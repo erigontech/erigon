@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 var (
@@ -88,6 +89,13 @@ type Domain struct {
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
 	checker *DependencyIntegrityChecker
+
+	// branchCache is the long-lived commitment-trie branch cache pinned to
+	// the aggregator. Set in ConfigureDomains for the commitment domain
+	// only; nil for every other domain. Lifetime = aggregator lifetime,
+	// independent of any single tx, batch, or SharedDomains. See
+	// commitment.BranchCacheProvider for the SDs' access path.
+	branchCache *commitment.BranchCache
 
 	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
 	_testBuildAccessorHook func(rs *recsplit.RecSplit)
@@ -134,6 +142,13 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 }
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
+}
+
+// BranchCache returns the long-lived commitment-trie branch cache attached
+// to this domain. Non-nil only on the commitment domain. Lifetime is the
+// owning Aggregator's lifetime.
+func (d *Domain) BranchCache() *commitment.BranchCache {
+	return d.branchCache
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
