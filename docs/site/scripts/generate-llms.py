@@ -254,8 +254,12 @@ def build():
     (OUT_DIR / "llms.txt").write_text(llms_txt, encoding="utf-8")
     (OUT_DIR / "llms-full.txt").write_text(llms_full_txt, encoding="utf-8")
 
-    print(f"llms.txt      {len(llms_txt):>8,} bytes  {len(all_pages)} pages")
-    print(f"llms-full.txt {len(llms_full_txt):>8,} bytes")
+    WARN_BYTES = 1_500_000  # 1.5 MB
+    full_bytes = len(llms_full_txt.encode("utf-8"))
+    size_note = f"  ⚠  WARNING: {full_bytes:,} bytes exceeds {WARN_BYTES:,} — LLMs may truncate" if full_bytes > WARN_BYTES else ""
+
+    print(f"llms.txt      {len(llms_txt.encode('utf-8')):>8,} bytes  {len(all_pages)} pages")
+    print(f"llms-full.txt {full_bytes:>8,} bytes{size_note}")
     print()
     print("--- llms.txt preview (first 80 lines) ---")
     for line in llms_txt.splitlines()[:80]:
