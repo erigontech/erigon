@@ -116,7 +116,7 @@ Logo height overridden in CSS: **28px**
 ```
 "Erigon Client"
 ```
-Font: **Quantify**, weight 700, letter-spacing 0.04em (applied via CSS)
+Font: **Montserrat**, weight 800, letter-spacing 0.04em (applied via CSS)
 
 ### Left Nav Items
 | Label | Type |
@@ -156,7 +156,7 @@ Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus 
 
 ### Logo + Tagline (left column)
 - Logo image height: **32px**
-- Brand text: **Quantify** font, weight 700, letter-spacing 0.04em
+- Brand text: **Montserrat** font, weight 800, letter-spacing 0.04em
 - Tagline: *"Building the future on the efficient software frontier."*
 - Company address: Erigon Technologies AG, Dammstrasse 16, 6300 Zug, Switzerland
 
@@ -269,7 +269,6 @@ Each entry is an `<a>` with `display:flex`, `alignItems:center`, `gap:0.6rem`. I
 ### Font Imports (`src/css/custom.css`)
 ```css
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800&family=Nunito+Sans:wght@400;700;800&display=swap');
-@import url('https://fonts.cdnfonts.com/css/quantify');
 ```
 
 ### Font Roles
@@ -277,7 +276,7 @@ Each entry is an `<a>` with `display:flex`, `alignItems:center`, `gap:0.6rem`. I
 |---|---|---|
 | Body text | Nunito Sans, sans-serif | 400 |
 | Headings (h1–h6) | Montserrat, sans-serif | 800 |
-| Navbar title, footer brand | Quantify | 700 |
+| Navbar title, footer brand | Montserrat | 800 |
 | Navbar left items | Montserrat | 800 |
 | Code | system monospace | — |
 
