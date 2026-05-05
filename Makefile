@@ -295,8 +295,9 @@ test-hive:
 
 # Pull the pinned bal tarball URL and branch straight from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
-FIXTURES_BAL_URL := $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
-FIXTURES_BAL_BRANCH := $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
+# Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
+FIXTURES_BAL_URL = $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
+FIXTURES_BAL_BRANCH = $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
 
 eest-bal:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -352,8 +353,9 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
 # Pull the pinned develop tarball URL straight from test-fixtures.json
-# so this target stays in sync with the rest of the test suite.
-FIXTURES_DEVELOP_URL := $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
+# so this target stays in sync with the rest of the test suite. Lazy `=`
+# so unrelated targets don't shell out to jq at make-parse time.
+FIXTURES_DEVELOP_URL = $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi

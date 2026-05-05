@@ -173,9 +173,10 @@ func (tm *TestMatcher) Walk(t *testing.T, dir string, runTest any) {
 	}
 }
 
-// WalkTar invokes its runTest argument for all subtests in the given tar(.gz) archive.
-// Only entries whose path starts with prefix and ends in .json are considered;
-// the prefix is stripped to produce the test name.
+// WalkTar invokes its runTest argument for all subtests in the given gzip-compressed
+// tar archive. Only entries whose path starts with prefix and ends in .json are
+// considered; the prefix is stripped to produce the test name. An empty prefix
+// matches every entry.
 //
 // runTest should be a function of type func(t *testing.T, name string, x <TestType>),
 // where TestType is the type of the test contained in test files.
@@ -195,7 +196,7 @@ func (tm *TestMatcher) WalkTar(t *testing.T, tarPath, prefix string, runTest any
 	}
 	defer gzr.Close()
 	tr := tar.NewReader(gzr)
-	if !strings.HasSuffix(prefix, "/") {
+	if prefix != "" && !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 	for {

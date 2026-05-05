@@ -70,6 +70,9 @@ func benchmarkEngineX(b *testing.B, category string) {
 
 	tarPath := filepath.Join("..", "..", "test-fixtures-cache", "fixtures_benchmark.tar.gz")
 	f, err := os.Open(tarPath)
+	if os.IsNotExist(err) {
+		b.Skipf("missing %s — run `make test-fixtures` to download", tarPath)
+	}
 	require.NoError(b, err)
 	defer f.Close()
 	gzr, err := gzip.NewReader(f)
