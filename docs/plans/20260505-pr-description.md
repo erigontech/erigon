@@ -199,8 +199,20 @@ New plan docs under `docs/plans/`:
 - [x] Scenarios suite covers ordering, quarantine, lifecycle
       transitions, per-step minimum-first ordering, timing
       instrumentation.
-- [ ] Mainnet time-to-tip measurement (next milestone, gates
-      moving the PR out of draft).
+- [ ] **Mainnet time-to-tip measurement** (gates moving the PR
+      out of draft). Two phases:
+  - **Cold (unsynced)**: fresh datadir → tip. Measures full
+    snapshot download + chaindata catch-up. Run with
+    `--chain=mainnet --prune.mode=minimal
+    --snap.lifecycle-driven-by-storage`.
+  - **Warm (synced)**: same datadir restarted → next age=0.
+    Measures startup + lifecycle bootstrap + last-block catch-up
+    against an already-populated datadir.
+  - Both numbers report alongside hoodi 10m25s for the
+    architectural-target comparison. Note: V2 chain.toml mode
+    (`--snap.p2p-manifest`) is OFF for both runs — no
+    V2-publishing peers exist on mainnet yet; that gets enabled
+    once the snapshotter is updated post-merge.
 
 ## Operator migration
 
