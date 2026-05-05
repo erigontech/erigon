@@ -36,15 +36,6 @@
         "nonce": "0xffffffffffffffff"
       }
     },
-    "config": {
-      "blobSchedule": {
-        "Osaka": {
-          "target": "0x6",
-          "max": "0x9",
-          "baseFeeUpdateFraction": "0x4c6964"
-        }
-      }
-    },
     "transaction": {
       "gasPrice": "0x10",
       "nonce": "0xffffffffffffffff",
