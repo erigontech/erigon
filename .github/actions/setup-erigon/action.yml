@@ -158,12 +158,6 @@ runs:
       shell: bash
       run: |
         time git lfs pull --include='execution/tests/test-corners/**'
-        cd execution/tests/execution-spec-tests
-        # The eest-fixtures submodule contains many more LFS JSON files
-        # (benchmarks, devnet fixtures, stTimeConsuming, etc.) that the
-        # tests don't need. This filter is intentionally selective — it
-        # cannot be simplified to *.json without pulling all of them.
-        time git lfs pull --include='state_tests/static/state_tests/stStackTests/*.json'
 
     - name: Install git-restore-mtime
       shell: bash
