@@ -10,30 +10,24 @@
 
 ## Get Started
 
+- [Get Started](https://docs.erigon.tech/get-started): Get your Erigon node running — hardware requirements, installation guides for binary, Docker, and source, and first-run walkthroughs.
+- [Why using Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Understand what makes Erigon different — performance benchmarks, disk savings, and architecture advantages over other clients.
+- [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode.
+- [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
+- [Installation](https://docs.erigon.tech/get-started/installation): Install Erigon from pre-built binaries, Docker, or source — step-by-step guides for Linux, macOS, and Windows.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): Easy Nodes — one-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Upgrading from a previous version](https://docs.erigon.tech/get-started/installation/upgrading): Upgrade from a previous version of Erigon without losing chain data or your configuration.
+- [How to run a Polygon node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
+- [How to run an Ethereum node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
+- [How to run a Gnosis Chain node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
 - [Gnosis Chain with an external CL](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl): Connect an external consensus layer client to Erigon for a Gnosis Chain full or validator node.
 - [Ethereum with an external CL](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl): Connect Lighthouse, Prysm, or another consensus client to Erigon for a full Ethereum node.
-- [How to run an Ethereum node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
-- [Upgrading from a previous version](https://docs.erigon.tech/get-started/installation/upgrading): Upgrade from a previous version of Erigon without losing chain data or your configuration.
-- [Why using Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Understand what makes Erigon different — performance benchmarks, disk savings, and architecture advantages over other clients.
-- [How to run a Gnosis Chain node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
-- [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode.
-- [Get Started](https://docs.erigon.tech/get-started): Get your Erigon node running — hardware requirements, installation guides for binary, Docker, and source, and first-run walkthroughs.
-- [How to run a Polygon node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
-- [Installation](https://docs.erigon.tech/get-started/installation): Install Erigon from pre-built binaries, Docker, or source — step-by-step guides for Linux, macOS, and Windows.
-- [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): Easy Nodes — one-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
 
 ## Fundamentals
 
-- [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
-- [NAT](https://docs.erigon.tech/fundamentals/configuring-erigon/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
-- [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon): The RPCdaemon module: serving JSON-RPC requests as a separate, remoteable process.
-- [TxPool](https://docs.erigon.tech/fundamentals/modules/txpool): The txpool module: managing the pending transaction pool as a standalone service.
-- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
-- [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, sync modes, database internals, and node configuration.
-- [Sentry](https://docs.erigon.tech/fundamentals/modules/sentry): The sentry module: Erigon's network-facing peer-to-peer communication layer.
-- [Downloader](https://docs.erigon.tech/fundamentals/modules/downloader): The downloader module: fetching and verifying Erigon snapshots from the BitTorrent network.
+- [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
+- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
@@ -45,19 +39,25 @@
 - [JWT Secret](https://docs.erigon.tech/fundamentals/jwt): Generating and configuring the JWT secret for Engine API communication.
 - [TLS Authentication](https://docs.erigon.tech/fundamentals/tls-authentication): Mutual TLS setup for securing gRPC and RPC daemon endpoints.
 - [Multiple instances / One machine](https://docs.erigon.tech/fundamentals/multiple-instances): Running several Erigon instances on a single machine without conflict.
-- [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.
 - [MCP Server](https://docs.erigon.tech/fundamentals/mcp): Model Context Protocol server for AI-assisted node interaction and queries.
 - [Creating a dashboard](https://docs.erigon.tech/fundamentals/creating-a-dashboard): Prometheus metrics export and Grafana dashboard setup for node monitoring.
 - [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Running Erigon and all its modules with Docker Compose.
 - [Otterscan](https://docs.erigon.tech/fundamentals/otterscan): Integrating Otterscan, the lightweight block explorer built for Erigon.
 - [web3 Wallet](https://docs.erigon.tech/fundamentals/web3-wallet): Connecting MetaMask and other web3 wallets to a local Erigon node.
+- [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.
+- [NAT](https://docs.erigon.tech/fundamentals/configuring-erigon/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
+- [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon): The RPCdaemon module: serving JSON-RPC requests as a separate, remoteable process.
+- [TxPool](https://docs.erigon.tech/fundamentals/modules/txpool): The txpool module: managing the pending transaction pool as a standalone service.
+- [Sentry](https://docs.erigon.tech/fundamentals/modules/sentry): The sentry module: Erigon's network-facing peer-to-peer communication layer.
+- [Downloader](https://docs.erigon.tech/fundamentals/modules/downloader): The downloader module: fetching and verifying Erigon snapshots from the BitTorrent network.
 
 ## Interacting with Erigon
 
+- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): Complete API reference for Erigon — JSON-RPC namespaces, GraphQL, and gRPC interfaces for querying and controlling your node.
 - [eth](https://docs.erigon.tech/interacting-with-erigon/eth): Standard Ethereum JSON-RPC methods: blocks, transactions, state, logs, and filters.
 - [erigon](https://docs.erigon.tech/interacting-with-erigon/erigon): Erigon-specific extensions to the standard JSON-RPC API.
 - [engine](https://docs.erigon.tech/interacting-with-erigon/engine): Engine API for consensus layer communication, used by CL clients post-Merge.
-- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): Complete API reference for Erigon — JSON-RPC namespaces, GraphQL, and gRPC interfaces for querying and controlling your node.
 - [web3](https://docs.erigon.tech/interacting-with-erigon/web3): web3_ namespace: client version info and SHA3 hash utilities.
 - [net](https://docs.erigon.tech/interacting-with-erigon/net): net_ namespace: network ID, peer count, and node listening status.
 - [debug](https://docs.erigon.tech/interacting-with-erigon/debug): debug_ namespace: execution traces, storage inspection, and profiling tools.
@@ -74,27 +74,27 @@
 
 ## Staking
 
+- [Staking](https://docs.erigon.tech/staking): Run an Ethereum validator with Erigon — use the embedded Caplin consensus layer or connect an external CL client like Lighthouse or Prysm.
 - [Using Caplin as Validator](https://docs.erigon.tech/staking/caplin): Configure Erigon's embedded consensus layer to act as a full validator node without any external CL dependency.
 - [Using an external consensus client as validator](https://docs.erigon.tech/staking/external-consensus-client-as-validator): Connect Lighthouse, Prysm, Teku, or Nimbus to Erigon via the Engine API for split EL/CL validator setups.
 - [Shutter Network](https://docs.erigon.tech/staking/shutter-network): Privacy-preserving mempool protection — integrate Shutter Network to shield validator transactions from MEV.
-- [Staking](https://docs.erigon.tech/staking): Run an Ethereum validator with Erigon — use the embedded Caplin consensus layer or connect an external CL client like Lighthouse or Prysm.
 
 ## About
 
+- [About](https://docs.erigon.tech/about): About Erigon — open-source license, contribution guidelines, and project information.
 - [Contributing](https://docs.erigon.tech/about/contributing): How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project.
 - [License](https://docs.erigon.tech/about/license): Erigon's open-source licensing terms and third-party attribution.
 - [Disclaimer](https://docs.erigon.tech/about/disclaimer): Important notices about software maturity, stability expectations, and intended use.
-- [About](https://docs.erigon.tech/about): About Erigon — open-source license, contribution guidelines, and project information.
 
 ## Help Center
 
+- [Help Center](https://docs.erigon.tech/help-center): Troubleshooting guides, FAQs, and support resources for Erigon node operators.
 - [Frequently Asked Questions (FAQs)](https://docs.erigon.tech/help-center/frequently-asked-questions-faqs): Answers to the most common questions about installing, syncing, and operating Erigon.
 - [Troubleshooting](https://docs.erigon.tech/help-center/troubleshooting): Step-by-step diagnostic guides for the most frequent runtime and sync issues.
 - [Known Issues](https://docs.erigon.tech/help-center/known-issues): Current confirmed bugs, limitations, and active workarounds for this release.
 - [Best Practices](https://docs.erigon.tech/help-center/best-practices): Recommended configurations, operational patterns, and tips for stable long-running nodes.
 - [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions): Error messages decoded — causes explained and actionable fixes provided.
 - [Glossary of Key Terms](https://docs.erigon.tech/help-center/glossary-of-key-terms): Definitions of Erigon-specific and Ethereum ecosystem terminology used throughout the docs.
-- [Help Center](https://docs.erigon.tech/help-center): Troubleshooting guides, FAQs, and support resources for Erigon node operators.
 
 ## Source
 

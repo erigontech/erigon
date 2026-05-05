@@ -11,7 +11,6 @@ Run from repo root:
 Outputs to docs/site/static/ (served at site root by Docusaurus).
 """
 
-import os
 import re
 import json
 from pathlib import Path
@@ -60,8 +59,15 @@ def strip_mdx(text):
     text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
     # Remove leftover JSX expressions like {foo.bar}
     text = re.sub(r"\{[^}]{1,120}\}", "", text)
-    # Strip leading whitespace from each line — orphaned indented text from JSX component bodies
-    text = "\n".join(line.lstrip() for line in text.splitlines())
+    # Strip leading whitespace from lines outside fenced code blocks —
+    # removes orphaned indentation left by JSX component bodies after tag stripping,
+    # while preserving meaningful indentation inside code fences.
+    out, in_fence = [], False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        out.append(line if in_fence else line.lstrip())
+    text = "\n".join(out)
     # Collapse 3+ blank lines to 2
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -144,7 +150,7 @@ def collect_pages(base_dir, route_prefix):
     """
     # Gather all files with metadata
     files = []
-    for fpath in sorted(base_dir.rglob("*.md")) :
+    for fpath in sorted(base_dir.rglob("*.md")):
         files.append(fpath)
     for fpath in sorted(base_dir.rglob("*.mdx")):
         files.append(fpath)
@@ -177,6 +183,7 @@ def collect_pages(base_dir, route_prefix):
             "position":    position,
             "section":     section_label,
             "section_pos": section_pos,
+            "depth":       len(rel.parts),  # nesting depth from base_dir
             "body":        clean_body,
             "fpath":       str(fpath),
         })
@@ -194,12 +201,12 @@ def build():
             p["instance"] = label
         all_pages.extend(pages)
 
-    # Sort: docs instance first, then section_pos, then sidebar_position within section.
-    # Index files (position=1 or stem=="index") always lead their section.
+    # Sort: docs instance first, then section_pos, then depth (shallow before deep),
+    # then index files before siblings, then sidebar_position.
     def sort_key(p):
         is_help = p["instance"] != "docs"
-        is_index = p["position"] <= 1 and p["section"] == ""
-        return (is_help, p["section_pos"], is_index, p["position"])
+        is_not_index = Path(p["fpath"]).stem != "index"  # 0 = index leads at each depth
+        return (is_help, p["section_pos"], p["depth"], is_not_index, p["position"])
 
     all_pages.sort(key=sort_key)
 
