@@ -23,6 +23,7 @@ import (
 )
 
 func TestStepKey_GroupsByFromToDomain(t *testing.T) {
+	t.Parallel()
 	a := &FileEntry{Name: "a", FromStep: 0, ToStep: 256, Domain: DomainAccounts}
 	b := &FileEntry{Name: "b", FromStep: 0, ToStep: 256, Domain: DomainAccounts}
 	c := &FileEntry{Name: "c", FromStep: 256, ToStep: 512, Domain: DomainAccounts}
@@ -36,6 +37,7 @@ func TestStepKey_GroupsByFromToDomain(t *testing.T) {
 }
 
 func TestStepKey_Zero(t *testing.T) {
+	t.Parallel()
 	caplin := &FileEntry{Name: "caplin/x.seg", Kind: KindCaplin}
 	meta := &FileEntry{Name: "erigondb.toml", Kind: KindMeta}
 	salt := &FileEntry{Name: "salt-state.txt", Kind: KindSalt}
@@ -46,6 +48,7 @@ func TestStepKey_Zero(t *testing.T) {
 }
 
 func TestIsMinimum_StateStep(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		domain   Domain
@@ -68,6 +71,7 @@ func TestIsMinimum_StateStep(t *testing.T) {
 }
 
 func TestIsMinimum_BlockStep(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		fileName string
@@ -90,6 +94,7 @@ func TestIsMinimum_BlockStep(t *testing.T) {
 }
 
 func TestIsMinimum_NonStepped(t *testing.T) {
+	t.Parallel()
 	for _, f := range []*FileEntry{
 		{Name: "caplin/x.seg", Kind: KindCaplin},
 		{Name: "erigondb.toml", Kind: KindMeta},
@@ -102,6 +107,7 @@ func TestIsMinimum_NonStepped(t *testing.T) {
 }
 
 func TestFilesAtStep_GroupsCorrectly(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	files := []*FileEntry{
 		{Name: "v1.0-accounts.0-256.kv", Domain: DomainAccounts, FromStep: 0, ToStep: 256, Local: true},
@@ -134,6 +140,7 @@ func TestFilesAtStep_GroupsCorrectly(t *testing.T) {
 }
 
 func TestFilesAtStep_BlockGroup(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	for _, f := range []*FileEntry{
 		{Name: "v1.1-001000-001001-headers.seg", FromStep: 1000, ToStep: 1001, Local: true},
@@ -150,6 +157,7 @@ func TestFilesAtStep_BlockGroup(t *testing.T) {
 }
 
 func TestFilesAtStep_ZeroKeyReturnsEmpty(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, Local: true})
 	g := inv.FilesAtStep(StepKey{})
@@ -158,6 +166,7 @@ func TestFilesAtStep_ZeroKeyReturnsEmpty(t *testing.T) {
 }
 
 func TestStepGroup_AllAtState(t *testing.T) {
+	t.Parallel()
 	g := StepGroup{Files: []*FileEntry{
 		{Name: "a", State: LifecycleIndexed},
 		{Name: "b", State: LifecycleAdvertisable},
@@ -178,6 +187,7 @@ func TestStepGroup_AllAtState(t *testing.T) {
 }
 
 func TestAdvanceStep_AtomicAdvance(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	for _, f := range []*FileEntry{
 		{Name: "v1.0-accounts.0-256.kv", Domain: DomainAccounts, FromStep: 0, ToStep: 256, State: LifecycleIndexed},
@@ -199,6 +209,7 @@ func TestAdvanceStep_AtomicAdvance(t *testing.T) {
 }
 
 func TestAdvanceStep_Idempotent(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	inv.AddFile(&FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: DomainAccounts,
@@ -210,6 +221,7 @@ func TestAdvanceStep_Idempotent(t *testing.T) {
 }
 
 func TestPopulateFromName_StateFile(t *testing.T) {
+	t.Parallel()
 	e := &FileEntry{Name: "v1.0-accounts.0-256.kv"}
 	require.True(t, PopulateFromName(e))
 	require.Equal(t, uint64(0), e.FromStep)
@@ -219,6 +231,7 @@ func TestPopulateFromName_StateFile(t *testing.T) {
 }
 
 func TestPopulateFromName_HistoryFile(t *testing.T) {
+	t.Parallel()
 	e := &FileEntry{Name: "v1.0-accountsHistory.0-256.v"}
 	require.True(t, PopulateFromName(e))
 	require.Equal(t, DomainAccounts, e.Domain,
@@ -227,6 +240,7 @@ func TestPopulateFromName_HistoryFile(t *testing.T) {
 }
 
 func TestPopulateFromName_BlockFile(t *testing.T) {
+	t.Parallel()
 	e := &FileEntry{Name: "v1.1-000900-001000-headers.seg"}
 	require.True(t, PopulateFromName(e))
 	require.Equal(t, Domain(""), e.Domain, "block files have empty Domain")
@@ -245,6 +259,7 @@ func TestPopulateFromName_BlockFile(t *testing.T) {
 }
 
 func TestPopulateFromName_PreservesExistingFields(t *testing.T) {
+	t.Parallel()
 	e := &FileEntry{
 		Name:     "v1.0-accounts.0-256.kv",
 		Domain:   DomainStorage, // wrong-but-explicit; preserved
@@ -258,11 +273,13 @@ func TestPopulateFromName_PreservesExistingFields(t *testing.T) {
 }
 
 func TestPopulateFromName_NilOrEmpty(t *testing.T) {
+	t.Parallel()
 	require.False(t, PopulateFromName(nil))
 	require.False(t, PopulateFromName(&FileEntry{}))
 }
 
 func TestAdvanceStep_ZeroKeyNoOp(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, State: LifecycleIndexed})
 	advanced := inv.AdvanceStep(StepKey{}, LifecycleAdvertisable)

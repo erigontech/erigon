@@ -23,6 +23,7 @@ import (
 )
 
 func TestSortItemsLatestFirst_MinimumBeforeExtrasWithinSameStep(t *testing.T) {
+	t.Parallel()
 	// Same step, mix of minimum and extras. Minimum (kv, kvi) goes
 	// first; history (.v) goes after even though same step range.
 	items := []preverifiedSnapshot{
@@ -46,6 +47,7 @@ func TestSortItemsLatestFirst_MinimumBeforeExtrasWithinSameStep(t *testing.T) {
 }
 
 func TestSortItemsLatestFirst_MinimumLatestStepBeatsExtrasOlderStep(t *testing.T) {
+	t.Parallel()
 	// Minimum file at OLDER step still beats extras file at NEWER
 	// step — the IsMinimum tier outranks the To-desc tiebreak.
 	items := []preverifiedSnapshot{
@@ -59,6 +61,7 @@ func TestSortItemsLatestFirst_MinimumLatestStepBeatsExtrasOlderStep(t *testing.T
 }
 
 func TestSortItemsLatestFirst_StateFiles(t *testing.T) {
+	t.Parallel()
 	items := []preverifiedSnapshot{
 		{Name: "v1.0-accounts.0-256.kv"},
 		{Name: "v1.0-accounts.512-768.kv"},
@@ -71,6 +74,7 @@ func TestSortItemsLatestFirst_StateFiles(t *testing.T) {
 }
 
 func TestSortItemsLatestFirst_UnparseableGoesToEnd(t *testing.T) {
+	t.Parallel()
 	items := []preverifiedSnapshot{
 		{Name: "erigondb.toml"},             // unparseable (no version prefix)
 		{Name: "v1.0-accounts.0-256.kv"},    // parseable, To=256
@@ -90,6 +94,7 @@ func TestSortItemsLatestFirst_UnparseableGoesToEnd(t *testing.T) {
 }
 
 func TestSortItemsLatestFirst_PreservesOrderForEqualKeys(t *testing.T) {
+	t.Parallel()
 	// Files with the same (From, To) — different domains/types. Stable
 	// sort must preserve their input order.
 	items := []preverifiedSnapshot{
@@ -104,6 +109,7 @@ func TestSortItemsLatestFirst_PreservesOrderForEqualKeys(t *testing.T) {
 }
 
 func TestSortItemsLatestFirst_EmptyAndSingle(t *testing.T) {
+	t.Parallel()
 	// Empty slice — must not panic.
 	var empty []preverifiedSnapshot
 	sortItemsLatestFirst(empty)

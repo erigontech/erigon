@@ -34,6 +34,7 @@ import (
 // non-commitment domains, nil-safety on dependencies.
 
 func TestCommitmentDomainValidator_NonCommitmentStepIsNoOp(t *testing.T) {
+	t.Parallel()
 	// Validator with nil dependencies — would panic if it tried to
 	// open a tx. Non-commitment domains must short-circuit before
 	// reaching the DB. The validator introspects files[0].Domain.
@@ -56,6 +57,7 @@ func TestCommitmentDomainValidator_NonCommitmentStepIsNoOp(t *testing.T) {
 }
 
 func TestCommitmentDomainValidator_CommitmentStepRequiresDB(t *testing.T) {
+	t.Parallel()
 	// Commitment step with nil DB → explicit error, not a panic.
 	v := CommitmentDomainValidator{}
 	files := []*snapshot.FileEntry{
@@ -67,6 +69,7 @@ func TestCommitmentDomainValidator_CommitmentStepRequiresDB(t *testing.T) {
 }
 
 func TestCommitmentDomainValidator_Name(t *testing.T) {
+	t.Parallel()
 	v := CommitmentDomainValidator{}
 	require.Equal(t, "commitment_domain_state_at_end", v.Name())
 }

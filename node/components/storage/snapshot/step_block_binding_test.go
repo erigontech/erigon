@@ -23,6 +23,7 @@ import (
 )
 
 func TestStepBlockBoundary_RegisterAndQuery(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 
 	// Register a few boundaries.
@@ -54,6 +55,7 @@ func TestStepBlockBoundary_RegisterAndQuery(t *testing.T) {
 }
 
 func TestStepBlockBoundary_OverwriteOnReregister(t *testing.T) {
+	t.Parallel()
 	// Re-registering the same step with a different block (e.g.
 	// after a retire-merge replaces the commitment file) overwrites.
 	inv := NewInventory()
@@ -66,6 +68,7 @@ func TestStepBlockBoundary_OverwriteOnReregister(t *testing.T) {
 }
 
 func TestStepBlockBoundaries_SortedAscendingByStep(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	inv.RegisterStepBlockBoundary(768, 400_000)
 	inv.RegisterStepBlockBoundary(256, 100_000)
@@ -79,6 +82,7 @@ func TestStepBlockBoundaries_SortedAscendingByStep(t *testing.T) {
 }
 
 func TestBlockToStep_EmptyInventoryReturnsFalse(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	step, ok := inv.BlockToStep(100_000)
 	require.False(t, ok)

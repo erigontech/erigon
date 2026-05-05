@@ -57,6 +57,7 @@ func (s *stubStepValidator) ValidateStep(_ context.Context, files []*snapshot.Fi
 }
 
 func TestBuildOnBatchValidation_StepCompleteAdvancesAtomically(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
@@ -85,6 +86,7 @@ func TestBuildOnBatchValidation_StepCompleteAdvancesAtomically(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_IncompleteStepNoOps(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
@@ -111,6 +113,7 @@ func TestBuildOnBatchValidation_IncompleteStepNoOps(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_ValidationFailureLeavesStepAtIndexed(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
@@ -138,6 +141,7 @@ func TestBuildOnBatchValidation_ValidationFailureLeavesStepAtIndexed(t *testing.
 }
 
 func TestBuildOnBatchValidation_SingletonAdvancesDirectly(t *testing.T) {
+	t.Parallel()
 	// Non-stepped file (caplin / meta / salt) — has no step-siblings,
 	// advances individually.
 	inv := snapshot.NewInventory()
@@ -158,6 +162,7 @@ func TestBuildOnBatchValidation_SingletonAdvancesDirectly(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_MinimumAdvancesBeforeExtras(t *testing.T) {
+	t.Parallel()
 	// Step has minimum (.kv + .kvi) Indexed AND extras (.v) still
 	// Downloaded — minimum should advance to Advertisable, extras
 	// should stay at Downloaded.
@@ -200,6 +205,7 @@ func TestBuildOnBatchValidation_MinimumAdvancesBeforeExtras(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_ExtrasAdvanceOnSecondPass(t *testing.T) {
+	t.Parallel()
 	// Minimum already at Advertisable from a previous handler invocation;
 	// extras now at Indexed → second pass advances extras.
 	inv := snapshot.NewInventory()
@@ -232,6 +238,7 @@ func TestBuildOnBatchValidation_ExtrasAdvanceOnSecondPass(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_BothPassesInOneCall(t *testing.T) {
+	t.Parallel()
 	// All files at Indexed simultaneously. Single handler invocation
 	// fires both passes: minimum first (advances minimum), then extras
 	// (advances extras).
@@ -256,6 +263,7 @@ func TestBuildOnBatchValidation_BothPassesInOneCall(t *testing.T) {
 }
 
 func TestBuildOnBatchValidation_BlockStepWaitsForCommitmentBinding(t *testing.T) {
+	t.Parallel()
 	// Block-domain step (empty Domain) at Indexed but no commitment
 	// binding registered yet → handler returns nil, files stay at
 	// Indexed. This is the "block files wait until verified via
@@ -289,6 +297,7 @@ func TestBuildOnBatchValidation_BlockStepWaitsForCommitmentBinding(t *testing.T)
 }
 
 func TestBuildOnBatchValidation_BlockStepAdvancesAfterBindingRegistered(t *testing.T) {
+	t.Parallel()
 	// Same setup as the wait test, but with a commitment binding
 	// registered FIRST. Now the block step is verifiable; the chain
 	// runs and the step advances.
@@ -325,6 +334,7 @@ func TestBuildOnBatchValidation_BlockStepAdvancesAfterBindingRegistered(t *testi
 }
 
 func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: snapshot.DomainAccounts,
@@ -348,6 +358,7 @@ func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
 }
 
 func TestBuildOnValidation_EmptyChainAdvancesUnconditionally(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	e := &snapshot.FileEntry{
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
@@ -363,6 +374,7 @@ func TestBuildOnValidation_EmptyChainAdvancesUnconditionally(t *testing.T) {
 }
 
 func TestBuildOnValidation_PassingChainAdvances(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	e := &snapshot.FileEntry{
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
@@ -383,6 +395,7 @@ func TestBuildOnValidation_PassingChainAdvances(t *testing.T) {
 }
 
 func TestBuildOnValidation_FailingChainHaltsAtIndexed(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	e := &snapshot.FileEntry{
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
@@ -406,6 +419,7 @@ func TestBuildOnValidation_FailingChainHaltsAtIndexed(t *testing.T) {
 }
 
 func TestBuildOnValidation_ContentSourceFactoryFires(t *testing.T) {
+	t.Parallel()
 	// Verify that contentFor is invoked once per validation call and
 	// the produced ContentSource flows into the validator. Confirms
 	// the wiring; ContentSource semantics are tested in the validation

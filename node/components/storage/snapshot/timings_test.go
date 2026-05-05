@@ -36,6 +36,7 @@ func fakeClock(start time.Time) func() time.Time {
 }
 
 func TestFileTimings_RecordedOnAddFile(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	inv.SetClock(fakeClock(t0))
@@ -58,6 +59,7 @@ func TestFileTimings_RecordedOnAddFile(t *testing.T) {
 }
 
 func TestFileTimings_RecordedOnAdvanceTo(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	inv.SetClock(fakeClock(t0))
@@ -80,6 +82,7 @@ func TestFileTimings_RecordedOnAdvanceTo(t *testing.T) {
 }
 
 func TestFileTimings_RecordedOnAdvanceStep(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	inv.SetClock(fakeClock(t0))
@@ -102,6 +105,7 @@ func TestFileTimings_RecordedOnAdvanceStep(t *testing.T) {
 }
 
 func TestStepTimings_DerivedFromFiles(t *testing.T) {
+	t.Parallel()
 	inv := NewInventory()
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	inv.SetClock(fakeClock(t0))
@@ -144,6 +148,7 @@ func TestStepTimings_DerivedFromFiles(t *testing.T) {
 }
 
 func TestFileTimings_NotRecordedTwice(t *testing.T) {
+	t.Parallel()
 	// Subsequent transitions through the SAME state must not overwrite
 	// the original timestamp — the orchestrator wants the FIRST time
 	// each milestone was reached.

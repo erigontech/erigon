@@ -47,6 +47,7 @@ import (
 // download-vs-validation distribution is eyeball-readable, feeding
 // the future bandwidth-aware orchestrator's policy work.
 func TestStepTiming_MinimumFirstOrdering(t *testing.T) {
+	t.Parallel()
 	inv := snapshot.NewInventory()
 	clock := newFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	inv.SetClock(clock.now)

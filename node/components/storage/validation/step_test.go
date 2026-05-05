@@ -28,6 +28,7 @@ import (
 )
 
 func TestAllFilesPresent_AcceptsExistingFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kvi"), []byte("y"), 0o644))
@@ -41,6 +42,7 @@ func TestAllFilesPresent_AcceptsExistingFiles(t *testing.T) {
 }
 
 func TestAllFilesPresent_RejectsMissingFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 	// a.kvi missing.
@@ -56,6 +58,7 @@ func TestAllFilesPresent_RejectsMissingFile(t *testing.T) {
 }
 
 func TestAllFilesPresent_SkipsNonLocalFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
 
@@ -69,6 +72,7 @@ func TestAllFilesPresent_SkipsNonLocalFiles(t *testing.T) {
 }
 
 func TestAllFilesPresent_RejectsEmptySnapDir(t *testing.T) {
+	t.Parallel()
 	err := AllFilesPresent{SnapDir: ""}.ValidateStep(context.Background(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "empty SnapDir")
@@ -85,10 +89,12 @@ func (s stubStepValidator) ValidateStep(_ context.Context, _ []*snapshot.FileEnt
 }
 
 func TestStepChain_AcceptsEmptyChain(t *testing.T) {
+	t.Parallel()
 	require.NoError(t, StepChain{}.Validate(context.Background(), nil))
 }
 
 func TestStepChain_FailsFastOnFirstError(t *testing.T) {
+	t.Parallel()
 	called := []string{}
 	chain := StepChain{
 		stubStepValidator{name: "first", err: nil},
