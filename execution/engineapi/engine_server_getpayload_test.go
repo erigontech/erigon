@@ -90,12 +90,12 @@ func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) 
 		BlockAccessListHash: &emptyBALHash,
 	}
 	block := types.NewBlockWithHeader(header)
-	br := &types.BlockWithReceipts{Block: block, BlockAccessList: nil, Requests: make(types.FlatRequests, 0)}
+	br := &types.BlockWithReceipts{Block: block, BlockAccessList: make(types.BlockAccessList, 0), Requests: make(types.FlatRequests, 0)}
 
 	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
 	require.NoError(t, err)
 
-	emptyBAL, err := types.EncodeBlockAccessListBytes(nil)
+	emptyBAL, err := types.EncodeBlockAccessListBytes(make(types.BlockAccessList, 0))
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Bytes(emptyBAL), resp.ExecutionPayload.BlockAccessList)
 }

@@ -1083,9 +1083,10 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		sn := hexutil.Uint64(*header.SlotNumber)
 		ep.SlotNumber = &sn
 	}
-	if header.BlockAccessListHash != nil {
-		// EIP-7928: encode even when br.BlockAccessList is nil/empty — an empty
-		// BAL serializes to 0xc0 via standard RLP rules.
+	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
+		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
+		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
+		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
 			ep.BlockAccessList = encoded
