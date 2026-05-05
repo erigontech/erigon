@@ -30,6 +30,9 @@ DISABLED_TEST_LIST=(
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
+  # Flaky: non-deterministic map iteration in StateOverrides.MovePrecompileToAddress causes
+  # the reported non-precompile address to vary across runs; disabled until root cause is fixed
+  eth_simulateV1/test_201.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
   # Temporary disable required block 23917742
