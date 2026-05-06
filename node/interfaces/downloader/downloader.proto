@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+option go_package = "./downloader;downloaderproto";
+
+package downloader;
+
+service Downloader {
+  // Seed generated file. Downloader will hash.
+  rpc Seed (SeedRequest) returns (google.protobuf.Empty) {}
+
+  // Request files be downloaded. Returns when the download is complete. Downloader seeds.
+  rpc Download (DownloadRequest) returns (google.protobuf.Empty) {}
+
+  // Remove files from the Downloader.
+  rpc Delete (DeleteRequest) returns (google.protobuf.Empty) {}
+}
+
+message SeedItem {
+  string path = 1;
+}
+
+message SeedRequest {
+  repeated string paths = 1;
+}
+
+// DownloadItem:
+// - if Erigon created new snapshot and want seed it
+// - if Erigon wnat download files - it fills only "torrent_hash" field
+message DownloadItem {
+  string path = 1;
+  types.H160 torrent_hash = 2; // will be resolved as magnet link
+}
+
+message DownloadRequest {
+  repeated DownloadItem items = 1;
+  string log_target = 2; // Why we requested this.
+}
+
+// DeleteRequest: stop seeding, delete file, delete .torrent
+message DeleteRequest {
+  repeated string paths = 1;
+}

@@ -121,7 +121,7 @@ type Transaction {
   s: BigInt!
   v: BigInt!
   # Envelope transaction support
-  type: Int
+  type: Long
   accessList: [AccessTuple!]
   # Raw is the canonical encoding of the transaction.
   # For legacy transactions, it returns the RLP encoding.

@@ -393,16 +393,10 @@ func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Curso
 		k, v, err = c.(kv.CursorDupSort).NextNoDup()
 	case remoteproto.Op_PREV:
 		k, v, err = c.Prev()
-	//case remoteproto.Op_PREV_DUP:
-	//	k, v, err = c.(ethdb.CursorDupSort).Prev()
-	//	if err != nil {
-	//		return err
-	//	}
-	//case remoteproto.Op_PREV_NO_DUP:
-	//	k, v, err = c.Prev()
-	//	if err != nil {
-	//		return err
-	//	}
+	case remoteproto.Op_PREV_DUP:
+		k, v, err = c.(kv.CursorDupSort).PrevDup()
+	case remoteproto.Op_PREV_NO_DUP:
+		k, v, err = c.(kv.CursorDupSort).PrevNoDup()
 	case remoteproto.Op_SEEK_EXACT:
 		k, v, err = c.SeekExact(in.K)
 	case remoteproto.Op_SEEK_BOTH_EXACT:

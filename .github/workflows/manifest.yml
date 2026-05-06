@@ -42,8 +42,8 @@ jobs:
           go-version: ${{ steps.goversion.outputs.version }}
       - run: make downloader
       - run: echo $ModModified
-      - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon31-v1-snapshots-mainnet.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain gnosis      --webseed 'https://erigon31-v1-snapshots-gnosis.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain chiado      --webseed 'https://erigon31-v1-snapshots-chiado.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain sepolia     --webseed 'https://erigon31-v1-snapshots-sepolia.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain hoodi       --webseed 'https://erigon31-v1-snapshots-hoodi.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon34-v1-snapshots-mainnet.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain gnosis      --webseed 'https://erigon34-v1-snapshots-gnosis.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain chiado      --webseed 'https://erigon34-v1-snapshots-chiado.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain sepolia     --webseed 'https://erigon34-v1-snapshots-sepolia.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain hoodi       --webseed 'https://erigon34-v1-snapshots-hoodi.erigon.network'

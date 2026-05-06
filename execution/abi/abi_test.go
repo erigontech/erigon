@@ -1169,3 +1169,48 @@ func TestCustomErrors(t *testing.T) {
 	}
 	check("MyError", "MyError(uint256)")
 }
+
+// TestCrashers contains some ABI definitions which previously caused the codec to panic.
+func TestCrashers(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{
+			name:    "underscore_digit",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"_1"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "ampersand",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"&"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "dashes",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"----"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "dotted",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"foo.Bar"}]}]}]`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := JSON(strings.NewReader(tc.input))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for input %q, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected success for input %q, got error: %v", tc.input, err)
+			}
+		})
+	}
+}

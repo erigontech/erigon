@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strings"
 	"sync"
@@ -43,8 +44,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -291,7 +294,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
 			txnprovider.WithTxnIdsFilter(txnsIdFilter),
-			txnprovider.WithGasTarget(gasLimit),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(gasLimit, math.MaxUint64, math.MaxUint64)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes1, 1)
@@ -300,7 +303,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
 			txnprovider.WithTxnIdsFilter(txnsIdFilter),
-			txnprovider.WithGasTarget(gasLimit),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(gasLimit, math.MaxUint64, math.MaxUint64)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
@@ -346,6 +349,123 @@ func TestPoolWithDecryptionKeysThatDoNotFollowTxnIndexOrder(t *testing.T) {
 		synctest.Wait()
 		require.Len(t, pool.AllEncryptedTxns(), 2)
 		require.Len(t, pool.AllDecryptedTxns(), 2)
+	})
+}
+
+// TestPoolSurvivesEonReadFailure verifies that a transient contract-call failure in
+// KsmEonTracker.handleBlockEvent does not stop the pool — the original flake mode was an
+// errgroup propagation tearing the whole pool down on a single RPC blip. Regression guard for
+// the log-and-skip behaviour in handleBlockEvent.
+//
+//goland:noinspection DuplicatedCode
+func TestPoolSurvivesEonReadFailure(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// snapshot the global counter — other parallel tests may also touch it, so assert delta
+		errCounter := metrics.GetOrCreateCounter("shutter_eon_tracker_block_event_errors")
+		errCountBefore := errCounter.GetValueUint64()
+
+		// first block: deliberately omit the eon-read mocks so readEonAtNewBlockEvent fails
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		err := handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.True(t, handle.logHandler.Contains("failed to read eon at block event"))
+		require.Greater(t, errCounter.GetValueUint64(), errCountBefore)
+
+		// pool is still alive — verify by completing a normal flow on the next block
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
+		})
+		require.NoError(t, err)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 1)
+
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn.IdentityPreimage)
+		synctest.Wait()
+		require.Len(t, pool.AllDecryptedTxns(), 1)
+	})
+}
+
+// TestPoolSurvivesCleanupSlotCalcFailure verifies that ErrTimestampBeforeGenesis from CalcSlot
+// in DecryptionKeysProcessor.cleanupLoop does not stop the pool. Regression guard for the
+// log-and-skip behaviour in processBlockEventCleanup.
+func TestPoolSurvivesCleanupSlotCalcFailure(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// snapshot the global counter — other parallel tests may also touch it, so assert delta
+		errCounter := metrics.GetOrCreateCounter("shutter_cleanup_block_event_errors")
+		errCountBefore := errCounter.GetValueUint64()
+
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+
+		// first block with a timestamp before the configured beacon-chain genesis — CalcSlot
+		// returns ErrTimestampBeforeGenesis. The cleanup loop must log-and-skip rather than
+		// returning the error up the errgroup chain.
+		err = handle.SimulateStateChange(ctx, MockStateChange{
+			batch: &remoteproto.StateChangeBatch{
+				ChangeBatch: []*remoteproto.StateChange{
+					{BlockHeight: 1, BlockTime: 1, Direction: remoteproto.Direction_FORWARD},
+				},
+			},
+		})
+		require.NoError(t, err)
+		synctest.Wait()
+		require.True(t, handle.logHandler.Contains("failed to calc slot for cleanup, skipping"))
+		require.Greater(t, errCounter.GetValueUint64(), errCountBefore)
+
+		// pool is still alive — verify by completing a normal flow on the next block
+		handle.nextBlockNum = 2
+		encTxn := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn),
+		})
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 1)
+	})
+}
+
+// TestPoolSurvivesClosedSubscriptions verifies that a graceful close of contract event
+// subscriptions (e.g. websocket reconnect — sub.Err() returns nil from a closed channel) does
+// not leak a half-running pool. Regression guard for the wait-for-ctx behaviour in
+// EncryptedTxnsPool.watchSubmissions and KsmEonTracker.trackFutureEons.
+func TestPoolSurvivesClosedSubscriptions(t *testing.T) {
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+
+		// simulate the underlying transports closing both subscriptions cleanly (no error)
+		handle.SimulateSubscriptionClose(common.HexToAddress(handle.config.SequencerContractAddress))
+		handle.SimulateSubscriptionClose(common.HexToAddress(handle.config.KeyperSetManagerContractAddress))
+		synctest.Wait()
+		require.True(t, handle.logHandler.Contains("encrypted txn submission subscription closed, waiting for shutdown"))
+		require.True(t, handle.logHandler.Contains("keyper set added subscription closed, waiting for shutdown"))
+
+		// pool is still alive on the parent ctx — the trailing pt.Run assertion checks that
+		// eg.Wait returns context.Canceled rather than a propagated subsystem error.
 	})
 }
 
@@ -445,6 +565,10 @@ func (h *PoolTestHandle) SimulateLogEvents(ctx context.Context, logs []types.Log
 	return h.contractBackend.SimulateLogEvents(ctx, logs)
 }
 
+func (h *PoolTestHandle) SimulateSubscriptionClose(addr common.Address) {
+	h.contractBackend.SimulateSubscriptionClose(addr)
+}
+
 func (h *PoolTestHandle) SimulateInitialEonRead(t *testing.T, ekg testhelpers.EonKeyGeneration) {
 	ksmAddr := common.HexToAddress(h.config.KeyperSetManagerContractAddress)
 	ksmAbi, err := abi.JSON(strings.NewReader(shuttercontracts.KeyperSetManagerABI))
@@ -529,6 +653,7 @@ func NewMockContractBackend(ctrl *gomock.Controller, logger log.Logger) *MockCon
 		mockedCallResults: map[common.Address][][]byte{},
 		mockedFilterLogs:  map[common.Address][][]types.Log{},
 		subs:              map[common.Address][]chan<- types.Log{},
+		mockSubs:          map[common.Address][]*MockSubscription{},
 	}
 }
 
@@ -538,6 +663,7 @@ type MockContractBackend struct {
 	mockedCallResults map[common.Address][][]byte
 	mockedFilterLogs  map[common.Address][][]types.Log
 	subs              map[common.Address][]chan<- types.Log
+	mockSubs          map[common.Address][]*MockSubscription
 	mu                sync.Mutex
 }
 
@@ -547,13 +673,15 @@ func (cb *MockContractBackend) PrepareMocks() {
 		DoAndReturn(func(_ context.Context, q ethereum.FilterQuery, s chan<- types.Log) (ethereum.Subscription, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
+			ms := &MockSubscription{errChan: make(chan error), logger: cb.logger}
 			addrStrs := make([]string, 0, len(q.Addresses))
 			for _, addr := range q.Addresses {
 				addrStrs = append(addrStrs, addr.Hex())
 				cb.subs[addr] = append(cb.subs[addr], s)
+				cb.mockSubs[addr] = append(cb.mockSubs[addr], ms)
 			}
 			cb.logger.Trace("--- DEBUG --- called SubscribeFilterLogs", "addrs", strings.Join(addrStrs, ","))
-			return MockSubscription{errChan: make(chan error), logger: cb.logger}, nil
+			return ms, nil
 		}).
 		AnyTimes()
 
@@ -605,6 +733,17 @@ func (cb *MockContractBackend) SimulateFilterLogs(addr common.Address, logs []ty
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 	cb.mockedFilterLogs[addr] = append(cb.mockedFilterLogs[addr], logs)
+}
+
+// SimulateSubscriptionClose closes the err channel of all subscriptions registered for addr,
+// modelling a graceful underlying-transport close (e.g. websocket reconnect). Receivers of
+// sub.Err() see nil, exercising the post-close handling in watchSubmissions / trackFutureEons.
+func (cb *MockContractBackend) SimulateSubscriptionClose(addr common.Address) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	for _, ms := range cb.mockSubs[addr] {
+		ms.SimulateClose()
+	}
 }
 
 func (cb *MockContractBackend) SimulateLogEvents(ctx context.Context, logs []types.Log) error {
@@ -698,18 +837,25 @@ type MockStateChange struct {
 }
 
 type MockSubscription struct {
-	errChan chan error
-	logger  log.Logger
+	errChan   chan error
+	logger    log.Logger
+	closeOnce sync.Once
 }
 
-func (m MockSubscription) Unsubscribe() {
+func (m *MockSubscription) Unsubscribe() {
 	m.logger.Trace("--- DEBUG --- called MockSubscription.Unsubscribe")
-	close(m.errChan)
+	m.closeOnce.Do(func() { close(m.errChan) })
 }
 
-func (m MockSubscription) Err() <-chan error {
+func (m *MockSubscription) Err() <-chan error {
 	m.logger.Trace("--- DEBUG --- called MockSubscription.Err")
 	return m.errChan
+}
+
+// SimulateClose simulates the subscription's underlying transport closing without an error
+// (e.g. websocket disconnect). Idempotent and safe to call alongside Unsubscribe.
+func (m *MockSubscription) SimulateClose() {
+	m.closeOnce.Do(func() { close(m.errChan) })
 }
 
 func NewMockSlotCalculator(ctrl *gomock.Controller, config shuttercfg.Config) *MockSlotCalculator {

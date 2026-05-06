@@ -26,7 +26,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -246,13 +245,7 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-var workers = dbg.EnvInt("PAGED_WRITER_WORKERS", 1)
-
-func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool) *PagedWriter {
-	return NewPagedWriterWithWorkers(ctx, parent, compressionEnabled, workers)
-}
-
-func NewPagedWriterWithWorkers(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
+func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
 	pw := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),

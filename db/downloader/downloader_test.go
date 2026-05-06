@@ -89,7 +89,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 
 func TestNoEscape(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
@@ -140,7 +140,7 @@ func TestVerifyDataDownloaderClosed(t *testing.T) {
 func TestAddDel(t *testing.T) {
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
 	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
@@ -229,7 +229,7 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(
-		context.Background(),
+		t.Context(),
 		dirs,
 		"",
 		log.LvlInfo,
@@ -248,7 +248,7 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg.ClientConfig.DisableUTP = true
 	}
 
-	d, err := New(context.Background(), cfg, log.New())
+	d, err := New(t.Context(), cfg, log.New())
 	require.NoError(err)
 
 	// Register cleanup in reverse order (downloader closes before config file)

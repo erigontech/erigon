@@ -292,7 +292,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
     upRow := row - 1
     depth := hph.depths[row]
     updateKeyLen := hph.currentKeyLen
-    updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
+    updateKey := nibbles.HexToCompact(hph.currentKey[:updateKeyLen])
     defer func() { hph.depthsToTxNum[depth] = 0 }()
 
     var upCell *cell
@@ -336,7 +336,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 | `feedBranchHashesToKeccak` | Keccak state accumulation; ordering is consensus-critical | Verify byte-identical keccak2 input; add temporary assertion in testing |
 | Method call overhead | `foldDelete`/`foldPropagate`/`foldBranch` called once per fold | Negligible — one call per fold, each does substantial work (DB reads, hashing) |
 | Parameter passing | 6 parameters to each fold* method | All value types or pointers already on stack; no heap escape |
-| `updateKey` slice | Allocated once per fold via `HexNibblesToCompactBytes` | Already exists; no change |
+| `updateKey` slice | Allocated once per fold via `nibbles.HexToCompact` | Already exists; no change |
 
 ### Method parameter design
 

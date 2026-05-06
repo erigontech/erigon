@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
@@ -57,6 +58,7 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
+	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -74,6 +76,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -153,7 +156,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
-		r.Logs[i].Index = uint(logIndex)
+		r.Logs[i].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 
@@ -172,7 +175,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
-		l.BlockNumber = blockNum
+		l.BlockNumber = hexutil.Uint64(blockNum)
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
@@ -236,6 +239,10 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+
+	// BlockStateCache holds pre-block account state for stable committed reads.
+	// Shared across all tasks in the same block. Set by the parallel executor.
+	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -345,6 +352,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 	return t.Header.Root
 }
 
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
+}
+
 func (t *TxTask) BlockTime() uint64 {
 	if t.Header == nil {
 		return 0
@@ -406,6 +417,10 @@ func (t *TxTask) Dependencies() []int {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
+}
+
+func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
+	return t.BlockStateCache
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {

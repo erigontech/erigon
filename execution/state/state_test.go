@@ -269,7 +269,7 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true)
-	so0.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'})), []byte{'c', 'a', 'f', 'e'}, true)
+	so0.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e'})), []byte{'c', 'a', 'f', 'e'}, true)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -285,7 +285,7 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53, true)
-	so1.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'})), []byte{'c', 'a', 'f', 'e', '2'}, true)
+	so1.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{'c', 'a', 'f', 'e', '2'})), []byte{'c', 'a', 'f', 'e', '2'}, true)
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
@@ -334,7 +334,7 @@ func TestCodeResolve(t *testing.T) {
 	so0, err := state.GetOrNewStateObject(stateobjaddr0)
 	require.NoError(t, err)
 	del := types.AddressToDelegation(stateobjaddr1)
-	so0.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(del)), del, true)
+	so0.SetCode(accounts.InternCodeHash(crypto.HashData(del)), del, true)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -342,7 +342,7 @@ func TestCodeResolve(t *testing.T) {
 	so1, err := state.GetOrNewStateObject(stateobjaddr1)
 	require.NoError(t, err)
 	target := []byte{'c', 'a', 'f', 'e'}
-	so1.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(target)), target, true)
+	so1.SetCode(accounts.InternCodeHash(crypto.HashData(target)), target, true)
 	so1.selfdestructed = false
 	so1.deleted = false
 	state.setStateObject(stateobjaddr1, so1)
@@ -454,7 +454,7 @@ func TestDump(t *testing.T) {
 	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
-	obj2.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true)
+	obj2.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true)
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)

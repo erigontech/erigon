@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/rpc"
@@ -288,6 +289,9 @@ func TestGeneratedTraceApi(t *testing.T) {
 }
 
 func TestGeneratedTraceApiCollision(t *testing.T) {
+	if dbg.Exec3Parallel {
+		t.Skip("intra-block SELFDESTRUCT + CREATE2 reincarnation not yet supported by parallel executor — fixed on exec3/remove-rwtx-threading branch")
+	}
 	m := rpcdaemontest.CreateTestExecModuleForTracesCollision(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool), nil)

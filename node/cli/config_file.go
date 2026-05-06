@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 )

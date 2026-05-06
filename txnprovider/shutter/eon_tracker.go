@@ -159,26 +159,25 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
-			err := et.handleBlockEvent(blockEvent)
-			if err != nil {
-				return err
-			}
+			et.handleBlockEvent(blockEvent)
 		}
 	}
 }
 
-func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
+func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) {
 	et.mu.Lock()
 	defer et.mu.Unlock()
 
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
-		return fmt.Errorf("read eon at new block event: %w", err)
+		eonTrackerBlockEventErrors.Inc()
+		et.logger.Warn("failed to read eon at block event, will retry on next block", "blockNum", blockNum, "err", err)
+		return
 	}
 	if !ok {
 		et.logger.Warn("no eon at", "blockNum", blockNum)
-		return nil
+		return
 	}
 
 	if et.currentEon == nil || et.currentEon.Index != eon.Index {
@@ -188,7 +187,6 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
 	et.maybeCleanup(blockNum)
-	return nil
 }
 
 func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, error) {
@@ -348,8 +346,19 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-keyperSetAddedEventSub.Err():
-			return err
+		case err, ok := <-keyperSetAddedEventSub.Err():
+			if ok {
+				return err
+			}
+			//
+			// TODO: re-establish the subscription with backoff instead of waiting for ctx.
+			//       A graceful close (e.g. websocket reconnect) currently leaves the tracker in
+			//       a silently degraded state — new keyper sets stop being observed until the
+			//       process restarts. Tracking issue: https://github.com/erigontech/erigon/issues/20999
+			//
+			et.logger.Warn("keyper set added subscription closed, waiting for shutdown")
+			<-ctx.Done()
+			return ctx.Err()
 		case event := <-keyperSetAddedEventC:
 			err := et.handleKeyperSetAddedEvent(event)
 			if err != nil {
@@ -370,22 +379,24 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 		return nil
 	}
 
+	// eth_call is overlay-aware, so contract reads see uncommitted block
+	// data via the overlay. Process the event directly.
 	eon, ok, err := et.readEonAtKeyperSetAddedEvent(event)
 	if err != nil {
-		return fmt.Errorf("read eon at keyper set added event: %w", err)
+		et.logger.Warn("failed to read eon at keyper set added event", "eon", event.Eon, "err", err)
+		return nil
 	}
 	if !ok {
 		et.logger.Warn("no eon at keyper set added event", "eon", event.Eon)
 		return nil
 	}
-
 	et.recentEons.ReplaceOrInsert(eon)
 	return nil
 }
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {
 	callOpts := &bind.CallOpts{
-		BlockNumber: uint256.NewInt(event.Raw.BlockNumber),
+		BlockNumber: uint256.NewInt(uint64(event.Raw.BlockNumber)),
 	}
 
 	eonIndex := event.Eon

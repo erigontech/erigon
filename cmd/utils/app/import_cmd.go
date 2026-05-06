@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"os/signal"
 	"strings"
@@ -33,18 +34,19 @@ import (
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -75,6 +77,22 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
+
+	// Force-disable subsystems the one-shot import doesn't need, via the normal
+	// flag path so the downstream config build skips their setup entirely.
+	// --nat=none in particular avoids a ~2s UPnP/NAT-PMP autodiscovery probe in
+	// downloadernat.DoNat that otherwise dominates per-run startup (observable
+	// in hive eest/consume-rlp).
+	for flag, value := range map[string]string{
+		utils.NATFlag.Name:               "none",
+		utils.NoDownloaderFlag.Name:      "true",
+		utils.ExternalConsensusFlag.Name: "true",
+	} {
+		if err := cliCtx.Set(flag, value); err != nil {
+			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
+		}
+	}
+
 	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -86,8 +104,6 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
-	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
@@ -239,6 +255,92 @@ type stateChangesClient interface {
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
+	if len(chain.Blocks) == 0 {
+		return nil
+	}
+	for _, block := range chain.Blocks {
+		if err := block.HashCheck(true); err != nil {
+			return err
+		}
+	}
+
+	ctx := context.Background()
+
+	// Compare the imported chain's total difficulty against the current canonical
+	// head's via the same PoW fork-choice rule as the legacy header sync
+	// (ethash.ShouldReorg). If the imported chain doesn't win, persist
+	// the blocks as a side chain (without changing head or executing them), so
+	// future imports extending this branch can still be validated. Once a
+	// side-chain extension surpasses the canonical TD, the regular
+	// InsertBlocks + UpdateForkChoice path triggers the reorg and executes
+	// those blocks. This matches what ethereum/tests BlockchainTests with
+	// multi-chain layouts (lotsOfLeafs, ChainAtoChainB, ForkStressTest, etc.)
+	// expect when Hive imports one block per file.
+	firstBlock := chain.Blocks[0]
+	tipBlock := chain.TopBlock
+	var parentTd, currentHeadTd *big.Int
+	var currentHeadHash common.Hash
+	var currentHeadNumber uint64
+	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
+		if firstBlock.NumberU64() > 0 {
+			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
+			if readErr != nil {
+				return fmt.Errorf("read parent TD: %w", readErr)
+			}
+			parentTd = td
+		} else {
+			parentTd = new(big.Int)
+		}
+		if hash := rawdb.ReadHeadBlockHash(tx); hash != (common.Hash{}) {
+			if num := rawdb.ReadHeaderNumber(tx, hash); num != nil {
+				td, readErr := rawdb.ReadTd(tx, hash, *num)
+				if readErr != nil {
+					return fmt.Errorf("read head TD: %w", readErr)
+				}
+				currentHeadTd = td
+				currentHeadHash = hash
+				currentHeadNumber = *num
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	// Apply the side-chain path only for PoW imports where both TDs are known.
+	// If parent TD is missing (orphan import) or there is no current head yet,
+	// fall through to the regular insert path so any error surfaces normally.
+	// PoS blocks have difficulty=0 so TD never grows; ShouldReorg's PoW
+	// tie-break (shorter chain wins on equal TD) would prevent the head from
+	// ever advancing, so PoS imports skip the side-chain branch and rely on
+	// UpdateForkChoice as before.
+	isPoW := tipBlock.Header().Difficulty.Sign() > 0
+	if setHead && isPoW && parentTd != nil && currentHeadTd != nil {
+		importedTipTd := new(big.Int).Set(parentTd)
+		for _, b := range chain.Blocks {
+			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
+		}
+		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
+			// Side chain — write headers/bodies/TDs directly without executing
+			// or changing head.
+			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {
+				td := new(big.Int).Set(parentTd)
+				for _, b := range chain.Blocks {
+					td.Add(td, b.Header().Difficulty.ToBig())
+					if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
+						return fmt.Errorf("write side-chain header: %w", err)
+					}
+					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), td); err != nil {
+						return fmt.Errorf("write side-chain TD: %w", err)
+					}
+					if _, err := rawdb.WriteRawBodyIfNotExists(tx, b.Hash(), b.NumberU64(), b.RawBody()); err != nil {
+						return fmt.Errorf("write side-chain body: %w", err)
+					}
+				}
+				return nil
+			})
+		}
+	}
+
 	streamCtx, cancel := context.WithCancel(ethereum.SentryCtx())
 	defer cancel()
 	stream, err := ethereum.StateDiffClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
@@ -247,17 +349,12 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	insertedBlocks := map[uint64]struct{}{}
-
 	for _, block := range chain.Blocks {
-		if err := block.HashCheck(true); err != nil {
-			return err
-		}
 		insertedBlocks[block.NumberU64()] = struct{}{}
 	}
 
-	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), time.Hour)
+	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
-	ctx := context.Background()
 	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
 		return err
 	}
@@ -267,9 +364,18 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
+	}
+	// On any non-success status the commit is skipped and no state-diff events
+	// will be emitted, so skip the wait below — otherwise stream.Recv() hangs.
+	if status != execmodule.ExecutionStatusSuccess {
+		blockNum := chain.Blocks[chain.Length()-1].NumberU64()
+		if validationErr != nil {
+			return fmt.Errorf("fork-choice rejected block %d, status: %s: %s", blockNum, status.String(), *validationErr)
+		}
+		return fmt.Errorf("fork-choice rejected block %d, status: %s", blockNum, status.String())
 	}
 
 	// UpdateForkChoice has an async commit so we need to wait to make sure
@@ -301,16 +407,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		}
 	}
 
-	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if status != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
-	}
-
-	return nil
 }

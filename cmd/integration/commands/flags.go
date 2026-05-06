@@ -26,23 +26,23 @@ import (
 )
 
 var (
-	chaindata                    string
-	databaseVerbosity            int
-	referenceChaindata           string
-	block, pruneTo, unwind       uint64
-	unwindEvery                  uint64
-	batchSizeStr                 string
-	domain                       string
-	reset, noCommit, squeeze     bool
-	bucket                       string
-	datadirCli, toChaindata      string
-	migration                    string
-	integrityFast, integritySlow bool
-	file                         string
-	HeimdallURL                  string
-	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
-	chain                        string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                string
+	chaindata                     string
+	databaseVerbosity             int
+	referenceChaindata            string
+	block, pruneTo, unwind        uint64
+	unwindEvery                   uint64
+	batchSizeStr                  string
+	domain                        string
+	reset, noCommit, squeeze, yes bool
+	bucket                        string
+	datadirCli, toChaindata       string
+	migration                     string
+	integrityFast, integritySlow  bool
+	file                          string
+	HeimdallURL                   string
+	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                         string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                 string
 
 	startTxNum uint64
 
@@ -110,6 +110,10 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+}
+
+func withYes(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive prompts (for non-interactive/background use)")
 }
 
 func withSqueeze(cmd *cobra.Command) {

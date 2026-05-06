@@ -75,8 +75,8 @@ func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
 }
 
-func (*SyncAggregate) Clone() clonable.Clonable {
-	return &SyncAggregate{}
+func (a *SyncAggregate) Clone() clonable.Clonable {
+	return NewSyncAggregateWithSize(len(a.SyncCommiteeBits))
 }
 
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {

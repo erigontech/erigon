@@ -97,22 +97,22 @@ type btSlotChanges struct {
 }
 
 type btStorageChange struct {
-	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32       `json:"blockAccessIndex"`
 	PostValue        math.HexOrDecimal256 `json:"postValue"`
 }
 
 type btBalanceChange struct {
-	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32       `json:"blockAccessIndex"`
 	PostBalance      math.HexOrDecimal256 `json:"postBalance"`
 }
 
 type btNonceChange struct {
-	BlockAccessIndex hexutil.Uint16      `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32      `json:"blockAccessIndex"`
 	PostNonce        math.HexOrDecimal64 `json:"postNonce"`
 }
 
 type btCodeChange struct {
-	BlockAccessIndex hexutil.Uint16 `json:"blockAccessIndex"`
+	BlockAccessIndex hexutil.Uint32 `json:"blockAccessIndex"`
 	NewCode          hexutil.Bytes  `json:"newCode"`
 }
 
@@ -137,7 +137,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 			}
 			for _, change := range sc.SlotChanges {
 				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
-					Index: uint16(change.BlockAccessIndex),
+					Index: uint32(change.BlockAccessIndex),
 					Value: *uint256.MustFromBig((*big.Int)(&change.PostValue)),
 				})
 			}
@@ -148,19 +148,19 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 		}
 		for _, bc := range ac.BalanceChanges {
 			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
-				Index: uint16(bc.BlockAccessIndex),
+				Index: uint32(bc.BlockAccessIndex),
 				Value: *uint256.MustFromBig((*big.Int)(&bc.PostBalance)),
 			})
 		}
 		for _, nc := range ac.NonceChanges {
 			entry.NonceChanges = append(entry.NonceChanges, &types.NonceChange{
-				Index: uint16(nc.BlockAccessIndex),
+				Index: uint32(nc.BlockAccessIndex),
 				Value: uint64(nc.PostNonce),
 			})
 		}
 		for _, cc := range ac.CodeChanges {
 			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
-				Index:    uint16(cc.BlockAccessIndex),
+				Index:    uint32(cc.BlockAccessIndex),
 				Bytecode: cc.NewCode,
 			})
 		}

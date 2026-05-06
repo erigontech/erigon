@@ -34,3 +34,12 @@ This section details common error messages and provides clear, actionable steps 
    * **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
    * **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
    * **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set.
+
+8. **Permission denied inside Docker (UID/GID mismatch):**
+   * **Error Description:** When running the official Docker image, Erigon fails to read or write files in the mounted datadir with a `permission denied` error.
+   * **Cause:** The container runs the Erigon process as UID/GID `1000`. If the host directory is owned by a different user, the process cannot access it.
+   * **Solution:** On the host, change ownership of the datadir to UID/GID 1000: `sudo chown -R 1000:1000 /your/datadir`. Alternatively, pass `--user $(id -u):$(id -g)` to `docker run` to run the container with your host user's identity.
+9. **`libsilkworm_capi.so: cannot open shared object file` on startup:**
+   * **Error Description:** Erigon fails to start with a dynamic linker error about a missing `libsilkworm_capi.so` shared library.
+   * **Cause:** The binary was built with Silkworm support but the shared library is not present in the system's library path or alongside the binary.
+   * **Solution:** Ensure the `libsilkworm_capi.so` file is located in the same directory as the `erigon` binary, or add its location to `LD_LIBRARY_PATH`. If you built from source, run `make erigon` again to confirm the library was compiled and placed correctly. Official Docker images bundle the library automatically.

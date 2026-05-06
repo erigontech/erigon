@@ -22,6 +22,7 @@ package trie
 import (
 	"bytes"
 	"io"
+	"math/bits"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -129,20 +130,8 @@ func (n *DuoNode) EncodeRLP(w io.Writer) error {
 }
 
 func (n *DuoNode) childrenIdx() (i1 byte, i2 byte) {
-	child := 1
-	var m uint32 = 1
-	for i := 0; i < 17; i++ {
-		if (n.mask & m) > 0 {
-			if child == 1 {
-				i1 = byte(i)
-				child = 2
-			} else if child == 2 {
-				i2 = byte(i)
-				break
-			}
-		}
-		m <<= 1
-	}
+	i1 = byte(bits.TrailingZeros32(n.mask))
+	i2 = byte(bits.TrailingZeros32(n.mask & ^(1 << i1)))
 	return i1, i2
 }
 

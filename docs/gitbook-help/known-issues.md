@@ -16,9 +16,9 @@ The **`RES`** (Resident) column in `htop` combines the memory used by the applic
 
 For a more accurate view of Erigon's memory usage, use one of these tools:
 
-* **`vmmap -summary PID`**: Use this command to see a detailed breakdown. The **`MALLOC ZONE`** and **`REGION TYPE`** sections will show you the memory used by the application and the size of the OS page cache separately.
+* **`vmmap -summary PID`** _(macOS only)_: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
+* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
 * **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`.
-* **`cat /proc/<PID>/smaps`**: This command gives a raw text file of the memory maps, which can be useful for detailed analysis.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.
 
@@ -53,7 +53,7 @@ If you're encountering a BuildKit error when starting Erigon, it's likely due to
 
 {% code overflow="wrap" %}
 ```bash
-XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+XDG_DATA_HOME=/preferred/data/folder make docker-compose
 ```
 {% endcode %}
 
@@ -62,6 +62,12 @@ XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=
 If Erigon crashes with a **`cannot allocate memory`** error, your kernel's memory allocation limits might be too low. You can resolve this by adding the following lines to `/etc/sysctl.conf` or a new `.conf` file in `/etc/sysctl.d/`:
 
 ```bash
-vm.overcommit_memory = 1 
-vm.max_map_count = 16777216 
+vm.overcommit_memory = 1
+vm.max_map_count = 16777216
 ```
+
+### Changing `--db.pagesize` After First Sync <a href="#db-pagesize" id="db-pagesize"></a>
+
+The `--db.pagesize` flag sets the MDBX page size and **must be chosen before the first sync**. It cannot be changed on an existing database without deleting the datadir and re-syncing from scratch.
+
+The default page size is `16KB`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency.

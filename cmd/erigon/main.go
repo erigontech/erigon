@@ -69,18 +69,6 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
-	if version.Major == 3 {
-		logger.Info(`
-	########b          oo                               d####b. 
-	##                                                      '## 
-	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
-	##        ##'  '## ## ##'  '## ##'  '## ##'  '##        '## 
-	##        ##       ## ##.  .## ##.  .## ##    ##        .## 
-	########P dP       dP '####P## '#####P' dP    dP    d#####P 
-	                           .##                              
-	                       d####P                               
-		`)
-	}
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 

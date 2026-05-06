@@ -1,7 +1,6 @@
 package test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -70,7 +69,7 @@ func TestUnmarked_PutToDb(t *testing.T) {
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
@@ -99,7 +98,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			dir, db, log := setup(t)
 			borSpanId, uma := setupBorSpans(t, log, dir, db)
 
-			ctx := context.Background()
+			ctx := t.Context()
 			cfg := state.Registry.SnapshotConfig(borSpanId)
 			extras_count := uint64(5) // db
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
@@ -182,7 +181,7 @@ func CustomSpanIdAt(blockNum uint64) heimdall.SpanId {
 func TestBuildFiles_Unmarked(t *testing.T) {
 	dir, db, log := setup(t)
 	borSpanId, uma := setupBorSpans(t, log, dir, db)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
@@ -279,7 +278,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	dir, db, log := setup(t)
 	pagedDataId, uma := setupPagedEntity(t, log, dir, db)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
@@ -396,7 +395,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 		state.NewAccessorArgs(false, false, cfg.ValuesOnCompressedPage, stepSize),
 		id, dirs.Tmp, log)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
