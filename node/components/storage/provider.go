@@ -298,6 +298,66 @@ func (p *Provider) Initialize(deps Deps) error {
 		},
 	)
 
+	// When the lifecycle driver advances files to Advertisable
+	// (LifecycleDrivenByStorage path), the legacy ChainDB.OnFilesChange
+	// callback above doesn't fire — those files came in via the disk
+	// scan + lifecycle handlers, not via retire's old "frozen files"
+	// notification. Without something firing Seed for them, the
+	// downloader never builds .torrent metadata for the new
+	// retire/merge output, GenerateChainToml has nothing to add to
+	// chain.toml, and V2 consumers don't see the publisher's fresh
+	// files.
+	//
+	// Subscribe to inventory ChangeSets to bridge the gap: when files
+	// reach LifecycleAdvertisable, call Seed (which builds the
+	// .torrent + adds the torrent to the client for seeding) and then
+	// re-publish chain.toml so consumers see the entry. This is the
+	// last-mile wiring that makes the V2 architectural advantage
+	// visible — without it, chain.toml stays at the
+	// post-DownloadSnapshots size while retire silently produces files
+	// that never make it into the advertised manifest.
+	if inv != nil && downloaderClient != nil {
+		sub, unsub := inv.Subscribe()
+		go func() {
+			defer unsub()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case cs, ok := <-sub:
+					if !ok {
+						return
+					}
+					var toSeed []string
+					for _, name := range cs.Files {
+						state, exists := inv.LifecycleState(name)
+						if !exists {
+							continue
+						}
+						if state == snapshot.LifecycleAdvertisable {
+							toSeed = append(toSeed, name)
+						}
+					}
+					if len(toSeed) == 0 {
+						continue
+					}
+					if config.Snapshot.NoDownloader {
+						continue
+					}
+					if err := downloaderClient.Seed(ctx, toSeed); err != nil {
+						p.logger.Warn("[snapshots] post-advance Seed", "err", err)
+						continue
+					}
+					if deps.RepublishChainToml != nil {
+						if err := deps.RepublishChainToml(); err != nil {
+							p.logger.Warn("[snapshots] re-publish chain.toml after seed", "err", err)
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	// Lifecycle driver — owns the import state machine when storage
 	// drives. Construct + start only when both Inventory is provided
 	// AND the operator has flipped the LifecycleDrivenByStorage flag.
