@@ -23,6 +23,10 @@ cache="${2:-test-fixtures-cache}"
 for tool in jq curl tar; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "test-fixtures: $tool not found in PATH" >&2; exit 1; }
 done
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+	echo "test-fixtures: neither sha256sum nor shasum found in PATH" >&2
+	exit 1
+fi
 
 sha256() {
 	if command -v sha256sum >/dev/null 2>&1; then
@@ -33,6 +37,13 @@ sha256() {
 }
 
 mkdir -p "$cache"
+
+# Read & parse the manifest up-front so jq errors abort the script (process
+# substitution would mask them under `set -e`).
+if ! manifest_entries=$(jq -r 'to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.url)\t\(.value.sha256)"' "$manifest" | tr -d '\r'); then
+	echo "test-fixtures: failed to parse manifest $manifest" >&2
+	exit 1
+fi
 
 # Clean up the in-progress iteration's tmp paths on any exit (including
 # Ctrl-C / SIGTERM) so a leftover .tmp doesn't accumulate across runs.
@@ -52,7 +63,7 @@ while IFS=$'\t' read -r name url want; do
 
 	if [[ ! -f "$tar_path" ]] || [[ "$(sha256 "$tar_path")" != "$want" ]]; then
 		echo "$name: downloading from $url"
-		curl -fsSL -o "$tar_path.tmp" "$url"
+		curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 -o "$tar_path.tmp" "$url"
 		got=$(sha256 "$tar_path.tmp")
 		if [[ "$got" != "$want" ]]; then
 			rm -f "$tar_path.tmp"
@@ -65,8 +76,8 @@ while IFS=$'\t' read -r name url want; do
 	echo "$name: extracting"
 	rm -rf "$out_dir.tmp" "$out_dir"
 	mkdir -p "$out_dir.tmp"
-	tar -xzf "$tar_path" -C "$out_dir.tmp"
+	tar --no-same-owner --no-same-permissions -xzf "$tar_path" -C "$out_dir.tmp"
 	echo "$want" > "$out_dir.tmp/.sha256"
 	mv "$out_dir.tmp" "$out_dir"
 	echo "$name: ok"
-done < <(jq -r 'to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.url)\t\(.value.sha256)"' "$manifest" | tr -d '\r')
+done <<< "$manifest_entries"

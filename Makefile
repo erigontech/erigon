@@ -270,10 +270,10 @@ check-large-files:
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
-test-group: test-filtered
+test-group: test-fixtures test-filtered
 
 test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
-test-sonar-coverage: test-filtered
+test-sonar-coverage: test-fixtures test-filtered
 
 ## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
 test-rpc: rpcdaemon integration
