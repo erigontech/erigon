@@ -41,21 +41,9 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocs map[PreAllocHash]*PreAlloc) *EngineXTestRunner {
-	return &EngineXTestRunner{
-		t:         t,
-		logger:    logger,
-		preAllocs: preAllocs,
-		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
-	}
-}
-
-func LoadPreAllocsFromDir(dir string) (map[PreAllocHash]*PreAlloc, error) {
+func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
-	err := filepath.WalkDir(dir, func(path string, info os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if info.IsDir() {
 			return nil
 		}
@@ -64,7 +52,8 @@ func LoadPreAllocsFromDir(dir string) (map[PreAllocHash]*PreAlloc, error) {
 			return err
 		}
 		var preAlloc PreAlloc
-		if err := json.Unmarshal(b, &preAlloc); err != nil {
+		err = json.Unmarshal(b, &preAlloc)
+		if err != nil {
 			return err
 		}
 		preAllocs[PreAllocHash(strings.TrimSuffix(info.Name(), filepath.Ext(info.Name())))] = &preAlloc
@@ -73,7 +62,13 @@ func LoadPreAllocsFromDir(dir string) (map[PreAllocHash]*PreAlloc, error) {
 	if err != nil {
 		return nil, err
 	}
-	return preAllocs, nil
+	runner := &EngineXTestRunner{
+		t:         t,
+		logger:    logger,
+		preAllocs: preAllocs,
+		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
+	}
+	return runner, nil
 }
 
 type EngineXTestRunner struct {

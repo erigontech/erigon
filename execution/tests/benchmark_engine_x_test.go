@@ -57,7 +57,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 	preAllocsDir := filepath.Join(engineXDir, "pre_alloc")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 
-	preAllocs, err := engineapitester.LoadPreAllocsFromDir(preAllocsDir)
+	runner, err := engineapitester.NewEngineXTestRunner(b, logger, preAllocsDir)
 	require.NoError(b, err)
 
 	type testEntry struct {
@@ -85,8 +85,6 @@ func benchmarkEngineX(b *testing.B, category string) {
 		return nil
 	})
 	require.NoError(b, err)
-
-	runner := engineapitester.NewEngineXTestRunner(b, logger, preAllocs)
 
 	// Pre-create all testers (not timed).
 	seen := make(map[[2]string]bool)
