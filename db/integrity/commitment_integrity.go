@@ -245,13 +245,19 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
-	// Touch Accounts and Storage keys that changed in the last block of the file via
-	// the production-blessed helper used by rpc/rpchelper/commitment.go and receipts
-	// generation. It iterates HistoryKeyTxNumRange for both domains. Code touches are
-	// not included here (the helper doesn't include them either) — code changes always
-	// accompany an account touch in the same block, so the trie's account-path
-	// recomputation already covers them via the codeHash field.
-	accountTouches, storageTouches, err := sd.TouchChangedKeysFromHistory(tx, info.blockMinTxNum, info.txNum+1)
+	// Touch every Accounts/Storage key that changed in the file's full txNum range
+	// [f.StartRootNum, info.txNum+1). Touching only the last block's keys would only
+	// re-evaluate trie paths reachable from those keys; the rest of the trie would
+	// be trusted as-loaded and corruption in older branches would slip through.
+	// Iterating the full range forces re-evaluation of every path that contributed
+	// to the recorded root.
+	//
+	// Uses the production-blessed helper from rpc/rpchelper/commitment.go and
+	// receipts generation, which iterates HistoryKeyTxNumRange for Accounts and
+	// Storage. Code touches are not included (helper doesn't either) — code
+	// changes always accompany an account touch in the same block, so the trie's
+	// account-path recomputation covers them via the codeHash field.
+	accountTouches, storageTouches, err := sd.TouchChangedKeysFromHistory(tx, f.StartRootNum(), info.txNum+1)
 	if err != nil {
 		return err
 	}
