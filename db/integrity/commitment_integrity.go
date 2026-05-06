@@ -207,12 +207,16 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	// Use a true historical reader (GetAsOf via .ef+.v index) rather than
-	// LimitedHistoryStateReader: the latter falls back to GetLatest when a key
-	// isn't in a frozen .kv at maxTxNum, which silently returns post-state values
-	// for storage slots and breaks recompute. HistoryStateReader returns
-	// point-in-time correct values for all domains.
-	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewHistoryStateReader(tx, maxTxNum+1))
+	// Read each touched key's value from the matching .kv file at the same
+	// boundary as commitment.kv (i.e. accounts/storage/code.kv at maxTxNum).
+	// Those domain .kv files are the authoritative snapshot the commitment was
+	// originally built against; consulting history (.ef+.v), current DB state,
+	// or later .kv files only introduces noise that wasn't part of the input
+	// that produced info.rootHash. FilesOnlyStateReader returns nil on miss
+	// (no GetLatest fallback like LimitedHistoryStateReader does) so a missing
+	// key is treated as "not in the boundary snapshot" rather than wrong-falling
+	// back to current state.
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err

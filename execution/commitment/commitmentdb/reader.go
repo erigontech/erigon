@@ -80,6 +80,40 @@ func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
 
+// FilesOnlyStateReader reads from .kv files only, capped at limitTxNum.
+// On miss (key not present in any frozen .kv file ≤ limitTxNum), returns nil
+// without any fallback. This is the right semantic for integrity checks that
+// validate "what does the .kv snapshot at this boundary actually contain?":
+// no consultation of history index, no consultation of current DB state, no
+// consultation of .kv files past the boundary.
+type FilesOnlyStateReader struct {
+	roTx       kv.TemporalTx
+	limitTxNum uint64
+}
+
+func NewFilesOnlyStateReader(roTx kv.TemporalTx, limitTxNum uint64) *FilesOnlyStateReader {
+	return &FilesOnlyStateReader{roTx: roTx, limitTxNum: limitTxNum}
+}
+
+func (r *FilesOnlyStateReader) WithHistory() bool { return false }
+
+func (r *FilesOnlyStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *FilesOnlyStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	enc, ok, _, endTxNum, err := r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitTxNum)
+	if err != nil {
+		return nil, 0, fmt.Errorf("FilesOnlyStateReader %q (limitTxNum=%d): %w", d, r.limitTxNum, err)
+	}
+	if !ok {
+		return nil, 0, nil
+	}
+	return enc, kv.Step(endTxNum / stepSize), nil
+}
+
+func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewFilesOnlyStateReader(tx, r.limitTxNum)
+}
+
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
 // `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
 type LimitedHistoryStateReader struct {
