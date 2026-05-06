@@ -266,9 +266,13 @@ Each entry is an `<a>` with `display:flex`, `alignItems:center`, `gap:0.6rem`. I
 
 ## 7. Typography
 
-### Font Imports (`src/css/custom.css`)
+### Font Loading (`src/css/custom.css`)
+All fonts are self-hosted via `@font-face` (no CDN). Woff2 files live in `static/fonts/`.
 ```css
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800&family=Nunito+Sans:wght@400;700;800&display=swap');
+@font-face { font-family: 'Montserrat';   src: url('/fonts/Montserrat-ExtraBold.woff2')  format('woff2'); font-weight: 800; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Regular.woff2')    format('woff2'); font-weight: 400; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Bold.woff2')        format('woff2'); font-weight: 700; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-ExtraBold.woff2')  format('woff2'); font-weight: 800; }
 ```
 
 ### Font Roles
