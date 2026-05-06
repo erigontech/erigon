@@ -31,7 +31,7 @@ func ProcessBuilderPendingPayments(s abstract.BeaconState) {
 	// Process the first SLOTS_PER_EPOCH payments: if weight >= quorum, promote to withdrawal
 	for i := 0; i < slotsPerEpoch && i < pendingPayments.Length(); i++ {
 		payment := pendingPayments.Get(i)
-		if payment != nil && payment.Weight >= quorum {
+		if payment != nil && payment.Weight >= quorum && payment.Withdrawal != nil {
 			pendingWithdrawals.Append(payment.Withdrawal)
 		}
 	}

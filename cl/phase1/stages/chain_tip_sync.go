@@ -310,6 +310,10 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 	if len(roots) == 0 {
 		return nil
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 	remaining := make([][32]byte, len(roots))
 	copy(remaining, roots)
