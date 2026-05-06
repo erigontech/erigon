@@ -1,8 +1,8 @@
 {
   "eest_benchmark": {
-    "url": "https://github.com/ethereum/execution-spec-tests/releases/download/benchmark%40v0.0.7/fixtures_benchmark.tar.gz",
-    "sha256": "efa7cbec58bedab28870e260eca1f5271b1c3d81c952f221ba6432bff88fee5d",
-    "size": 428679253
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-benchmark%40v0.0.9/fixtures_benchmark.tar.gz",
+    "sha256": "5aee5d1bf7430d5b6ca5b48269dd2a1fb0f9df39ac1e980bac9fc56ad403b8c7",
+    "size": 1025048557
   },
   "eest_devnet": {
     "url": "https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.7.0/fixtures_bal.tar.gz",

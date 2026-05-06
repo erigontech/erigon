@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -54,8 +55,19 @@ func benchmarkEngineX(b *testing.B, category string) {
 	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
 	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
-	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
+
+	// Layout: blockchain_tests_engine_x/for_osaka_at_<NNNN>M/compute/<category>/<subcat>/<file>.json
+	gasEntries, err := os.ReadDir(engineXDir)
+	require.NoError(b, err)
+	var gasLimits []string
+	for _, e := range gasEntries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "for_") {
+			gasLimits = append(gasLimits, e.Name())
+		}
+	}
+	sort.Strings(gasLimits)
+	require.NotEmpty(b, gasLimits, "no for_*_at_<gas>M dirs under %s", engineXDir)
 
 	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocDir)
 	require.NoError(b, err)
@@ -64,53 +76,77 @@ func benchmarkEngineX(b *testing.B, category string) {
 		require.NoError(b, err)
 	})
 
-	// Parse all test files, group by subcategory.
 	type testEntry struct {
 		name string
 		def  engineapitester.EngineXTestDefinition
 	}
-	subcategories := make(map[string][]testEntry)
-	err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
+	type subcatEntries struct {
+		name    string
+		entries []testEntry
+	}
+	allTests := make(map[string][]subcatEntries)
+	for _, gas := range gasLimits {
+		testsDir := filepath.Join(engineXDir, gas, "compute", category)
+		bySubcat := make(map[string][]testEntry)
+		err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			var tests map[string]engineapitester.EngineXTestDefinition
+			if err := json.Unmarshal(data, &tests); err != nil {
+				return nil
+			}
+			rel := filepath.ToSlash(strings.TrimPrefix(path, testsDir+string(filepath.Separator)))
+			subcat := strings.SplitN(rel, "/", 2)[0]
+			for name, def := range tests {
+				bySubcat[subcat] = append(bySubcat[subcat], testEntry{name: name, def: def})
+			}
 			return nil
+		})
+		require.NoError(b, err)
+		subcatNames := make([]string, 0, len(bySubcat))
+		for k := range bySubcat {
+			subcatNames = append(subcatNames, k)
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
+		sort.Strings(subcatNames)
+		ordered := make([]subcatEntries, 0, len(subcatNames))
+		for _, k := range subcatNames {
+			ordered = append(ordered, subcatEntries{name: k, entries: bySubcat[k]})
 		}
-		var tests map[string]engineapitester.EngineXTestDefinition
-		if err := json.Unmarshal(data, &tests); err != nil {
-			return nil
-		}
-		rel := filepath.ToSlash(strings.TrimPrefix(path, testsDir+string(filepath.Separator)))
-		subcat := strings.SplitN(rel, "/", 2)[0]
-		for name, def := range tests {
-			subcategories[subcat] = append(subcategories[subcat], testEntry{name: name, def: def})
-		}
-		return nil
-	})
-	require.NoError(b, err)
+		allTests[gas] = ordered
+	}
 
 	// Pre-create all testers (not timed).
 	seen := make(map[[2]string]bool)
-	for _, entries := range subcategories {
-		for _, e := range entries {
-			k := [2]string{string(e.def.Fork), string(e.def.PreAllocHash)}
-			if !seen[k] {
-				seen[k] = true
-				require.NoError(b, runner.EnsureTester(e.def))
+	for _, ordered := range allTests {
+		for _, sc := range ordered {
+			for _, e := range sc.entries {
+				k := [2]string{string(e.def.Fork), string(e.def.PreAllocHash)}
+				if !seen[k] {
+					seen[k] = true
+					require.NoError(b, runner.EnsureTester(e.def))
+				}
 			}
 		}
 	}
 
 	b.ResetTimer()
-	for subcat, entries := range subcategories {
-		entries := entries
-		b.Run(subcat, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				for _, e := range entries {
-					require.NoError(b, runner.Execute(ctx, e.def), "%s/%s", subcat, e.name)
-				}
+	for _, gas := range gasLimits {
+		ordered := allTests[gas]
+		b.Run(gas, func(b *testing.B) {
+			for _, sc := range ordered {
+				sc := sc
+				b.Run(sc.name, func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						for _, e := range sc.entries {
+							require.NoError(b, runner.Execute(ctx, e.def), "%s/%s/%s", gas, sc.name, e.name)
+						}
+					}
+				})
 			}
 		})
 	}
