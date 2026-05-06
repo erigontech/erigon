@@ -19,18 +19,19 @@ package engineapitester
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -41,9 +42,16 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+// NewEngineXTestRunner builds a runner that lazily creates engine-api testers
+// per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
+// at construction time. The caller must call Close on the returned runner to
+// release the underlying testers and temp directories.
+func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		if info.IsDir() {
 			return nil
 		}
@@ -63,7 +71,7 @@ func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) 
 		return nil, err
 	}
 	runner := &EngineXTestRunner{
-		t:         t,
+		ctx:       ctx,
 		logger:    logger,
 		preAllocs: preAllocs,
 		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
@@ -72,12 +80,31 @@ func NewEngineXTestRunner(t testing.TB, logger log.Logger, preAllocsDir string) 
 }
 
 type EngineXTestRunner struct {
-	t         testing.TB
+	ctx       context.Context
 	logger    log.Logger
 	preAllocs map[PreAllocHash]*PreAlloc
 	mu        sync.Mutex
 	testers   map[Fork]map[PreAllocHash]EngineApiTester
 	wg        sync.WaitGroup
+	cleanups  []func() error
+}
+
+// Close releases all cached testers and removes any temp directories created
+// for them. Cleanup callbacks run LIFO; errors are joined so a single late
+// failure does not skip earlier cleanups.
+func (extr *EngineXTestRunner) Close() error {
+	extr.mu.Lock()
+	defer extr.mu.Unlock()
+	var errs []error
+	for i := len(extr.cleanups) - 1; i >= 0; i-- {
+		err := extr.cleanups[i]()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	extr.cleanups = nil
+	extr.testers = nil
+	return errors.Join(errs...)
 }
 
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
@@ -172,10 +199,17 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		genesis.Alloc = alloc.Alloc
 		genesis.Config = forkConfig
 	}
+	dataDir, err := os.MkdirTemp("", "enginex-tester-*")
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("create temp data dir: %w", err)
+	}
+	// Track the temp dir cleanup before tester construction so the directory
+	// is removed even if InitialiseEngineApiTester fails.
+	extr.cleanups = append(extr.cleanups, func() error { return dir.RemoveAll(dataDir) })
 	engineApiClientTimeout := 10 * time.Minute
-	tester := InitialiseEngineApiTester(extr.t, EngineApiTesterInitArgs{
+	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
-		DataDir:                extr.t.TempDir(),
+		DataDir:                dataDir,
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
@@ -183,8 +217,12 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 			config.MaxReorgDepth = 512
 		},
 	})
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
+	}
+	extr.cleanups = append(extr.cleanups, tester.Close)
 	testersPerAlloc[preAllocHash] = tester
-	return testersPerAlloc[preAllocHash], nil
+	return tester, nil
 }
 
 func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
