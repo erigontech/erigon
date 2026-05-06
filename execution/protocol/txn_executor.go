@@ -328,7 +328,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		skipBlobCheck := st.evm.Config().NoBaseFee && (maxFeePerBlobGas == nil || maxFeePerBlobGas.IsZero())
+		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
 				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
