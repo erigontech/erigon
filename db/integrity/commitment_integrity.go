@@ -207,8 +207,13 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	latestTxNum, _, err := sd.SeekCommitment(ctx, tx)                // seek commitment again to use the new state reader instead
+	// Use a true historical reader (GetAsOf via .ef+.v index) rather than
+	// LimitedHistoryStateReader: the latter falls back to GetLatest when a key
+	// isn't in a frozen .kv at maxTxNum, which silently returns post-state values
+	// for storage slots and breaks recompute. HistoryStateReader returns
+	// point-in-time correct values for all domains.
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewHistoryStateReader(tx, maxTxNum+1))
+	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
@@ -240,26 +245,19 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
-	trace := logger.Enabled(ctx, log.LvlTrace)
-	touchLoggingVisitor := func(k []byte) {
-		if trace {
-			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
-		}
+	// Touch Accounts and Storage keys that changed in the last block of the file via
+	// the production-blessed helper used by rpc/rpchelper/commitment.go and receipts
+	// generation. It iterates HistoryKeyTxNumRange for both domains. Code touches are
+	// not included here (the helper doesn't include them either) — code changes always
+	// accompany an account touch in the same block, so the trie's account-path
+	// recomputation already covers them via the codeHash field.
+	accountTouches, storageTouches, err := sd.TouchChangedKeysFromHistory(tx, info.blockMinTxNum, info.txNum+1)
+	if err != nil {
+		return err
 	}
-	// Touch keys from all three domains that contribute to the trie root: account fields
-	// (Accounts), per-account storage slots (Storage), and contract code hashes (Code).
-	// Touching only Accounts misses pure-SSTORE blocks (storage changed without account
-	// changes) and contract-creation/SELFDESTRUCT-only blocks where code changed without
-	// account changes — those storage/code subtrees would stay un-recomputed.
-	var touches uint64
-	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		n, err := touchHistoricalKeys(sd, tx, d, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
-		if err != nil {
-			return err
-		}
-		touches += n
-	}
-	logger.Info("[integrity] CommitmentRoot recomputing", "touches", touches, "file", filepath.Base(f.Fullpath()))
+	logger.Info("[integrity] CommitmentRoot recomputing",
+		"accountTouches", accountTouches, "storageTouches", storageTouches,
+		"file", filepath.Base(f.Fullpath()))
 	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
@@ -268,7 +266,10 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	if recomputed != info.rootHash {
 		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.rootHash)
 	}
-	logger.Info("[integrity] CommitmentRoot recomputed matches", "root", recomputed, "touches", touches, "file", filepath.Base(f.Fullpath()))
+	logger.Info("[integrity] CommitmentRoot recomputed matches",
+		"root", recomputed,
+		"accountTouches", accountTouches, "storageTouches", storageTouches,
+		"file", filepath.Base(f.Fullpath()))
 	return nil
 }
 
