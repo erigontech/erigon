@@ -7,7 +7,7 @@ sidebar_position: 2
 
 # Using an external consensus client as validator
 
-To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighhouse and Prysm to run along with Erigon:
+To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighthouse and Prysm to run along with Erigon:
 
 * [Ethereum](../get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl)
 * [Gnosis Chain](../get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl)
@@ -37,7 +37,7 @@ erigon \
   --externalcl \
   --datadir=/data/erigon \
   --chain=sepolia \
-  --authrpc.jwtsecret=/jwt
+  --authrpc.jwtsecret=/jwt \
   --authrpc.addr=0.0.0.0 \
   --http \
   --http.addr=0.0.0.0 \
