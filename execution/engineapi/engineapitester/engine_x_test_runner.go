@@ -74,7 +74,7 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		ctx:       ctx,
 		logger:    logger,
 		preAllocs: preAllocs,
-		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
+		testers:   make(map[Fork]map[PreAllocHash]testerEntry),
 	}
 	return runner, nil
 }
@@ -84,26 +84,71 @@ type EngineXTestRunner struct {
 	logger    log.Logger
 	preAllocs map[PreAllocHash]*PreAlloc
 	mu        sync.Mutex
-	testers   map[Fork]map[PreAllocHash]EngineApiTester
+	testers   map[Fork]map[PreAllocHash]testerEntry
 	wg        sync.WaitGroup
-	cleanups  []func() error
+}
+
+// testerEntry pairs a cached EngineApiTester with the temp directory created
+// for it, so eviction can close the tester and remove the directory together.
+type testerEntry struct {
+	tester  EngineApiTester
+	dataDir string
 }
 
 // Close releases all cached testers and removes any temp directories created
-// for them. Cleanup callbacks run LIFO; errors are joined so a single late
-// failure does not skip earlier cleanups.
+// for them. Errors are joined so a single late failure does not skip earlier
+// cleanups.
 func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
 	defer extr.mu.Unlock()
 	var errs []error
-	for i := len(extr.cleanups) - 1; i >= 0; i-- {
-		err := extr.cleanups[i]()
-		if err != nil {
-			errs = append(errs, err)
+	for fork, perAlloc := range extr.testers {
+		for preAllocHash := range perAlloc {
+			err := extr.evict(fork, preAllocHash)
+			if err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
-	extr.cleanups = nil
 	extr.testers = nil
+	return errors.Join(errs...)
+}
+
+// Evict closes the tester for (fork, preAllocHash) and removes its temp dir.
+// Safe to call when no such tester exists. Use this to free a tester after a
+// group of tests has finished, so a worker slot can host another (fork,
+// preAllocHash) combination.
+func (extr *EngineXTestRunner) Evict(fork Fork, preAllocHash PreAllocHash) error {
+	extr.mu.Lock()
+	defer extr.mu.Unlock()
+	return extr.evict(fork, preAllocHash)
+}
+
+// evict is the locked-caller variant of Evict: it assumes extr.mu is already
+// held. Used by both the public Evict and Close to share the close-and-remove
+// logic without re-entering the lock.
+func (extr *EngineXTestRunner) evict(fork Fork, preAllocHash PreAllocHash) error {
+	perAlloc, ok := extr.testers[fork]
+	if !ok {
+		return nil
+	}
+	entry, ok := perAlloc[preAllocHash]
+	if !ok {
+		return nil
+	}
+	delete(perAlloc, preAllocHash)
+	if len(perAlloc) == 0 {
+		delete(extr.testers, fork)
+	}
+	var errs []error
+	err := entry.tester.Close()
+	if err != nil {
+		errs = append(errs, err)
+	}
+	err = dir.RemoveAll(entry.dataDir)
+	if err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -134,7 +179,8 @@ func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefi
 
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	for _, newPayload := range test.NewPayloads {
-		if err := processNewPayload(ctx, tester, newPayload); err != nil {
+		err := processNewPayload(ctx, tester, newPayload)
+		if err != nil {
 			return err
 		}
 	}
@@ -146,12 +192,12 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	defer extr.mu.Unlock()
 	testersPerAlloc, ok := extr.testers[fork]
 	if ok {
-		tester, ok := testersPerAlloc[preAllocHash]
+		entry, ok := testersPerAlloc[preAllocHash]
 		if ok {
-			return tester, nil
+			return entry.tester, nil
 		}
 	} else {
-		testersPerAlloc = make(map[PreAllocHash]EngineApiTester)
+		testersPerAlloc = make(map[PreAllocHash]testerEntry)
 		extr.testers[fork] = testersPerAlloc
 	}
 	// create an engine api tester for [fork, preAllocHash] tuple
@@ -203,9 +249,6 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("create temp data dir: %w", err)
 	}
-	// Track the temp dir cleanup before tester construction so the directory
-	// is removed even if InitialiseEngineApiTester fails.
-	extr.cleanups = append(extr.cleanups, func() error { return dir.RemoveAll(dataDir) })
 	engineApiClientTimeout := 10 * time.Minute
 	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
@@ -218,10 +261,13 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		},
 	})
 	if err != nil {
+		// Best-effort: drop the temp dir we just created. The tester wasn't
+		// returned, so its own cleanups have already run inside
+		// InitialiseEngineApiTester's rollback path.
+		_ = dir.RemoveAll(dataDir)
 		return EngineApiTester{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
 	}
-	extr.cleanups = append(extr.cleanups, tester.Close)
-	testersPerAlloc[preAllocHash] = tester
+	testersPerAlloc[preAllocHash] = testerEntry{tester: tester, dataDir: dataDir}
 	return tester, nil
 }
 
@@ -252,6 +298,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 			return err
 		}
 	}
+	expectFailure := payload.ValidationError != "" || payload.ErrorCode != ""
 	enginePayloadStatus, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -283,7 +330,13 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		return err
 	}
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
+		if expectFailure {
+			return nil
+		}
 		return fmt.Errorf("payload status is not valid: %s", enginePayloadStatus.Status)
+	}
+	if expectFailure {
+		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
 	}
 	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
 }
@@ -338,6 +391,17 @@ type EngineXTestNewPayload struct {
 	Params            []json.RawMessage `json:"params"`
 	NewPayloadVersion string            `json:"newPayloadVersion"`
 	FcuVersion        string            `json:"forkchoiceUpdatedVersion"`
+	// ValidationError is the expected validation error name (e.g.
+	// "BlockException.INCORRECT_BLOCK_FORMAT") for negative tests. When set,
+	// a non-Valid payload status counts as success; a Valid status is a
+	// failure. Transport-level errors from the engine API call always
+	// propagate as test failures.
+	ValidationError string `json:"validationError,omitempty"`
+	// ErrorCode is the expected JSON-RPC error code (encoded as a string in
+	// the EEST fixtures, e.g. "-32602") for malformed-payload tests. Treated
+	// the same as ValidationError: a non-Valid status counts as success.
+	// Strict code/message matching is intentionally skipped.
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 type PreAllocHash string
