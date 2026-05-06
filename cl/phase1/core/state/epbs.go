@@ -244,7 +244,7 @@ func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Byte
 	// Verify BLS signature
 	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
 	if err != nil {
-		return false, nil
+		return false, err
 	}
 	return valid, nil
 }
