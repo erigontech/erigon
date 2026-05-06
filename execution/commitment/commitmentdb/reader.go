@@ -80,40 +80,6 @@ func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
 
-// FilesOnlyStateReader reads from .kv files only, capped at limitTxNum.
-// On miss (key not present in any frozen .kv file ≤ limitTxNum), returns nil
-// without any fallback. This is the right semantic for integrity checks that
-// validate "what does the .kv snapshot at this boundary actually contain?":
-// no consultation of history index, no consultation of current DB state, no
-// consultation of .kv files past the boundary.
-type FilesOnlyStateReader struct {
-	roTx       kv.TemporalTx
-	limitTxNum uint64
-}
-
-func NewFilesOnlyStateReader(roTx kv.TemporalTx, limitTxNum uint64) *FilesOnlyStateReader {
-	return &FilesOnlyStateReader{roTx: roTx, limitTxNum: limitTxNum}
-}
-
-func (r *FilesOnlyStateReader) WithHistory() bool { return false }
-
-func (r *FilesOnlyStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
-
-func (r *FilesOnlyStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	enc, ok, _, endTxNum, err := r.roTx.Debug().GetLatestFromFiles(d, plainKey, r.limitTxNum)
-	if err != nil {
-		return nil, 0, fmt.Errorf("FilesOnlyStateReader %q (limitTxNum=%d): %w", d, r.limitTxNum, err)
-	}
-	if !ok {
-		return nil, 0, nil
-	}
-	return enc, kv.Step(endTxNum / stepSize), nil
-}
-
-func (r *FilesOnlyStateReader) Clone(tx kv.TemporalTx) StateReader {
-	return NewFilesOnlyStateReader(tx, r.limitTxNum)
-}
-
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
 // `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
 type LimitedHistoryStateReader struct {
@@ -149,16 +115,19 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 	if err != nil {
 		return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatestFromFiles) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
 	}
-	if !ok {
-		enc = nil
-	} else {
-		step = kv.Step(endTxNum / stepSize)
+	if ok {
+		// Trust the file record, including deletion tombstones (enc may be empty/nil
+		// — that means "deleted at limitTxNum"). Falling back to GetLatest here would
+		// silently mask tombstones and return post-limit state, breaking integrity
+		// checks that need exact point-in-time reads.
+		return enc, kv.Step(endTxNum / stepSize), nil
 	}
-	if enc == nil {
-		enc, step, err = r.getter.GetLatest(d, plainKey)
-		if err != nil {
-			return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatest) %q: %w", d, err)
-		}
+	// No frozen .kv record ≤ limitTxNum — fall back to current state. Used by
+	// RebuildCommitmentFiles when the key hasn't been frozen into a .kv yet
+	// (still in DB or in a .kv past limitTxNum that we're hiding).
+	enc, step, err = r.getter.GetLatest(d, plainKey)
+	if err != nil {
+		return nil, 0, fmt.Errorf("LimitedHistoryStateReader(GetLatest) %q: %w", d, err)
 	}
 	return enc, step, nil
 }
