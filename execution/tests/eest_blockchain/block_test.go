@@ -37,7 +37,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	tarPath := filepath.Join("..", "..", "..", "test-fixtures-cache", "fixtures_develop.tar.gz")
+	tarPath := filepath.Join("..", "..", "..", "test-fixtures-cache", "fixtures_stable.tar.gz")
 
 	// Slow tests — split into their own packages for parallelism
 	bt.SkipLoad(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)

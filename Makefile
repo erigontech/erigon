@@ -293,13 +293,13 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-# Pull the pinned bal tarball URL and branch straight from test-fixtures.json
+# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
 # so this target stays in sync with whatever the rest of the test suite uses.
 # Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
-FIXTURES_BAL_URL = $(shell jq -r '."fixtures_bal.tar.gz".url' test-fixtures.json)
-FIXTURES_BAL_BRANCH = $(shell jq -r '."fixtures_bal.tar.gz".branch' test-fixtures.json)
+FIXTURES_DEVNET_URL = $(shell jq -r '."fixtures_devnet".url' test-fixtures.json)
+FIXTURES_DEVNET_BRANCH = $(shell jq -r '."fixtures_devnet".branch' test-fixtures.json)
 
-eest-bal:
+eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
@@ -309,7 +309,7 @@ eest-bal:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(FIXTURES_BAL_BRANCH) --sim.buildarg fixtures=$(FIXTURES_BAL_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(FIXTURES_DEVNET_BRANCH) --sim.buildarg fixtures=$(FIXTURES_DEVNET_URL))
 
 # Define the run_suite function
 define run_suite
@@ -355,7 +355,7 @@ hive-local:
 # Pull the pinned develop tarball URL straight from test-fixtures.json
 # so this target stays in sync with the rest of the test suite. Lazy `=`
 # so unrelated targets don't shell out to jq at make-parse time.
-FIXTURES_DEVELOP_URL = $(shell jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
+FIXTURES_STABLE_URL = $(shell jq -r '."fixtures_stable".url' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -367,7 +367,7 @@ eest-hive:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(FIXTURES_DEVELOP_URL))
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(FIXTURES_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor

@@ -26,7 +26,7 @@ sha256() {
 mkdir -p "$cache"
 
 while IFS=$'\t' read -r name url want; do
-	path="$cache/$name"
+	path="$cache/${name}.tar.gz"
 	if [[ -f "$path" ]] && [[ "$(sha256 "$path")" == "$want" ]]; then
 		echo "$name: cached (sha256 ${want:0:12})"
 		continue

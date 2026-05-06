@@ -8,7 +8,7 @@ description: Run Erigon Hive simulator tests locally or via GitHub Actions. Test
 Runs Hive simulator tests for EL/CL protocol interoperability. Two modes:
 1. **`make test-hive`** — uses `act` (nektos) to simulate the GitHub Actions workflow locally
 2. **`make hive-local`** — builds hive and runs suites directly (no `act` needed)
-3. **`make eest-bal`** — runs the BAL/Amsterdam-specific EEST fixtures
+3. **`make eest-devnet`** — runs the BAL/Amsterdam-specific EEST fixtures
 
 ## Prerequisites
 
@@ -52,7 +52,7 @@ make hive-local
 
 ```bash
 # Runs eels/consume-engine with amsterdam fixtures
-make eest-bal
+make eest-devnet
 ```
 
 ## Cleanup (ALWAYS run after hive tests)
@@ -119,7 +119,7 @@ cd temp/<hive-dir>/hive
 
 # Run EEST engine simulator (URL pinned in test-fixtures.json)
 ./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
-  --sim.buildarg fixtures=$(jq -r '."fixtures_develop.tar.gz".url' test-fixtures.json)
+  --sim.buildarg fixtures=$(jq -r '."fixtures_stable".url' test-fixtures.json)
 ```
 
 ## Suites Covered
