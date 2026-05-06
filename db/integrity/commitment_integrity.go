@@ -212,10 +212,9 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	// Those domain .kv files are the authoritative snapshot the commitment was
 	// originally built against; consulting history (.ef+.v), current DB state,
 	// or later .kv files only introduces noise that wasn't part of the input
-	// that produced info.rootHash. FilesOnlyStateReader returns nil on miss
-	// (no GetLatest fallback like LimitedHistoryStateReader does) so a missing
-	// key is treated as "not in the boundary snapshot" rather than wrong-falling
-	// back to current state.
+	// that produced info.rootHash. FilesOnlyStateReader returns nil on miss —
+	// no fallback to current state — so a missing key is treated as "not in
+	// the boundary snapshot" rather than leaking post-limit values.
 	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
