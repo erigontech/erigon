@@ -244,7 +244,7 @@ test-bench:
 	$(GOTEST)
 
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
-test-all-race: test-filtered
+test-all-race: test-fixtures test-filtered
 
 ## check-generated:                     verify go.mod/go.sum are tidy
 check-generated:

@@ -34,6 +34,12 @@ sha256() {
 
 mkdir -p "$cache"
 
+# Clean up the in-progress iteration's tmp paths on any exit (including
+# Ctrl-C / SIGTERM) so a leftover .tmp doesn't accumulate across runs.
+tar_path=""
+out_dir=""
+trap 'rm -f "${tar_path}.tmp" 2>/dev/null; rm -rf "${out_dir}.tmp" 2>/dev/null' EXIT
+
 while IFS=$'\t' read -r name url want; do
 	tar_path="$cache/${name}.tar.gz"
 	out_dir="$cache/${name}"

@@ -9,7 +9,7 @@ Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that n
 
 ## Prerequisite: Test fixtures
 
-`make test-all-race` ultimately runs the same packages as `make test-all`, which depends on `test-fixtures` (tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` automatically). `make test-all-race` itself doesn't carry that dep — run `make test-fixtures` once first if your local cache is empty.
+`make test-all-race` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
 
 Two side prerequisites still apply:
 
@@ -82,7 +82,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && make test-fixtures && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
+- Race check gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
 
 ## CI Equivalent
 
