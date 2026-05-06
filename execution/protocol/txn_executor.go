@@ -328,7 +328,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		skipBlobCheck := st.evm.Config().NoBaseFee && (maxFeePerBlobGas == nil || maxFeePerBlobGas.IsZero())
+		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
 				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
@@ -843,6 +844,8 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          vmConfig.HasEip3860(rules),
 		IsEIP7623:          rules.IsPrague,
+		IsEIP7976:          rules.IsAmsterdam,
+		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
 	})
 }

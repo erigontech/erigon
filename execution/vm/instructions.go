@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -1491,7 +1492,7 @@ func makeLog(size int) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// execution/state doesn't know the current block number.
-			BlockNumber: evm.Context.BlockNumber,
+			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
 		})
 
 		return pc, nil, nil

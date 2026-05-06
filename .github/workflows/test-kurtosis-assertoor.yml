@@ -159,3 +159,12 @@ jobs:
           path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
           retention-days: 7
           if-no-files-found: warn
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

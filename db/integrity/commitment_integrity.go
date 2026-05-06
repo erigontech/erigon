@@ -82,7 +82,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 			if failFast {
 				return err
 			}
-			log.Warn(err.Error())
+			logger.Warn(err.Error())
 			integrityErr = err
 			continue
 		}
@@ -504,7 +504,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
-	if !state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum) {
+	if !state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
 		logger.Info(
 			"[integrity] CommitmentKvDeref skipped, file not above min steps",
 			"file", fileName,
@@ -1256,7 +1256,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	expectedAccounts := uint64(accDecomp.Count()) / 2
 	expectedStorages := uint64(stoDecomp.Count()) / 2
 
-	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
 
 	// Track unique keys found in commitment branches via ETL collectors (disk-spilling dedup).
 	accCollector := etl.NewCollector("[integrity] StateVerify acc", "", etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
@@ -1854,7 +1854,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
 	// Always open domain readers for dereferencing (commitment files may contain
-	// reference keys regardless of MayContainValuesPlainKeyReferencing result)
+	// reference keys regardless of ValuesPlainKeyReferencingThresholdReached result)
 	_, nextAccReader, nextAccClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
 	if err != nil {
 		return err
@@ -1939,6 +1939,8 @@ type hashWorkItem struct {
 	branchValue []byte
 }
 
+var valMapPool = sync.Pool{New: func() any { return make(map[string][]byte, 8) }}
+
 // checkHashVerification verifies that stateHash stored in each commitment branch cell
 // matches the hash recomputed from the actual domain values. Uses a producer-consumer
 // pattern: 1 producer reads the commitment file sequentially, N workers each open their
@@ -1949,7 +1951,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 
-	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+	isReferencing := state.ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum)
 
 	logger.Info("[integrity] StateVerify hash verification starting",
 		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)
@@ -1979,10 +1981,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	workCh := make(chan hashWorkItem, numWorkers*4)
 	var hashMismatches atomic.Uint64
 	var hashChecked atomic.Uint64
-
-	// Pool to reuse per-item value maps and reduce GC pressure.
-	var valMapPool sync.Pool
-	valMapPool.New = func() any { return make(map[string][]byte, 8) }
 
 	// Set up errgroup with context for cancellation on failure.
 	var eg *errgroup.Group
@@ -2021,92 +2019,14 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 					return ctx.Err()
 				default:
 				}
-
-				branchData := commitment.BranchData(item.branchValue)
-
-				// Build maps of accountValues and storageValues by resolving
-				// keys/values from domain files.
-				accountValues := valMapPool.Get().(map[string][]byte)
-				storageValues := valMapPool.Get().(map[string][]byte)
-
-				// We need branch data with plain keys for VerifyBranchHashes.
-				// Walk the branch to extract + resolve all keys and read values.
-				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-					if isStorage {
-						plainKey := key
-						isRef := len(key) != length.Addr+length.Hash
-						if isRef {
-							if !isReferencing {
-								return key, nil
-							}
-							offset := state.DecodeReferenceKey(key)
-							if offset >= uint64(stoReader.Size()) {
-								return key, nil
-							}
-							stoReader.Reset(offset)
-							plainKey, _ = stoReader.Next(plainKeyBuf[:0])
-							if len(plainKey) != length.Addr+length.Hash {
-								return key, nil
-							}
-							val, _ := stoReader.Next(valBuf[:0])
-							storageValues[string(plainKey)] = common.Copy(val)
-						} else if preloadedStoValues != nil {
-							strKey := string(plainKey)
-							if val, ok := preloadedStoValues[strKey]; ok {
-								storageValues[strKey] = val
-							}
-						}
-						return plainKey, nil
-					}
-
-					// Account key
-					plainKey := key
-					isRef := len(key) != length.Addr
-					if isRef {
-						if !isReferencing {
-							return key, nil
-						}
-						offset := state.DecodeReferenceKey(key)
-						if offset >= uint64(accReader.Size()) {
-							return key, nil
-						}
-						accReader.Reset(offset)
-						plainKey, _ = accReader.Next(plainKeyBuf[:0])
-						if len(plainKey) != length.Addr {
-							return key, nil
-						}
-						val, _ := accReader.Next(valBuf[:0])
-						accountValues[string(plainKey)] = common.Copy(val)
-					} else if preloadedAccValues != nil {
-						strKey := string(plainKey)
-						if val, ok := preloadedAccValues[strKey]; ok {
-							accountValues[strKey] = val
-						}
-					}
-					return plainKey, nil
-				})
-				if err != nil {
-					if failFast {
-						return err
-					}
-					logger.Warn("[integrity] StateVerify hash: ReplacePlainKeys error", "err", err, "kv", fileName)
-					continue
+				if err := verifyHashItem(item, failFast, fileName, isReferencing,
+					preloadedAccValues, preloadedStoValues,
+					accReader, stoReader,
+					plainKeyBuf, valBuf,
+					&hashMismatches, &hashChecked,
+					logger); err != nil {
+					return err
 				}
-
-				// Only verify if we have at least one value to check.
-				if len(accountValues) == 0 && len(storageValues) == 0 {
-					continue
-				}
-
-				err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
-				if err != nil {
-					hashMismatches.Add(1)
-					if failFast {
-						return fmt.Errorf("%w: %s in %s", ErrIntegrity, err.Error(), fileName)
-					}
-					logger.Warn("[integrity] StateVerify hash mismatch", "err", err, "kv", fileName)
-				}
-				hashChecked.Add(1)
 			}
 			return nil
 		})
@@ -2191,6 +2111,105 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	logger.Info("[integrity] StateVerify hash verification PASS",
 		"checked", checked, "mismatches", mismatches,
 		"dur", dur, "kv", fileName)
+	return nil
+}
+
+func verifyHashItem(
+	item hashWorkItem,
+	failFast bool,
+	fileName string,
+	isReferencing bool,
+	preloadedAccValues, preloadedStoValues map[string][]byte,
+	accReader, stoReader *seg.Reader,
+	plainKeyBuf, valBuf []byte,
+	hashMismatches, hashChecked *atomic.Uint64,
+	logger log.Logger,
+) error {
+	accountValues := valMapPool.Get().(map[string][]byte)
+	storageValues := valMapPool.Get().(map[string][]byte)
+	defer func() {
+		clear(accountValues)
+		clear(storageValues)
+		valMapPool.Put(accountValues)
+		valMapPool.Put(storageValues)
+	}()
+
+	branchData := commitment.BranchData(item.branchValue)
+	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			plainKey := key
+			isRef := len(key) != length.Addr+length.Hash
+			if isRef {
+				if !isReferencing {
+					return key, nil
+				}
+				offset := state.DecodeReferenceKey(key)
+				if offset >= uint64(stoReader.Size()) {
+					return key, nil
+				}
+				stoReader.Reset(offset)
+				plainKey, _ = stoReader.Next(plainKeyBuf[:0])
+				if len(plainKey) != length.Addr+length.Hash {
+					return key, nil
+				}
+				val, _ := stoReader.Next(valBuf[:0])
+				storageValues[string(plainKey)] = common.Copy(val)
+			} else if preloadedStoValues != nil {
+				strKey := string(plainKey)
+				if val, ok := preloadedStoValues[strKey]; ok {
+					storageValues[strKey] = val
+				}
+			}
+			return plainKey, nil
+		}
+
+		plainKey := key
+		isRef := len(key) != length.Addr
+		if isRef {
+			if !isReferencing {
+				return key, nil
+			}
+			offset := state.DecodeReferenceKey(key)
+			if offset >= uint64(accReader.Size()) {
+				return key, nil
+			}
+			accReader.Reset(offset)
+			plainKey, _ = accReader.Next(plainKeyBuf[:0])
+			if len(plainKey) != length.Addr {
+				return key, nil
+			}
+			val, _ := accReader.Next(valBuf[:0])
+			accountValues[string(plainKey)] = common.Copy(val)
+		} else if preloadedAccValues != nil {
+			strKey := string(plainKey)
+			if val, ok := preloadedAccValues[strKey]; ok {
+				accountValues[strKey] = val
+			}
+		}
+		return plainKey, nil
+	})
+	if err != nil {
+		if failFast {
+			return err
+		}
+		logger.Warn("[integrity] StateVerify hash: ReplacePlainKeys error", "err", err, "kv", fileName)
+		return nil
+	}
+
+	if len(accountValues) == 0 && len(storageValues) == 0 {
+		return nil
+	}
+
+	err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
+	if err != nil {
+		hashMismatches.Add(1)
+		if failFast {
+			return fmt.Errorf("%w: %s in %s", ErrIntegrity, err.Error(), fileName)
+		}
+		logger.Warn("[integrity] StateVerify hash mismatch", "err", err, "kv", fileName)
+		return nil
+	}
+	hashChecked.Add(1)
 	return nil
 }
 

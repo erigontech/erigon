@@ -437,10 +437,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := blockReader.TxnumReader()
 
-		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
-
 		erigonDBSettings, err := dbstate.ResolveErigonDBSettings(cfg.Dirs, logger, false)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -810,6 +806,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		}
 		listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, &node.HttpEndpointConfig{
 			Timeouts: cfg.HTTPTimeouts,
+			Listener: cfg.HttpListener,
 		}, apiHandler)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api: %w", err)
@@ -995,6 +992,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 
 	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, &node.HttpEndpointConfig{
 		Timeouts: cfg.AuthRpcTimeouts,
+		Listener: cfg.AuthRpcListener,
 	}, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)

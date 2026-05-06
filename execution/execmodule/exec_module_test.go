@@ -1388,7 +1388,7 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 		uint256.NewInt(gasPrice-blockBaseFee),
 	)
 	burnBytes := expectedBurn.Bytes32()
-	require.Equal(t, burnBytes[:], burnLog.Data,
+	require.Equal(t, burnBytes[:], []byte(burnLog.Data),
 		"burn amount should equal the priority fee credited to coinbase")
 
 	// Insert + validate + FCU proves the state root is computed correctly.

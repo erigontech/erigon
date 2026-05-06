@@ -39,6 +39,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
+
       - name: Set reference data dir based on branch
         run: |
           # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
@@ -231,7 +236,16 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests-latest --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch ${{ github.ref_name }} \
+            --test_name rpc-integration-tests-latest \
+            --chain $CHAIN \
+            --runner ${{ runner.name }} \
+            --db_version $db_version \
+            --outcome $TEST_RESULT \
+            --result_file $TEST_RESULT_DIR/results/test_report.json
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && steps.save_datadir_step.outputs.datadir_saved == 'true'
