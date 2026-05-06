@@ -236,6 +236,27 @@ func (p *Provider) Initialize(deps Deps) error {
 				}
 			}
 
+			// Re-publish chain.toml so V2 consumers see the freshly
+			// retired/aggregated files. Runs unconditionally on every
+			// OnFilesChange (fires for retire output AND aggregator
+			// state files); the inner generator-and-save path is
+			// idempotent when nothing's changed. Skipped only when
+			// the callback isn't wired (consumer-only nodes,
+			// tests/tools).
+			//
+			// Placed BEFORE the downloader-specific early returns
+			// because state-aggregation events can fire OnFilesChange
+			// with empty frozenFileNames; those events still produce
+			// new local files that should be reflected in the
+			// advertised chain.toml. The downloader.Seed call below
+			// remains gated on frozenFileNames non-empty (no point
+			// telling the downloader to seed nothing).
+			if deps.RepublishChainToml != nil {
+				if err := deps.RepublishChainToml(); err != nil {
+					p.logger.Warn("[snapshots] re-publish chain.toml after retire", "err", err)
+				}
+			}
+
 			if config.Downloader != nil && config.Downloader.ChainName == "" {
 				return
 			}
@@ -245,20 +266,6 @@ func (p *Provider) Initialize(deps Deps) error {
 			if err := downloaderClient.Seed(ctx, frozenFileNames); err != nil {
 				p.logger.Warn("[snapshots] downloader.Seed", "err", err)
 			}
-
-			// Re-publish chain.toml so V2 consumers see the freshly
-			// retired files. Without this the publisher's advertised
-			// manifest stays stuck at whatever the post-startup /
-			// post-DownloadSnapshots publish produced, and consumers
-			// connecting later have to re-execute the blocks the
-			// publisher has already retired into snapshots. Skipped
-			// when the callback isn't wired (consumer-only nodes,
-			// tests/tools).
-			if deps.RepublishChainToml != nil {
-				if err := deps.RepublishChainToml(); err != nil {
-					p.logger.Warn("[snapshots] re-publish chain.toml after retire", "err", err)
-				}
-			}
 		},
 		func(deletedFiles []string) {
 			// Drop deleted files from Inventory. RemoveFile defers the
@@ -267,6 +274,15 @@ func (p *Provider) Initialize(deps Deps) error {
 			if inv != nil {
 				for _, name := range deletedFiles {
 					inv.RemoveFile(name)
+				}
+			}
+
+			// Re-publish chain.toml after deletions too — files that
+			// got merged out of existence shouldn't appear in the
+			// advertised manifest.
+			if deps.RepublishChainToml != nil {
+				if err := deps.RepublishChainToml(); err != nil {
+					p.logger.Warn("[snapshots] re-publish chain.toml after merge", "err", err)
 				}
 			}
 
