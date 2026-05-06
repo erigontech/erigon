@@ -1,0 +1,89 @@
+name: Rerun on runner loss
+
+# Watchdog that auto-reruns CI Gate leaf jobs whose failure looks like a
+# self-hosted-runner disappearance rather than a real test failure.
+#
+# Failure mode this targets: a self-hosted runner drops its connection
+# mid-job (memory pressure, host crash, network blip, runner-agent restart).
+# GitHub eventually marks the job `failure`, but the runner never got to
+# fire the in-job `gh run cancel` from PR #20789, so the gate aggregator
+# waits for the slowest sibling instead of failing fast.
+#
+# Heuristic: if the failed job has any step still in a non-completed state
+# (status != "completed"), the runner disappeared mid-execution. Real test
+# failures have every step that started reach a definite conclusion.
+#
+# Bound: only retries on the first attempt (run_attempt == 1). If the
+# retried run also dies the same way, we do not chase it further — the
+# gate will fail and a human can investigate the runner pool.
+
+on:
+  workflow_run:
+    workflows:
+      - All tests
+      - All tests (with -race)
+      - Test Hive
+      - Hive EEST tests
+      - Kurtosis Assertoor GitHub Action
+      - Consensus spec
+      - Reproducible build
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  maybe-rerun:
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rerun jobs whose runner disappeared mid-execution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t failed_job_ids < <(
+            gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+              --jq '.jobs[] | select(.conclusion == "failure") | .id'
+          )
+
+          if [ "${#failed_job_ids[@]}" -eq 0 ]; then
+            echo "::notice::$WORKFLOW_NAME run $RUN_ID has no failed jobs; nothing to rerun."
+            exit 0
+          fi
+
+          retried=0
+          for job_id in "${failed_job_ids[@]}"; do
+            # A step that started but never reached `completed` means the
+            # runner went silent before reporting back. Real test failures
+            # leave every started step with status=completed (and a
+            # conclusion of success/failure/skipped/cancelled).
+            orphan_steps=$(
+              gh api "repos/$REPO/actions/jobs/$job_id" \
+                --jq '[.steps[] | select(.status != "completed")] | length'
+            )
+            job_name=$(
+              gh api "repos/$REPO/actions/jobs/$job_id" --jq '.name'
+            )
+
+            if [ "$orphan_steps" -gt 0 ]; then
+              echo "::notice::Job '$job_name' (id $job_id) has $orphan_steps orphan step(s) — runner-loss heuristic, rerunning."
+              gh api -X POST "repos/$REPO/actions/jobs/$job_id/rerun"
+              retried=$((retried + 1))
+            else
+              echo "Job '$job_name' (id $job_id) failed with all steps completed — leaving alone (likely a real test failure)."
+            fi
+          done
+
+          if [ "$retried" -eq 0 ]; then
+            echo "::notice::$WORKFLOW_NAME run $RUN_ID: no runner-loss jobs found."
+          else
+            echo "::notice::$WORKFLOW_NAME run $RUN_ID: reran $retried job(s) flagged as runner-loss."
+          fi
