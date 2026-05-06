@@ -2097,6 +2097,11 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
+	if dbg.NoBackgroundMaintenance() {
+		close(fin)
+		return fin
+	}
+
 	if !a.produce {
 		a.logger.Debug("[snapshots] buildFiles: produce=false")
 		close(fin)

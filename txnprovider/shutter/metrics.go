@@ -31,7 +31,4 @@ var (
 	decryptionMarkWaitSecs = metrics.GetOrCreateSummary("shutter_decryption_mark_wait_secs")
 	decryptionMarkOnTime   = metrics.GetOrCreateCounter("shutter_decryption_mark_on_time")
 	decryptionMarkMissed   = metrics.GetOrCreateCounter("shutter_decryption_mark_missed")
-
-	eonTrackerBlockEventErrors = metrics.GetOrCreateCounter("shutter_eon_tracker_block_event_errors")
-	cleanupBlockEventErrors    = metrics.GetOrCreateCounter("shutter_cleanup_block_event_errors")
 )

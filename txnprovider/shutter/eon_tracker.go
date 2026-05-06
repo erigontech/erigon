@@ -159,25 +159,26 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
-			et.handleBlockEvent(blockEvent)
+			err := et.handleBlockEvent(blockEvent)
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) {
+func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	et.mu.Lock()
 	defer et.mu.Unlock()
 
 	blockNum := blockEvent.LatestBlockNum
 	eon, ok, err := et.readEonAtNewBlockEvent(blockNum)
 	if err != nil {
-		eonTrackerBlockEventErrors.Inc()
-		et.logger.Warn("failed to read eon at block event, will retry on next block", "blockNum", blockNum, "err", err)
-		return
+		return fmt.Errorf("read eon at block event (blockNum=%d): %w", blockNum, err)
 	}
 	if !ok {
 		et.logger.Warn("no eon at", "blockNum", blockNum)
-		return
+		return nil
 	}
 
 	if et.currentEon == nil || et.currentEon.Index != eon.Index {
@@ -187,6 +188,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) {
 	et.currentEon = &eon
 	et.recentEons.ReplaceOrInsert(eon)
 	et.maybeCleanup(blockNum)
+	return nil
 }
 
 func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, error) {
@@ -346,19 +348,8 @@ func (et *KsmEonTracker) trackFutureEons(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err, ok := <-keyperSetAddedEventSub.Err():
-			if ok {
-				return err
-			}
-			//
-			// TODO: re-establish the subscription with backoff instead of waiting for ctx.
-			//       A graceful close (e.g. websocket reconnect) currently leaves the tracker in
-			//       a silently degraded state — new keyper sets stop being observed until the
-			//       process restarts. Tracking issue: https://github.com/erigontech/erigon/issues/20999
-			//
-			et.logger.Warn("keyper set added subscription closed, waiting for shutdown")
-			<-ctx.Done()
-			return ctx.Err()
+		case err := <-keyperSetAddedEventSub.Err():
+			return err
 		case event := <-keyperSetAddedEventC:
 			err := et.handleKeyperSetAddedEvent(event)
 			if err != nil {

@@ -26,12 +26,12 @@ type blockValidator struct {
 
 // newBlockValidator starts validation in a goroutine. The caller must
 // eventually call Wait() to surface the result and to drain the goroutine.
-func newBlockValidator(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
+func newBlockValidator(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) *blockValidator {
 	bv := &blockValidator{done: make(chan error, 1)}
 	go func() {
-		bv.done <- protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, receipts, header, txns, chainConfig, logger)
+		bv.done <- protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, header, txns, chainConfig, logger)
 	}()
 	return bv
 }
