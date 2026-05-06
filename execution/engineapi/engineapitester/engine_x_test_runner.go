@@ -86,6 +86,25 @@ type EngineXTestRunner struct {
 	mu        sync.Mutex
 	testers   map[Fork]map[PreAllocHash]testerEntry
 	wg        sync.WaitGroup
+	cleanups  []func() error
+}
+
+// Close releases all cached testers and removes any temp directories created
+// for them. Cleanup callbacks run LIFO; errors are joined so a single late
+// failure does not skip earlier cleanups.
+func (extr *EngineXTestRunner) Close() error {
+	extr.mu.Lock()
+	defer extr.mu.Unlock()
+	var errs []error
+	for i := len(extr.cleanups) - 1; i >= 0; i-- {
+		err := extr.cleanups[i]()
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	extr.cleanups = nil
+	extr.testers = nil
+	return errors.Join(errs...)
 }
 
 // testerEntry pairs a cached EngineApiTester with the temp directory created
