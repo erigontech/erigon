@@ -53,18 +53,18 @@ func benchmarkEngineX(b *testing.B, category string) {
 
 	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
-
 	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
-	preAllocsDir := filepath.Join(engineXDir, "pre_alloc")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
+	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 
-	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocsDir)
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocDir)
 	require.NoError(b, err)
 	b.Cleanup(func() {
 		err := runner.Close()
 		require.NoError(b, err)
 	})
 
+	// Parse all test files, group by subcategory.
 	type testEntry struct {
 		name string
 		def  engineapitester.EngineXTestDefinition
