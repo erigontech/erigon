@@ -47,7 +47,8 @@ type codeword struct {
 
 type patternTable struct {
 	patterns []*codeword
-	bitLen   int // Number of bits to lookup in the table
+	bitLen   int    // Number of bits to lookup in the table
+	mask     uint16 // precomputed (1<<bitLen)-1
 }
 
 func (pt *patternTable) insertWord(cw *codeword) {
@@ -103,6 +104,7 @@ func (a *patternArena) allocTable(bitLen int) *patternTable {
 	t := &a.tables[a.tableIdx]
 	a.tableIdx++
 	t.bitLen = bitLen
+	t.mask = uint16(1)<<bitLen - 1
 	t.patterns = a.slots[a.slotIdx : a.slotIdx+sz]
 	a.slotIdx += sz
 	return t
@@ -870,7 +872,7 @@ func (g *Getter) nextPattern() []byte {
 		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
-		code &= (uint16(1) << table.bitLen) - 1
+		code &= table.mask
 
 		cw := table.patterns[code]
 		if cw.len == 0 {
