@@ -3031,6 +3031,15 @@ func (hph *HexPatriciaHashed) Cache() *WarmupCache {
 	return hph.cache
 }
 
+// verifyBranchCache, when true, makes branchFromCacheOrDB cross-check
+// every BranchCache hit against ctx.Branch and record a divergence on
+// the cache when the bytes disagree. Off by default — gate via env
+// BRANCH_CACHE_VERIFY=true. Use during cross-block-cache-lifetime
+// investigations to localise a bad cached entry to the read site
+// instead of waiting for the downstream wrong-trie-root to surface
+// many blocks later.
+var verifyBranchCache = dbg.EnvBool("BRANCH_CACHE_VERIFY", false)
+
 // branchFromCacheOrDB reads branch data via the cache hierarchy:
 //   - L1: WarmupCache (ephemeral, populated by warmup workers ahead of fold)
 //   - L2: BranchCache (longer-lived; per-Process today, will be aggTx-scoped
@@ -3059,6 +3068,18 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	}
 	if hph.branchCache != nil {
 		if data, found := hph.branchCache.Get(key); found {
+			if verifyBranchCache {
+				canonical, _, err := hph.ctx.Branch(key)
+				if err == nil && !bytes.Equal(data, canonical) {
+					hph.branchCache.RecordDivergence()
+					log.Warn("[branch-cache] divergence",
+						"prefix", hex.EncodeToString(key),
+						"cached_len", len(data),
+						"canonical_len", len(canonical),
+						"cached", hex.EncodeToString(data),
+						"canonical", hex.EncodeToString(canonical))
+				}
+			}
 			return data, nil
 		}
 	}

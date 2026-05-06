@@ -31,6 +31,13 @@ import (
 var (
 	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
+
+	// logCacheFingerprint, when true, makes ComputeCommitment emit a
+	// "[cache-fp]" log line at end-of-block with (block, root, fp,
+	// divergences). Diff two builds' logs offline to localise the first
+	// block at which their BranchCache states diverge. Off by default —
+	// gate via env BRANCH_CACHE_FINGERPRINT=true.
+	logCacheFingerprint = dbg.EnvBool("BRANCH_CACHE_FINGERPRINT", false)
 )
 
 type sd interface {
@@ -323,6 +330,23 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
+
+		// Per-block BranchCache fingerprint — gated by BRANCH_CACHE_FINGERPRINT
+		// env. Emit a single log line of (block, root, cache_fp, divergences)
+		// so two builds running the same workload can be diffed offline to
+		// localise the first block at which their caches diverge. See
+		// commitment.BranchCache.Fingerprint for the hash semantics.
+		if logCacheFingerprint {
+			if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
+				if bc := hph.BranchCache(); bc != nil {
+					log.Info("[commitment][cache-fp]",
+						"block", blockNum,
+						"root", hex.EncodeToString(rootHash),
+						"fp", fmt.Sprintf("%016x", bc.Fingerprint()),
+						"divergences", bc.VerifyDivergences())
+				}
+			}
+		}
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
