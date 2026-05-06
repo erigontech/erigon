@@ -22,6 +22,12 @@ Solo staking with Caplin (built-in consensus layer) or pair Erigon with any exte
 Interacting with Erigon
 JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
 
+<Link
+className="lp-card"
+to="/get-started/why-using-erigon"
+style=}
+>
+
 Why Erigon?
 Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
 
@@ -62,11 +68,17 @@ Erigon is an Ethereum execution client focused on performance, low disk usage, a
 
 A core benefit of Erigon is its **reduced disk footprint** across all available sync modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
 
+{[
 ,
 ,
 ,
 ,
 ].map(() => (
+<div key= style={{
+textAlign:'center', padding:'1.25rem 1rem', borderRadius:'8px',
+border:'1px solid var(--ifm-color-emphasis-200)',
+background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
+}}>
 
 ))}
 
@@ -123,7 +135,13 @@ Erigon ships a built-in **[Model Context Protocol (MCP) server](../fundamentals/
 "Which tx in block 21,000,000 used the most gas?",
 "My node seems stuck — check sync status and recent logs.",
 ].map((q) => (
-
+<div key= style={{
+padding:'0.85rem 1rem', borderRadius:'8px',
+background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
+border:'1px solid var(--ifm-color-emphasis-200)',
+fontSize:'0.82rem', color:'var(--ifm-color-emphasis-700)',
+fontStyle:'italic', lineHeight:1.5,
+}}>
 ))}
 
 The interface is **read-only** and localhost-bound — no risk of unintended state changes. For developers this means instant on-chain lookups during development, natural-language log triage, and a complete RPC surface accessible without writing a single line of code.
@@ -240,7 +258,7 @@ This path offers the simplest validator configuration by using Erigon's embedded
       --chain=mainnet \
       --port=30304 \
       --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
-```
+    ```
 3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
@@ -262,7 +280,7 @@ EL is using). For example:
       --chain=mainnet \
       --port=30304 \
       --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
-```
+    ```
 3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
 5. **Reconfiguration and Restart**: Restart Erigon, ensuring it uses the **original Engine API port and JWT secret** that your old EL client used. See [here](../staking/external-consensus-client-as-validator) for details.
@@ -305,7 +323,7 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
       --http.api=engine,eth,net,web3 \
       --ws \
       --ws.port=8546
-```
+    ```
 
 _(Otherwise, you must reconfigure your external CL client to match Erigon's default settings)_
 4. **Synchronization**: Start syncing Erigon. Your external CL client will automatically connect to Erigon once Erigon is running and reachable on the Engine API port.
@@ -323,9 +341,12 @@ URL: https://docs.erigon.tech/get-started/installation
 const el = document.getElementById(id);
 if (!el) return;
 const scroll = () => el.scrollIntoView();
-if (!el.open) );
+if (!el.open) {
+el.addEventListener('toggle', scroll, );
 el.open = true;
-} else 
+} else {
+scroll();
+}
 };
 
 # Installation
@@ -382,13 +403,13 @@ Check in the GitHub [Release Notes](https://github.com/erigontech/erigon/release
 Download the chosen version replacing `` with the actual version:
 
 ```sh
-docker pull erigontech/erigon:
+docker pull erigontech/erigon:<version_tag>
 ```
 
 For example:
 
 ```sh
-docker pull erigontech/erigon:v
+docker pull erigontech/erigon:v{ERIGON_VERSION}
 ```
 
 **3. Start the Erigon container**
@@ -396,13 +417,13 @@ docker pull erigontech/erigon:v
 Start the Erigon container in your terminal:
 
 ```sh
-docker run -it erigontech/erigon: 
+docker run -it erigontech/erigon:<version_tag> <flags>
 ```
 
 For example:
 
 ```sh
-docker run -it erigontech/erigon:v --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -it erigontech/erigon:v{ERIGON_VERSION} --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 
 * `-v` connects a folder on your computer to the container (must have authorization)
@@ -440,13 +461,13 @@ To verify the integrity and ensure your downloaded Erigon file hasn't been corru
 Next, use the `sha256sum` command followed by the name of your downloaded binary (e.g., `erigon_v3.x.x_linux_amd64.tar.gz`).
 
 ```sh
-sha256sum 
+sha256sum <DOWNLOADED_FILE_NAME>
 ```
 
 Example with a `tar.gz` file:
 
 ```sh
-sha256sum erigon_v_linux_amd64.tar.gz
+sha256sum erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz
 ```
 
 This command will output a long string (the computed checksum) followed by the file name.
@@ -469,12 +490,12 @@ This method uses your distribution's package manager (like dpkg) to install Erig
 
     ```bash
     cd ~/Downloads
-```
+    ```
 2.  Install the package:
 
     ```bash
     sudo dpkg -i erigon_3.x.x_amd64.deb
-```
+    ```
 
 (Replace the filename with your downloaded version)
 
@@ -486,14 +507,14 @@ This method gives you a standalone executable that can be run from any directory
 
     ```bash
     tar -xzf erigon_v3.x.x_linux_amd64.tar.gz
-```
+    ```
 
 (Replace the filename with your downloaded version)
 2.  Move the resulting `erigon` executable to a directory included in your system's $PATH(e.g., $/usr/local/bin) to run it from anywhere:
 
     ```bash
     sudo mv erigon /usr/local/bin/
-```
+    ```
 
 **4. Running Erigon**
 
@@ -566,7 +587,7 @@ git fetch --tags
 Check out the desired version tag by replacing `` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
-git checkout v
+git checkout v{ERIGON_VERSION}
 ```
 
 **2.3 Compile the Software**
@@ -582,7 +603,7 @@ make erigon
 Fast Compilation (Recommended): to significantly speed up the process, specify the number of processors you want to use with the `-j` option, where `` is the number of processor you want to use (we recommend using a number slightly less than your total core count):
 
 ```sh
-make -j erigon
+make -j<n> erigon
 ```
 
 The resulting executable binary will be created in the `./build/bin/erigon` path.
@@ -671,7 +692,7 @@ git fetch --tags
 Check out the desired version tag by replacing `` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
-git checkout v
+git checkout v{ERIGON_VERSION}
 ```
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a **Powershell session as Administrator** and type:
@@ -893,7 +914,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```sh
 services:
   erigon:
-    image: erigontech/erigon:v
+    image: erigontech/erigon:v{ERIGON_VERSION}
     container_name: erigon-node
     restart: always
     command:
@@ -971,7 +992,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```sh
 services:
   erigon:
-    image: erigontech/erigon:v
+    image: erigontech/erigon:v{ERIGON_VERSION}
     container_name: erigon-node
     restart: always
     command:
@@ -1047,7 +1068,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```sh
 services:
   erigon:
-    image: erigontech/erigon:v
+    image: erigontech/erigon:v{ERIGON_VERSION}
     container_name: erigon-node
     restart: always
     command:
@@ -1153,7 +1174,7 @@ Copy
      --execution-endpoint http://localhost:8551 \
      --execution-jwt /home/user/.local/share/erigon/jwt.hex \
      --checkpoint-sync-url "https://checkpoint.gnosischain.com"
-```
+    ```
 
 Here is an example of Lighthouse running the Chiado testnet:
 
@@ -1167,7 +1188,7 @@ Copy
      --execution-endpoint http://localhost:8551 \
      --execution-jwt /home/user/.local/share/erigon/jwt.hex \
      --checkpoint-sync-url "https://checkpoint.chiadochain.net"
-```
+    ```
 
 Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.
 
@@ -1186,7 +1207,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
 
     ```bash
     erigon --externalcl
-```
+    ```
 
 If your Consensus Layer (CL) client is on a different device, add the following flags:
 
@@ -1201,16 +1222,16 @@ Prysm must fully synchronize before Erigon can start syncing, since Erigon requi
     ```bash
     ./prysm.sh beacon-chain \
     --execution-endpoint http://localhost:8551 \
-    --mainnet --jwt-secret=/jwt.hex \
+    --mainnet --jwt-secret=<your-datadir>/jwt.hex \
     --checkpoint-sync-url=https://beaconstate.info \
     --genesis-beacon-api-url=https://beaconstate.info
-```
+    ```
 
 1.  Start Erigon adding the `--externalcl` flag:
 
     ```bash
     ./build/bin/erigon --externalcl
-```
+    ```
 2. Install and run Lighthouse by following the official guide: [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html)
 3. Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
 4. To communicate with Erigon, the `--execution-endpoint` must be specified as `:8551`, where `` is either `http://localhost` or the IP address of the device running Erigon.
@@ -1220,9 +1241,9 @@ Prysm must fully synchronize before Erigon can start syncing, since Erigon requi
     lighthouse bn \
     --network mainnet \
     --execution-endpoint http://localhost:8551 \
-    --execution-jwt /jwt.hex \
+    --execution-jwt <your-datadir>/jwt.hex \
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
-```
+    ```
 
 Check Erigon and your chosen CL logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
 
@@ -1338,7 +1359,7 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 
     ```bash
     --datadir=/desired/path/to/datadir
-```
+    ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
@@ -1387,7 +1408,7 @@ This command will display a list of convenience commands available in the Makefi
  gen:                               generate all auto-generated code in the codebase
  bindings:                          generate test contracts and core contracts
  prometheus:                        run prometheus and grafana with docker-compose
- escape:                            run escape path= to check for memory leaks e.g. run escape path=cmd/erigon
+ escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
  git-submodules:                    update git submodules
  install:                           copies binaries and libraries to DIST
  user_linux:                        create "erigon" user (Linux)
@@ -1593,7 +1614,7 @@ To run an op-node alongside Erigon, follow these steps:
 
     ```bash
     ./build/bin/erigon --caplin.blobs-immediate-backfill
-```
+    ```
 2. **Run the Op-Node**: Configure the op-node with the `--l1.trustrpc` flag to trust the Erigon RPC layer as the L1 node. This setup ensures smooth communication and synchronization.
 
 This configuration enables the op-node to function effectively with Erigon serving as both the L1 node and the CL.
@@ -2094,7 +2115,7 @@ Here's how to run mainnet and sepolia instances simultaneously:
 ```bash
 # Mainnet instance
 ./build/bin/erigon \
-  --datadir="" \
+  --datadir="<your_mainnet_data_path>" \
   --chain=mainnet \
   --port=30303 \
   --http.port=8545 \
@@ -2107,7 +2128,7 @@ Here's how to run mainnet and sepolia instances simultaneously:
 
 # Sepolia instance
 ./build/bin/erigon \
-  --datadir="" \
+  --datadir="<your_sepolia_data_path>" \
   --chain=sepolia \
   --port=30304 \
   --http.port=8546 \
@@ -2268,7 +2289,7 @@ Erigon itself consumes less than 2GB of RAM. Therefore, Erigon will benefit from
     volumes:
       - datadir:/home/erigon/.local/share/erigon
       - ./logdir:/logs
-    user: $:$
+    user: ${DOCKER_UID}:${DOCKER_GID}
     restart: unless-stopped
     mem_swappiness: 0
 
@@ -2448,20 +2469,32 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 ```json
 {
   "mcpServers": {
-    "erigon": 
+    "erigon": {
+      "command": "/path/to/build/bin/mcp",
+      "args": ["--port", "8545", "--log.dir", "/data/erigon/logs"]
+    }
   }
 }
 ```
 
 ```json
 {
-  "mcpServers": 
+  "mcpServers": {
+    "erigon": {
+      "command": "/path/to/build/bin/mcp",
+      "args": ["--datadir", "/data/erigon"]
+    }
   }
 }
 ```
 
 ```json
-
+{
+  "mcpServers": {
+    "erigon": {
+      "type": "sse",
+      "url": "http://127.0.0.1:8553/sse"
+    }
   }
 }
 ```
@@ -2713,7 +2746,7 @@ To use a specific UID, like `1205`, and mount a host data directory (`/erigon-da
 docker run \
 --user 1205 \
 -v /erigon-data:/container-erigon-data \
--it erigontech/erigon: \
+-it erigontech/erigon:<version_tag> \
 --chain=hoodi \
 --prune.mode=minimal \
 --datadir /container-erigon-data
@@ -2780,7 +2813,7 @@ DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) XDG_DATA_HOME=/preferred/data/folder DOC
 # To run the command via another user, use
 #
 ERIGON_USER=erigon
-sudo -u $ DOCKER_UID=$(id -u $) DOCKER_GID=$(id -g $) XDG_DATA_HOME=~$/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
+sudo -u ${ERIGON_USER} DOCKER_UID=$(id -u ${ERIGON_USER}) DOCKER_GID=$(id -g ${ERIGON_USER}) XDG_DATA_HOME=~${ERIGON_USER}/.ethereum DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 `makefile` creates the initial directories for `erigon`, `prometheus` and `grafana`. The PID namespace is shared between erigon and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode). See: [https://github.com/erigontech/erigon/pull/2392/files](https://github.com/erigontech/erigon/pull/2392/files)
@@ -3713,21 +3746,21 @@ make rpcdaemon
 3. Now Erigon and other services can be started as separate processes
 
 ```sh
-./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir= --http=false
+./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
 If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
 
 ```sh
-./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=
+./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
 ```
 
 ```sh
-./build/bin/txpool --private.api.addr=localhost:9090 --sentry.api.addr=localhost:9091 --txpool.api.addr=localhost:9094 --datadir=
+./build/bin/txpool --private.api.addr=localhost:9090 --sentry.api.addr=localhost:9091 --txpool.api.addr=localhost:9094 --datadir=<your datadir>
 ```
 
 ```sh
-./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir= --txpool.api.addr=localhost:9094
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir=<your datadir> --txpool.api.addr=localhost:9094
 ```
 
 ## Flags explanation
@@ -3782,14 +3815,14 @@ Flags:
       --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
       --pprof.cpuprofile string            Write CPU profile to the given file
       --pprof.port int                     pprof HTTP server listening port (default 6060)
-      --private.api.addr string            execution service : (default "localhost:9090")
-      --sentry.api.addr strings            comma separated sentry addresses ':,:' (default [localhost:9091])
+      --private.api.addr string            execution service <host>:<port> (default "localhost:9090")
+      --sentry.api.addr strings            comma separated sentry addresses '<host>:<port>,<host>:<port>' (default [localhost:9091])
       --tls.cacert string                  CA certificate for client side TLS handshake
       --tls.cert string                    certificate for client side TLS handshake
       --tls.key string                     key file for client side TLS handshake
       --trace string                       Write execution trace to the given file
       --txpool.accountslots uint           Minimum number of executable transaction slots guaranteed per account (default 16)
-      --txpool.api.addr string             txpool service : (default "localhost:9094")
+      --txpool.api.addr string             txpool service <host>:<port> (default "localhost:9094")
       --txpool.blobpricebump uint          Price bump percentage to replace an existing blob (type-3) transaction (default 100)
       --txpool.blobslots uint              Max allowed total number of blobs (within type-3 txs) per account (default 48)
       --txpool.commit.every duration       How often transactions should be committed to the storage (default 15s)
@@ -3909,7 +3942,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -3917,11 +3950,11 @@ Flags:
                                            			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
                                            			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
                                            			 "stun"               Uses STUN to detect an external IP using a default server
-                                           			 "stun:"      Uses STUN to detect an external IP using the given server (host:port)
+                                           			 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
                                            
       --netrestrict string                 Restricts network communication to the given IP networks (CIDR masks)
       --nodiscover                         Disables the peer discovery mechanism (manual peer addition)
-      --p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows ,,.., (default [30303,30304,30305,30306,30307])
+      --p2p.allowed-ports uints            Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti> (default [30303,30304,30305,30306,30307])
       --p2p.protocol uint                  Version of eth p2p protocol (default 68)
       --port int                           Network listening port (default 30303)
       --pprof                              Enable the pprof HTTP server
@@ -3986,7 +4019,7 @@ Usage:
    [command]
 
 Examples:
-go run ./cmd/downloader --datadir  --downloader.api.addr 127.0.0.1:9093
+go run ./cmd/downloader --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093
 
 Available Commands:
   completion      Generate the autocompletion script for the specified shell
@@ -4023,7 +4056,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -4031,7 +4064,7 @@ Flags:
                                            			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
                                            			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
                                            			 "stun"               Uses STUN to detect an external IP using a default server
-                                           			 "stun:"      Uses STUN to detect an external IP using the given server (host:port)
+                                           			 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
                                            
       --pprof                              Enable the pprof HTTP server
       --pprof.addr string                  pprof HTTP server listening interface (default "127.0.0.1")
@@ -4175,13 +4208,13 @@ modular architecture where RPC functionality is handled by a standalone daemon.
 First, start Erigon with the private API enabled:
 
 ```bash
-erigon --datadir= --private.api.addr=localhost:9090
+erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
 ```
 
 Then, in a separate terminal, start rpcdaemon with IPC enabled:
 
 ```bash
-rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:////erigon.ipc
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
 ```
 
 **Important:** Make sure you have write permissions to the directory where the socket will be created.
@@ -4190,7 +4223,7 @@ On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using 
 format). The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
 
 ```bash
-rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:////erigon.ipc --http.api eth,net,web3,debug,trace
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
 ```
 
 #### TCP Socket Alternative (Advanced)
@@ -4209,10 +4242,10 @@ default on port 8545) instead. The TCP socket is for specialized clients that su
 Test your IPC connection using curl:
 
 ```bash
-curl --unix-socket /erigon.ipc \
+curl --unix-socket <path-to-datadir>/erigon.ipc \
      -X POST http://localhost/ \
      -H "Content-Type: application/json" \
-     --data ''
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
 Or use the HTTP endpoint (enabled by default on port 8545):
@@ -4221,7 +4254,7 @@ Or use the HTTP endpoint (enabled by default on port 8545):
 curl http://127.0.0.1:8545 \
      -X POST \
      -H "Content-Type: application/json" \
-     --data ''
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
 ### gRPC
@@ -4249,12 +4282,12 @@ erigon --http --http.api "admin,debug,eth,erigon,net,trace,txpool,web3"
 This allows you to then call:
 
 ```bash
-curl -X POST -H "Content-Type: application/json" --data '' localhost:8545
+curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' localhost:8545
 
 # With cast (if using Foundry)
 cast block-number
 cast rpc admin_nodeInfo  
-cast rpc debug_traceTransaction 
+cast rpc debug_traceTransaction <tx_hash>
 cast rpc erigon_forks
 ```
 
@@ -4356,7 +4389,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_forks","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4383,7 +4416,7 @@ Returns the latest executed block number. Unlike `eth_blockNumber`, this method 
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_blockNumber","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4407,7 +4440,7 @@ Returns a block header by block number, ignoring transaction and uncle data for 
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_getHeaderByNumber","params":["0x1b4"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4456,7 +4489,7 @@ Returns a block by timestamp using binary search to find the closest block to th
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBlockByTimestamp","params":["0x5ddf2094", false],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4480,7 +4513,7 @@ Returns all account balance changes that occurred within a specific block.
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_getBalanceChangesInBlock","params":["0x1b4"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4528,7 +4561,7 @@ Returns an array of logs matching a given filter object with enhanced filtering 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock":"0x1","toBlock":"0x2","address":"0x8888f1f195afa192cfee860698584c030f4c9db1"}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4557,7 +4590,7 @@ Returns the latest logs matching a filter criteria in descending order with adva
 **Example**
 
 ```bash
-curl -s --data ',],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"address":"0x8888f1f195afa192cfee860698584c030f4c9db1"},{"logCount":100,"ignoreTopicsOrder":true}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4607,7 +4640,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"erigon_nodeInfo","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -4790,7 +4823,7 @@ Returns an array of EIP-2718 binary-encoded receipts from a single block.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawReceipts","params":["0x123456"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4817,7 +4850,7 @@ Returns a range of accounts involved in the given block range.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_accountRange","params":["0xaaaaa",[1],1,true,true,true],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4841,7 +4874,7 @@ Returns account information at a specific block and transaction index.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_accountAt","params":["0x123456...",1,"0x123456..."],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4864,7 +4897,7 @@ Returns a list of accounts modified in the given block range by number.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":["0xccccd","0xcccce"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4887,7 +4920,7 @@ Returns a list of accounts modified in the given block range by hash.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","params":["0x2a1af0...","0x4e3d3e..."],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4913,7 +4946,7 @@ Returns information about a range of storage locations for a contract address.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0xd3f185...",1,"0xb734c7...","0x00",2],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4936,7 +4969,7 @@ Returns Geth style transaction traces for a block by hash.
 #### Example
 
 ```bash
-curl -s --data '],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["0x123456...",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4959,7 +4992,7 @@ Returns Geth style transaction traces for a block by number.
 #### Example
 
 ```bash
-curl -s --data '],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["0x123456",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -4982,7 +5015,7 @@ Returns Geth style transaction trace.
 #### Example
 
 ```bash
-curl -s --data '],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x123456...",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5006,7 +5039,7 @@ Returns Geth style call trace.
 #### Example
 
 ```bash
-curl -s --data ',"latest",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCall","params":[{"to":"0x123456..."},"latest",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5030,7 +5063,7 @@ Returns Geth style traces for multiple call bundles.
 #### Example
 
 ```bash
-curl -s --data '],,{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"transactions":[...]}],{"blockNumber":"latest"},{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5052,7 +5085,7 @@ Sets the GOMEMLIMIT for the process.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[8589934592],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5074,7 +5107,7 @@ Sets the garbage collection target percentage.
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_setGCPercent","params":[100],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5094,7 +5127,7 @@ None
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_freeOSMemory","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5114,7 +5147,7 @@ None
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_gcStats","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5134,7 +5167,7 @@ None
 #### Example
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"debug_memStats","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 #### Returns
@@ -5246,7 +5279,7 @@ Executes the given call and returns a number of possible traces for it.
 Request
 
 ```bash
-curl --data ',["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_call","params":[{ ... },["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
@@ -5255,8 +5288,15 @@ Response
 {
   "id": 1,
   "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
       "subtraces": 0,
       "traceAddress": [],
       "type": "call"
@@ -5310,7 +5350,7 @@ params: [
 Request
 
 ```bash
-curl --data '{"method":"trace_callMany","params":[[[,["trace"]],[,["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
@@ -5332,7 +5372,10 @@ Response
           "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
           "value": "0x186a0"
         },
-        "result": ,
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
         "subtraces": 0,
         "traceAddress": [],
         "type": "call"
@@ -5351,7 +5394,10 @@ Response
           "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
           "value": "0x186a0"
         },
-        "result": ,
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
         "subtraces": 0,
         "traceAddress": [],
         "type": "call"
@@ -5398,8 +5444,15 @@ Response
 {
   "id": 1,
   "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
       "subtraces": 0,
       "traceAddress": [],
       "type": "call"
@@ -5436,7 +5489,7 @@ params: [
 Request
 
 ```bash
-curl --data '' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_replayBlockTransactions","params":["0x2ed119",["trace"]],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
@@ -5446,8 +5499,15 @@ Response
   "id": 1,
   "jsonrpc": "2.0",
   "result": [
-    ,
-        "result": ,
+    {
+      "output": "0x",
+      "stateDiff": null,
+      "trace": [{
+        "action": { ... },
+        "result": {
+          "gasUsed": "0x0",
+          "output": "0x"
+        },
         "subtraces": 0,
         "traceAddress": [],
         "type": "call"
@@ -5455,7 +5515,7 @@ Response
       "transactionHash": "0x...",
       "vmTrace": null
     },
-    
+    { ... }
   ]
 }
 ```
@@ -5496,8 +5556,15 @@ Response
 {
   "id": 1,
   "jsonrpc": "2.0",
-  "result": ,
-      "result": ,
+  "result": {
+    "output": "0x",
+    "stateDiff": null,
+    "trace": [{
+      "action": { ... },
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
       "subtraces": 0,
       "traceAddress": [],
       "type": "call"
@@ -5532,7 +5599,7 @@ params: [
 Request
 
 ```bash
-curl --data '' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_block","params":["0x2ed119"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 Response
@@ -5553,7 +5620,10 @@ Response
       },
       "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
       "blockNumber": 3068185,
-      "result": ,
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
       "subtraces": 0,
       "traceAddress": [],
       "transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
@@ -5622,7 +5692,10 @@ Response
       },
       "blockHash": "0x86df301bcdd8248d982dbf039f09faf792684e1aeee99d5b58b77d620008b80f",
       "blockNumber": 3068183,
-      "result": ,
+      "result": {
+        "gasUsed": "0x0",
+        "output": "0x"
+      },
       "subtraces": 0,
       "traceAddress": [],
       "transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
@@ -5681,7 +5754,10 @@ Response
     },
     "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
     "blockNumber": 3068185,
-    "result": ,
+    "result": {
+      "gasUsed": "0x183",
+      "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
+    },
     "subtraces": 0,
     "traceAddress": [
       0
@@ -5813,7 +5889,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -5840,7 +5916,7 @@ Returns the content of the transaction pool for a specific sender address, showi
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e8dd61c5d32be8058bb8eb970870f07233155"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -5865,7 +5941,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"txpool_status","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -5925,7 +6001,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -5947,7 +6023,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6098,7 +6174,7 @@ Returns the validator snapshot at a given block number, containing information a
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshot","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6122,7 +6198,7 @@ Returns the author (block proposer) of a block at the given block number or hash
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getAuthor","params":["0x1b4"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6170,7 +6246,7 @@ Returns the list of authorized signers (validators) at a given block number.
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getSigners","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6216,7 +6292,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentProposer","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6238,7 +6314,7 @@ None
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentValidators","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6262,7 +6338,7 @@ Returns the proposer sequence for a given block, showing the order in which vali
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshotProposerSequence","params":["latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6287,7 +6363,7 @@ Returns the root hash for a range of blocks, used for checkpoint verification an
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x100"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6353,7 +6429,7 @@ Returns transaction number information for development and debugging purposes. T
 **Example**
 
 ```bash
-curl -s --data '' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"internal_getTxNumInfo","params":["0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -6564,7 +6640,9 @@ gRPC health checks can be enabled to monitor service availability:
 
 ```go
 conn, err := grpc.Dial("localhost:9090", grpc.WithInsecure())
-if err != nil 
+if err != nil {
+    log.Fatal(err)
+}
 defer conn.Close()
 
 client := remote.NewKVClient(conn)
@@ -6632,7 +6710,10 @@ curl -X POST http://localhost:8545 \
         "toBlock":   "0x1000010",
         "address":   "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
       },
-      
+      {
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": {
+          "code": "0x<your_modified_bytecode>"
+        }
       }
     ],
     "id": 1
@@ -6659,7 +6740,7 @@ This is useful for understanding what a contract would have initialised to if it
 **Returns**
 
 ```json
-
+{ "code": "0x<effective_creation_code>" }
 ```
 
 **Example**
@@ -6672,7 +6753,7 @@ curl -X POST http://localhost:8545 \
     "method": "overlay_callConstructor",
     "params": [
       "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-      "0x"
+      "0x<your_replacement_bytecode>"
     ],
     "id": 1
   }'
@@ -6779,8 +6860,15 @@ The schema includes queries for blocks, transactions, accounts, logs, and pendin
 ## Example Query
 
 ```graphql
-
-      to 
+{
+  block(number: 21000000) {
+    hash
+    number
+    timestamp
+    transactions {
+      hash
+      from { address }
+      to { address }
       value
     }
   }
@@ -6790,7 +6878,7 @@ The schema includes queries for blocks, transactions, accounts, logs, and pendin
 ```bash
 curl -X POST http://localhost:8545/graphql \
   -H "Content-Type: application/json" \
-  -d ' }"}'
+  -d '{"query": "{ block(number: 21000000) { hash number } }"}'
 ```
 
 ---
@@ -6874,7 +6962,7 @@ Start the validator client and connect it to the Caplin CL:
 lighthouse vc \
   --network mainnet \
   --beacon-nodes http://127.0.0.1:5555 \
-  --suggested-fee-recipient=
+  --suggested-fee-recipient=<your_eth_address>
 ```
 
 **Flags Explanation**:
@@ -6888,7 +6976,7 @@ lighthouse vc \
 If you have existing validator keys, import them:
 
 ```bash
-lighthouse account validator import --directory 
+lighthouse account validator import --directory <path_to_validator_keys>
 ```
 
 ---
@@ -6986,8 +7074,8 @@ Complete the validator registration for Shutter using the tool provided in the [
 
 Use the Erigon CLI command to verify that your registration was successful:
 ```bash
-    erigon shutter-validator-reg-check --chain  --el-url  --validator-info-file 
-```
+    erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
+    ```
 * `--chain` valid values are `gnosis` or `chiado`
 * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
 * `` is the file generated during registration.
@@ -6995,14 +7083,14 @@ Use the Erigon CLI command to verify that your registration was successful:
 for example:
 ```bash
     erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
-```
+    ```
 4. **Run Erigon with Shutter Support**
 
 Start Erigon as usual, but add the `--shutter` flag to enable Shutterized Validator mode:
 
     ```bash
     erigon --shutter [other options...]
-```
+    ```
 
 This works with Erigon's internal CL Caplin (enabled by default) or with an external CL client using `--externalcl`.
 
@@ -7051,17 +7139,17 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
 
 1. Fork the repository and clone your fork:
    ```bash
-   git clone https://github.com//erigon.git
+   git clone https://github.com/<your-username>/erigon.git
    cd erigon
-```
+   ```
 2. Build the project (requires Go 1.24+ and a C++ compiler):
    ```bash
    make erigon
-```
+   ```
 3. Run the test suite:
    ```bash
    go test ./...
-```
+   ```
 
 ### Reporting bugs and requesting features
 
@@ -7099,11 +7187,11 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
    git clone https://github.com/erigontech/erigon.git
    cd erigon/docs/site
    npm install
-```
+   ```
 2. Start the local dev server:
    ```bash
    npm run start
-```
+   ```
 3. Open `http://localhost:3000` in your browser — changes to Markdown files hot-reload automatically.
 
 ### Submitting a pull request

@@ -50,23 +50,29 @@ def parse_frontmatter(text):
 
 def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
-    # Remove import/export statements
+    # Remove import/export statements (always line-level, safe to strip globally)
     text = re.sub(r"^(import|export)\s+.+$", "", text, flags=re.MULTILINE)
-    # Strip self-closing and opening HTML/JSX tags
-    text = re.sub(r"<[A-Za-z][^>]*/?>", "", text)
-    text = re.sub(r"</[A-Za-z][^>]*>", "", text)
-    # Remove {/* comments */}
+    # Remove {/* comments */} — JSX block comments don't appear inside code fences
     text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
-    # Remove leftover JSX expressions like {foo.bar}
-    text = re.sub(r"\{[^}]{1,120}\}", "", text)
-    # Strip leading whitespace from lines outside fenced code blocks —
-    # removes orphaned indentation left by JSX component bodies after tag stripping,
-    # while preserving meaningful indentation inside code fences.
+    # Line-by-line pass: track fenced code blocks and apply MDX-specific stripping
+    # only outside fences, preserving placeholders and brace-heavy content inside fences.
     out, in_fence = [], False
     for line in text.splitlines():
         if line.lstrip().startswith("```"):
             in_fence = not in_fence
-        out.append(line if in_fence else line.lstrip())
+            out.append(line)
+            continue
+        if in_fence:
+            # Preserve lines inside code fences completely unchanged
+            out.append(line)
+        else:
+            # Outside code fences: strip HTML/JSX tags and expressions
+            line = re.sub(r"<[A-Za-z][^>]*/?>", "", line)
+            line = re.sub(r"</[A-Za-z][^>]*>", "", line)
+            # Remove leftover JSX expressions like {foo.bar}
+            line = re.sub(r"\{[^}]{1,120}\}", "", line)
+            # Strip leading whitespace (orphaned indentation from JSX component bodies)
+            out.append(line.lstrip())
     text = "\n".join(out)
     # Collapse 3+ blank lines to 2
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -125,7 +131,7 @@ def get_category_label(dirpath):
     cat = dirpath / "_category_.json"
     if cat.exists():
         try:
-            data = json.loads(cat.read_text())
+            data = json.loads(cat.read_text(encoding="utf-8"))
             return data.get("label", "")
         except Exception:
             pass
@@ -136,7 +142,7 @@ def get_category_position(dirpath):
     cat = dirpath / "_category_.json"
     if cat.exists():
         try:
-            data = json.loads(cat.read_text())
+            data = json.loads(cat.read_text(encoding="utf-8"))
             return int(data.get("position", 99))
         except Exception:
             pass
