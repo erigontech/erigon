@@ -1,0 +1,484 @@
+/**
+ * Erigon brand colors — light and dark theme.
+ * Primary: #EF7716 (Erigon Orange), Hover: #D4660F
+ * Light bg: #FFFFFF, Dark bg: #0A0A0A
+ * Fonts: Montserrat ExtraBold (headings), Nunito Sans (body)
+ */
+
+@font-face {
+  font-family: 'Montserrat';
+  src: url('/fonts/Montserrat-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+:root {
+  /* Brand fonts */
+  --ifm-font-family-base: 'Nunito Sans', sans-serif;
+  --ifm-heading-font-family: 'Montserrat', sans-serif;
+  --ifm-heading-font-weight: 800;
+  /* Erigon Orange scale */
+  --ifm-color-primary: #EF7716;
+  --ifm-color-primary-dark: #D4660F;
+  --ifm-color-primary-darker: #C55E0D;
+  --ifm-color-primary-darkest: #A34E0B;
+  --ifm-color-primary-light: #F28A33;
+  --ifm-color-primary-lighter: #F3923F;
+  --ifm-color-primary-lightest: #F6A862;
+
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(239, 119, 22, 0.1);
+
+  /* Light mode */
+  --ifm-background-color: #FFFFFF;
+  --ifm-font-color-base: #000000;
+
+  /* Navbar — light mode */
+  --ifm-navbar-background-color: #FFFFFF;
+  --ifm-navbar-link-color: #111111;
+  --ifm-navbar-link-hover-color: #EF7716;
+  --ifm-navbar-shadow: 0 1px 0 rgba(0,0,0,0.08);
+
+  /* Navbar button tokens — light mode */
+  --navbar-btn-color: #111111;
+  --navbar-btn-border: rgba(0,0,0,0.25);
+  --navbar-btn-color-muted: rgba(0,0,0,0.55);
+
+  /* Active sidebar item */
+  --ifm-menu-color-active: #EF7716;
+}
+
+[data-theme='dark'] {
+  /* Same orange scale — readable on dark */
+  --ifm-color-primary: #EF7716;
+  --ifm-color-primary-dark: #D4660F;
+  --ifm-color-primary-darker: #C55E0D;
+  --ifm-color-primary-darkest: #A34E0B;
+  --ifm-color-primary-light: #F28A33;
+  --ifm-color-primary-lighter: #F3923F;
+  --ifm-color-primary-lightest: #F6A862;
+
+  --docusaurus-highlighted-code-line-bg: rgba(239, 119, 22, 0.2);
+
+  /* Dark mode */
+  --ifm-background-color: #0A0A0A;
+  --ifm-background-surface-color: #141414;
+  --ifm-font-color-base: #FFFFFF;
+
+  /* Navbar — dark mode */
+  --ifm-navbar-background-color: #000000;
+  --ifm-navbar-link-color: #FFFFFF;
+  --ifm-navbar-link-hover-color: #EF7716;
+  --ifm-navbar-shadow: none;
+
+  /* Navbar button tokens — dark mode */
+  --navbar-btn-color: #FFFFFF;
+  --navbar-btn-border: rgba(255,255,255,0.35);
+  --navbar-btn-color-muted: rgba(255,255,255,0.75);
+
+  /* Active sidebar item */
+  --ifm-menu-color-active: #EF7716;
+}
+
+/* ─── Brand typography enforcement ──────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+}
+
+/* ─── Shared landing-page card grid ─────────────────────────────────────── */
+
+.lp-hero {
+  padding: 2rem 0 1.5rem;
+}
+.lp-hero h1 {
+  font-size: 2.25rem;
+  margin: 0 0 0.75rem !important;
+}
+.lp-hero p {
+  font-size: 1.05rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 560px;
+  margin: 0 !important;
+  line-height: 1.6;
+}
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.lp-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  text-decoration: none !important;
+  color: inherit !important;
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  background: var(--ifm-background-surface-color, var(--ifm-background-color));
+}
+.lp-card:hover {
+  border-color: #EF7716;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(239, 119, 22, 0.14);
+}
+.lp-icon {
+  width: 2rem;
+  height: 2rem;
+  margin-bottom: 1rem;
+  color: #EF7716;
+  flex-shrink: 0;
+}
+.lp-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem !important;
+  color: var(--ifm-font-color-base);
+}
+.lp-card-desc {
+  font-size: 0.875rem;
+  margin: 0 !important;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.55;
+}
+
+/* ─── Navbar ──────────────────────────────────────────────────────────────── */
+
+.navbar__logo img {
+  height: 28px;
+  width: auto;
+}
+.navbar__brand {
+  min-width: calc(var(--doc-sidebar-width, 300px) - 40px);
+}
+.navbar__title {
+  color: var(--ifm-navbar-link-color);
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.navbar .clean-btn {
+  color: var(--ifm-navbar-link-color);
+}
+.navbar__link--active {
+  color: #EF7716 !important;
+}
+.navbar__items--left .navbar__item {
+  font-family: 'Montserrat', sans-serif !important;
+  font-weight: 800 !important;
+  font-size: 0.9rem !important;
+}
+
+/* ─── Navbar right-side items ─────────────────────────────────────────────── */
+
+.navbar-github-icon {
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem;
+  color: var(--navbar-btn-color-muted);
+  transition: color 0.15s;
+}
+.navbar-github-icon:hover {
+  color: #EF7716 !important;
+}
+
+.navbar-blog-btn {
+  border: 1px solid var(--navbar-btn-border);
+  color: var(--navbar-btn-color) !important;
+  padding: 0.35rem 0.9rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none !important;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+.navbar-blog-btn:hover {
+  border-color: #EF7716;
+  color: #EF7716 !important;
+  box-shadow: 0 0 12px rgba(239, 119, 22, 0.45);
+}
+
+.navbar-release-btn {
+  background: #EF7716;
+  color: #FFFFFF !important;
+  padding: 0.35rem 0.9rem;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none !important;
+  transition: background 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+.navbar-release-btn:hover {
+  background: #D4660F;
+  color: #FFFFFF !important;
+  box-shadow: 0 0 14px rgba(239, 119, 22, 0.6);
+}
+
+/* ─── Table of contents (right sidebar) ──────────────────────────────────── */
+
+.table-of-contents__link {
+  font-size: var(--ifm-font-size-base);
+}
+
+/* ─── Pagination nav cards (prev/next) ───────────────────────────────────── */
+
+.pagination-nav__link {
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease !important;
+}
+.pagination-nav__link:hover {
+  border-color: #EF7716 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(239, 119, 22, 0.14);
+}
+
+/* ─── Details / collapsible sections ─────────────────────────────────────── */
+
+details.alert.alert--info {
+  --ifm-alert-background-color: rgba(0, 0, 0, 0.05);
+  --ifm-alert-border-color: rgba(0, 0, 0, 0.1);
+  background-color: rgba(0, 0, 0, 0.05) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  border-radius: 8px !important;
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 1rem);
+}
+[data-theme='dark'] details.alert.alert--info {
+  --ifm-alert-background-color: rgba(255, 255, 255, 0.04);
+  --ifm-alert-border-color: rgba(255, 255, 255, 0.1);
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+details.alert.alert--info {
+  --docusaurus-details-decoration-color: #EF7716;
+}
+details.alert.alert--info summary {
+  font-weight: 700;
+  color: #555555;
+}
+[data-theme='dark'] details.alert.alert--info summary {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* ─── 404 page hero ──────────────────────────────────────────────────────── */
+
+.hero-404 {
+  padding: 6rem 2rem 5rem;
+  text-align: center;
+}
+.hero-404-number {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: clamp(5rem, 18vw, 10rem);
+  line-height: 1;
+  color: #EF7716;
+  margin-bottom: 1.5rem;
+}
+.hero-404-title {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: clamp(1.5rem, 4vw, 2.25rem);
+  margin: 0 0 1rem !important;
+}
+.hero-404-desc {
+  font-size: 1.05rem;
+  color: var(--ifm-color-emphasis-700);
+  max-width: 480px;
+  margin: 0 auto 2.5rem !important;
+  line-height: 1.65;
+}
+.hero-404-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ─── 404 page cards section ─────────────────────────────────────────────── */
+
+.cards-404-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 2rem 5rem;
+}
+.cards-404-heading {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem !important;
+  color: var(--ifm-color-emphasis-600);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.cards-404-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.card-404-label {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.35rem;
+  color: var(--ifm-font-color-base);
+}
+.card-404-desc {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.5;
+}
+
+/* ─── 404 page cards ─────────────────────────────────────────────────────── */
+
+.card-404 {
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem 1.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  text-decoration: none !important;
+  color: inherit !important;
+  background: var(--ifm-background-surface-color, var(--ifm-background-color));
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-404:hover {
+  border-color: #EF7716;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(239, 119, 22, 0.14);
+}
+
+/* ─── 404 page buttons ────────────────────────────────────────────────────── */
+
+.button-404-primary {
+  background: #EF7716;
+  color: #ffffff !important;
+  padding: 0.65rem 1.6rem;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-decoration: none !important;
+  transition: background 0.15s;
+}
+.button-404-primary:hover {
+  background: #D4660F;
+  color: #ffffff !important;
+}
+.button-404-secondary {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  color: var(--ifm-font-color-base) !important;
+  padding: 0.65rem 1.6rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none !important;
+  transition: border-color 0.15s;
+}
+.button-404-secondary:hover {
+  border-color: #EF7716;
+  color: var(--ifm-font-color-base) !important;
+}
+
+/* Footer background matches dark brand */
+.footer {
+  background-color: #000000;
+}
+
+/* ─── Footer social pill buttons ─────────────────────────────────────────── */
+
+.footer-social-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.65) !important;
+  text-decoration: none !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+.footer-social-btn:hover {
+  color: #EF7716 !important;
+  border-color: #EF7716 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(239,119,22,0.15);
+}
+
+/* ─── Footer responsive (mobile) ────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .footer-top-grid {
+    grid-template-columns: 1fr !important;
+    padding: 2.5rem 1.5rem 2rem !important;
+    gap: 2.5rem !important;
+  }
+
+  .footer-bottom-bar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 1.25rem 1.5rem !important;
+    gap: 1rem !important;
+  }
+
+  .footer-bottom-bar > div {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.6rem !important;
+  }
+}
+
+/* ─── Version dropdown ───────────────────────────────────────────────────── */
+
+.navbar__item.dropdown .navbar__link[data-toggle="dropdown"],
+.navbar__item.dropdown > .navbar__link {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.dropdown__menu {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+}
+
+.dropdown__link--active,
+.dropdown__link:hover {
+  color: #EF7716 !important;
+  background: rgba(239,119,22,0.06);
+}
