@@ -60,14 +60,20 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	defer tx.Rollback()
 	aggTx := state.AggTx(tx)
 	defer aggTx.Close()
-	files := aggTx.Files(kv.CommitmentDomain)
+	allFiles := aggTx.Files(kv.CommitmentDomain)
 	// atm our older files are missing the root due to purification, so this flag can be used to only check the last file
 	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", true)
 	// may want to check all files for root key presence, but only recompute for the last file (due to purification)
 	onlyRecomputeLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE_RECOMPUTE", true)
-	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
+	files := make([]state.VisibleFile, 0, len(allFiles))
+	for _, f := range allFiles {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			files = append(files, f)
+		}
+	}
+	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
 	if len(files) == 0 {
-		logger.Warn("[integrity] CommitmentRoot: no commitment domain files found, nothing to check")
+		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
 	}
 	if onlyCheckLastFile {
@@ -76,10 +82,6 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	var integrityErr error
 	checked := 0
 	for i, file := range files {
-		if !strings.HasSuffix(file.Fullpath(), ".kv") {
-			logger.Info("[integrity] CommitmentRoot skipping non-.kv file", "file", filepath.Base(file.Fullpath()))
-			continue
-		}
 		checked++
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
