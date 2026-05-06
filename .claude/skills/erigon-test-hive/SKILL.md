@@ -119,7 +119,7 @@ cd temp/<hive-dir>/hive
 
 # Run EEST engine simulator (URL pinned in test-fixtures.json)
 ./hive --sim ethereum/eels/consume-engine --sim.limit="" --client erigon \
-  --sim.buildarg fixtures=$(jq -r '."fixtures_stable".url' test-fixtures.json)
+  --sim.buildarg fixtures=$(jq -r '."eest_stable".url' test-fixtures.json)
 ```
 
 ## Suites Covered

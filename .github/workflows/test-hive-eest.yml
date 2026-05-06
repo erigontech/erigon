@@ -35,33 +35,33 @@ jobs:
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             pool-size: 0
-            fixtures-tarball: fixtures_stable
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             pool-size: 4
-            fixtures-tarball: fixtures_stable
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             pool-size: 4
-            fixtures-tarball: fixtures_stable
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
-            fixtures-tarball: fixtures_stable
+            fixtures-tarball: eest_stable
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
             pool-size: 0
-            fixtures-tarball: fixtures_stable
+            fixtures-tarball: eest_stable
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
             pool-size: 24
-            fixtures-tarball: fixtures_devnet
+            fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)

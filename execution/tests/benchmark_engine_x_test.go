@@ -69,7 +69,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 	preAllocs := make(map[engineapitester.PreAllocHash]*engineapitester.PreAlloc)
 	subcategories := make(map[string][]testEntry)
 
-	tarPath := filepath.Join("..", "..", "test-fixtures-cache", "fixtures_benchmark.tar.gz")
+	tarPath := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark.tar.gz")
 	f, err := os.Open(tarPath)
 	if os.IsNotExist(err) {
 		b.Skipf("missing %s — run `make test-fixtures` to download", tarPath)
