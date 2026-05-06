@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -98,7 +99,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 			}
 			var tests map[string]engineapitester.EngineXTestDefinition
 			if err := json.Unmarshal(data, &tests); err != nil {
-				return nil
+				return fmt.Errorf("unmarshal %s: %w", path, err)
 			}
 			rel := filepath.ToSlash(strings.TrimPrefix(path, testsDir+string(filepath.Separator)))
 			subcat := strings.SplitN(rel, "/", 2)[0]
