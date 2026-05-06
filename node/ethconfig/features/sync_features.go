@@ -19,6 +19,10 @@ func EnableSyncCfg(chainDB kv.RoDB, syncCfg ethconfig.Sync) (ethconfig.Sync, err
 		if syncCfg.KeepExecutionProofs {
 			statecfg.EnableHistoricalCommitment()
 		}
+		syncCfg.KeepExecutionProofsBlocks, _, err = rawdb.ReadDBCommitmentHistoryBlocks(tx)
+		if err != nil {
+			return err
+		}
 		syncCfg.PersistReceiptsCacheV2, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
 			return err

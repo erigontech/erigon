@@ -224,6 +224,9 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 			if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 				return err
 			}
+			if err := rawdb.WriteDBCommitmentHistoryBlocks(tx, cfg.KeepExecutionProofsBlocks); err != nil {
+				return err
+			}
 			return nil
 		}
 		// we need to make sure we do not run from an old version so check amount of keys in kv.AccountDomain
@@ -238,6 +241,9 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 		if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 			return err
 		}
+		if err := rawdb.WriteDBCommitmentHistoryBlocks(tx, cfg.KeepExecutionProofsBlocks); err != nil {
+			return err
+		}
 		return nil
 	}
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
@@ -245,7 +251,30 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
 			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
 	}
+	dbBlocks, dbBlocksOk, err := rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	if err != nil {
+		return err
+	}
+	// Legacy datadirs lack the blocks key; accept the config value silently.
+	// Otherwise: tightening retention is safe (extra files get cleaned up next
+	// prune cycle); widening is not (files may already be gone).
+	if dbBlocksOk {
+		oldEff := (ethconfig.Sync{KeepExecutionProofsBlocks: dbBlocks}).EffectiveCommitmentRetention()
+		newEff := cfg.Sync.EffectiveCommitmentRetention()
+		if newEff > oldEff {
+			return fmt.Errorf(
+				"flag '--prune.commitment-history.distance.blocks' cannot be widened: db: %d; config: %d. retention may only be tightened at runtime; widening requires deleting the chaindata folder and resyncing: %s",
+				dbBlocks, cfg.KeepExecutionProofsBlocks, dirs.Chaindata)
+		}
+		if newEff < oldEff {
+			logger.Warn("[snapshots] commitment history retention tightened",
+				"db", dbBlocks, "config", cfg.KeepExecutionProofsBlocks)
+		}
+	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
+		return err
+	}
+	if err := rawdb.WriteDBCommitmentHistoryBlocks(tx, cfg.KeepExecutionProofsBlocks); err != nil {
 		return err
 	}
 	return nil

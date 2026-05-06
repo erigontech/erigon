@@ -2074,6 +2074,80 @@ func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs ui
 	}
 }
 
+// DeleteCommitmentHistoryFilesBelow removes commitment-history files whose
+// endTxNum is at or below threshold. File paths are captured before
+// deleteMergeFile runs because that path preserves frozen files on disk —
+// retention must override that cleanAfterMerge safety net. Used by
+// --prune.commitment-history.distance.blocks.
+func (a *Aggregator) DeleteCommitmentHistoryFilesBelow(threshold uint64) int {
+	d := a.d[kv.CommitmentDomain]
+	if d.History.SnapshotsDisabled {
+		return 0
+	}
+	h := d.History
+
+	pathsToRemove := a.markCommitmentHistoryBelowDeletable(h, threshold)
+	if len(pathsToRemove) == 0 {
+		return 0
+	}
+	for _, p := range pathsToRemove {
+		if err := dir.RemoveFile(p); err != nil {
+			a.logger.Warn("[agg] commitment-history retention: remove file", "err", err, "path", p)
+		}
+		// .torrent absent for locally-built files; ignore.
+		_ = dir.RemoveFile(p + ".torrent")
+	}
+	return len(pathsToRemove)
+}
+
+// markCommitmentHistoryBelowDeletable holds dirtyFilesLock for the BTree
+// mutation only; physical file removal happens outside the lock.
+func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold uint64) []string {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	// dirtyFiles is ordered by endTxNum (filesItemLess), so items satisfying
+	// endTxNum <= threshold cluster at the start; break on first miss.
+	collect := func(t *btree.BTreeG[*FilesItem], pathsOut *[]string) []*FilesItem {
+		outs := make([]*FilesItem, 0, t.Len())
+		iter := t.Iter()
+		defer iter.Release()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			item := iter.Item()
+			if item == nil {
+				continue
+			}
+			if item.endTxNum > threshold {
+				break
+			}
+			outs = append(outs, item)
+			if item.decompressor != nil {
+				*pathsOut = append(*pathsOut, item.decompressor.FilePath())
+			}
+			if item.index != nil {
+				*pathsOut = append(*pathsOut, item.index.FilePath())
+			}
+		}
+		return outs
+	}
+
+	paths := make([]string, 0, h.dirtyFiles.Len()*2)
+	histOuts := collect(h.dirtyFiles, &paths)
+	iiOuts := collect(h.InvertedIndex.dirtyFiles, &paths)
+	if len(histOuts) == 0 && len(iiOuts) == 0 {
+		return nil
+	}
+
+	if len(histOuts) > 0 {
+		deleteMergeFile(h.dirtyFiles, histOuts, h.FilenameBase, a.logger)
+	}
+	if len(iiOuts) > 0 {
+		deleteMergeFile(h.InvertedIndex.dirtyFiles, iiOuts, h.InvertedIndex.FilenameBase, a.logger)
+	}
+	a.recalcVisibleFiles()
+	return paths
+}
+
 func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }

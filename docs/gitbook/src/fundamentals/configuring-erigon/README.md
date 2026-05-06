@@ -87,6 +87,8 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](../../interacting-with-erigon/eth.md#eth_getproof).
   * Default: `false`
+* `--prune.commitment-history.distance.blocks value`: Bounds commitment-history snapshot retention to the latest `N` blocks. Requires `--prune.include-commitment-history` and must be `≤ --prune.distance`. May be tightened at runtime (extra files are expired on the next prune cycle); widening requires resync. `0` keeps everything (default).
+  * Default: `0`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
 * `--snap.stop`: Stops generating new snapshots.
@@ -627,6 +629,7 @@ GLOBAL OPTIONS:
                                                                                                                                  archive: Keep the entire state history and all blocks,
                                                                                                                                  minimal: Keep only latest state (default: "full")
    --prune.include-commitment-history, --experimental.commitment-history, --prune.experimental.include-commitment-history  Enables blazing fast eth_getProof for executed block (default: false)
+   --prune.commitment-history.distance.blocks value                                                                        Keep commitment history for the latest N blocks (requires --prune.include-commitment-history; must be ≤ --prune.distance; default: everything) (default: 0)
    --fcu.timeout value                                                                                                     FCU timeout before it switches to being process async (use 0 to disable) (default: 1s)
    --fcu.background.prune                                                                                                  Enables background pruning post fcu (default: true)
    --batchSize value                                                                                                       Batch size for the execution stage (default: "512M")

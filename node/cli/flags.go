@@ -254,6 +254,23 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.Prune = mode
 
+	// Commitment history is unusable without the underlying state history that
+	// eth_getProof reads from, so reject retention windows wider than --prune.distance.
+	if cfg.KeepExecutionProofs {
+		d, ok := cfg.Prune.History.(prune.Distance)
+		if !ok {
+			utils.Fatalf("internal: unexpected prune.History type %T", cfg.Prune.History)
+		}
+		effRegular := uint64(d)
+		effCommit := cfg.Sync.EffectiveCommitmentRetention()
+		if effCommit > effRegular {
+			utils.Fatalf(
+				"--prune.commitment-history.distance.blocks=%d cannot exceed --prune.distance=%d. "+
+					"Lower commitment retention to ≤%d, or widen state-history retention via --prune.mode=archive (or larger --prune.distance).",
+				cfg.KeepExecutionProofsBlocks, effRegular, effRegular)
+		}
+	}
+
 	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
 		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)

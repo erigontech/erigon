@@ -271,6 +271,8 @@ const (
 var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
+	// CommitmentLayoutBlocksKey persists --prune.commitment-history.distance.blocks; absent or 0 = unbounded.
+	CommitmentLayoutBlocksKey = []byte("CommitmentLayoutBlocks")
 
 	PruneTypeOlder = []byte("older")
 	PruneHistory   = []byte("pruneHistory")
