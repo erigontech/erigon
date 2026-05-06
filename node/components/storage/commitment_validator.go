@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -157,4 +158,68 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		v.Inventory.RegisterStepBlockBoundary(toStep, blockNum)
 	}
 	return nil
+}
+
+// seedLatestCommitmentBinding finds the highest commitment-domain
+// step in the inventory and runs CommitmentDomainValidator on it
+// directly to register a (step, block) binding. Called once after
+// bootstrap populates the inventory.
+//
+// Bootstrap files start at LifecycleAdvertisable directly (back-
+// compat: visible-in-aggregator implies fully validated by previous
+// runs), so they bypass the lifecycle's per-step batch validation
+// and CommitmentDomainValidator never fires on them. Without a
+// binding registered, the block-step wait gate in
+// BuildOnBatchValidation blocks ALL block files indefinitely. This
+// helper closes that loop by registering the latest bootstrap
+// commitment binding directly.
+//
+// On error or empty inventory, no binding is registered — block
+// files keep waiting until a commitment file goes through the
+// lifecycle (e.g. post-tip retire produces one).
+func seedLatestCommitmentBinding(ctx context.Context, inv *snapshot.Inventory, v CommitmentDomainValidator, logger log.Logger) {
+	if inv == nil {
+		return
+	}
+	commitmentFiles := inv.AllDomainFiles(snapshot.DomainCommitment)
+	if len(commitmentFiles) == 0 {
+		if logger != nil {
+			logger.Debug("[storage] no bootstrap commitment files; block-files will wait until lifecycle produces one")
+		}
+		return
+	}
+
+	// Find the entry with the highest ToStep — its (step, block)
+	// binding covers all blocks at or below.
+	var latest *snapshot.FileEntry
+	for _, e := range commitmentFiles {
+		if e == nil || e.ToStep == 0 {
+			continue
+		}
+		if latest == nil || e.ToStep > latest.ToStep {
+			latest = e
+		}
+	}
+	if latest == nil {
+		return
+	}
+
+	files := []*snapshot.FileEntry{latest}
+	if err := v.ValidateStep(ctx, files); err != nil {
+		// Bootstrap files might fail validation for various reasons
+		// (file format edge cases, missing block-reader entries for
+		// older snapshots, etc.). The lifecycle path's normal flow
+		// will eventually populate a binding from a fresh commitment
+		// file produced by retire post-tip. Logged at Warn so
+		// operators can investigate persistent failures.
+		if logger != nil {
+			logger.Warn("[storage] failed to seed bootstrap commitment binding",
+				"name", latest.Name, "step", latest.ToStep, "err", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Info("[storage] seeded bootstrap commitment binding",
+			"name", latest.Name, "toStep", latest.ToStep)
+	}
 }

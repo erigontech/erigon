@@ -413,6 +413,37 @@ func (p *Provider) Initialize(deps Deps) error {
 				addBootstrapFile(fullpath)
 			}
 		}
+
+		// Populate the (step, block) binding from the latest bootstrap
+		// commitment file. Bootstrap files start at LifecycleAdvertisable
+		// directly (back-compat: visible-in-aggregator implies fully
+		// validated by previous runs), so they bypass the lifecycle's
+		// per-step batch validation — meaning CommitmentDomainValidator
+		// never fires on them and no bindings get registered. Without a
+		// binding, the block-step wait gate in BuildOnBatchValidation
+		// blocks ALL block files indefinitely (they wait for a binding
+		// that's never going to materialise via the lifecycle path).
+		//
+		// We register a binding for the latest commitment file
+		// directly. BlockToStep returns the smallest covering boundary,
+		// so a single binding for the latest commitment step covers
+		// every block range below it. Block files arriving via
+		// discoverNewFiles can then validate immediately once their
+		// step-siblings are present.
+		//
+		// Subsequent commitment files produced by post-tip retire go
+		// through the lifecycle normally (not via bootstrap) and
+		// CommitmentDomainValidator registers their bindings as part of
+		// the per-step batch validation — incrementally raising the
+		// high-water mark.
+		if p.ChainDB != nil && p.BlockReader != nil {
+			seedLatestCommitmentBinding(ctx, deps.Inventory,
+				CommitmentDomainValidator{
+					DB:          p.ChainDB,
+					BlockReader: p.BlockReader,
+					Inventory:   deps.Inventory,
+				}, logger)
+		}
 	}
 
 	if deps.Inventory != nil && config.Snapshot.LifecycleDrivenByStorage {
