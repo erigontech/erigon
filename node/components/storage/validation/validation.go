@@ -67,10 +67,14 @@ type Validator interface {
 // allowed to be called multiple times — validators that need to
 // stream the content independently can do so without coordinating.
 //
-// A nil ContentSource is permitted when no validator in the chain
-// needs bytes. Validators that DO need bytes return a structured
-// error if Open returns nil — the caller's bug, not a validation
-// failure.
+// Caller contract: validators that don't need bytes accept a nil
+// ContentSource argument. Validators that DO need bytes must guard
+// for the nil-interface case (`if content == nil`) and return a
+// structured error — calling .Open() on a nil interface panics, so
+// the validator must reject before reaching that call site. A nil
+// ContentSource at a byte-needing validator is the caller's bug
+// (handler wired without a content resolver), not a validation
+// failure of the file.
 type ContentSource interface {
 	Open() (io.ReadCloser, error)
 }

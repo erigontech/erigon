@@ -70,7 +70,7 @@ var (
 	}
 )
 
-// doSnapshotDelegate is the action body for `erigon snapshot delegate`.
+// doSnapshotDelegate is the action body for `erigon snapshots delegate`.
 // Steps:
 //  1. Load operator private key from --signer-key (hex).
 //  2. Parse target ENR; extract the audience secp256k1 pubkey.
