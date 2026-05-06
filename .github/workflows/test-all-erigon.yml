@@ -15,6 +15,16 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-15
+          - windows-2025
+        include:
+          # eest_blockchain tests take ~1190s on the GitHub-hosted windows-2025
+          # runner (right at the 20m limit). Give Windows extra headroom to avoid
+          # marginal timeouts while keeping Linux/macOS at the tighter 20m.
+          - os: windows-2025
+            test_timeout: 30m
+            skip_execution_tests: 'true'
+          - os: macos-15
+            skip_execution_tests: 'true'
     runs-on: ${{ matrix.os }}
 
     steps:
