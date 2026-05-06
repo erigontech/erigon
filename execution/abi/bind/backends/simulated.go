@@ -295,8 +295,12 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 		return nil, err
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block, commitmentHistoryEnabled)
 	if err != nil {
 		panic(err)
 	}

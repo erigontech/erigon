@@ -316,7 +316,7 @@ func TestGetBlockReceipts(t *testing.T) {
 		hashes = append(hashes, block.Hash())
 		// If known, encode and queue for response packet
 
-		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block)
+		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block, false)
 		require.NoError(t, err)
 		encoded, err := rlp.EncodeToBytes(r)
 		require.NoError(t, err)

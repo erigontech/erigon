@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
@@ -63,8 +62,6 @@ type Generator struct {
 
 	commitmentReplay *rpchelper.CommitmentReplay
 	filters          *rpchelper.Filters
-
-	_commitmentHistoryEnabled atomic.Pointer[bool]
 }
 
 type ReceiptEnv struct {
@@ -118,20 +115,6 @@ func NewGenerator(dirs datadir.Dirs, blockReader services.FullBlockReader, engin
 		commitmentReplay: rpchelper.NewCommitmentReplay(dirs, txNumReader, log.Root()),
 		filters:          f,
 	}
-}
-
-func (g *Generator) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
-	if p := g._commitmentHistoryEnabled.Load(); p != nil {
-		return *p, nil
-	}
-	enabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
-	if err != nil {
-		return false, err
-	}
-	if ok {
-		g._commitmentHistoryEnabled.Store(&enabled)
-	}
-	return enabled, nil
 }
 
 func (g *Generator) LogStats() {
@@ -466,7 +449,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	return receipt, nil
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (_ types.Receipts, err error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, commitmentHistoryEnabled bool) (_ types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -499,13 +482,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 
-	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
-	var commitmentHistory bool
-	commitmentHistory, err = g.commitmentHistoryEnabled(tx)
-	if err != nil {
-		return nil, err
-	}
-	calculatePostState := (commitmentHistory || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
+	calculatePostState := (commitmentHistoryEnabled || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
 	// we must skip persistent receipts and re-calculate
@@ -564,7 +541,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 
 		var stateWriter state.StateWriter
-		if commitmentHistory {
+		if commitmentHistoryEnabled {
 			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
 			if err != nil {
 				return nil, err
@@ -623,7 +600,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			}
 
 			var stateRoot []byte
-			if commitmentHistory {
+			if commitmentHistoryEnabled {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
 				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
 				if err != nil {
@@ -654,7 +631,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 
 	// When assertions are enabled, receipts are *always* computed (i.e. receipt cache V2 is skipped)
 	// Hence, we need commitment history to correctly compute the `root` field for pre-Byzantium receipts
-	if dbg.AssertEnabled && (commitmentHistory || cfg.IsByzantium(blockNum)) {
+	if dbg.AssertEnabled && (commitmentHistoryEnabled || cfg.IsByzantium(blockNum)) {
 		computedReceiptsRoot := types.DeriveSha(receipts)
 		blockReceiptsRoot := block.Header().ReceiptHash
 		if computedReceiptsRoot != blockReceiptsRoot {

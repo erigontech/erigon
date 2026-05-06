@@ -66,7 +66,11 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 		return nil, err
 	}
 
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block)
+	commitmentHistoryEnabled, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, commitmentHistoryEnabled)
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {

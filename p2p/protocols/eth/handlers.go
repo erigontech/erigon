@@ -223,7 +223,7 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 }
 
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, commitmentHistoryEnabled bool) (types.Receipts, error)
 	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
 }
 
@@ -372,6 +372,11 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		pendingIndex = cached.PendingIndex
 	}
 
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
+	if err != nil {
+		return nil, false, err
+	}
+
 	for lookups := pendingIndex; lookups < len(query); lookups++ {
 		hash := query[lookups]
 		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
@@ -390,7 +395,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, false, nil
 		}
 
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, commitmentHistoryEnabled)
 		if err != nil {
 			return nil, false, err
 		}
