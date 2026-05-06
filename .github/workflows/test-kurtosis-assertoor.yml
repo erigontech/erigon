@@ -21,7 +21,7 @@ on:
 
 jobs:
   assertoor_test:
-    name: assertoor_${{ matrix.suite }}_test
+    name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
@@ -33,15 +33,32 @@ jobs:
         # The caps below give ~1.5–2x of the happy path so real regressions still
         # pass but pathological hangs (e.g. a node that silently stops proposing)
         # fail in reasonable time instead of burning hours.
+        #
+        # Each suite runs twice — once with serial exec
+        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so divergence
+        # is caught on the PR. Matrix entries spawn separate hosted runners
+        # and run concurrently — wall-clock unchanged, runner-minutes doubled.
         include:
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 50
+            exec_mode: serial
+          - suite: regular
+            package_args: .github/workflows/kurtosis/regular-assertoor.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 50
+            exec_mode: parallel
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
             test_timeout_minutes: 45
+            exec_mode: serial
+          - suite: pectra
+            package_args: .github/workflows/kurtosis/pectra.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 45
+            exec_mode: parallel
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
             # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
@@ -49,11 +66,24 @@ jobs:
             # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
             ethereum_package_branch: "6.1.0"
             test_timeout_minutes: 20
+            exec_mode: serial
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: parallel
           - suite: caplin-minimal
             package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
+            exec_mode: serial
+          - suite: caplin-minimal
+            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
+            ethereum_package_url: "github.com/erigontech/ethereum-package"
+            ethereum_package_branch: "erigontech/fix-caplin-launcher"
+            test_timeout_minutes: 20
+            exec_mode: parallel
 
     steps:
       - name: Fast checkout git repository
@@ -108,11 +138,24 @@ jobs:
         with:
           context: .
           load: true
-          tags: test/erigon:current
+          tags: test/erigon:current-base
           build-args: |
             BINARIES=erigon caplin
           cache-from: type=gha,scope=kurtosis-erigon-build
           cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      - name: Bake exec_mode env into the runtime image
+        # Kurtosis launches `test/erigon:current` as the EL participant.
+        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the cached
+        # base image so the matrix entries differ in exec mode without
+        # invalidating the BuildKit layer cache.
+        env:
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+        run: |
+          docker build -t test/erigon:current - <<EOF
+          FROM test/erigon:current-base
+          ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}
+          EOF
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
         # On branch push, tests already passed in the merge queue. This run exists
@@ -126,7 +169,7 @@ jobs:
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
@@ -146,8 +189,8 @@ jobs:
         continue-on-error: true
         run: |
           set -eu
-          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
-          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}"
           kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
       - name: Upload Kurtosis enclave dump
@@ -155,8 +198,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
+          name: kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}
           retention-days: 7
           if-no-files-found: warn
 
