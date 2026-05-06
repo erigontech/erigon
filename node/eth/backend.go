@@ -703,6 +703,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
+
+	// Start the eth/71 BAL downloader (EIP-8159) only on chains that activate
+	// EIP-7928. collectMissingBALs already short-circuits on the first pre-
+	// Amsterdam header (BlockAccessListHash==nil), but skipping the whole
+	// goroutine on chains that never reach Amsterdam is cheaper and clearer.
+	if chainConfig.AmsterdamTime != nil {
+		// Always-on once gated, negotiation-driven: if no peer advertises eth/71
+		// this is a silent no-op per scan pass. When eth/71 peers connect, the
+		// downloader backfills missing BALs into rawdb so subsequent stage_exec
+		// runs can skip local BAL regeneration.
+		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
+	}
+
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}

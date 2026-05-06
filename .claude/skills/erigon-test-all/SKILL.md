@@ -7,15 +7,18 @@ description: Run the full Erigon test suite locally using GOGC=80 make test-all.
 
 Runs the complete test suite with 60-minute timeout and coverage output. Takes ~30 minutes.
 
-## Prerequisite: Update Submodules
+## Prerequisite: Test fixtures
 
-Before running `make test-all`, always sync git submodules:
+`make test-all` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+
+Two side prerequisites still apply:
 
 ```bash
-git submodule update --init --recursive --force
+git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
 ```
 
-Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon.yml`); locally you must do it yourself.
+The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -76,7 +79,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 
