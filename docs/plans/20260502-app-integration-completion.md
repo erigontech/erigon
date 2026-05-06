@@ -87,6 +87,27 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
   - **Item 4 — Fast-start fixture.** Existing hoodi datadirs
     serve as fixtures.
 
+## Known gap (follow-up)
+
+  - **`.torrent`-on-retire wiring.** The re-publish-on-retire
+    wire landed in `c724fa2a96` regenerates chain.toml on every
+    OnFilesChange, but `GenerateChainToml` scans `.torrent`
+    files in snap-dir; post-tip retire output doesn't have
+    `.torrent` files generated synchronously, so chain.toml
+    doesn't grow even though the wire fires. Without this
+    closing, the V2 architectural exec-reduction advantage isn't
+    visible in mainnet measurement.
+
+    Fix: ensure `downloaderClient.Seed(paths)` synchronously
+    creates `.torrent` files for the named paths before
+    OnFilesChange's chain.toml regenerate runs, OR have retire
+    itself produce the `.torrent` alongside the `.seg`/`.kv`.
+    Either way the gap is downstream of OnFilesChange and not
+    a redesign of the wire itself.
+
+    Estimated effort: small. Sequencing: small follow-up PR
+    after this one merges.
+
 ## What follows up in subsequent PRs
 
   - **Mainnet measurement** ✅ done (2026-05-05). Bootstrap

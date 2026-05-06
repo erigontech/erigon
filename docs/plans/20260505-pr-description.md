@@ -283,6 +283,21 @@ New plan docs under `docs/plans/`:
   vs the publisher came purely from a warm swarm + populated
   peer, not from a smaller manifest.
 
+  **Re-publish-on-retire wire (commit `c724fa2a96`)**: added so
+  the publisher's chain.toml reflects fresh retire output. Wire
+  fires correctly (chain.toml mtime updates on every
+  OnFilesChange), but the next link in the pipeline is
+  incomplete: `.torrent` files aren't generated synchronously
+  for post-tip retire output, so even after the wire calls
+  `PublishLocalChainToml`, `GenerateChainToml` doesn't see the
+  new `.seg`/`.kv` files (it scans `.torrent` files in snap-dir).
+  Result: chain.toml stays at the post-DownloadSnapshots size
+  (~7389 entries on mainnet minimal). Quantifying the V2
+  exec-reduction advantage needs the `.torrent`-on-retire wiring
+  closed; that's deferred to a follow-up. The wire here is
+  correct and idempotent — lands as infrastructure, the visible
+  advantage emerges once the `.torrent` gap is closed.
+
   Hoodi reference numbers from
   `docs/plans/20260502-min-time-to-tip-target.md`:
   V2 post-§5e 10m25s, §5c rerun 13m17s.
