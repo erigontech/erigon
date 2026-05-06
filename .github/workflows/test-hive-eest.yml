@@ -4,9 +4,6 @@ on:
   workflow_call:
   workflow_dispatch:
 
-env:
-  EEST_VERSION: 'v5.4.0'
-
 concurrency:
   # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
@@ -38,29 +35,34 @@ jobs:
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
             pool-size: 0
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
             pool-size: 0
+            fixtures-tarball: eest_stable
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
             pool-size: 24
-            fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.7.0/fixtures_bal.tar.gz"
-            extra-hive-flags: "--sim.buildarg branch=devnets/bal/4 --sim.loglevel=3 --client.checktimelimit=300s"
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
             # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
             # transitioning to bal-devnet-4
@@ -87,6 +89,7 @@ jobs:
           sparse-checkout: |
             go.mod
             .github/workflows/hive-versions.json
+            test-fixtures.json
           sparse-checkout-cone-mode: false
           path: erigon-src
 
@@ -159,17 +162,19 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
+          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-src/test-fixtures.json)
+          branch=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].branch // empty' erigon-src/test-fixtures.json)
+          branch_arg=""
+          if [ -n "$branch" ]; then
+            branch_arg="--sim.buildarg branch=$branch"
+          fi
           cd hive
           docker ps
-          fixtures_url="${{ matrix.fixtures-url }}"
-          if [ -z "$fixtures_url" ]; then
-            fixtures_url="https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz"
-          fi
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
