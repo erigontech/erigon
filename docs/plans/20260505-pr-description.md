@@ -283,20 +283,50 @@ New plan docs under `docs/plans/`:
   vs the publisher came purely from a warm swarm + populated
   peer, not from a smaller manifest.
 
-  **Re-publish-on-retire wire (commit `c724fa2a96`)**: added so
-  the publisher's chain.toml reflects fresh retire output. Wire
-  fires correctly (chain.toml mtime updates on every
-  OnFilesChange), but the next link in the pipeline is
-  incomplete: `.torrent` files aren't generated synchronously
-  for post-tip retire output, so even after the wire calls
-  `PublishLocalChainToml`, `GenerateChainToml` doesn't see the
-  new `.seg`/`.kv` files (it scans `.torrent` files in snap-dir).
-  Result: chain.toml stays at the post-DownloadSnapshots size
-  (~7389 entries on mainnet minimal). Quantifying the V2
-  exec-reduction advantage needs the `.torrent`-on-retire wiring
-  closed; that's deferred to a follow-up. The wire here is
-  correct and idempotent — lands as infrastructure, the visible
-  advantage emerges once the `.torrent` gap is closed.
+  **Re-publish + Seed wires (commits `c724fa2a96`, `2d1a88060b`,
+  `c373dd07b3`)**: added so the publisher's chain.toml reflects
+  fresh retire output via the lifecycle path. After multiple
+  iterations the wires landed are:
+
+    1. **Re-publish-on-retire** (`c724fa2a96`): chain.toml
+       regenerates on every OnFilesChange (frozen + deleted
+       paths). Idempotent.
+    2. **Bridge subscriber** (`2d1a88060b`): subscribes to
+       inventory ChangeSets; when files reach
+       LifecycleAdvertisable, calls `Seed` (builds `.torrent` +
+       adds to torrent client) then re-publishes chain.toml.
+    3. **Bootstrap binding seeder** (`c373dd07b3`): registers a
+       `(step, block)` binding for the latest commitment file in
+       bootstrap inventory so the block-step wait gate can
+       release.
+
+  **What's still gating the V2 architectural advantage**: on a
+  fresh publisher datadir, two subtle paths aren't yet flowing
+  through the lifecycle, so the bridge subscriber doesn't fire:
+
+    - Bootstrap commitment files don't exist on a fresh datadir,
+      so the binding seeder has nothing to seed.
+    - `discoverNewFiles` only scans the top-level snap-dir;
+      state files in `domain/` / `history/` / `accessor/`
+      subdirs aren't picked up by the lifecycle, so commitment
+      files never go through the per-step batch hook either.
+
+  Result: the LIFECYCLE path doesn't currently complete the chain
+  to LifecycleAdvertisable on a fresh publisher, but **retire's
+  old `seeder.Seed(ctx, mergedFileNames)` path still fires and
+  the chain.toml does grow via that route** (publisher 5 mainnet
+  run: 7389 → 7392 entries during catch-up to tip). So the
+  publisher still ends up with a slightly fresher manifest than
+  preverified-only, just via the legacy code path rather than the
+  shiny new lifecycle.
+
+  The wires landed are correct + idempotent + non-regressive.
+  The full lifecycle-driven V2 exec-reduction advantage emerges
+  once the lifecycle covers state files (a separate follow-up
+  PR, not in scope here). Today's wires sit dormant for fresh
+  publishers; they activate once `discoverNewFiles` sees state
+  files, OR when retire produces a fresh commitment that the
+  bootstrap seeder can pick up on subsequent restart.
 
   Hoodi reference numbers from
   `docs/plans/20260502-min-time-to-tip-target.md`:

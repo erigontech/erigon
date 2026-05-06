@@ -87,26 +87,33 @@ Step+minimum data model: `docs/plans/20260504-step-and-minimum-unified.md`.
   - **Item 4 — Fast-start fixture.** Existing hoodi datadirs
     serve as fixtures.
 
-## Known gap (follow-up)
+## Known gaps (follow-up)
 
-  - **`.torrent`-on-retire wiring.** The re-publish-on-retire
-    wire landed in `c724fa2a96` regenerates chain.toml on every
-    OnFilesChange, but `GenerateChainToml` scans `.torrent`
-    files in snap-dir; post-tip retire output doesn't have
-    `.torrent` files generated synchronously, so chain.toml
-    doesn't grow even though the wire fires. Without this
-    closing, the V2 architectural exec-reduction advantage isn't
-    visible in mainnet measurement.
+  - **Lifecycle coverage of state files.** `discoverNewFiles`
+    in `lifecycle/driver.go` only scans the top-level snap-dir;
+    state files in `domain/`, `history/`, `accessor/` subdirs
+    aren't picked up. Effect: commitment files never go through
+    the per-step batch hook, so `CommitmentDomainValidator`
+    never fires on bootstrap-driven publishers, no
+    `(step, block)` bindings get registered via the lifecycle,
+    and the block-step wait gate keeps block files at
+    LifecycleIndexed indefinitely. Mainnet publisher 5 run
+    confirmed: 189 files reached Indexed, 0 reached Advertisable.
 
-    Fix: ensure `downloaderClient.Seed(paths)` synchronously
-    creates `.torrent` files for the named paths before
-    OnFilesChange's chain.toml regenerate runs, OR have retire
-    itself produce the `.torrent` alongside the `.seg`/`.kv`.
-    Either way the gap is downstream of OnFilesChange and not
-    a redesign of the wire itself.
+    The bridge subscriber + re-publish wires landed in
+    `2d1a88060b` and `c724fa2a96` are correct and ready — they
+    just need the lifecycle to cover state files. Fix: extend
+    `discoverNewFiles` to walk the state subdirs OR have wire B
+    (`OnFilesChange`) plumb state-file events from the
+    Aggregator. Either approach surfaces commitment files
+    through the lifecycle, the binding gets registered, and the
+    full chain (lifecycle → AdvanceTo Advertisable → bridge →
+    Seed → chain.toml regenerate) flows end-to-end.
 
-    Estimated effort: small. Sequencing: small follow-up PR
-    after this one merges.
+    Until then, retire's legacy `seeder.Seed(ctx, mergedFileNames)`
+    path keeps the chain.toml growing as block files retire
+    (publisher 5 mainnet: 7389 → 7392 entries). The fresher
+    chain.toml is via the legacy path, not the lifecycle path.
 
 ## What follows up in subsequent PRs
 
