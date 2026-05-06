@@ -163,3 +163,24 @@ func (l *LRU[V]) SetByHash(hash uint64, value V) {
 func (l *LRU[V]) ContainsByHash(hash uint64) bool {
 	return l.cache.Contains(hash)
 }
+
+// Range iterates over every (hash, value) pair without affecting LRU
+// recency (uses Peek under the hood). Iteration order is unspecified.
+// Return false from fn to stop early.
+//
+// The original byte-key is not recoverable — Set hashes-and-discards.
+// Use the hash itself as the identity in callers that need cross-cache
+// comparisons; same byte-key always maps to the same hash, so equality
+// of (hash, value) sets is equivalent to equality of (key, value) sets
+// modulo collision (vanishingly unlikely at typical working-set sizes).
+func (l *LRU[V]) Range(fn func(hash uint64, v V) bool) {
+	for _, h := range l.cache.Keys() {
+		v, ok := l.cache.Peek(h)
+		if !ok {
+			continue
+		}
+		if !fn(h, v) {
+			return
+		}
+	}
+}

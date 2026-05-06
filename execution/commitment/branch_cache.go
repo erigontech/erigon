@@ -137,6 +137,15 @@ type BranchCache struct {
 	rootHits, rootMisses atomic.Uint64
 	tailHits, tailMisses atomic.Uint64
 	bytesServed          atomic.Uint64
+
+	// Divergence counter — incremented by RecordDivergence when a caller
+	// detects that a cache-served value disagrees with the canonical
+	// store. Driven by branchFromCacheOrDB's verify path (gated by
+	// BRANCH_CACHE_VERIFY env). Helps localise correctness regressions
+	// in cross-block-cache investigations: a non-zero count is a
+	// load-bearing signal that the cache lifecycle is broken before any
+	// trie root mismatch surfaces downstream.
+	verifyDivergences atomic.Uint64
 }
 
 type branchCacheEntry struct {
@@ -332,6 +341,59 @@ func (c *BranchCache) Clear() {
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
+	c.verifyDivergences.Store(0)
+}
+
+// RecordDivergence increments the divergence counter. Called by
+// branchFromCacheOrDB's verify path when a cache-served value disagrees
+// with a parallel ctx.Branch read.
+func (c *BranchCache) RecordDivergence() {
+	c.verifyDivergences.Add(1)
+}
+
+// Fingerprint returns a deterministic hash of all current entries (root +
+// tail). Two caches with the same set of (key, data) pairs produce the
+// same fingerprint regardless of insertion order. Use for cross-run
+// divergence localisation: emit per-block in two builds, diff the logs to
+// see exactly which block their caches first differ.
+//
+// Mixes (key-hash, data-hash) pairs because the LRU stores by hash and
+// discards the original key bytes on insert. Two entries with the same
+// original key produce the same hash, so the fingerprint is still
+// equality-equivalent to the (key, data) set modulo hash collision.
+//
+// Cheap: one FNV-1a fold over data per entry. Not cryptographic.
+func (c *BranchCache) Fingerprint() uint64 {
+	const fnvOffset uint64 = 14695981039346656037
+	const fnvPrime uint64 = 1099511628211
+	dataHash := func(data []byte) uint64 {
+		h := fnvOffset
+		for _, b := range data {
+			h ^= uint64(b)
+			h *= fnvPrime
+		}
+		return h
+	}
+	mix := func(keyHash uint64, data []byte) uint64 {
+		// Combine key and data hashes into one entry hash; xor-fold across
+		// entries below so the per-cache result is insertion-order
+		// independent.
+		return keyHash ^ (dataHash(data) * fnvPrime)
+	}
+	var fp uint64
+	if e := c.root.Load(); e != nil && len(e.data) > 0 {
+		// Pinned-root key is the constant 1-byte prefix 0x00; use a
+		// distinct sentinel hash so the root contribution can't collide
+		// with a tail entry hashed to zero.
+		fp ^= mix(0xdeadbeefcafe0001, e.data)
+	}
+	c.tail.Range(func(h uint64, e *branchCacheEntry) bool {
+		if len(e.data) > 0 {
+			fp ^= mix(h, e.data)
+		}
+		return true
+	})
+	return fp
 }
 
 // Stats returns a one-line summary of root-tier and tail-tier hit/miss
@@ -349,10 +411,20 @@ func (c *BranchCache) Stats() string {
 		return 100.0 * float64(hit) / float64(total)
 	}
 	return fmt.Sprintf(
-		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) | served %.1f MiB | tail entries=%d",
+		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) | served %.1f MiB | tail entries=%d | divergences=%d",
 		rh, rm, pct(rh, rm),
 		th, tm, pct(th, tm),
 		float64(bb)/1024/1024,
 		c.tail.Len(),
+		c.verifyDivergences.Load(),
 	)
+}
+
+// VerifyDivergences returns the number of cache-vs-canonical divergences
+// recorded since the last Clear. Non-zero indicates a cache lifecycle
+// invariant has been violated (a cached entry no longer matches the
+// canonical store) — read from outside to assert correctness in tests
+// and benches.
+func (c *BranchCache) VerifyDivergences() uint64 {
+	return c.verifyDivergences.Load()
 }
