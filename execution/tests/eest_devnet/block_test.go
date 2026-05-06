@@ -44,7 +44,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_devnet")
+	dir := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_devnet", "fixtures", "blockchain_tests")
 	bt := new(testutil.TestMatcher)
 	// to run only tests for 1 eip do:
 	//bt.Whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)

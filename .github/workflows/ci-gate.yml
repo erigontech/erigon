@@ -79,9 +79,13 @@ jobs:
     secrets: inherit
 
   sonar:
-    # SONAR_TOKEN is a repo secret unavailable to fork PRs, so skip the scan
-    # for external contributions to avoid a guaranteed failure in ci-gate.
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    # SONAR_TOKEN is a repo secret unavailable to fork PRs and Dependabot PRs
+    # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
+    # so skip the scan for those to avoid a guaranteed failure in ci-gate.
+    if: |
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]') ||
+      github.event_name != 'pull_request'
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
