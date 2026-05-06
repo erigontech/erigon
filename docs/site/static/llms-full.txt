@@ -523,7 +523,7 @@ To verify the integrity and ensure your downloaded Erigon file hasn't been corru
 Next, use the `sha256sum` command followed by the name of your downloaded binary (e.g., `erigon_v3.x.x_linux_amd64.tar.gz`).
 
 ```sh
-sha256sum 
+sha256sum <DOWNLOADED_FILE_NAME>
 ```
 
 Example with a `tar.gz` file:
@@ -1199,7 +1199,7 @@ erigon --chain=gnosis --externalcl
 If your CL client is on a different device, add the following flags:
 
 * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-* `--authrpc.vhosts ` where `` is the source host or the appropriate hostname that your CL client is using.
+* `--authrpc.vhosts <CL_host>` where `<CL_host>` is the source host or the appropriate hostname that your CL client is using.
 
 ### 2. Install Lighthouse
 
@@ -1271,7 +1271,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
     If your Consensus Layer (CL) client is on a different device, add the following flags:
 
     * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-    * `--authrpc.vhosts ` where \ is the source host or the appropriate hostname that your CL client is using.
+    * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
 2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
 
     Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
@@ -4037,7 +4037,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -4150,7 +4150,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -7157,11 +7157,11 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
     Use the Erigon CLI command to verify that your registration was successful:
 ```bash
-    erigon shutter-validator-reg-check --chain  --el-url  --validator-info-file 
+    erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
     ```
 * `--chain` valid values are `gnosis` or `chiado`
     * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
-    * `` is the file generated during registration.
+    * `<VALIDATOR_INFO_JSON>` is the file generated during registration.
 
     for example:
 ```bash
@@ -7493,7 +7493,7 @@ The **`RES`** (Resident) column in `htop` combines the memory used by the applic
 For a more accurate view of Erigon's memory usage, use one of these tools:
 
 * **`vmmap -summary PID`** _(macOS only)_: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
-* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc//smaps`.
+* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
 * **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`. See [Creating a Dashboard](/fundamentals/creating-a-dashboard) for full setup instructions.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.

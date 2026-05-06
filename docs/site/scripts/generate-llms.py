@@ -77,7 +77,8 @@ def _strip_multiline_expr_blocks(text):
         if line.lstrip().startswith("```"):
             if skip_depth == 0:
                 in_fence = not in_fence
-            out.append(line)
+                out.append(line)
+            # else: fence marker is inside a skipped block — discard it
             continue
 
         if in_fence:
@@ -120,9 +121,10 @@ def strip_mdx(text):
     # Pre-pass: strip multi-line JSX component opening/closing tags before
     # line-by-line processing. [^>]* matches newlines (char class, not .), so
     # <Link\n  prop="val"\n> is consumed in one shot without needing DOTALL.
-    # Restricted to PascalCase names so <PLACEHOLDER> tokens in code and prose survive.
-    text = re.sub(r"<[A-Z][a-zA-Z]*[^>]*>", "", text)
-    text = re.sub(r"</[A-Z][a-zA-Z]*>", "", text)
+    # Requires lowercase second letter ([A-Z][a-z]) so that ALL_CAPS placeholders
+    # like <IP>, <PID>, <DOWNLOADED_FILE_NAME> in code fences are NOT stripped.
+    text = re.sub(r"<[A-Z][a-z][a-zA-Z]*[^>]*>", "", text)
+    text = re.sub(r"</[A-Z][a-z][a-zA-Z]*>", "", text)
     # Pre-pass: strip multi-line inline JSX expression blocks that start with {
     # on their own line (e.g. {[...].map(...)}). These contain nested braces that
     # defeat the single-line {0,120} pattern used in the loop below. The brace
