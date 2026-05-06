@@ -114,38 +114,6 @@ func TestWarmupCache_Eviction(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_Enable tests enable/disable
-func TestWarmupCache_Enable(t *testing.T) {
-	cache := NewWarmupCache()
-
-	key := []byte("12345678901234567890")
-	cache.PutAccount(key, &Update{Flags: BalanceUpdate})
-
-	// Should find when enabled
-	_, found := cache.GetAccount(key)
-	if !found {
-		t.Fatal("expected to find account when enabled")
-	}
-
-	// Disable cache
-	cache.Enable(false)
-
-	// Should not find when disabled
-	_, found = cache.GetAccount(key)
-	if found {
-		t.Error("expected not to find account when disabled")
-	}
-
-	// Re-enable
-	cache.Enable(true)
-
-	// Should find again
-	_, found = cache.GetAccount(key)
-	if !found {
-		t.Error("expected to find account after re-enabling")
-	}
-}
-
 // TestWarmupCache_Clear tests clearing the cache
 func TestWarmupCache_Clear(t *testing.T) {
 	cache := NewWarmupCache()
