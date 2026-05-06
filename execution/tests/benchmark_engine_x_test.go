@@ -53,7 +53,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 
 	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
-	engineXDir := filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
+	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 
