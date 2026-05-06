@@ -68,7 +68,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -323,6 +322,7 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
+				&cli.BoolFlag{Name: "only-history", Aliases: []string{"history"}, Usage: "remove only history files (SnapHistory+SnapIdx), not domain data"},
 			},
 			),
 		},
@@ -700,6 +700,7 @@ type DeleteStateSnapshotsArgs struct {
 	DryRun                 bool
 	StepRange              string
 	OnlyDomain             bool
+	OnlyHistory            bool
 	DomainNames            []string
 }
 
@@ -729,6 +730,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
+	} else if args.OnlyHistory {
+		scanDirs = []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors}
 	}
 	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
@@ -1035,6 +1038,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	stepRange := cliCtx.String("step")
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
+	onlyHistory := cliCtx.Bool("only-history")
 	promptUser := true // CLI should always prompt the user
 	return DeleteStateSnapshots(DeleteStateSnapshotsArgs{
 		Dirs:                   dirs,
@@ -1043,6 +1047,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		DryRun:                 dryRun,
 		StepRange:              stepRange,
 		DomainNames:            domainNames,
+		OnlyHistory:            onlyHistory,
 	})
 }
 
@@ -1552,6 +1557,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
 
+	var commitmentHistoryEnabled bool
+	if err := chainDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		commitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		return err
+	}); err != nil {
+		return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+	}
+
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
 		switch chk {
 		case integrity.BlocksTxnID:
@@ -1591,6 +1605,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
 			return integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast)
+		case integrity.ReceiptRootIntegrity:
+			return integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, chainConfig, failFast)
 		case integrity.CommitmentRoot:
 			return integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger)
 		case integrity.CommitmentKvi:
@@ -1600,10 +1616,18 @@ func doIntegrity(cliCtx *cli.Context) error {
 		case integrity.CommitmentKvDeref:
 			return integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger)
 		case integrity.CommitmentHistVal:
+			if !commitmentHistoryEnabled {
+				logger.Info("[integrity] CommitmentHistVal skipped because commitment history is not enabled on this datadir")
+				return nil
+			}
 			scCopy := sc
 			scCopy.SampleRatio /= 100 // it's very slow check
 			return integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger)
 		case integrity.StateRootVerifyByHistory:
+			if !commitmentHistoryEnabled {
+				logger.Info("[integrity] StateRootVerifyByHistory skipped because commitment history is not enabled on this datadir")
+				return nil
+			}
 			to, err := stateProgress(ctx, db, blockReader.TxnumReader())
 			if err != nil {
 				return err
@@ -3171,6 +3195,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
+	blockReader, _ := br.IO()
+	agg.SetFrozenBlocksProvider(blockReader)
+
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -3190,8 +3217,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}); err != nil {
 		return err
 	}
-
-	blockReader, _ := br.IO()
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	if chainConfig.Bor != nil {
@@ -3241,15 +3266,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
 		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
-		if err != nil {
-			return err
-		}
-		maxCollatable, err := services.MaxCollatableTxNum(ctx, tx, blockReader)
-		if err != nil {
-			return err
-		}
-		lastTxNum = min(lastTxNum, maxCollatable)
-		return nil
+		return err
 	}); err != nil {
 		return err
 	}
@@ -3374,7 +3391,7 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

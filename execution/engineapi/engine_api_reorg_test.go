@@ -40,7 +40,14 @@ import (
 )
 
 func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy changer at b2
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
@@ -77,6 +84,8 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 }
 
 func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucceed(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	// Scenario:
 	//   - we were following the tip efficiently and exec-ing 1 block at a time
 	//   - the CL went offline for a some time
@@ -91,19 +100,24 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 	//
 	// Generate a canonical chain of N blocks
 	n := uint64(64)
-	logLvl := log.LvlDebug
 	receiver1 := common.HexToAddress("0x111")
 	receiver2 := common.HexToAddress("0x222")
-	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	canonicalChain := make([]*engineapitester.MockClPayload, n)
-	eatCanonical := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatCanonical, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = n
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatCanonical.Close()
+		require.NoError(t, err)
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical engineapitester.EngineApiTester) {
 		for i := range canonicalChain {
@@ -118,14 +132,19 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 	})
 	// Generate a side chain which goes up to N and executes the same txns until N-1 but at N executes different txns
 	sideChain := make([]*engineapitester.MockClPayload, n)
-	eatSide := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatSide, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = n
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatSide.Close()
+		require.NoError(t, err)
 	})
 	eatSide.Run(t, func(ctx context.Context, t *testing.T, eatSide engineapitester.EngineApiTester) {
 		forkPoint := n - 1
@@ -149,14 +168,19 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 		}
 	})
 	// Sync another EL all the way up to the canonical tip, then give it the side chain tip as a new payload
-	eatSync := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatSync, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = n
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatSync.Close()
+		require.NoError(t, err)
 	})
 	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync engineapitester.EngineApiTester) {
 		for _, payload := range canonicalChain {
@@ -171,14 +195,21 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 }
 
 func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
-	logLvl := log.LvlDebug
-	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	var b2Side *engineapitester.MockClPayload
-	eatSide := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatSide, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatSide.Close()
+		require.NoError(t, err)
 	})
 	eatSide.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// do a simple eth transfer at bn2
@@ -189,11 +220,16 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Side.ExecutionPayload, txn.Hash())
 		require.NoError(t, err)
 	})
-	eatCanonical := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatCanonical, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatCanonical.Close()
+		require.NoError(t, err)
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy a smart contract at bn2
@@ -232,26 +268,33 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 }
 
 func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	// we had an issue where some benchmark tests were doing more than a 32-block reorg backwards
 	// while our MAX_REORG_DEPTH was 96 blocks, however, NewPayload returned ACCEPTED instead of VALID
 	// and caused issues with benchmarkoor
 	// this test captures that by calling NewPayload for a side fork back to block 1 from canonical fork at block 34
-	logLvl := log.LvlDebug
 	canonicalChainLen := 34 // a few blocks > 32
 	maxReorgDepth := uint64(96)
 	receiver1 := common.HexToAddress("0x111")
 	receiver2 := common.HexToAddress("0x222")
-	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	// Generate a side chain which goes up to 1
 	var sideChain *engineapitester.MockClPayload
-	eatSide := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatSide, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatSide.Close()
+		require.NoError(t, err)
 	})
 	eatSide.Run(t, func(ctx context.Context, t *testing.T, eatSide engineapitester.EngineApiTester) {
 		txn, err := eatSide.Transactor.SubmitSimpleTransfer(eatSide.CoinbaseKey, receiver2, big.NewInt(1))
@@ -262,14 +305,19 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 		require.NoError(t, err)
 		sideChain = clPayload
 	})
-	eatCanonical := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatCanonical, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatCanonical.Close()
+		require.NoError(t, err)
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical engineapitester.EngineApiTester) {
 		// build the canonical chain up to canonicalChainLen
@@ -285,5 +333,108 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 		ps, err := eatCanonical.MockCl.InsertNewPayload(ctx, sideChain)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, ps.Status)
+	})
+}
+
+func TestFcuAllowsReorgBackOnCanonicalChainWhenAfterFinalisedHash(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	// as per spec update: https://github.com/ethereum/execution-apis/pull/786
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// deploy changer at b2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b3
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		blockNum, err := eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), blockNum)
+		// unwind back to b2
+		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
+		require.NoError(t, err)
+		// verify canonical head went back
+		blockNum, err = eat.RpcApiClient.BlockNumber()
+		require.NoError(t, err)
+		require.Equal(t, uint64(2), blockNum)
+	})
+}
+
+func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	// as per spec update: https://github.com/ethereum/execution-apis/pull/786
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
+		DataDir:     t.TempDir(),
+		Genesis:     genesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = 2
+		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		// deploy changer at b2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b3
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b4
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b4Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b4Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// change changer at b5
+		txn, err = changer.Change(transactOpts)
+		require.NoError(t, err)
+		b5Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b5Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// unwind back to b2 should return "Too deep reorg" error with code 38006
+		err = eat.MockCl.UpdateForkChoice(ctx, b2Canon)
+		require.Error(t, err)
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, -38006, rpcErr.ErrorCode())
+		require.Equal(t, "Too deep reorg", rpcErr.Error())
 	})
 }

@@ -60,7 +60,7 @@ models:
       - github.com/99designs/gqlgen/graphql.Int32
   Long:
     model:
-      - github.com/99designs/gqlgen/graphql.Uint64
+      - github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/scalar.Uint64
   BigInt:
     model:
       - github.com/99designs/gqlgen/graphql.String
@@ -77,13 +77,17 @@ models:
     model:
       - github.com/99designs/gqlgen/graphql.String
       - github.com/99designs/gqlgen/graphql.Uint64
-#  Block:
-#    fields:
-#      logs:
-#        resolver: true # force a resolver to be generated
-#      ommers:
-#        resolver: true # force a resolver to be generated
-#      transactions:
-#        resolver: true # force a resolver to be generated
+  Block:
+    fields:
+      transactionAt:
+        resolver: true
+      account:
+        resolver: true
+  Transaction:
+    fields:
+      from:
+        resolver: true
+      to:
+        resolver: true
 
 omit_getters: true

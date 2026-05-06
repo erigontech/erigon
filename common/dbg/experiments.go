@@ -99,12 +99,14 @@ var (
 	TraceGas              = EnvBool("TRACE_GAS", false)
 	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
 	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
+	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
@@ -116,7 +118,8 @@ var (
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
 )
 
 func ReadMemStats(m *runtime.MemStats) {
