@@ -120,7 +120,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
-func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
@@ -144,8 +144,8 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
-	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
-	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(recentReceipts)
+	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
+	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
@@ -280,7 +280,7 @@ func (fv *ForkValidator) clear() {
 }
 
 // ClearWithUnwind wipes out current extending fork data.
-func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
+func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()

@@ -37,6 +37,7 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | Monitor Your Node's Health  | Implement comprehensive monitoring using tools like Prometheus and Grafana to track key metrics like disk I/O, CPU load, and sync status in real time. | Essential for proactively identifying performance bottlenecks and stability issues.                         |
 | Enable JSON-RPC Compression | Use the `--http.compression` flag.                                                                                                                     | Reduces network bandwidth usage for RPC requests.                                                           |
 | Tune RPC Batch Concurrency  | Adjust the `--rpc.batch.concurrency` flag.                                                                                                             | Limits the number of parallel database reads to prevent a single batch request from overloading the server. |
+| Harden Public RPC Endpoints | Place a reverse proxy (e.g. Nginx, Caddy) in front of Erigon. Enable rate-limiting, TLS termination, and authentication at the proxy layer. Never bind `--http.addr` to `0.0.0.0` directly on a public interface. | A direct public binding exposes the node to DoS attacks and unrestricted calls that can exhaust resources. |
 
 **4. Maintenance and Development**
 
@@ -53,3 +54,32 @@ These integrated practices focus on maximizing the reliability, efficiency, and 
 | --------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Check Validator Health            | For validator nodes, a daily check of the node's logs and service status is essential. | Confirms that the node is signing attestations and performing its duty. |
 | Maintain a Sufficient ETH Balance | Validators must maintain an adequate ETH balance on their signer address.              | Required to cover transaction fees for checkpoint submissions.          |
+
+**6. Advanced Performance Tricks**
+
+The following shell snippets can provide meaningful performance gains on the right hardware.
+
+**Speed up initial sync** — throttle block execution to leave I/O headroom for snapshot downloads:
+
+```bash
+--sync.loop.block.limit=10000
+```
+
+**Keep the latest state in RAM** — use `vmtouch` to pin the domain files so the OS page cache never evicts them:
+
+```bash
+# Install: apt install vmtouch  (or brew install vmtouch)
+vmtouch -vldt /your/datadir/snapshots/domain
+```
+
+**Reduce random-read pressure on cloud / NAS storage** — disable the random-access hint for snapshot files:
+
+```bash
+export ERIGON_SNAPSHOT_MADV_RND=false
+```
+
+**Reduce database fragmentation** — set a larger page size at first sync (cannot be changed afterwards):
+
+```bash
+--db.pagesize=64kb
+```

@@ -142,6 +142,19 @@ integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,traces
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
 
+## How to remove history snapshots only (keep domain data)
+
+```sh
+# Remove all history files (SnapHistory + SnapIdx + SnapAccessors) without touching domain data (.kv files):
+erigon snapshots rm-state --only-history
+
+# Remove a specific step range of history files only:
+erigon snapshots rm-state --only-history --step=0-900
+
+# Dry-run first to see what would be deleted:
+erigon snapshots rm-state --only-history --step=0-900 --dry-run
+```
+
 ## How to re-gen bor checkpoints
 
 ```sh

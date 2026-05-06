@@ -84,16 +84,17 @@ type Witness struct {
 
 // NewWitness creates an empty witness ready for population.
 func NewWitness(context *types.Header, chain HeaderReader) (*Witness, error) {
+	if chain == nil {
+		return nil, errors.New("header reader is required")
+	}
 	// When building witnesses, retrieve the parent header, which will *always*
 	// be included to act as a trustless pre-root hash container
-	var headers []*types.Header
-	if chain != nil {
-		parent := chain.GetHeader(context.ParentHash, context.Number.Uint64()-1)
-		if parent == nil {
-			return nil, errors.New("failed to retrieve parent header")
-		}
-		headers = append(headers, parent)
+	headers := make([]*types.Header, 0, 1)
+	parent := chain.GetHeader(context.ParentHash, context.Number.Uint64()-1)
+	if parent == nil {
+		return nil, errors.New("failed to retrieve parent header")
 	}
+	headers = append(headers, parent)
 	// Create the wtness with a reconstructed gutted out block
 	return &Witness{
 		context: context,

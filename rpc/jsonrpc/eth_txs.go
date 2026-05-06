@@ -69,7 +69,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		overlayTx := api.filters.WithOverlay(tx)
+		txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +79,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 
-		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+		header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err
 		}

@@ -174,6 +174,7 @@ var stateBuckets = []string{
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
+	kv.TblPruningValsProg,
 	kv.ChangeSets3,
 }
 

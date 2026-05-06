@@ -119,13 +119,13 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 				Slot:              message.Slot,
 				SubcommitteeIndex: subCommitee,
 				BeaconBlockRoot:   message.BeaconBlockRoot,
-				AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+				AggregationBits:   make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize),
 			}
 			return nil
 		}).AnyTimes()
 	pool.EXPECT().
 		GetSyncAggregate(gomock.Any(), gomock.Any()).
-		Return(&cltypes.SyncAggregate{}, nil).
+		Return(cltypes.NewSyncAggregate(), nil).
 		AnyTimes()
 	return pool
 }

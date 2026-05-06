@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 )
 
 type DiagnosticClient struct {

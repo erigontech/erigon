@@ -37,7 +37,7 @@ DOCKER_TAG ?= erigontech/erigon:latest
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 #CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
 #CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
-#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=1 # Disabled by default; enable for MDBX GC profiling
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
@@ -180,13 +180,11 @@ erigon: go-version erigon.cmd
 
 COMMANDS += capcli
 COMMANDS += downloader
-COMMANDS += hack
 COMMANDS += integration
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
-COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
 COMMANDS += caplin
@@ -456,7 +454,7 @@ mocks:
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
-solc:
+solc: $(OPENZEPPELIN)
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
 	@cd txnprovider/shutter && $(MAKE) solc
 
@@ -512,8 +510,13 @@ stringer:
 	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
+## versions-gen:                       regenerate version_schema_gen.go from versions.yaml
+versions-gen:
+	$(GOBUILD) -o $(GOBIN)/bumper ./cmd/bumper
+	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:

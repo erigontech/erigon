@@ -33,84 +33,20 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type BuiltBlock struct {
-	ParentHeaderTime uint64
-	Header           *types.Header
-	Uncles           []*types.Header
-	Txns             types.Transactions
-	Receipts         types.Receipts
-	Withdrawals      []*types.Withdrawal
-	Requests         types.FlatRequests
-	BlockAccessList  types.BlockAccessList
-
-	headerRlpSize         *int
-	withdrawalsRlpSize    *int
-	unclesRlpSize         *int
-	txnsRlpSize           int
-	txnsRlpSizeCalculated int
-}
-
-func (mb *BuiltBlock) AddTxn(txn types.Transaction) {
-	mb.Txns = append(mb.Txns, txn)
-	s := txn.EncodingSize()
-	s += rlp.ListPrefixLen(s)
-	mb.txnsRlpSize += s
-	mb.txnsRlpSizeCalculated++
-}
-
-func (mb *BuiltBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
-	if mb.headerRlpSize == nil {
-		s := mb.Header.EncodingSize()
-		s += rlp.ListPrefixLen(s)
-		mb.headerRlpSize = &s
-	}
-	if mb.withdrawalsRlpSize == nil {
-		var s int
-		if mb.Withdrawals != nil {
-			s = types.EncodingSizeGenericList(mb.Withdrawals)
-			s += rlp.ListPrefixLen(s)
-		}
-		mb.withdrawalsRlpSize = &s
-	}
-	if mb.unclesRlpSize == nil {
-		s := types.EncodingSizeGenericList(mb.Uncles)
-		s += rlp.ListPrefixLen(s)
-		mb.unclesRlpSize = &s
-	}
-
-	blockSize := *mb.headerRlpSize
-	blockSize += *mb.unclesRlpSize
-	blockSize += *mb.withdrawalsRlpSize
-	blockSize += mb.TxnsRlpSize(withAdditional...)
-	blockSize += rlp.ListPrefixLen(blockSize)
-	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
-	return maxSize - blockSize
-}
-
-func (mb *BuiltBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
-	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
-		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
-	}
-	s := mb.txnsRlpSize
-	s += types.EncodingSizeGenericList(withAdditional) // what size would be if we add additional txns
-	s += rlp.ListPrefixLen(s)
-	return s
-}
-
 type BuilderState struct {
 	BuilderConfig   *buildercfg.BuilderConfig
 	PendingResultCh chan *types.Block
 	BuilderResultCh chan *types.BlockWithReceipts
-	BuiltBlock      *BuiltBlock
+	BuiltBlock      *exec.AssembledBlock
 }
 
 func NewBuilderState(cfg *buildercfg.BuilderConfig) BuilderState {
@@ -118,7 +54,7 @@ func NewBuilderState(cfg *buildercfg.BuilderConfig) BuilderState {
 		BuilderConfig:   cfg,
 		PendingResultCh: make(chan *types.Block, 1),
 		BuilderResultCh: make(chan *types.BlockWithReceipts, 1),
-		BuiltBlock:      &BuiltBlock{},
+		BuiltBlock:      &exec.AssembledBlock{},
 	}
 }
 
@@ -153,7 +89,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	const logPrefix = "BuilderCreateBlock"
 
 	current := cfg.builder.BuiltBlock
-	*current = BuiltBlock{}             // always start with a clean state
+	*current = exec.AssembledBlock{}    // always start with a clean state
 	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
 

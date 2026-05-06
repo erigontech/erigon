@@ -229,6 +229,31 @@ func TestEliasFanoSeek(t *testing.T) {
 
 }
 
+// TestSearchUpperReverseNoSolution exercises the n<=0 fast-path in searchUpperReverse.
+// When all upper bits in the sequence exceed hi (guaranteed-miss), searchUpperReverse must
+// return ef.count+1 so the caller loop in searchReverse is skipped entirely.
+// Before the fix it returned ef.count, causing an unnecessary probe of element 0.
+func TestSearchUpperReverseNoSolution(t *testing.T) {
+	// Large values so that upper(0) = 1_000_000>>19 = 1, and any hi derived from
+	// v < 1_000_000 has hi = v>>19 = 0. That guarantees upper(0) > hi -> no solution.
+	vals := []uint64{1_000_000, 2_000_000, 3_000_000}
+	ef := NewEliasFano(uint64(len(vals)), vals[len(vals)-1])
+	for _, v := range vals {
+		ef.AddOffset(v)
+	}
+	ef.Build()
+
+	// hi=0: no element satisfies upper(count-j) <= 0, so searchUpperReverse must
+	// return count+1, not count, to make the caller loop empty.
+	lo := ef.searchUpperReverse(0)
+	require.Equal(t, ef.count+1, lo, "no-solution path must return count+1 to skip caller loop")
+
+	// Confirm via public API: reverse-seek below ef.Min() must find no element.
+	it := ef.ReverseIterator()
+	it.Seek(1)
+	require.False(t, it.HasNext(), "no element <= 1 should be found when EF starts at 1_000_000")
+}
+
 func TestEliasFano(t *testing.T) {
 	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
 	count := uint64(len(offsets))

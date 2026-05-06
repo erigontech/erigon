@@ -9,12 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"sync/atomic"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/scalar"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -23,24 +23,16 @@ import (
 
 // NewExecutableSchema creates an ExecutableSchema from the ResolverRoot interface.
 func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
-	return &executableSchema{
-		schema:     cfg.Schema,
-		resolvers:  cfg.Resolvers,
-		directives: cfg.Directives,
-		complexity: cfg.Complexity,
-	}
+	return &executableSchema{SchemaData: cfg.Schema, Resolvers: cfg.Resolvers, Directives: cfg.Directives, ComplexityRoot: cfg.Complexity}
 }
 
-type Config struct {
-	Schema     *ast.Schema
-	Resolvers  ResolverRoot
-	Directives DirectiveRoot
-	Complexity ComplexityRoot
-}
+type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Block() BlockResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
+	Transaction() TransactionResolver
 }
 
 type DirectiveRoot struct {
@@ -175,6 +167,11 @@ type ComplexityRoot struct {
 	}
 }
 
+type BlockResolver interface {
+	TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error)
+
+	Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error)
+}
 type MutationResolver interface {
 	SendRawTransaction(ctx context.Context, data string) (string, error)
 }
@@ -189,59 +186,58 @@ type QueryResolver interface {
 	Syncing(ctx context.Context) (*model.SyncState, error)
 	ChainID(ctx context.Context) (string, error)
 }
-
-type executableSchema struct {
-	schema     *ast.Schema
-	resolvers  ResolverRoot
-	directives DirectiveRoot
-	complexity ComplexityRoot
+type TransactionResolver interface {
+	From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
+	To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error)
 }
 
+type executableSchema graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot]
+
 func (e *executableSchema) Schema() *ast.Schema {
-	if e.schema != nil {
-		return e.schema
+	if e.SchemaData != nil {
+		return e.SchemaData
 	}
 	return parsedSchema
 }
 
 func (e *executableSchema) Complexity(ctx context.Context, typeName, field string, childComplexity int, rawArgs map[string]any) (int, bool) {
-	ec := executionContext{nil, e, 0, 0, nil}
+	ec := newExecutionContext(nil, e, nil)
 	_ = ec
 	switch typeName + "." + field {
 
 	case "AccessTuple.address":
-		if e.complexity.AccessTuple.Address == nil {
+		if e.ComplexityRoot.AccessTuple.Address == nil {
 			break
 		}
 
-		return e.complexity.AccessTuple.Address(childComplexity), true
+		return e.ComplexityRoot.AccessTuple.Address(childComplexity), true
 	case "AccessTuple.storageKeys":
-		if e.complexity.AccessTuple.StorageKeys == nil {
+		if e.ComplexityRoot.AccessTuple.StorageKeys == nil {
 			break
 		}
 
-		return e.complexity.AccessTuple.StorageKeys(childComplexity), true
+		return e.ComplexityRoot.AccessTuple.StorageKeys(childComplexity), true
 
 	case "Account.address":
-		if e.complexity.Account.Address == nil {
+		if e.ComplexityRoot.Account.Address == nil {
 			break
 		}
 
-		return e.complexity.Account.Address(childComplexity), true
+		return e.ComplexityRoot.Account.Address(childComplexity), true
 	case "Account.balance":
-		if e.complexity.Account.Balance == nil {
+		if e.ComplexityRoot.Account.Balance == nil {
 			break
 		}
 
-		return e.complexity.Account.Balance(childComplexity), true
+		return e.ComplexityRoot.Account.Balance(childComplexity), true
 	case "Account.code":
-		if e.complexity.Account.Code == nil {
+		if e.ComplexityRoot.Account.Code == nil {
 			break
 		}
 
-		return e.complexity.Account.Code(childComplexity), true
+		return e.ComplexityRoot.Account.Code(childComplexity), true
 	case "Account.storage":
-		if e.complexity.Account.Storage == nil {
+		if e.ComplexityRoot.Account.Storage == nil {
 			break
 		}
 
@@ -250,16 +246,16 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Account.Storage(childComplexity, args["slot"].(string)), true
+		return e.ComplexityRoot.Account.Storage(childComplexity, args["slot"].(string)), true
 	case "Account.transactionCount":
-		if e.complexity.Account.TransactionCount == nil {
+		if e.ComplexityRoot.Account.TransactionCount == nil {
 			break
 		}
 
-		return e.complexity.Account.TransactionCount(childComplexity), true
+		return e.ComplexityRoot.Account.TransactionCount(childComplexity), true
 
 	case "Block.account":
-		if e.complexity.Block.Account == nil {
+		if e.ComplexityRoot.Block.Account == nil {
 			break
 		}
 
@@ -268,15 +264,15 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.Account(childComplexity, args["address"].(string)), true
+		return e.ComplexityRoot.Block.Account(childComplexity, args["address"].(string)), true
 	case "Block.baseFeePerGas":
-		if e.complexity.Block.BaseFeePerGas == nil {
+		if e.ComplexityRoot.Block.BaseFeePerGas == nil {
 			break
 		}
 
-		return e.complexity.Block.BaseFeePerGas(childComplexity), true
+		return e.ComplexityRoot.Block.BaseFeePerGas(childComplexity), true
 	case "Block.call":
-		if e.complexity.Block.Call == nil {
+		if e.ComplexityRoot.Block.Call == nil {
 			break
 		}
 
@@ -285,15 +281,15 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.Call(childComplexity, args["data"].(model.CallData)), true
+		return e.ComplexityRoot.Block.Call(childComplexity, args["data"].(model.CallData)), true
 	case "Block.difficulty":
-		if e.complexity.Block.Difficulty == nil {
+		if e.ComplexityRoot.Block.Difficulty == nil {
 			break
 		}
 
-		return e.complexity.Block.Difficulty(childComplexity), true
+		return e.ComplexityRoot.Block.Difficulty(childComplexity), true
 	case "Block.estimateGas":
-		if e.complexity.Block.EstimateGas == nil {
+		if e.ComplexityRoot.Block.EstimateGas == nil {
 			break
 		}
 
@@ -302,33 +298,33 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.EstimateGas(childComplexity, args["data"].(model.CallData)), true
+		return e.ComplexityRoot.Block.EstimateGas(childComplexity, args["data"].(model.CallData)), true
 	case "Block.extraData":
-		if e.complexity.Block.ExtraData == nil {
+		if e.ComplexityRoot.Block.ExtraData == nil {
 			break
 		}
 
-		return e.complexity.Block.ExtraData(childComplexity), true
+		return e.ComplexityRoot.Block.ExtraData(childComplexity), true
 	case "Block.gasLimit":
-		if e.complexity.Block.GasLimit == nil {
+		if e.ComplexityRoot.Block.GasLimit == nil {
 			break
 		}
 
-		return e.complexity.Block.GasLimit(childComplexity), true
+		return e.ComplexityRoot.Block.GasLimit(childComplexity), true
 	case "Block.gasUsed":
-		if e.complexity.Block.GasUsed == nil {
+		if e.ComplexityRoot.Block.GasUsed == nil {
 			break
 		}
 
-		return e.complexity.Block.GasUsed(childComplexity), true
+		return e.ComplexityRoot.Block.GasUsed(childComplexity), true
 	case "Block.hash":
-		if e.complexity.Block.Hash == nil {
+		if e.ComplexityRoot.Block.Hash == nil {
 			break
 		}
 
-		return e.complexity.Block.Hash(childComplexity), true
+		return e.ComplexityRoot.Block.Hash(childComplexity), true
 	case "Block.logs":
-		if e.complexity.Block.Logs == nil {
+		if e.ComplexityRoot.Block.Logs == nil {
 			break
 		}
 
@@ -337,15 +333,15 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.Logs(childComplexity, args["filter"].(model.BlockFilterCriteria)), true
+		return e.ComplexityRoot.Block.Logs(childComplexity, args["filter"].(model.BlockFilterCriteria)), true
 	case "Block.logsBloom":
-		if e.complexity.Block.LogsBloom == nil {
+		if e.ComplexityRoot.Block.LogsBloom == nil {
 			break
 		}
 
-		return e.complexity.Block.LogsBloom(childComplexity), true
+		return e.ComplexityRoot.Block.LogsBloom(childComplexity), true
 	case "Block.miner":
-		if e.complexity.Block.Miner == nil {
+		if e.ComplexityRoot.Block.Miner == nil {
 			break
 		}
 
@@ -354,33 +350,33 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.Miner(childComplexity, args["block"].(*uint64)), true
+		return e.ComplexityRoot.Block.Miner(childComplexity, args["block"].(*uint64)), true
 	case "Block.mixHash":
-		if e.complexity.Block.MixHash == nil {
+		if e.ComplexityRoot.Block.MixHash == nil {
 			break
 		}
 
-		return e.complexity.Block.MixHash(childComplexity), true
+		return e.ComplexityRoot.Block.MixHash(childComplexity), true
 	case "Block.nextBaseFeePerGas":
-		if e.complexity.Block.NextBaseFeePerGas == nil {
+		if e.ComplexityRoot.Block.NextBaseFeePerGas == nil {
 			break
 		}
 
-		return e.complexity.Block.NextBaseFeePerGas(childComplexity), true
+		return e.ComplexityRoot.Block.NextBaseFeePerGas(childComplexity), true
 	case "Block.nonce":
-		if e.complexity.Block.Nonce == nil {
+		if e.ComplexityRoot.Block.Nonce == nil {
 			break
 		}
 
-		return e.complexity.Block.Nonce(childComplexity), true
+		return e.ComplexityRoot.Block.Nonce(childComplexity), true
 	case "Block.number":
-		if e.complexity.Block.Number == nil {
+		if e.ComplexityRoot.Block.Number == nil {
 			break
 		}
 
-		return e.complexity.Block.Number(childComplexity), true
+		return e.ComplexityRoot.Block.Number(childComplexity), true
 	case "Block.ommerAt":
-		if e.complexity.Block.OmmerAt == nil {
+		if e.ComplexityRoot.Block.OmmerAt == nil {
 			break
 		}
 
@@ -389,63 +385,63 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.OmmerAt(childComplexity, args["index"].(int)), true
+		return e.ComplexityRoot.Block.OmmerAt(childComplexity, args["index"].(int)), true
 	case "Block.ommerCount":
-		if e.complexity.Block.OmmerCount == nil {
+		if e.ComplexityRoot.Block.OmmerCount == nil {
 			break
 		}
 
-		return e.complexity.Block.OmmerCount(childComplexity), true
+		return e.ComplexityRoot.Block.OmmerCount(childComplexity), true
 	case "Block.ommerHash":
-		if e.complexity.Block.OmmerHash == nil {
+		if e.ComplexityRoot.Block.OmmerHash == nil {
 			break
 		}
 
-		return e.complexity.Block.OmmerHash(childComplexity), true
+		return e.ComplexityRoot.Block.OmmerHash(childComplexity), true
 	case "Block.ommers":
-		if e.complexity.Block.Ommers == nil {
+		if e.ComplexityRoot.Block.Ommers == nil {
 			break
 		}
 
-		return e.complexity.Block.Ommers(childComplexity), true
+		return e.ComplexityRoot.Block.Ommers(childComplexity), true
 	case "Block.parent":
-		if e.complexity.Block.Parent == nil {
+		if e.ComplexityRoot.Block.Parent == nil {
 			break
 		}
 
-		return e.complexity.Block.Parent(childComplexity), true
+		return e.ComplexityRoot.Block.Parent(childComplexity), true
 	case "Block.raw":
-		if e.complexity.Block.Raw == nil {
+		if e.ComplexityRoot.Block.Raw == nil {
 			break
 		}
 
-		return e.complexity.Block.Raw(childComplexity), true
+		return e.ComplexityRoot.Block.Raw(childComplexity), true
 	case "Block.rawHeader":
-		if e.complexity.Block.RawHeader == nil {
+		if e.ComplexityRoot.Block.RawHeader == nil {
 			break
 		}
 
-		return e.complexity.Block.RawHeader(childComplexity), true
+		return e.ComplexityRoot.Block.RawHeader(childComplexity), true
 	case "Block.receiptsRoot":
-		if e.complexity.Block.ReceiptsRoot == nil {
+		if e.ComplexityRoot.Block.ReceiptsRoot == nil {
 			break
 		}
 
-		return e.complexity.Block.ReceiptsRoot(childComplexity), true
+		return e.ComplexityRoot.Block.ReceiptsRoot(childComplexity), true
 	case "Block.stateRoot":
-		if e.complexity.Block.StateRoot == nil {
+		if e.ComplexityRoot.Block.StateRoot == nil {
 			break
 		}
 
-		return e.complexity.Block.StateRoot(childComplexity), true
+		return e.ComplexityRoot.Block.StateRoot(childComplexity), true
 	case "Block.timestamp":
-		if e.complexity.Block.Timestamp == nil {
+		if e.ComplexityRoot.Block.Timestamp == nil {
 			break
 		}
 
-		return e.complexity.Block.Timestamp(childComplexity), true
+		return e.ComplexityRoot.Block.Timestamp(childComplexity), true
 	case "Block.transactionAt":
-		if e.complexity.Block.TransactionAt == nil {
+		if e.ComplexityRoot.Block.TransactionAt == nil {
 			break
 		}
 
@@ -454,53 +450,53 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Block.TransactionAt(childComplexity, args["index"].(int)), true
+		return e.ComplexityRoot.Block.TransactionAt(childComplexity, args["index"].(int)), true
 	case "Block.transactionCount":
-		if e.complexity.Block.TransactionCount == nil {
+		if e.ComplexityRoot.Block.TransactionCount == nil {
 			break
 		}
 
-		return e.complexity.Block.TransactionCount(childComplexity), true
+		return e.ComplexityRoot.Block.TransactionCount(childComplexity), true
 	case "Block.transactions":
-		if e.complexity.Block.Transactions == nil {
+		if e.ComplexityRoot.Block.Transactions == nil {
 			break
 		}
 
-		return e.complexity.Block.Transactions(childComplexity), true
+		return e.ComplexityRoot.Block.Transactions(childComplexity), true
 	case "Block.transactionsRoot":
-		if e.complexity.Block.TransactionsRoot == nil {
+		if e.ComplexityRoot.Block.TransactionsRoot == nil {
 			break
 		}
 
-		return e.complexity.Block.TransactionsRoot(childComplexity), true
+		return e.ComplexityRoot.Block.TransactionsRoot(childComplexity), true
 	case "Block.withdrawals":
-		if e.complexity.Block.Withdrawals == nil {
+		if e.ComplexityRoot.Block.Withdrawals == nil {
 			break
 		}
 
-		return e.complexity.Block.Withdrawals(childComplexity), true
+		return e.ComplexityRoot.Block.Withdrawals(childComplexity), true
 
 	case "CallResult.data":
-		if e.complexity.CallResult.Data == nil {
+		if e.ComplexityRoot.CallResult.Data == nil {
 			break
 		}
 
-		return e.complexity.CallResult.Data(childComplexity), true
+		return e.ComplexityRoot.CallResult.Data(childComplexity), true
 	case "CallResult.gasUsed":
-		if e.complexity.CallResult.GasUsed == nil {
+		if e.ComplexityRoot.CallResult.GasUsed == nil {
 			break
 		}
 
-		return e.complexity.CallResult.GasUsed(childComplexity), true
+		return e.ComplexityRoot.CallResult.GasUsed(childComplexity), true
 	case "CallResult.status":
-		if e.complexity.CallResult.Status == nil {
+		if e.ComplexityRoot.CallResult.Status == nil {
 			break
 		}
 
-		return e.complexity.CallResult.Status(childComplexity), true
+		return e.ComplexityRoot.CallResult.Status(childComplexity), true
 
 	case "Log.account":
-		if e.complexity.Log.Account == nil {
+		if e.ComplexityRoot.Log.Account == nil {
 			break
 		}
 
@@ -509,34 +505,34 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Log.Account(childComplexity, args["block"].(*uint64)), true
+		return e.ComplexityRoot.Log.Account(childComplexity, args["block"].(*uint64)), true
 	case "Log.data":
-		if e.complexity.Log.Data == nil {
+		if e.ComplexityRoot.Log.Data == nil {
 			break
 		}
 
-		return e.complexity.Log.Data(childComplexity), true
+		return e.ComplexityRoot.Log.Data(childComplexity), true
 	case "Log.index":
-		if e.complexity.Log.Index == nil {
+		if e.ComplexityRoot.Log.Index == nil {
 			break
 		}
 
-		return e.complexity.Log.Index(childComplexity), true
+		return e.ComplexityRoot.Log.Index(childComplexity), true
 	case "Log.topics":
-		if e.complexity.Log.Topics == nil {
+		if e.ComplexityRoot.Log.Topics == nil {
 			break
 		}
 
-		return e.complexity.Log.Topics(childComplexity), true
+		return e.ComplexityRoot.Log.Topics(childComplexity), true
 	case "Log.transaction":
-		if e.complexity.Log.Transaction == nil {
+		if e.ComplexityRoot.Log.Transaction == nil {
 			break
 		}
 
-		return e.complexity.Log.Transaction(childComplexity), true
+		return e.ComplexityRoot.Log.Transaction(childComplexity), true
 
 	case "Mutation.sendRawTransaction":
-		if e.complexity.Mutation.SendRawTransaction == nil {
+		if e.ComplexityRoot.Mutation.SendRawTransaction == nil {
 			break
 		}
 
@@ -545,10 +541,10 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.SendRawTransaction(childComplexity, args["data"].(string)), true
+		return e.ComplexityRoot.Mutation.SendRawTransaction(childComplexity, args["data"].(string)), true
 
 	case "Pending.account":
-		if e.complexity.Pending.Account == nil {
+		if e.ComplexityRoot.Pending.Account == nil {
 			break
 		}
 
@@ -557,9 +553,9 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Pending.Account(childComplexity, args["address"].(string)), true
+		return e.ComplexityRoot.Pending.Account(childComplexity, args["address"].(string)), true
 	case "Pending.call":
-		if e.complexity.Pending.Call == nil {
+		if e.ComplexityRoot.Pending.Call == nil {
 			break
 		}
 
@@ -568,9 +564,9 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Pending.Call(childComplexity, args["data"].(model.CallData)), true
+		return e.ComplexityRoot.Pending.Call(childComplexity, args["data"].(model.CallData)), true
 	case "Pending.estimateGas":
-		if e.complexity.Pending.EstimateGas == nil {
+		if e.ComplexityRoot.Pending.EstimateGas == nil {
 			break
 		}
 
@@ -579,22 +575,22 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Pending.EstimateGas(childComplexity, args["data"].(model.CallData)), true
+		return e.ComplexityRoot.Pending.EstimateGas(childComplexity, args["data"].(model.CallData)), true
 	case "Pending.transactionCount":
-		if e.complexity.Pending.TransactionCount == nil {
+		if e.ComplexityRoot.Pending.TransactionCount == nil {
 			break
 		}
 
-		return e.complexity.Pending.TransactionCount(childComplexity), true
+		return e.ComplexityRoot.Pending.TransactionCount(childComplexity), true
 	case "Pending.transactions":
-		if e.complexity.Pending.Transactions == nil {
+		if e.ComplexityRoot.Pending.Transactions == nil {
 			break
 		}
 
-		return e.complexity.Pending.Transactions(childComplexity), true
+		return e.ComplexityRoot.Pending.Transactions(childComplexity), true
 
 	case "Query.block":
-		if e.complexity.Query.Block == nil {
+		if e.ComplexityRoot.Query.Block == nil {
 			break
 		}
 
@@ -603,9 +599,9 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Block(childComplexity, args["number"].(*string), args["hash"].(*string)), true
+		return e.ComplexityRoot.Query.Block(childComplexity, args["number"].(*string), args["hash"].(*string)), true
 	case "Query.blocks":
-		if e.complexity.Query.Blocks == nil {
+		if e.ComplexityRoot.Query.Blocks == nil {
 			break
 		}
 
@@ -614,21 +610,22 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Blocks(childComplexity, args["from"].(*uint64), args["to"].(*uint64)), true
+		return e.ComplexityRoot.Query.Blocks(childComplexity, args["from"].(*uint64), args["to"].(*uint64)), true
 	case "Query.chainID":
-		if e.complexity.Query.ChainID == nil {
+		if e.ComplexityRoot.Query.ChainID == nil {
 			break
 		}
 
-		return e.complexity.Query.ChainID(childComplexity), true
+		return e.ComplexityRoot.Query.ChainID(childComplexity), true
 	case "Query.gasPrice":
-		if e.complexity.Query.GasPrice == nil {
+		if e.ComplexityRoot.Query.GasPrice == nil {
 			break
 		}
 
-		return e.complexity.Query.GasPrice(childComplexity), true
+		return e.ComplexityRoot.Query.GasPrice(childComplexity), true
+
 	case "Query.logs":
-		if e.complexity.Query.Logs == nil {
+		if e.ComplexityRoot.Query.Logs == nil {
 			break
 		}
 
@@ -637,27 +634,27 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Logs(childComplexity, args["filter"].(model.FilterCriteria)), true
+		return e.ComplexityRoot.Query.Logs(childComplexity, args["filter"].(model.FilterCriteria)), true
 	case "Query.maxPriorityFeePerGas":
-		if e.complexity.Query.MaxPriorityFeePerGas == nil {
+		if e.ComplexityRoot.Query.MaxPriorityFeePerGas == nil {
 			break
 		}
 
-		return e.complexity.Query.MaxPriorityFeePerGas(childComplexity), true
+		return e.ComplexityRoot.Query.MaxPriorityFeePerGas(childComplexity), true
 	case "Query.pending":
-		if e.complexity.Query.Pending == nil {
+		if e.ComplexityRoot.Query.Pending == nil {
 			break
 		}
 
-		return e.complexity.Query.Pending(childComplexity), true
+		return e.ComplexityRoot.Query.Pending(childComplexity), true
 	case "Query.syncing":
-		if e.complexity.Query.Syncing == nil {
+		if e.ComplexityRoot.Query.Syncing == nil {
 			break
 		}
 
-		return e.complexity.Query.Syncing(childComplexity), true
+		return e.ComplexityRoot.Query.Syncing(childComplexity), true
 	case "Query.transaction":
-		if e.complexity.Query.Transaction == nil {
+		if e.ComplexityRoot.Query.Transaction == nil {
 			break
 		}
 
@@ -666,41 +663,41 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Transaction(childComplexity, args["hash"].(string)), true
+		return e.ComplexityRoot.Query.Transaction(childComplexity, args["hash"].(string)), true
 
 	case "SyncState.currentBlock":
-		if e.complexity.SyncState.CurrentBlock == nil {
+		if e.ComplexityRoot.SyncState.CurrentBlock == nil {
 			break
 		}
 
-		return e.complexity.SyncState.CurrentBlock(childComplexity), true
+		return e.ComplexityRoot.SyncState.CurrentBlock(childComplexity), true
 	case "SyncState.highestBlock":
-		if e.complexity.SyncState.HighestBlock == nil {
+		if e.ComplexityRoot.SyncState.HighestBlock == nil {
 			break
 		}
 
-		return e.complexity.SyncState.HighestBlock(childComplexity), true
+		return e.ComplexityRoot.SyncState.HighestBlock(childComplexity), true
 	case "SyncState.startingBlock":
-		if e.complexity.SyncState.StartingBlock == nil {
+		if e.ComplexityRoot.SyncState.StartingBlock == nil {
 			break
 		}
 
-		return e.complexity.SyncState.StartingBlock(childComplexity), true
+		return e.ComplexityRoot.SyncState.StartingBlock(childComplexity), true
 
 	case "Transaction.accessList":
-		if e.complexity.Transaction.AccessList == nil {
+		if e.ComplexityRoot.Transaction.AccessList == nil {
 			break
 		}
 
-		return e.complexity.Transaction.AccessList(childComplexity), true
+		return e.ComplexityRoot.Transaction.AccessList(childComplexity), true
 	case "Transaction.block":
-		if e.complexity.Transaction.Block == nil {
+		if e.ComplexityRoot.Transaction.Block == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Block(childComplexity), true
+		return e.ComplexityRoot.Transaction.Block(childComplexity), true
 	case "Transaction.createdContract":
-		if e.complexity.Transaction.CreatedContract == nil {
+		if e.ComplexityRoot.Transaction.CreatedContract == nil {
 			break
 		}
 
@@ -709,27 +706,27 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Transaction.CreatedContract(childComplexity, args["block"].(*uint64)), true
+		return e.ComplexityRoot.Transaction.CreatedContract(childComplexity, args["block"].(*uint64)), true
 	case "Transaction.cumulativeGasUsed":
-		if e.complexity.Transaction.CumulativeGasUsed == nil {
+		if e.ComplexityRoot.Transaction.CumulativeGasUsed == nil {
 			break
 		}
 
-		return e.complexity.Transaction.CumulativeGasUsed(childComplexity), true
+		return e.ComplexityRoot.Transaction.CumulativeGasUsed(childComplexity), true
 	case "Transaction.effectiveGasPrice":
-		if e.complexity.Transaction.EffectiveGasPrice == nil {
+		if e.ComplexityRoot.Transaction.EffectiveGasPrice == nil {
 			break
 		}
 
-		return e.complexity.Transaction.EffectiveGasPrice(childComplexity), true
+		return e.ComplexityRoot.Transaction.EffectiveGasPrice(childComplexity), true
 	case "Transaction.effectiveTip":
-		if e.complexity.Transaction.EffectiveTip == nil {
+		if e.ComplexityRoot.Transaction.EffectiveTip == nil {
 			break
 		}
 
-		return e.complexity.Transaction.EffectiveTip(childComplexity), true
+		return e.ComplexityRoot.Transaction.EffectiveTip(childComplexity), true
 	case "Transaction.from":
-		if e.complexity.Transaction.From == nil {
+		if e.ComplexityRoot.Transaction.From == nil {
 			break
 		}
 
@@ -738,99 +735,99 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Transaction.From(childComplexity, args["block"].(*uint64)), true
+		return e.ComplexityRoot.Transaction.From(childComplexity, args["block"].(*uint64)), true
 	case "Transaction.gas":
-		if e.complexity.Transaction.Gas == nil {
+		if e.ComplexityRoot.Transaction.Gas == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Gas(childComplexity), true
+		return e.ComplexityRoot.Transaction.Gas(childComplexity), true
 	case "Transaction.gasPrice":
-		if e.complexity.Transaction.GasPrice == nil {
+		if e.ComplexityRoot.Transaction.GasPrice == nil {
 			break
 		}
 
-		return e.complexity.Transaction.GasPrice(childComplexity), true
+		return e.ComplexityRoot.Transaction.GasPrice(childComplexity), true
 	case "Transaction.gasUsed":
-		if e.complexity.Transaction.GasUsed == nil {
+		if e.ComplexityRoot.Transaction.GasUsed == nil {
 			break
 		}
 
-		return e.complexity.Transaction.GasUsed(childComplexity), true
+		return e.ComplexityRoot.Transaction.GasUsed(childComplexity), true
 	case "Transaction.hash":
-		if e.complexity.Transaction.Hash == nil {
+		if e.ComplexityRoot.Transaction.Hash == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Hash(childComplexity), true
+		return e.ComplexityRoot.Transaction.Hash(childComplexity), true
 	case "Transaction.index":
-		if e.complexity.Transaction.Index == nil {
+		if e.ComplexityRoot.Transaction.Index == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Index(childComplexity), true
+		return e.ComplexityRoot.Transaction.Index(childComplexity), true
 	case "Transaction.inputData":
-		if e.complexity.Transaction.InputData == nil {
+		if e.ComplexityRoot.Transaction.InputData == nil {
 			break
 		}
 
-		return e.complexity.Transaction.InputData(childComplexity), true
+		return e.ComplexityRoot.Transaction.InputData(childComplexity), true
 	case "Transaction.logs":
-		if e.complexity.Transaction.Logs == nil {
+		if e.ComplexityRoot.Transaction.Logs == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Logs(childComplexity), true
+		return e.ComplexityRoot.Transaction.Logs(childComplexity), true
 	case "Transaction.maxFeePerGas":
-		if e.complexity.Transaction.MaxFeePerGas == nil {
+		if e.ComplexityRoot.Transaction.MaxFeePerGas == nil {
 			break
 		}
 
-		return e.complexity.Transaction.MaxFeePerGas(childComplexity), true
+		return e.ComplexityRoot.Transaction.MaxFeePerGas(childComplexity), true
 	case "Transaction.maxPriorityFeePerGas":
-		if e.complexity.Transaction.MaxPriorityFeePerGas == nil {
+		if e.ComplexityRoot.Transaction.MaxPriorityFeePerGas == nil {
 			break
 		}
 
-		return e.complexity.Transaction.MaxPriorityFeePerGas(childComplexity), true
+		return e.ComplexityRoot.Transaction.MaxPriorityFeePerGas(childComplexity), true
 	case "Transaction.nonce":
-		if e.complexity.Transaction.Nonce == nil {
+		if e.ComplexityRoot.Transaction.Nonce == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Nonce(childComplexity), true
+		return e.ComplexityRoot.Transaction.Nonce(childComplexity), true
 	case "Transaction.r":
-		if e.complexity.Transaction.R == nil {
+		if e.ComplexityRoot.Transaction.R == nil {
 			break
 		}
 
-		return e.complexity.Transaction.R(childComplexity), true
+		return e.ComplexityRoot.Transaction.R(childComplexity), true
 	case "Transaction.raw":
-		if e.complexity.Transaction.Raw == nil {
+		if e.ComplexityRoot.Transaction.Raw == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Raw(childComplexity), true
+		return e.ComplexityRoot.Transaction.Raw(childComplexity), true
 	case "Transaction.rawReceipt":
-		if e.complexity.Transaction.RawReceipt == nil {
+		if e.ComplexityRoot.Transaction.RawReceipt == nil {
 			break
 		}
 
-		return e.complexity.Transaction.RawReceipt(childComplexity), true
+		return e.ComplexityRoot.Transaction.RawReceipt(childComplexity), true
 	case "Transaction.s":
-		if e.complexity.Transaction.S == nil {
+		if e.ComplexityRoot.Transaction.S == nil {
 			break
 		}
 
-		return e.complexity.Transaction.S(childComplexity), true
+		return e.ComplexityRoot.Transaction.S(childComplexity), true
 	case "Transaction.status":
-		if e.complexity.Transaction.Status == nil {
+		if e.ComplexityRoot.Transaction.Status == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Status(childComplexity), true
+		return e.ComplexityRoot.Transaction.Status(childComplexity), true
 	case "Transaction.to":
-		if e.complexity.Transaction.To == nil {
+		if e.ComplexityRoot.Transaction.To == nil {
 			break
 		}
 
@@ -839,50 +836,50 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Transaction.To(childComplexity, args["block"].(*uint64)), true
+		return e.ComplexityRoot.Transaction.To(childComplexity, args["block"].(*uint64)), true
 	case "Transaction.type":
-		if e.complexity.Transaction.Type == nil {
+		if e.ComplexityRoot.Transaction.Type == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Type(childComplexity), true
+		return e.ComplexityRoot.Transaction.Type(childComplexity), true
 	case "Transaction.v":
-		if e.complexity.Transaction.V == nil {
+		if e.ComplexityRoot.Transaction.V == nil {
 			break
 		}
 
-		return e.complexity.Transaction.V(childComplexity), true
+		return e.ComplexityRoot.Transaction.V(childComplexity), true
 	case "Transaction.value":
-		if e.complexity.Transaction.Value == nil {
+		if e.ComplexityRoot.Transaction.Value == nil {
 			break
 		}
 
-		return e.complexity.Transaction.Value(childComplexity), true
+		return e.ComplexityRoot.Transaction.Value(childComplexity), true
 
 	case "Withdrawal.address":
-		if e.complexity.Withdrawal.Address == nil {
+		if e.ComplexityRoot.Withdrawal.Address == nil {
 			break
 		}
 
-		return e.complexity.Withdrawal.Address(childComplexity), true
+		return e.ComplexityRoot.Withdrawal.Address(childComplexity), true
 	case "Withdrawal.amount":
-		if e.complexity.Withdrawal.Amount == nil {
+		if e.ComplexityRoot.Withdrawal.Amount == nil {
 			break
 		}
 
-		return e.complexity.Withdrawal.Amount(childComplexity), true
+		return e.ComplexityRoot.Withdrawal.Amount(childComplexity), true
 	case "Withdrawal.index":
-		if e.complexity.Withdrawal.Index == nil {
+		if e.ComplexityRoot.Withdrawal.Index == nil {
 			break
 		}
 
-		return e.complexity.Withdrawal.Index(childComplexity), true
+		return e.ComplexityRoot.Withdrawal.Index(childComplexity), true
 	case "Withdrawal.validator":
-		if e.complexity.Withdrawal.Validator == nil {
+		if e.ComplexityRoot.Withdrawal.Validator == nil {
 			break
 		}
 
-		return e.complexity.Withdrawal.Validator(childComplexity), true
+		return e.ComplexityRoot.Withdrawal.Validator(childComplexity), true
 
 	}
 	return 0, false
@@ -890,7 +887,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
-	ec := executionContext{opCtx, e, 0, 0, make(chan graphql.DeferredResult)}
+	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputBlockFilterCriteria,
 		ec.unmarshalInputCallData,
@@ -908,9 +905,9 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 				ctx = graphql.WithUnmarshalerMap(ctx, inputUnmarshalMap)
 				data = ec._Query(ctx, opCtx.Operation.SelectionSet)
 			} else {
-				if atomic.LoadInt32(&ec.pendingDeferred) > 0 {
-					result := <-ec.deferredResults
-					atomic.AddInt32(&ec.pendingDeferred, -1)
+				if atomic.LoadInt32(&ec.PendingDeferred) > 0 {
+					result := <-ec.DeferredResults
+					atomic.AddInt32(&ec.PendingDeferred, -1)
 					data = result.Result
 					response.Path = result.Path
 					response.Label = result.Label
@@ -922,8 +919,8 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 			var buf bytes.Buffer
 			data.MarshalGQL(&buf)
 			response.Data = buf.Bytes()
-			if atomic.LoadInt32(&ec.deferred) > 0 {
-				hasNext := atomic.LoadInt32(&ec.pendingDeferred) > 0
+			if atomic.LoadInt32(&ec.Deferred) > 0 {
+				hasNext := atomic.LoadInt32(&ec.PendingDeferred) > 0
 				response.HasNext = &hasNext
 			}
 
@@ -951,44 +948,22 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 }
 
 type executionContext struct {
-	*graphql.OperationContext
-	*executableSchema
-	deferred        int32
-	pendingDeferred int32
-	deferredResults chan graphql.DeferredResult
+	*graphql.ExecutionContextState[ResolverRoot, DirectiveRoot, ComplexityRoot]
 }
 
-func (ec *executionContext) processDeferredGroup(dg graphql.DeferredGroup) {
-	atomic.AddInt32(&ec.pendingDeferred, 1)
-	go func() {
-		ctx := graphql.WithFreshResponseContext(dg.Context)
-		dg.FieldSet.Dispatch(ctx)
-		ds := graphql.DeferredResult{
-			Path:   dg.Path,
-			Label:  dg.Label,
-			Result: dg.FieldSet,
-			Errors: graphql.GetErrors(ctx),
-		}
-		// null fields should bubble up
-		if dg.FieldSet.Invalids > 0 {
-			ds.Result = graphql.Null
-		}
-		ec.deferredResults <- ds
-	}()
-}
-
-func (ec *executionContext) introspectSchema() (*introspection.Schema, error) {
-	if ec.DisableIntrospection {
-		return nil, errors.New("introspection disabled")
+func newExecutionContext(
+	opCtx *graphql.OperationContext,
+	execSchema *executableSchema,
+	deferredResults chan graphql.DeferredResult,
+) executionContext {
+	return executionContext{
+		ExecutionContextState: graphql.NewExecutionContextState[ResolverRoot, DirectiveRoot, ComplexityRoot](
+			opCtx,
+			(*graphql.ExecutableSchemaState[ResolverRoot, DirectiveRoot, ComplexityRoot])(execSchema),
+			parsedSchema,
+			deferredResults,
+		),
 	}
-	return introspection.WrapSchema(ec.Schema()), nil
-}
-
-func (ec *executionContext) introspectType(name string) (*introspection.Type, error) {
-	if ec.DisableIntrospection {
-		return nil, errors.New("introspection disabled")
-	}
-	return introspection.WrapTypeFromDef(ec.Schema(), ec.Schema().Types[name]), nil
 }
 
 //go:embed "schema.graphqls"
@@ -2472,7 +2447,8 @@ func (ec *executionContext) _Block_transactionAt(ctx context.Context, field grap
 		field,
 		ec.fieldContext_Block_transactionAt,
 		func(ctx context.Context) (any, error) {
-			return obj.TransactionAt, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().TransactionAt(ctx, obj, fc.Args["index"].(int))
 		},
 		nil,
 		ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction,
@@ -2485,8 +2461,8 @@ func (ec *executionContext) fieldContext_Block_transactionAt(ctx context.Context
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "hash":
@@ -2618,7 +2594,8 @@ func (ec *executionContext) _Block_account(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Block_account,
 		func(ctx context.Context) (any, error) {
-			return obj.Account, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Block().Account(ctx, obj, fc.Args["address"].(string))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -2631,8 +2608,8 @@ func (ec *executionContext) fieldContext_Block_account(ctx context.Context, fiel
 	fc = &graphql.FieldContext{
 		Object:     "Block",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -3165,7 +3142,7 @@ func (ec *executionContext) _Mutation_sendRawTransaction(ctx context.Context, fi
 		ec.fieldContext_Mutation_sendRawTransaction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().SendRawTransaction(ctx, fc.Args["data"].(string))
+			return ec.Resolvers.Mutation().SendRawTransaction(ctx, fc.Args["data"].(string))
 		},
 		nil,
 		ec.marshalNBytes322string,
@@ -3458,7 +3435,7 @@ func (ec *executionContext) _Query_block(ctx context.Context, field graphql.Coll
 		ec.fieldContext_Query_block,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Block(ctx, fc.Args["number"].(*string), fc.Args["hash"].(*string))
+			return ec.Resolvers.Query().Block(ctx, fc.Args["number"].(*string), fc.Args["hash"].(*string))
 		},
 		nil,
 		ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock,
@@ -3563,7 +3540,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query_blocks,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Blocks(ctx, fc.Args["from"].(*uint64), fc.Args["to"].(*uint64))
+			return ec.Resolvers.Query().Blocks(ctx, fc.Args["from"].(*uint64), fc.Args["to"].(*uint64))
 		},
 		nil,
 		ec.marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ,
@@ -3667,7 +3644,7 @@ func (ec *executionContext) _Query_pending(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Query_pending,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().Pending(ctx)
+			return ec.Resolvers.Query().Pending(ctx)
 		},
 		nil,
 		ec.marshalNPending2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending,
@@ -3709,7 +3686,7 @@ func (ec *executionContext) _Query_transaction(ctx context.Context, field graphq
 		ec.fieldContext_Query_transaction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Transaction(ctx, fc.Args["hash"].(string))
+			return ec.Resolvers.Query().Transaction(ctx, fc.Args["hash"].(string))
 		},
 		nil,
 		ec.marshalOTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction,
@@ -3804,7 +3781,7 @@ func (ec *executionContext) _Query_logs(ctx context.Context, field graphql.Colle
 		ec.fieldContext_Query_logs,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Logs(ctx, fc.Args["filter"].(model.FilterCriteria))
+			return ec.Resolvers.Query().Logs(ctx, fc.Args["filter"].(model.FilterCriteria))
 		},
 		nil,
 		ec.marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ,
@@ -3856,7 +3833,7 @@ func (ec *executionContext) _Query_gasPrice(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Query_gasPrice,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().GasPrice(ctx)
+			return ec.Resolvers.Query().GasPrice(ctx)
 		},
 		nil,
 		ec.marshalNBigInt2string,
@@ -3885,7 +3862,7 @@ func (ec *executionContext) _Query_maxPriorityFeePerGas(ctx context.Context, fie
 		field,
 		ec.fieldContext_Query_maxPriorityFeePerGas,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().MaxPriorityFeePerGas(ctx)
+			return ec.Resolvers.Query().MaxPriorityFeePerGas(ctx)
 		},
 		nil,
 		ec.marshalNBigInt2string,
@@ -3914,7 +3891,7 @@ func (ec *executionContext) _Query_syncing(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Query_syncing,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().Syncing(ctx)
+			return ec.Resolvers.Query().Syncing(ctx)
 		},
 		nil,
 		ec.marshalOSyncState2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐSyncState,
@@ -3951,7 +3928,7 @@ func (ec *executionContext) _Query_chainID(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Query_chainID,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().ChainID(ctx)
+			return ec.Resolvers.Query().ChainID(ctx)
 		},
 		nil,
 		ec.marshalNBigInt2string,
@@ -3981,7 +3958,7 @@ func (ec *executionContext) _Query___type(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query___type,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.introspectType(fc.Args["name"].(string))
+			return ec.IntrospectType(fc.Args["name"].(string))
 		},
 		nil,
 		ec.marshalO__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType,
@@ -4045,7 +4022,7 @@ func (ec *executionContext) _Query___schema(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Query___schema,
 		func(ctx context.Context) (any, error) {
-			return ec.introspectSchema()
+			return ec.IntrospectSchema()
 		},
 		nil,
 		ec.marshalO__Schema2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐSchema,
@@ -4262,7 +4239,8 @@ func (ec *executionContext) _Transaction_from(ctx context.Context, field graphql
 		field,
 		ec.fieldContext_Transaction_from,
 		func(ctx context.Context) (any, error) {
-			return obj.From, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().From(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4275,8 +4253,8 @@ func (ec *executionContext) fieldContext_Transaction_from(ctx context.Context, f
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4314,7 +4292,8 @@ func (ec *executionContext) _Transaction_to(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Transaction_to,
 		func(ctx context.Context) (any, error) {
-			return obj.To, nil
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Transaction().To(ctx, obj, fc.Args["block"].(*uint64))
 		},
 		nil,
 		ec.marshalOAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount,
@@ -4327,8 +4306,8 @@ func (ec *executionContext) fieldContext_Transaction_to(ctx context.Context, fie
 	fc = &graphql.FieldContext{
 		Object:     "Transaction",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "address":
@@ -4961,7 +4940,7 @@ func (ec *executionContext) _Transaction_type(ctx context.Context, field graphql
 			return obj.Type, nil
 		},
 		nil,
-		ec.marshalOInt2ᚖint,
+		ec.marshalOLong2ᚖuint64,
 		true,
 		false,
 	)
@@ -4974,7 +4953,7 @@ func (ec *executionContext) fieldContext_Transaction_type(_ context.Context, fie
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Int does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -6637,6 +6616,10 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 func (ec *executionContext) unmarshalInputBlockFilterCriteria(ctx context.Context, obj any) (model.BlockFilterCriteria, error) {
 	var it model.BlockFilterCriteria
+	if obj == nil {
+		return it, nil
+	}
+
 	asMap := map[string]any{}
 	for k, v := range obj.(map[string]any) {
 		asMap[k] = v
@@ -6665,12 +6648,15 @@ func (ec *executionContext) unmarshalInputBlockFilterCriteria(ctx context.Contex
 			it.Topics = data
 		}
 	}
-
 	return it, nil
 }
 
 func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj any) (model.CallData, error) {
 	var it model.CallData
+	if obj == nil {
+		return it, nil
+	}
+
 	asMap := map[string]any{}
 	for k, v := range obj.(map[string]any) {
 		asMap[k] = v
@@ -6741,12 +6727,15 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj any)
 			it.Data = data
 		}
 	}
-
 	return it, nil
 }
 
 func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, obj any) (model.FilterCriteria, error) {
 	var it model.FilterCriteria
+	if obj == nil {
+		return it, nil
+	}
+
 	asMap := map[string]any{}
 	for k, v := range obj.(map[string]any) {
 		asMap[k] = v
@@ -6789,7 +6778,6 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			it.Topics = data
 		}
 	}
-
 	return it, nil
 }
 
@@ -6831,10 +6819,10 @@ func (ec *executionContext) _AccessTuple(ctx context.Context, sel ast.SelectionS
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -6890,10 +6878,10 @@ func (ec *executionContext) _Account(ctx context.Context, sel ast.SelectionSet, 
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -6918,56 +6906,56 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "number":
 			out.Values[i] = ec._Block_number(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "hash":
 			out.Values[i] = ec._Block_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "parent":
 			out.Values[i] = ec._Block_parent(ctx, field, obj)
 		case "nonce":
 			out.Values[i] = ec._Block_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionsRoot":
 			out.Values[i] = ec._Block_transactionsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactionCount":
 			out.Values[i] = ec._Block_transactionCount(ctx, field, obj)
 		case "stateRoot":
 			out.Values[i] = ec._Block_stateRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "receiptsRoot":
 			out.Values[i] = ec._Block_receiptsRoot(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "miner":
 			out.Values[i] = ec._Block_miner(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "extraData":
 			out.Values[i] = ec._Block_extraData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasLimit":
 			out.Values[i] = ec._Block_gasLimit(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasUsed":
 			out.Values[i] = ec._Block_gasUsed(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "baseFeePerGas":
 			out.Values[i] = ec._Block_baseFeePerGas(ctx, field, obj)
@@ -6976,22 +6964,22 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "timestamp":
 			out.Values[i] = ec._Block_timestamp(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "logsBloom":
 			out.Values[i] = ec._Block_logsBloom(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "mixHash":
 			out.Values[i] = ec._Block_mixHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "difficulty":
 			out.Values[i] = ec._Block_difficulty(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "ommerCount":
 			out.Values[i] = ec._Block_ommerCount(ctx, field, obj)
@@ -7002,38 +6990,100 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		case "ommerHash":
 			out.Values[i] = ec._Block_ommerHash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "transactions":
 			out.Values[i] = ec._Block_transactions(ctx, field, obj)
 		case "transactionAt":
-			out.Values[i] = ec._Block_transactionAt(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_transactionAt(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "logs":
 			out.Values[i] = ec._Block_logs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "account":
-			out.Values[i] = ec._Block_account(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Block_account(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "call":
 			out.Values[i] = ec._Block_call(ctx, field, obj)
 		case "estimateGas":
 			out.Values[i] = ec._Block_estimateGas(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "rawHeader":
 			out.Values[i] = ec._Block_rawHeader(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "raw":
 			out.Values[i] = ec._Block_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "withdrawals":
 			out.Values[i] = ec._Block_withdrawals(ctx, field, obj)
@@ -7046,10 +7096,10 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7095,10 +7145,10 @@ func (ec *executionContext) _CallResult(ctx context.Context, sel ast.SelectionSe
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7154,10 +7204,10 @@ func (ec *executionContext) _Log(ctx context.Context, sel ast.SelectionSet, obj 
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7203,10 +7253,10 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7256,10 +7306,10 @@ func (ec *executionContext) _Pending(ctx context.Context, sel ast.SelectionSet, 
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7495,10 +7545,10 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7544,10 +7594,10 @@ func (ec *executionContext) _SyncState(ctx context.Context, sel ast.SelectionSet
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7572,31 +7622,93 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "hash":
 			out.Values[i] = ec._Transaction_hash(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "nonce":
 			out.Values[i] = ec._Transaction_nonce(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "index":
 			out.Values[i] = ec._Transaction_index(ctx, field, obj)
 		case "from":
-			out.Values[i] = ec._Transaction_from(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_from(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "to":
-			out.Values[i] = ec._Transaction_to(ctx, field, obj)
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Transaction_to(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "value":
 			out.Values[i] = ec._Transaction_value(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "gasPrice":
 			out.Values[i] = ec._Transaction_gasPrice(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "maxFeePerGas":
 			out.Values[i] = ec._Transaction_maxFeePerGas(ctx, field, obj)
@@ -7607,12 +7719,12 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "gas":
 			out.Values[i] = ec._Transaction_gas(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "inputData":
 			out.Values[i] = ec._Transaction_inputData(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "block":
 			out.Values[i] = ec._Transaction_block(ctx, field, obj)
@@ -7631,17 +7743,17 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "r":
 			out.Values[i] = ec._Transaction_r(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "s":
 			out.Values[i] = ec._Transaction_s(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "v":
 			out.Values[i] = ec._Transaction_v(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "type":
 			out.Values[i] = ec._Transaction_type(ctx, field, obj)
@@ -7650,12 +7762,12 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		case "raw":
 			out.Values[i] = ec._Transaction_raw(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "rawReceipt":
 			out.Values[i] = ec._Transaction_rawReceipt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -7666,10 +7778,10 @@ func (ec *executionContext) _Transaction(ctx context.Context, sel ast.SelectionS
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7720,10 +7832,10 @@ func (ec *executionContext) _Withdrawal(ctx context.Context, sel ast.SelectionSe
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7776,10 +7888,10 @@ func (ec *executionContext) ___Directive(ctx context.Context, sel ast.SelectionS
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7824,10 +7936,10 @@ func (ec *executionContext) ___EnumValue(ctx context.Context, sel ast.SelectionS
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7882,10 +7994,10 @@ func (ec *executionContext) ___Field(ctx context.Context, sel ast.SelectionSet, 
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7937,10 +8049,10 @@ func (ec *executionContext) ___InputValue(ctx context.Context, sel ast.Selection
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -7992,10 +8104,10 @@ func (ec *executionContext) ___Schema(ctx context.Context, sel ast.SelectionSet,
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -8051,10 +8163,10 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 		return graphql.Null
 	}
 
-	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+	atomic.AddInt32(&ec.Deferred, int32(len(deferred)))
 
 	for label, dfs := range deferred {
-		ec.processDeferredGroup(graphql.DeferredGroup{
+		ec.ProcessDeferredGroup(graphql.DeferredGroup{
 			Label:    label,
 			Path:     graphql.GetPath(ctx),
 			FieldSet: dfs,
@@ -8072,17 +8184,21 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx context.Context, sel ast.SelectionSet, v *model.AccessTuple) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
 	return ec._AccessTuple(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNAccount2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v model.Account) graphql.Marshaler {
+	return ec._Account(ctx, sel, &v)
+}
+
 func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8099,7 +8215,7 @@ func (ec *executionContext) marshalNAddress2string(ctx context.Context, sel ast.
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8115,46 +8231,18 @@ func (ec *executionContext) marshalNBigInt2string(ctx context.Context, sel ast.S
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
 }
 
 func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Block) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8168,7 +8256,7 @@ func (ec *executionContext) marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerig
 func (ec *executionContext) marshalNBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx context.Context, sel ast.SelectionSet, v *model.Block) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8190,7 +8278,7 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	res := graphql.MarshalBoolean(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8206,7 +8294,7 @@ func (ec *executionContext) marshalNBytes2string(ctx context.Context, sel ast.Se
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8222,7 +8310,7 @@ func (ec *executionContext) marshalNBytes322string(ctx context.Context, sel ast.
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8278,46 +8366,18 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	res := graphql.MarshalInt(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
 }
 
 func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Log) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8331,7 +8391,7 @@ func (ec *executionContext) marshalNLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigon
 func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx context.Context, sel ast.SelectionSet, v *model.Log) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8339,16 +8399,16 @@ func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋ
 }
 
 func (ec *executionContext) unmarshalNLong2uint64(ctx context.Context, v any) (uint64, error) {
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalNLong2uint64(ctx context.Context, sel ast.SelectionSet, v uint64) graphql.Marshaler {
 	_ = sel
-	res := graphql.MarshalUint64(v)
+	res := scalar.MarshalUint64(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8361,7 +8421,7 @@ func (ec *executionContext) marshalNPending2githubᚗcomᚋerigontechᚋerigon�
 func (ec *executionContext) marshalNPending2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v *model.Pending) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8378,7 +8438,7 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8387,7 +8447,7 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx context.Context, sel ast.SelectionSet, v *model.Transaction) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8397,7 +8457,7 @@ func (ec *executionContext) marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋe
 func (ec *executionContext) marshalNWithdrawal2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx context.Context, sel ast.SelectionSet, v *model.Withdrawal) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8409,39 +8469,11 @@ func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlge
 }
 
 func (ec *executionContext) marshalN__Directive2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirectiveᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.Directive) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8462,7 +8494,7 @@ func (ec *executionContext) marshalN__DirectiveLocation2string(ctx context.Conte
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8484,39 +8516,11 @@ func (ec *executionContext) unmarshalN__DirectiveLocation2ᚕstringᚄ(ctx conte
 }
 
 func (ec *executionContext) marshalN__DirectiveLocation2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__DirectiveLocation2string(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__DirectiveLocation2string(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8540,39 +8544,11 @@ func (ec *executionContext) marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlg
 }
 
 func (ec *executionContext) marshalN__InputValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValueᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.InputValue) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValue(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValue(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8588,39 +8564,11 @@ func (ec *executionContext) marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋg
 }
 
 func (ec *executionContext) marshalN__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐTypeᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.Type) graphql.Marshaler {
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8634,7 +8582,7 @@ func (ec *executionContext) marshalN__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgen�
 func (ec *executionContext) marshalN__Type2ᚖgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx context.Context, sel ast.SelectionSet, v *introspection.Type) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 		return graphql.Null
 	}
@@ -8651,7 +8599,7 @@ func (ec *executionContext) marshalN__TypeKind2string(ctx context.Context, sel a
 	res := graphql.MarshalString(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
-			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
 	}
 	return res
@@ -8661,39 +8609,11 @@ func (ec *executionContext) marshalOAccessTuple2ᚕᚖgithubᚗcomᚋerigontech�
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccessTuple(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -8787,39 +8707,11 @@ func (ec *executionContext) marshalOBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerig
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalOBlock2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlock(ctx, sel, v[i])
+	})
 
 	return ret
 }
@@ -8980,39 +8872,11 @@ func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋerigontechᚋerigon
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNLog2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐLog(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9027,7 +8891,7 @@ func (ec *executionContext) unmarshalOLong2ᚖuint64(ctx context.Context, v any)
 	if v == nil {
 		return nil, nil
 	}
-	res, err := graphql.UnmarshalUint64(v)
+	res, err := scalar.UnmarshalUint64(v)
 	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -9037,7 +8901,7 @@ func (ec *executionContext) marshalOLong2ᚖuint64(ctx context.Context, sel ast.
 	}
 	_ = sel
 	_ = ctx
-	res := graphql.MarshalUint64(*v)
+	res := scalar.MarshalUint64(*v)
 	return res
 }
 
@@ -9070,39 +8934,11 @@ func (ec *executionContext) marshalOTransaction2ᚕᚖgithubᚗcomᚋerigontech�
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNTransaction2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐTransaction(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9124,39 +8960,11 @@ func (ec *executionContext) marshalOWithdrawal2ᚕᚖgithubᚗcomᚋerigontech�
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalNWithdrawal2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNWithdrawal2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐWithdrawal(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9171,39 +8979,11 @@ func (ec *executionContext) marshalO__EnumValue2ᚕgithubᚗcomᚋ99designsᚋgq
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__EnumValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐEnumValue(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__EnumValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐEnumValue(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9218,39 +8998,11 @@ func (ec *executionContext) marshalO__Field2ᚕgithubᚗcomᚋ99designsᚋgqlgen
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__Field2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐField(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__Field2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐField(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9265,39 +9017,11 @@ func (ec *executionContext) marshalO__InputValue2ᚕgithubᚗcomᚋ99designsᚋg
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValue(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValue(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {
@@ -9319,39 +9043,11 @@ func (ec *executionContext) marshalO__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgen�
 	if v == nil {
 		return graphql.Null
 	}
-	ret := make(graphql.Array, len(v))
-	var wg sync.WaitGroup
-	isLen1 := len(v) == 1
-	if !isLen1 {
-		wg.Add(len(v))
-	}
-	for i := range v {
-		i := i
-		fc := &graphql.FieldContext{
-			Index:  &i,
-			Result: &v[i],
-		}
-		ctx := graphql.WithFieldContext(ctx, fc)
-		f := func(i int) {
-			defer func() {
-				if r := recover(); r != nil {
-					ec.Error(ctx, ec.Recover(ctx, r))
-					ret = nil
-				}
-			}()
-			if !isLen1 {
-				defer wg.Done()
-			}
-			ret[i] = ec.marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, sel, v[i])
-		}
-		if isLen1 {
-			f(i)
-		} else {
-			go f(i)
-		}
-
-	}
-	wg.Wait()
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐType(ctx, sel, v[i])
+	})
 
 	for _, e := range ret {
 		if e == graphql.Null {

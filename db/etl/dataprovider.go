@@ -23,8 +23,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -99,6 +101,19 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
 
@@ -115,11 +130,14 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
-	defer w.Flush() //nolint:errcheck
+	w := getBufioWriter(bufferFile)
+	defer putBufioWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
+	}
+	if err = w.Flush(); err != nil {
+		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
 	}
 	return bufferFile, nil
 }
@@ -201,15 +219,17 @@ func (p *fileDataProvider) Dispose() {
 
 	p.Wait()
 
+	if p.mmapData != nil {
+		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		p.mmapData = nil
+		p.mmapHandle2 = nil
+		p.mmapReader = nil
+	}
+
 	filePath := p.file.Name()
 	p.file.Close()
 	p.file = nil
 	_ = dir.RemoveFile(filePath)
-
-	// Note: We intentionally do NOT munmap here. The mmap'd memory remains mapped
-	// and valid for zero-copy slices returned to callers. The OS will unmap when
-	// the process exits or memory pressure requires it. This is safe for the ETL
-	// use case where data is consumed immediately before Close() is called.
 }
 
 func (p *fileDataProvider) String() string {

@@ -1,0 +1,204 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package types;
+
+option go_package = "./types;typesproto";
+
+/* Service-level versioning shall use a 3-part version number (M.m.p) following semver rules */
+/* 1. MAJOR version (M): increment when you make incompatible changes                        */
+/* 2. MINOR version (m): increment when you add functionality in backward compatible manner  */
+/* 3. PATCH version (p): increment when you make backward compatible bug fixes               */
+
+// Extensions of file-level options for service versioning: should *not* be modified
+extend google.protobuf.FileOptions {
+  uint32 service_major_version = 50001;
+  uint32 service_minor_version = 50002;
+  uint32 service_patch_version = 50003;
+}
+
+message H128 {
+  uint64 hi = 1;
+  uint64 lo = 2;
+}
+
+message H160 {
+  H128 hi = 1;
+  uint32 lo = 2;
+}
+
+message H256 {
+  H128 hi = 1;
+  H128 lo = 2;
+}
+
+message H512 {
+  H256 hi = 1;
+  H256 lo = 2;
+}
+
+message H1024 {
+  H512 hi = 1;
+  H512 lo = 2;
+}
+
+message H2048 {
+  H1024 hi = 1;
+  H1024 lo = 2;
+}
+
+// Reply message containing the current service version on the service side
+message VersionReply {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+// ------------------------------------------------------------------------
+// Engine API types
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine
+message ExecutionPayload {
+  uint32 version = 1; // v1 - no withdrawals, v2 - with withdrawals, v3 - with blob gas
+  H256 parent_hash = 2;
+  H160 coinbase = 3;
+  H256 state_root = 4;
+  H256 receipt_root = 5;
+  H2048 logs_bloom = 6;
+  H256 prev_randao = 7;
+  uint64 block_number = 8;
+  uint64 gas_limit = 9;
+  uint64 gas_used = 10;
+  uint64 timestamp = 11;
+  bytes extra_data = 12;
+  H256 base_fee_per_gas = 13;
+  H256 block_hash = 14;
+  repeated bytes transactions = 15;
+  repeated Withdrawal withdrawals = 16;
+  optional uint64 blob_gas_used = 17;
+  optional uint64 excess_blob_gas = 18;
+  optional H256 block_access_list_hash = 19; // added in Amsterdam (EIP-7928)
+  repeated BlockAccessListAccount block_access_list = 20; // added in Amsterdam (EIP-7928)
+  optional uint64 slot_number = 21;                  // added in Amsterdam (EIP-7843)
+}
+
+message BlockAccessListStorageChange {
+  uint32 index = 1;
+  H256 value = 2;
+}
+
+message BlockAccessListSlotChanges {
+  H256 slot = 1;
+  repeated BlockAccessListStorageChange changes = 2;
+}
+
+message BlockAccessListBalanceChange {
+  uint32 index = 1;
+  H256 value = 2;
+}
+
+message BlockAccessListNonceChange {
+  uint32 index = 1;
+  uint64 value = 2;
+}
+
+message BlockAccessListCodeChange {
+  uint32 index = 1;
+  bytes data = 2;
+}
+
+message BlockAccessListAccount {
+  H160 address = 1;
+  repeated BlockAccessListSlotChanges storage_changes = 2;
+  repeated H256 storage_reads = 3;
+  repeated BlockAccessListBalanceChange balance_changes = 4;
+  repeated BlockAccessListNonceChange nonce_changes = 5;
+  repeated BlockAccessListCodeChange code_changes = 6;
+}
+
+message Withdrawal {
+  uint64 index = 1;
+  uint64 validator_index = 2;
+  H160 address = 3;
+  uint64 amount = 4;
+}
+
+message BlobsBundle {
+  // TODO(eip-4844): define a protobuf message for type KZGCommitment
+  repeated bytes commitments = 1;
+  // TODO(eip-4844): define a protobuf message for type Blob
+  repeated bytes blobs = 2;
+  repeated bytes proofs = 3;
+}
+
+message RequestsBundle {
+  repeated bytes requests = 1;
+}
+
+// End of Engine API types
+// ------------------------------------------------------------------------
+
+message NodeInfoPorts {
+  uint32 discovery = 1;
+  uint32 listener = 2;
+}
+
+message NodeInfoReply {
+  string id = 1;
+  string name = 2;
+  string enode = 3;
+  string enr = 4;
+  NodeInfoPorts ports = 5;
+  string listener_addr = 6;
+  bytes protocols = 7;
+}
+
+message PeerInfo {
+  string id = 1;
+  string name = 2;
+  string enode = 3;
+  string enr = 4;
+  repeated string caps = 5;
+  string conn_local_addr = 6;
+  string conn_remote_addr = 7;
+  bool conn_is_inbound = 8;
+  bool conn_is_trusted = 9;
+  bool conn_is_static = 10;
+}
+
+message ExecutionPayloadBody {
+  repeated bytes transactions = 1;
+  repeated Withdrawal withdrawals = 2;
+  bytes block_access_list = 3;
+}
+
+message AccountAbstractionTransaction {
+  uint64 nonce = 1;
+  bytes chain_id = 2;
+  bytes tip = 3;
+  bytes fee_cap = 4;
+  uint64 gas = 5;
+
+  bytes sender_address = 6;
+  bytes sender_validation_data = 7;
+  bytes execution_data = 8;
+  bytes paymaster = 9;
+  bytes paymaster_data = 10;
+  bytes deployer = 11;
+  bytes deployer_data = 12;
+  bytes builder_fee = 13;
+  uint64 validation_gas_limit = 14;
+  uint64 paymaster_validation_gas_limit = 15;
+  uint64 post_op_gas_limit = 16;
+  bytes nonce_key = 17;
+  repeated Authorization authorizations = 18;
+}
+
+message Authorization {
+  uint64 chain_id = 1;
+  bytes address = 2;
+  uint64 nonce = 3;
+  uint32 y_parity = 4;
+  bytes r = 5;
+  bytes s = 6;
+}
