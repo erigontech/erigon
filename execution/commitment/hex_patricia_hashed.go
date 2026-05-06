@@ -3067,6 +3067,16 @@ func (hph *HexPatriciaHashed) Cache() *WarmupCache {
 // many blocks later.
 var verifyBranchCache = dbg.EnvBool("BRANCH_CACHE_VERIFY", false)
 
+// disableBranchCacheReads forces branchFromCacheOrDB to skip the L2
+// BranchCache read path — every read goes to ctx.Branch (sd.mem →
+// MDBX). Cache writes (CollectUpdate.Put, branchFromCacheOrDB.Put on
+// L3 fallback) still fire so verify-mode can keep comparing cache vs
+// canonical. Use to A/B test correctness with-cache vs without-cache
+// without recompiling. Confirmed in 2026-05-06 investigation that
+// flipping this distinguishes "cache holds bad data" (bench passes
+// further) from "deeper compute bug" (bench fails at the same block).
+var disableBranchCacheReads = dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false)
+
 // branchFromCacheOrDB reads branch data via the cache hierarchy:
 //   - L1: WarmupCache (ephemeral, populated by warmup workers ahead of fold)
 //   - L2: BranchCache (longer-lived; per-Process today, will be aggTx-scoped
@@ -3093,7 +3103,7 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			hph.metrics.missBranch.Add(1)
 		}
 	}
-	if hph.branchCache != nil {
+	if hph.branchCache != nil && !disableBranchCacheReads {
 		if data, found := hph.branchCache.Get(key); found {
 			if verifyBranchCache {
 				canonical, _, err := hph.ctx.Branch(key)
