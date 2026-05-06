@@ -6,8 +6,11 @@
 #   CACHE_DIR/KEY/         extracted contents
 #   CACHE_DIR/KEY/.sha256  sentinel file recording the verified sha256
 #
-# Re-running is a no-op when the sentinel already matches; useful tarballs
-# stay cached so re-extraction (e.g. after `make clean`) doesn't re-download.
+# Re-running is a no-op when the sentinel already matches. Tarballs are kept
+# alongside the extracted dirs so re-extraction (after `make clean` or a
+# manual rm of CACHE_DIR/KEY/) doesn't re-download. The trade-off is roughly
+# 2x local disk usage vs. extracted-only; CI caches only *.tar.gz to stay
+# under cache budget and re-extracts on each run.
 #
 # Usage: tools/test-fixtures.sh [MANIFEST [CACHE_DIR]]
 #   MANIFEST defaults to test-fixtures.json
