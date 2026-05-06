@@ -48,6 +48,15 @@ def parse_frontmatter(text):
     return meta, text[end + 4:]
 
 
+def _sub_outside_backticks(pattern, repl, line):
+    """Apply re.sub only outside backtick-quoted inline code spans."""
+    parts = re.split(r"(`[^`]*`)", line)
+    return "".join(
+        re.sub(pattern, repl, p) if not p.startswith("`") else p
+        for p in parts
+    )
+
+
 def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
     # Remove import/export statements (always line-level, safe to strip globally)
@@ -66,13 +75,15 @@ def strip_mdx(text):
             # Preserve lines inside code fences completely unchanged
             out.append(line)
         else:
-            # Outside code fences: strip HTML/JSX tags and expressions
-            line = re.sub(r"<[A-Za-z][^>]*/?>", "", line)
-            line = re.sub(r"</[A-Za-z][^>]*>", "", line)
-            # Remove leftover JSX expressions like {foo.bar}
-            line = re.sub(r"\{[^}]{1,120}\}", "", line)
-            # Strip leading whitespace (orphaned indentation from JSX component bodies)
-            out.append(line.lstrip())
+            # Outside fences: strip HTML/JSX tags and JSX expressions.
+            # Use backtick-aware substitution so inline code spans like
+            # `erigon:v{ERIGON_VERSION}` or `<YOUR_ADDRESS>` are preserved.
+            line = _sub_outside_backticks(r"<[A-Za-z][^>]*/?>", "", line)
+            line = _sub_outside_backticks(r"</[A-Za-z][^>]*>", "", line)
+            line = _sub_outside_backticks(r"\{[^}]{1,120}\}", "", line)
+            # Preserve indentation — dropping lstrip() keeps nested lists and
+            # indented continuations intact (JSX-orphaned spaces are harmless).
+            out.append(line)
     text = "\n".join(out)
     # Collapse 3+ blank lines to 2
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -257,7 +268,10 @@ def build():
         full_parts.append(f"# {p['title']}")
         full_parts.append(f"URL: {p['url']}")
         full_parts.append("")
-        full_parts.append(p["body"])
+        # Strip a leading H1 from the body — many docs start with an H1 that
+        # matches the title, which would produce a duplicate heading in the export.
+        body = re.sub(r"^#\s+[^\n]+\n?", "", p["body"].lstrip("\n"), count=1)
+        full_parts.append(body)
         full_parts.append("")
         full_parts.append("---")
         full_parts.append("")
