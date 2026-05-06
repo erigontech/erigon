@@ -47,11 +47,11 @@ func BenchmarkEngineXScenario(b *testing.B) {
 }
 
 func benchmarkEngineX(b *testing.B, category string) {
-	ctx := b.Context()
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
+	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
 	engineXDir := filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)

@@ -48,11 +48,11 @@ import (
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
 // BAL hash mismatch returned by ProcessBAL.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	const numSenders = 10
 	senderKeys := make([]*ecdsa.PrivateKey, numSenders)
 	for i := range senderKeys {
@@ -114,11 +114,11 @@ func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 }
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -190,11 +190,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 }
 
 func TestEngineApiBALContractCreation(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -245,11 +245,11 @@ func TestEngineApiBALContractCreation(t *testing.T) {
 }
 
 func TestEngineApiBALStorageWrites(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -311,11 +311,11 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 }
 
 func TestEngineApiBALMultiTxBlock(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -571,11 +571,11 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 // assertoor suite fail. Runs under -race should eventually expose non-
 // determinism sources that survive a single execution.
 func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlInfo)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlInfo)
 	const (
 		numSenders = 20
 		numBlocks  = 3
@@ -698,11 +698,11 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 // There is no deployed code (no `f3` RETURN), so the create returns no
 // bytecode — the only output the test needs is the BAL agreement.
 func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -761,11 +761,11 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 // TestEngineApiBALSelfDestruct tests BAL tracking when a contract self-destructs.
 // Exercises storage writes followed by self-destruct in the same block.
 func TestEngineApiBALSelfDestruct(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
 	t.Cleanup(func() {

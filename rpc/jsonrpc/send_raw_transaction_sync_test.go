@@ -34,12 +34,12 @@ import (
 )
 
 func TestSendRawTransactionSync(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
 
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	assert := require.New(t)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
@@ -95,12 +95,12 @@ func TestSendRawTransactionSync(t *testing.T) {
 }
 
 func TestSendRawTransactionSyncTimeout(t *testing.T) {
-	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
 
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	assert := require.New(t)
 	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
 	require.NoError(t, err)
