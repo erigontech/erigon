@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 )
 
 // BenchmarkEngineXInstruction measures payload execution time per instruction category,
@@ -50,18 +51,23 @@ func benchmarkEngineX(b *testing.B, category string) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
+	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
-	engineXDir := filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
+	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 
-	runner, err := NewEngineXTestRunner(b, logger, preAllocDir)
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocDir)
 	require.NoError(b, err)
+	b.Cleanup(func() {
+		err := runner.Close()
+		require.NoError(b, err)
+	})
 
 	// Parse all test files, group by subcategory.
 	type testEntry struct {
 		name string
-		def  EngineXTestDefinition
+		def  engineapitester.EngineXTestDefinition
 	}
 	subcategories := make(map[string][]testEntry)
 	err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
@@ -72,7 +78,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 		if err != nil {
 			return err
 		}
-		var tests map[string]EngineXTestDefinition
+		var tests map[string]engineapitester.EngineXTestDefinition
 		if err := json.Unmarshal(data, &tests); err != nil {
 			return nil
 		}
@@ -103,7 +109,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 		b.Run(subcat, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				for _, e := range entries {
-					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
+					require.NoError(b, runner.Execute(ctx, e.def), "%s/%s", subcat, e.name)
 				}
 			}
 		})
