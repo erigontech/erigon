@@ -246,18 +246,9 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
 		}
 	}
-	// Touch keys from all three domains that contribute to the trie root: account fields
-	// (Accounts), per-account storage slots (Storage), and contract code hashes (Code).
-	// Touching only Accounts misses pure-SSTORE blocks (storage changed without account
-	// changes) and contract-creation/SELFDESTRUCT-only blocks where code changed without
-	// account changes — those storage/code subtrees would stay un-recomputed.
-	var touches uint64
-	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		n, err := touchHistoricalKeys(sd, tx, d, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
-		if err != nil {
-			return err
-		}
-		touches += n
+	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
+	if err != nil {
+		return err
 	}
 	logger.Info("[integrity] CommitmentRoot recomputing", "touches", touches, "file", filepath.Base(f.Fullpath()))
 	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "", nil /* commitProgress */)
