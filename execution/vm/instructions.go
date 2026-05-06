@@ -1550,7 +1550,7 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		integer.SetBytes(scope.Contract.Code[startMin:endMin])
 		// Missing bytes: pushByteSize - len(pushData)
 		if missing := pushByteSize - (endMin - startMin); missing > 0 {
-			integer.Lsh(&integer, uint(8*missing))
+			integer.ILsh(uint(8 * missing))
 		}
 		scope.Stack.push(integer)
 
