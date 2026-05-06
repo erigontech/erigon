@@ -485,6 +485,29 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
+	// Chain the validation SD to currentContext when the new payload
+	// extends the current canonical head. Closes a timing hole: FCU's
+	// MergeExtendingFork moves the previous fork's writes into
+	// currentContext.mem, but MDBX commit only fires from RunLoop's
+	// CommitCycle on memory pressure. Between FCU and the next
+	// newPayload, currentContext.mem holds the latest state and MDBX
+	// is stale. Without the parent link, this fresh doms reads
+	// stale-MDBX while the aggregator-scope BranchCache (populated by
+	// the prior FV's CollectUpdate writes) holds the fresh state,
+	// producing divergence and wrong-trie-root downstream.
+	//
+	// Only set parent for head-extending payloads — fork validation
+	// requires unwindToCommonCanonical below to revert doms's view to
+	// the common ancestor, and exposing currentContext.mem (which holds
+	// post-divergence canonical writes) via the parent chain would
+	// shadow the unwound base. The current SD topology supports a
+	// single canonical chain only; per-branch SD lineage for concurrent
+	// multi-fork validation is a separate architectural follow-up.
+	canonicalHead := rawdb.ReadHeadBlockHash(tx)
+	if header.ParentHash == canonicalHead && e.currentContext != nil {
+		doms.SetParent(e.currentContext)
+	}
+
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
 	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
 	// and the parallel exec goroutine via NewReadView — see this block data.
