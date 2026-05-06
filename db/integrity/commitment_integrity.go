@@ -207,15 +207,16 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	// Read each touched key's value from the .kv files visible at maxTxNum
-	// (walkback through frozen .kv files, capped at maxTxNum). Those domain
-	// .kv files are the authoritative snapshot the commitment was originally
-	// built against. Tombstones in .kv files are honoured as "deleted at
-	// maxTxNum"; the GetLatest fallback in LimitedHistoryStateReader only
-	// fires when a touched key has no frozen .kv record at all (which doesn't
-	// happen for keys touched via HistoryKeyTxNumRange within the file's range,
-	// since their writes are by definition in the corresponding frozen .kv).
-	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum)
+	// Read each touched key's value from the matching .kv file at the same
+	// boundary as commitment.kv (i.e. accounts/storage/code.kv at maxTxNum).
+	// Those domain .kv files are the authoritative snapshot the commitment was
+	// originally built against; consulting history (.ef+.v), current DB state,
+	// or later .kv files only introduces noise that wasn't part of the input
+	// that produced info.rootHash. FilesOnlyStateReader returns nil on miss
+	// (no GetLatest fallback like LimitedHistoryStateReader does) so a missing
+	// key is treated as "not in the boundary snapshot" rather than wrong-falling
+	// back to current state.
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
@@ -249,9 +250,8 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
 	// Touch Accounts/Storage keys changed in the LAST block of the file
-	// ([info.blockMinTxNum, info.txNum+1)). With LimitedHistoryStateReader
-	// plugged in (and getLatestFromFiles' walkback fix), the touched leaves
-	// are re-read from the matching .kv files visible at maxTxNum — so
+	// ([info.blockMinTxNum, info.txNum+1)). With FilesOnlyStateReader plugged in,
+	// the touched leaves are re-read from the matching boundary .kv files — so
 	// recomputing the last block's contribution and folding to the root is a
 	// meaningful end-to-end check that commitment.kv agrees with its sibling
 	// accounts/storage.kv at the boundary for that block's writes. Older branches
