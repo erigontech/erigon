@@ -24,7 +24,7 @@ These methods must be explicitly enabled using the `--http.api` flag when starti
 * `erigon_getLogs` returns enhanced ErigonLog objects with additional metadata like timestamps
 * `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
-See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README#rpc-implementation-status) about implementation status.
+See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
 
 ***
 

@@ -18,9 +18,9 @@ The Erigon RPC service offers three distinct deployment modes when it comes to t
 
 For a comprehensive understanding and the latest instructions, the official documentation is essential:
 
-* **Detailed Functionality and Configuration**: The primary documentation for the `rpcdaemon` is located at [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/).
+* **Detailed Functionality and Configuration**: The primary documentation for the `rpcdaemon` is located at [https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md).
 * **Local Access**: This documentation is also contained in your locally compiled Erigon folder at `/cmd/rpcdaemon`.
-* **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README#running-remotely).
+* **Remote Running Instructions**: For detailed instructions on running RPC in Remote mode, refer to the documentation [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#running-remotely).
 
 :::tip
 To interact with the **RPC Service** visit the dedicated page [Interacting with Erigon](../../interacting-with-erigon/).

@@ -10,7 +10,7 @@ The Downloader is a service responsible for seeding and downloading historical d
 **Info**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
 :::
 
-For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme) with the following key topics:
+For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
 
 1. **Snapshots overview**: An introduction to snapshots, their benefits, and how they are created and used in Erigon.
 2. **Starting Erigon with snapshots support**: Instructions on how to start Erigon with snapshots support, either by default or as a separate process.
@@ -70,7 +70,7 @@ Flags:
       --diagnostics.endpoint.port uint     Diagnostics HTTP server listening port (default 6062)
       --diagnostics.speedtest              Enable speed test
       --downloader.api.addr string         external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface (default "127.0.0.1:9093")
-      --downloader.disable.ipv4            Turns off ipv6 for the downloader
+      --downloader.disable.ipv4            Turns off ipv4 for the downloader
       --downloader.disable.ipv6            Turns off ipv6 for the downloader
   -h, --help                               help for this command
       --log.console.json                   Format console logs with JSON
