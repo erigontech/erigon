@@ -30,6 +30,7 @@ var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
 	rlpTestDir = filepath.Join(legacyDir, "RLPTests")
 	cornersDir = filepath.Join(".", "test-corners")
+	eestDir    = filepath.Join("..", "..", "test-fixtures-cache", "eest_stable", "fixtures")
 )
 
 func TestMatcherWhitelist(t *testing.T) {

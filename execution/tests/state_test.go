@@ -103,7 +103,7 @@ func TestState(t *testing.T) {
 
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	runStateTests(t, st, filepath.Join("..", "..", "test-fixtures-cache", "eest_stable", "fixtures", "state_tests", "static", "state_tests"))
+	runStateTests(t, st, filepath.Join(eestDir, "state_tests", "static", "state_tests"))
 }
 
 // stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
