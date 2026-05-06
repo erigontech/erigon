@@ -56,10 +56,12 @@ import (
 // Without the fix: wrong receipts are silently returned → test FAILS
 // With the fix: non-canonical block error is returned → test PASSES
 func TestReceiptRootValidationAfterReorg(t *testing.T) {
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	maxReorgDepth := uint64(64)
-	logLvl := log.LvlDebug
 	receiver := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18")
-	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 
 	// ==============================================================================================================
 	// Chain A: Deploy Changer + call Change() in block 2, call Change() again in block 3 (no-op SSTOREs, cheap gas)
@@ -67,14 +69,19 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// After init, all testers share identical block 1 (empty). So the fork point is at block 1,
 	// and chains diverge starting at block 2.
 	chainA := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
-	eatA := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatA, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatA.Close()
+		require.NoError(t, err)
 	})
 	eatA.Run(t, func(ctx context.Context, t *testing.T, eatA engineapitester.EngineApiTester) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatA.CoinbaseKey, eatA.ChainId())
@@ -103,7 +110,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 		chainA[1] = block3A
 	})
-	eatA.Close(t) // free MDBX resources before creating the next tester
+	require.NoError(t, eatA.Close()) // free MDBX resources before creating the next tester
 
 	// ==============================================================================================================
 	// Chain B: Deploy Changer + ETH transfer in block 2 (no Change() call), ETH transfer in block 3
@@ -111,14 +118,19 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// Same tx count per block as chain A (2 txs in block 2, 1 tx in block 3) to keep coinbase nonce aligned.
 	// But Changer.Change() is never called, so Changer storage remains {x:0, y:0, z:0}.
 	chainB := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
-	eatB := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatB, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatB.Close()
+		require.NoError(t, err)
 	})
 	eatB.Run(t, func(ctx context.Context, t *testing.T, eatB engineapitester.EngineApiTester) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatB.CoinbaseKey, eatB.ChainId())
@@ -146,19 +158,24 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 		chainB[1] = block3B
 	})
-	eatB.Close(t) // free MDBX resources before creating the next tester
+	require.NoError(t, eatB.Close()) // free MDBX resources before creating the next tester
 
 	// ==============================================================================================================
 	// Sync tester: process chain A, then re-org to chain B, then query receipts for orphaned block 3(A)
 	// ==============================================================================================================
-	eatSync := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+	eatSync, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eatSync.Close()
+		require.NoError(t, err)
 	})
 	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync engineapitester.EngineApiTester) {
 		// Insert and commit chain A (blocks 2(A) and 3(A))
