@@ -164,7 +164,14 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 	}
 
 	hph.branchEncoder.setMetrics(hph.metrics)
-	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
+	// Inline-mode write path: CollectUpdate writes sd.mem + WarmupCache +
+	// BranchCache atomically at fold-time via PutBranch, preserving the
+	// trie's read-your-own-writes invariant and keeping the cache aligned
+	// with sd.mem at every write. Deferred-mode (parallel encoding at
+	// apply time) breaks this — the encoder writes to sd.mem at apply
+	// time while reads still see pre-apply state via cache, producing
+	// intra-Process divergence.
+	hph.branchEncoder.SetDeferUpdates(false)
 	return hph
 }
 
