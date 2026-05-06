@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -35,7 +36,7 @@ import (
 
 // BenchmarkEngineXInstruction measures payload execution time per instruction category,
 // excluding one-time setup (genesis write, node startup, DB init).
-// Usage: go test -run='^$' -bench BenchmarkEngineXInstruction -benchtime=1x -timeout 60m ./execution/tests/
+// Usage: BENCH_ENGINE_X_MANUAL_ALLOW=true go test -run='^$' -bench BenchmarkEngineXInstruction -benchtime=1x -timeout 60m ./execution/tests/
 func BenchmarkEngineXInstruction(b *testing.B) {
 	benchmarkEngineX(b, "instruction")
 }
@@ -49,8 +50,8 @@ func BenchmarkEngineXScenario(b *testing.B) {
 }
 
 func benchmarkEngineX(b *testing.B, category string) {
-	if testing.Short() {
-		b.Skip("skipping heavy engine-x benchmark in short mode")
+	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
+		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
 	logger := testlog.Logger(b, log.LvlDebug)
