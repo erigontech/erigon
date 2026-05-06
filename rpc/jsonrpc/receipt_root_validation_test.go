@@ -57,10 +57,11 @@ import (
 // With the fix: non-canonical block error is returned → test PASSES
 func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	maxReorgDepth := uint64(64)
-	logLvl := log.LvlDebug
 	receiver := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18")
-	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 
 	// ==============================================================================================================
 	// Chain A: Deploy Changer + call Change() in block 2, call Change() again in block 3 (no-op SSTOREs, cheap gas)
@@ -69,7 +70,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// and chains diverge starting at block 2.
 	chainA := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
 	eatA, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
@@ -118,7 +119,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// But Changer.Change() is never called, so Changer storage remains {x:0, y:0, z:0}.
 	chainB := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
 	eatB, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,
@@ -163,7 +164,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// Sync tester: process chain A, then re-org to chain B, then query receipts for orphaned block 3(A)
 	// ==============================================================================================================
 	eatSync, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, logLvl),
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
 		CoinbaseKey: coinbaseKey,

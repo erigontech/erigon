@@ -215,7 +215,8 @@ type blockBuildingUniverse struct {
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
-	genesis, coinbasePrivKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	genesis, coinbasePrivKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
