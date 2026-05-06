@@ -1119,11 +1119,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	go func() {
-		if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-			logger.Error("snapashot merge loop error", "err", err)
-		}
-	}()
+	if !dbg.NoBackgroundMaintenance() {
+		go func() {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
+				logger.Error("snapashot merge loop error", "err", err)
+			}
+		}()
+	}
 
 	return backend, nil
 }
