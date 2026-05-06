@@ -27,7 +27,7 @@ The user may specify one or more test suites in any combination:
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
-| `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures (version auto-discovered) |
+| `eest-devnet` | ethereum/eels/consume-engine | EEST devnet (BAL/glamsterdam) fixtures (version auto-discovered) |
 | `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
@@ -41,7 +41,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test withdrawals api` - Run withdrawals and API suites
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
-- `/hive-test eest-bal` - Run BAL-specific EEST tests
+- `/hive-test eest-devnet` - Run devnet EEST tests (BAL/glamsterdam)
 - `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
@@ -69,7 +69,7 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-bal (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| eest-devnet (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)

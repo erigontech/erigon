@@ -139,7 +139,7 @@ cd temp/<hive-dir>/hive
 
 For an **interactive, ephemeral hive workflow** (handles versioned EEST fixtures, Dockerfile setup, BAL workarounds, per-suite parallelism), use the `/hive-test` skill instead:
 ```
-/hive-test eest-bal          # run BAL amsterdam tests
+/hive-test eest-devnet       # run devnet (BAL/glamsterdam) tests
 /hive-test engine rpc-compat # run engine + rpc suites
 /hive-test all               # run everything
 ```
