@@ -51,14 +51,19 @@ func benchmarkEngineX(b *testing.B, category string) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
 
+	ctx := b.Context()
 	logger := testlog.Logger(b, log.LvlDebug)
 
 	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
 	preAllocsDir := filepath.Join(engineXDir, "pre_alloc")
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 
-	runner, err := engineapitester.NewEngineXTestRunner(b, logger, preAllocsDir)
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocsDir)
 	require.NoError(b, err)
+	b.Cleanup(func() {
+		err := runner.Close()
+		require.NoError(b, err)
+	})
 
 	type testEntry struct {
 		name string
@@ -104,7 +109,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 		b.Run(subcat, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				for _, e := range entries {
-					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
+					require.NoError(b, runner.Execute(ctx, e.def), "%s/%s", subcat, e.name)
 				}
 			}
 		})

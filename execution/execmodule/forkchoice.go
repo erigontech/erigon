@@ -297,11 +297,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	if fcuHeader.Number.Sign() > 0 {
 		var finalisedBlockNum uint64
-		if finalizedHash == (common.Hash{}) {
-			// The CL has not finalised anything yet (e.g. fresh devnet before finality kicks in).
-			finalisedBlockNum = finishProgressBefore
-		} else {
-			bn, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+		lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
+		if lastKnownFinalisedHash != (common.Hash{}) {
+			bn, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
