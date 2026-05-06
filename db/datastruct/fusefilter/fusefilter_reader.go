@@ -109,9 +109,49 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	}
 	fingerprintsLen := int(fingerprintsLen64)
 
+	if err := validateFilterGeometry(filter, fingerprintsLen, fName); err != nil {
+		return nil, 0, err
+	}
+
 	filter.Fingerprints = data[:fingerprintsLen]
 	total := headerSize + fingerprintsLen
 	return &Reader{inner: filter, version: v, features: features, m: m[:total]}, total, nil
+}
+
+// validateFilterGeometry rejects on-disk header values that would let
+// xorfilter.Contains panic with an out-of-bounds Fingerprints index. The fuse
+// filter encodes h_i = uint32(Mul64(hash, SegmentCountLength).hi) + i*SegmentLength
+// for i in {0,1,2}; the largest index it can produce is SegmentCountLength-1 +
+// 2*SegmentLength, so we need len(Fingerprints) >= (SegmentCount+2)*SegmentLength.
+func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen int, fName string) error {
+	if filter.SegmentLength == 0 || filter.SegmentCount == 0 {
+		return fmt.Errorf("fusefilter %s: zero SegmentLength=%d SegmentCount=%d", fName, filter.SegmentLength, filter.SegmentCount)
+	}
+	// SegmentLength is a power of two by construction (calculateSegmentLength
+	// returns 1<<k). The mask must equal SegmentLength-1; otherwise hi-bit
+	// shifts in getHashFromHash compute indices beyond SegmentLengthMask+1,
+	// breaking the implicit bound used below.
+	if filter.SegmentLength&(filter.SegmentLength-1) != 0 {
+		return fmt.Errorf("fusefilter %s: SegmentLength=%d is not a power of two", fName, filter.SegmentLength)
+	}
+	if filter.SegmentLengthMask != filter.SegmentLength-1 {
+		return fmt.Errorf("fusefilter %s: SegmentLengthMask=%d != SegmentLength-1=%d", fName, filter.SegmentLengthMask, filter.SegmentLength-1)
+	}
+	wantSCL := uint64(filter.SegmentCount) * uint64(filter.SegmentLength)
+	if wantSCL > math.MaxUint32 {
+		return fmt.Errorf("fusefilter %s: SegmentCount*SegmentLength=%d overflows uint32", fName, wantSCL)
+	}
+	if uint64(filter.SegmentCountLength) != wantSCL {
+		return fmt.Errorf("fusefilter %s: SegmentCountLength=%d != SegmentCount*SegmentLength=%d", fName, filter.SegmentCountLength, wantSCL)
+	}
+	wantFP := (uint64(filter.SegmentCount) + 2) * uint64(filter.SegmentLength)
+	if wantFP > math.MaxInt {
+		return fmt.Errorf("fusefilter %s: required fingerprints length %d overflows int", fName, wantFP)
+	}
+	if uint64(fingerprintsLen) < wantFP {
+		return fmt.Errorf("fusefilter %s: fingerprints length %d < required %d for SegmentCount=%d SegmentLength=%d", fName, fingerprintsLen, wantFP, filter.SegmentCount, filter.SegmentLength)
+	}
+	return nil
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
