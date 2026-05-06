@@ -13,10 +13,15 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
-    name: test-hive-eest (${{ matrix.shard }})
+    name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
     strategy:
       fail-fast: false
       matrix:
+        # Each shard runs twice — once with serial exec
+        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
+        # divergence between the two paths is caught on the PR. Matrix
+        # entries spawn separate `hive` group runners and run concurrently —
+        # wall-clock unchanged, runner-minutes doubled.
         include:
           # consume-engine: split by fork for parallelism (61k+ tests total).
           # Engine API tests only exist from Paris (The Merge) onwards.
@@ -36,26 +41,61 @@ jobs:
             shard: paris+shanghai
             pool-size: 0
             fixtures-tarball: eest_stable
+            exec_mode: serial
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
+            shard: paris+shanghai
+            pool-size: 0
+            fixtures-tarball: eest_stable
+            exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
             pool-size: 4
             fixtures-tarball: eest_stable
+            exec_mode: serial
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Cancun"
+            shard: cancun
+            pool-size: 4
+            fixtures-tarball: eest_stable
+            exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
             pool-size: 4
             fixtures-tarball: eest_stable
+            exec_mode: serial
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Prague"
+            shard: prague
+            pool-size: 4
+            fixtures-tarball: eest_stable
+            exec_mode: parallel
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
             pool-size: 4
             fixtures-tarball: eest_stable
+            exec_mode: serial
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Osaka"
+            shard: osaka
+            pool-size: 4
+            fixtures-tarball: eest_stable
+            exec_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
             pool-size: 0
             fixtures-tarball: eest_stable
+            exec_mode: serial
+          - sim: consume-rlp
+            sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
+            shard: rlp
+            pool-size: 0
+            fixtures-tarball: eest_stable
+            exec_mode: parallel
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
@@ -67,6 +107,16 @@ jobs:
             # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
             # transitioning to bal-devnet-4
             max-failures: 579
+            exec_mode: serial
+          - sim: consume-engine
+            sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
+            shard: glamsterdam-devnet
+            pool-size: 24
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+            erigon-extra-flags: "--experimental.bal"
+            max-failures: 579
+            exec_mode: parallel
     steps:
       - name: Clean docker system
         run: |
@@ -129,11 +179,15 @@ jobs:
         with:
           go-version: '>=1.25'
 
-      # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
+      # Targetting the clients/erigon/Dockerfile.git in the Hive director -
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
         env:
           SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          # Toggle dbg.Exec3Parallel inside the hive-built erigon container.
+          # Baked as an ENV directive into the client Dockerfile so every
+          # erigon instance hive launches inherits it.
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
           git status
@@ -147,6 +201,10 @@ jobs:
           go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
           echo "Patching builder Go version to ${go_version}"
           sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
+          # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
+          # erigon process inside hive picks it up. Append as the last layer
+          # so it doesn't invalidate earlier build caches.
+          echo "ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}" >> clients/erigon/Dockerfile
           erigon_extra_flags="${{ matrix.erigon-extra-flags }}"
           if [ -n "$erigon_extra_flags" ]; then
             echo "Patching erigon.sh with extra flags: $erigon_extra_flags"
@@ -211,7 +269,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: hive-workspace-log-${{ matrix.shard }}
+          # exec_mode in the artifact name keeps the two matrix entries from
+          # clobbering each other's logs on the same artifact key.
+          name: hive-workspace-log-${{ matrix.shard }}-${{ matrix.exec_mode }}
           path: hive/workspace/logs
           if-no-files-found: ignore
       - name: Test Results
