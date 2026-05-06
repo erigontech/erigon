@@ -37,7 +37,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	tarPath := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_stable.tar.gz")
+	dir := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_stable", "fixtures", "blockchain_tests")
 
 	// Slow tests — split into their own packages for parallelism
 	bt.SkipLoad(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
@@ -56,7 +56,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	// Tested in the state test format by TestState
 	bt.SkipLoad(`^static/state_tests/`)
 
-	bt.WalkTar(t, tarPath, "fixtures/blockchain_tests/", func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)

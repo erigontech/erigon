@@ -2,17 +2,17 @@
 
 tests:
 	../../tools/test-fixtures.sh ../../test-fixtures.json ../../test-fixtures-cache
-	tar xf ../../test-fixtures-cache/cl_mainnet.tar.gz
-	# not needed for now
-	rm -rf tests/mainnet/eip6110
-	rm -rf tests/mainnet/whisk
-	rm -rf tests/mainnet/eip7441
-	rm -rf tests/mainnet/eip7732
-	rm -rf tests/mainnet/eip7805
-	rm -rf tests/mainnet/gloas
+	# not needed for now (run after every fixture refresh in case the
+	# tarball was re-extracted)
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
+	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
 clean:
-	rm -rf tests
+	rm -rf ../../test-fixtures-cache/cl_mainnet
 
 mainnet:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go test -run=/mainnet/ -v --timeout 30m

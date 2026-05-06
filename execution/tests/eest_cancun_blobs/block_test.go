@@ -18,9 +18,9 @@ func TestExecutionSpecBlockchainCancunBlobs(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	tarPath := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_stable.tar.gz")
+	dir := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_stable", "fixtures", "blockchain_tests")
 	bt.Whitelist(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas\.json`)
-	bt.WalkTar(t, tarPath, "fixtures/blockchain_tests/", func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}

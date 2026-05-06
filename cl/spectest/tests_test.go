@@ -29,5 +29,5 @@ import (
 func Test(t *testing.T) {
 	caplinConfig := clparams.CaplinConfig{}
 	clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
-	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("../../test-fixtures-cache/cl_mainnet/tests"))
 }

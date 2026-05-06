@@ -103,7 +103,7 @@ func TestState(t *testing.T) {
 
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	runStateTestsTar(t, st, filepath.Join("..", "..", "test-fixtures-cache", "eest_stable.tar.gz"), "fixtures/state_tests/static/state_tests/")
+	runStateTests(t, st, filepath.Join("..", "..", "test-fixtures-cache", "eest_stable", "fixtures", "state_tests", "static", "state_tests"))
 }
 
 // stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
@@ -126,42 +126,30 @@ func stateTestSetup(t *testing.T) {
 func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 	t.Helper()
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
-		runStateTest(t, st, test)
-	})
-}
-
-// runStateTestsTar is the tar(.gz) counterpart to runStateTests.
-func runStateTestsTar(t *testing.T, st *testutil.TestMatcher, tarPath, prefix string) {
-	t.Helper()
-	st.WalkTar(t, tarPath, prefix, func(t *testing.T, name string, test *testutil.StateTest) {
-		runStateTest(t, st, test)
-	})
-}
-
-func runStateTest(t *testing.T, st *testutil.TestMatcher, test *testutil.StateTest) {
-	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-	dirs := datadir.New(tmpDir)
-	db := temporaltest.NewTestDB(t, dirs)
-	for _, subtest := range test.Subtests() {
-		key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-		t.Run(key, func(t *testing.T) {
-			withTrace(t, func(vmconfig vm.Config) error {
-				tx := beginRwNoContention(t, db)
-				defer tx.Rollback()
-				_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
-				tx.Rollback()
-				if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-					// Ignore expected errors
-					return nil
-				}
-				return st.CheckFailure(t, err)
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
+		for _, subtest := range test.Subtests() {
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					tx := beginRwNoContention(t, db)
+					defer tx.Rollback()
+					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					tx.Rollback()
+					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.CheckFailure(t, err)
+				})
 			})
-		})
-	}
+		}
+	})
 }
 
 // temporalRwTry is implemented by *temporal.DB when the underlying MDBX env

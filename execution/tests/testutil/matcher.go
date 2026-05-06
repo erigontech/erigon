@@ -20,11 +20,8 @@
 package testutil
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -170,94 +167,6 @@ func (tm *TestMatcher) Walk(t *testing.T, dir string, runTest any) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-// WalkTar invokes its runTest argument for all subtests in the given gzip-compressed
-// tar archive. Only entries whose path starts with prefix and ends in .json are
-// considered; the prefix is stripped to produce the test name. An empty prefix
-// matches every entry.
-//
-// runTest should be a function of type func(t *testing.T, name string, x <TestType>),
-// where TestType is the type of the test contained in test files.
-func (tm *TestMatcher) WalkTar(t *testing.T, tarPath, prefix string, runTest any) {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Fprintf(os.Stderr, "can't find tarball %s, run `make test-fixtures` to download\n", tarPath)
-			t.Skip("missing tarball")
-		}
-		t.Fatal(err)
-	}
-	defer f.Close()
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gzr.Close()
-	tr := tar.NewReader(gzr)
-	if prefix != "" && !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if hdr.Typeflag != tar.TypeReg || filepath.Ext(hdr.Name) != ".json" {
-			continue
-		}
-		if !strings.HasPrefix(hdr.Name, prefix) {
-			continue
-		}
-		name := strings.TrimPrefix(hdr.Name, prefix)
-		if tm.whitelistpat != nil && !tm.whitelistpat.MatchString(name) {
-			continue
-		}
-		if _, skipload := tm.FindSkip(name); skipload {
-			continue
-		}
-		data, err := io.ReadAll(tr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Run(name, func(t *testing.T) { tm.runTestBytes(t, data, name, runTest) })
-	}
-}
-
-func (tm *TestMatcher) runTestBytes(t *testing.T, data []byte, name string, runTest any) {
-	if !tm.NoParallel {
-		t.Parallel()
-	}
-	if r, _ := tm.FindSkip(name); r != "" {
-		t.Skip(r)
-	}
-
-	m := makeMapFromTestFunc(runTest)
-	if err := jsoniter.Unmarshal(data, m.Addr().Interface()); err != nil {
-		if offset, ok := jsoniterErrorOffset(err); ok {
-			line := findLine(data, offset)
-			t.Fatalf("JSON syntax error at line %v: %v", line, err)
-		}
-		t.Fatal(err)
-	}
-
-	keys := sortedMapKeys(m)
-	if len(keys) == 1 {
-		runTestFunc(runTest, t, name, m, keys[0])
-		return
-	}
-	for _, key := range keys {
-		name := name + "/" + key
-		t.Run(key, func(t *testing.T) {
-			if r, _ := tm.FindSkip(name); r != "" {
-				t.Skip(r)
-			}
-			runTestFunc(runTest, t, name, m, key)
-		})
 	}
 }
 

@@ -17,10 +17,7 @@
 package executiontests
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,62 +53,38 @@ func benchmarkEngineX(b *testing.B, category string) {
 
 	logger := testlog.Logger(b, log.LvlDebug)
 
-	const (
-		preAllocPrefix = "fixtures/blockchain_tests_engine_x/pre_alloc/"
-		computePrefix  = "fixtures/blockchain_tests_engine_x/benchmark/compute/"
-	)
-	categoryPrefix := computePrefix + category + "/"
+	engineXDir := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark", "fixtures", "blockchain_tests_engine_x")
+	preAllocsDir := filepath.Join(engineXDir, "pre_alloc")
+	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
+
+	preAllocs, err := engineapitester.LoadPreAllocsFromDir(preAllocsDir)
+	require.NoError(b, err)
 
 	type testEntry struct {
 		name string
 		def  engineapitester.EngineXTestDefinition
 	}
-	preAllocs := make(map[engineapitester.PreAllocHash]*engineapitester.PreAlloc)
 	subcategories := make(map[string][]testEntry)
-
-	tarPath := filepath.Join("..", "..", "test-fixtures-cache", "eest_benchmark.tar.gz")
-	f, err := os.Open(tarPath)
-	if os.IsNotExist(err) {
-		b.Skipf("missing %s — run `make test-fixtures` to download", tarPath)
-	}
+	err = filepath.WalkDir(testsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || filepath.Ext(path) != ".json" {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var tests map[string]engineapitester.EngineXTestDefinition
+		if err := json.Unmarshal(data, &tests); err != nil {
+			return nil
+		}
+		rel := filepath.ToSlash(strings.TrimPrefix(path, testsDir+string(filepath.Separator)))
+		subcat := strings.SplitN(rel, "/", 2)[0]
+		for name, def := range tests {
+			subcategories[subcat] = append(subcategories[subcat], testEntry{name: name, def: def})
+		}
+		return nil
+	})
 	require.NoError(b, err)
-	defer f.Close()
-	gzr, err := gzip.NewReader(f)
-	require.NoError(b, err)
-	defer gzr.Close()
-	tr := tar.NewReader(gzr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(b, err)
-		if hdr.Typeflag != tar.TypeReg || filepath.Ext(hdr.Name) != ".json" {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(hdr.Name, preAllocPrefix):
-			data, err := io.ReadAll(tr)
-			require.NoError(b, err)
-			var preAlloc engineapitester.PreAlloc
-			require.NoError(b, json.Unmarshal(data, &preAlloc))
-			base := filepath.Base(hdr.Name)
-			hash := strings.TrimSuffix(base, filepath.Ext(base))
-			preAllocs[engineapitester.PreAllocHash(hash)] = &preAlloc
-		case strings.HasPrefix(hdr.Name, categoryPrefix):
-			data, err := io.ReadAll(tr)
-			require.NoError(b, err)
-			var tests map[string]engineapitester.EngineXTestDefinition
-			if err := json.Unmarshal(data, &tests); err != nil {
-				continue
-			}
-			rel := strings.TrimPrefix(hdr.Name, categoryPrefix)
-			subcat := strings.SplitN(rel, "/", 2)[0]
-			for name, def := range tests {
-				subcategories[subcat] = append(subcategories[subcat], testEntry{name: name, def: def})
-			}
-		}
-	}
 
 	runner := engineapitester.NewEngineXTestRunner(b, logger, preAllocs)
 
