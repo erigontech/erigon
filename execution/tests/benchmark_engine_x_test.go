@@ -47,6 +47,7 @@ func BenchmarkEngineXScenario(b *testing.B) {
 }
 
 func benchmarkEngineX(b *testing.B, category string) {
+	ctx := b.Context()
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		b.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
@@ -56,8 +57,12 @@ func benchmarkEngineX(b *testing.B, category string) {
 	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 
-	runner, err := engineapitester.NewEngineXTestRunner(b, logger, preAllocDir)
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocDir)
 	require.NoError(b, err)
+	b.Cleanup(func() {
+		err := runner.Close()
+		require.NoError(b, err)
+	})
 
 	// Parse all test files, group by subcategory.
 	type testEntry struct {
@@ -104,7 +109,7 @@ func benchmarkEngineX(b *testing.B, category string) {
 		b.Run(subcat, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				for _, e := range entries {
-					require.NoError(b, runner.Execute(b.Context(), e.def), "%s/%s", subcat, e.name)
+					require.NoError(b, runner.Execute(ctx, e.def), "%s/%s", subcat, e.name)
 				}
 			}
 		})

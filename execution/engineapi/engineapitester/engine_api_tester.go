@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"net"
 	"path"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,12 +62,18 @@ import (
 
 func DefaultEngineApiTester(t *testing.T) EngineApiTester {
 	genesis, coinbasePrivKey := DefaultEngineApiTesterGenesis(t)
-	return InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+	eat, err := InitialiseEngineApiTester(t.Context(), EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbasePrivKey,
 	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
+	return eat
 }
 
 func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.PrivateKey) {
@@ -122,26 +129,75 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 // concurrent tests selecting the same port.
 const localhostEphemeral = "127.0.0.1:0"
 
-func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) EngineApiTester {
-	ctx := t.Context()
+// cleanupHandle owns the LIFO stack of cleanup callbacks for a tester. It is
+// shared by all copies of an EngineApiTester so Close is safely idempotent
+// regardless of which copy the caller invokes it on.
+type cleanupHandle struct {
+	once     sync.Once
+	cleanups []func() error
+	err      error
+}
+
+func (h *cleanupHandle) close() error {
+	h.once.Do(func() {
+		var errs []error
+		for i := len(h.cleanups) - 1; i >= 0; i-- {
+			err := h.cleanups[i]()
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+		h.cleanups = nil
+		h.err = errors.Join(errs...)
+	})
+	return h.err
+}
+
+// InitialiseEngineApiTester builds a full engine-api tester around a real
+// erigon node. The supplied ctx is used during initialisation and by the node
+// for its lifetime. The caller must invoke EngineApiTester.Close on the
+// returned tester to release the underlying resources. On initialisation error
+// any resources that have already been acquired are cleaned up before
+// returning.
+func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs) (EngineApiTester, error) {
 	logger := args.Logger
+	cleanup := &cleanupHandle{}
+	success := false
+	defer func() {
+		if success {
+			return
+		}
+		// Run accumulated cleanups LIFO if init failed before hand-off.
+		err := cleanup.close()
+		if err != nil {
+			logger.Error("InitialiseEngineApiTester rollback cleanup error", "err", err)
+		}
+	}()
+	addCleanup := func(fn func() error) {
+		cleanup.cleanups = append(cleanup.cleanups, fn)
+	}
+
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
 
 	// Pre-bind the HTTP listeners on a kernel-assigned port to avoid TOCTOU
 	// port races with concurrent tests. Each listener is held open until the
-	// matching server takes ownership of the socket. The t.Cleanup calls are
+	// matching server takes ownership of the socket. The cleanup callbacks are
 	// safety nets if InitialiseEngineApiTester aborts before hand-off; on the
 	// happy path the http server's Shutdown closes the listener first and the
 	// cleanup is a silent no-op. The sentry/P2P stack picks its own kernel-
 	// assigned port directly via its config below, so no pre-bind there.
 	jsonRpcListener, err := net.Listen("tcp", localhostEphemeral)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = jsonRpcListener.Close() })
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("listen json-rpc: %w", err)
+	}
+	addCleanup(func() error { _ = jsonRpcListener.Close(); return nil })
 	jsonRpcPort := jsonRpcListener.Addr().(*net.TCPAddr).Port
 	engineApiListener, err := net.Listen("tcp", localhostEphemeral)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = engineApiListener.Close() })
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("listen engine-api: %w", err)
+	}
+	addCleanup(func() error { _ = engineApiListener.Close(); return nil })
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
@@ -167,7 +223,9 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("load/generate node key: %w", err)
+	}
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -203,34 +261,45 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	}
 
 	ethNode, err := node.New(ctx, &nodeConfig, logger)
-	require.NoError(t, err)
-	cleanNode := func(ethNode *node.Node) func() {
-		return func() {
-			err := ethNode.Close()
-			if errors.Is(err, node.ErrNodeStopped) {
-				return
-			}
-			require.NoError(t, err)
-		}
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("node.New: %w", err)
 	}
-	t.Cleanup(cleanNode(ethNode))
+	addCleanup(func() error {
+		err := ethNode.Close()
+		if errors.Is(err, node.ErrNodeStopped) {
+			return nil
+		}
+		return err
+	})
 
 	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), dbcfg.ChainDB, "", false, logger)
-	require.NoError(t, err)
-	t.Cleanup(chainDB.Close)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("open chain db: %w", err)
+	}
+	addCleanup(func() error { chainDB.Close(); return nil })
 	_, genesisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, networkname.Mainnet, ethNode.Config().Dirs, logger)
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("commit genesis block: %w", err)
+	}
 	chainDB.Close()
 
 	// note we need to create jwt secret before calling ethBackend.Init to avoid race conditions
 	jwtSecret, err := cli.ObtainJWTSecret(&httpConfig, logger)
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("obtain jwt secret: %w", err)
+	}
 	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
+	}
 	err = ethBackend.Init(ethNode, &ethConfig, genesis.Config)
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("ethBackend.Init: %w", err)
+	}
 	err = ethNode.Start()
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("ethNode.Start: %w", err)
+	}
 
 	rpcDaemonHttpUrl := fmt.Sprintf("%s:%d", httpConfig.HttpListenAddress, httpConfig.HttpPort)
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
@@ -256,7 +325,9 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		logger,
 		engineApiClientOpts...,
 	)
-	require.NoError(t, err)
+	if err != nil {
+		return EngineApiTester{}, fmt.Errorf("dial engine api: %w", err)
+	}
 	var mockCl *MockCl
 	if args.MockClState != nil {
 		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
@@ -266,8 +337,11 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything
 		_, err = mockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
+		if err != nil {
+			return EngineApiTester{}, fmt.Errorf("build initial empty block 1: %w", err)
+		}
 	}
+	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
 		CoinbaseKey:          args.CoinbaseKey,
@@ -280,7 +354,8 @@ func InitialiseEngineApiTester(t testing.TB, args EngineApiTesterInitArgs) Engin
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
-	}
+		cleanup:              cleanup,
+	}, nil
 }
 
 type EngineApiTesterInitArgs struct {
@@ -306,6 +381,7 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
+	cleanup              *cleanupHandle
 }
 
 func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *testing.T, eat EngineApiTester)) {
@@ -320,10 +396,13 @@ func (eat EngineApiTester) ChainId() *big.Int {
 	return eat.ChainConfig.ChainID
 }
 
-func (eat EngineApiTester) Close(t *testing.T) {
-	err := eat.Node.Close()
-	if errors.Is(err, node.ErrNodeStopped) {
-		return
+// Close releases all resources acquired by the tester. Cleanup callbacks run
+// LIFO; an error from any callback is collected and joined into the returned
+// error so a single late failure does not skip earlier cleanups. Close is
+// idempotent across copies of the tester via a shared cleanup handle.
+func (eat EngineApiTester) Close() error {
+	if eat.cleanup == nil {
+		return nil
 	}
-	require.NoError(t, err)
+	return eat.cleanup.close()
 }

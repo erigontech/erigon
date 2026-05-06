@@ -227,11 +227,16 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))
 	bank.RegisterGenesisAlloc(genesis)
 	// first we need to deploy the shutter smart contracts, so we start an engine api tester without shutter
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      logger,
 		DataDir:     dataDir,
 		Genesis:     genesis,
 		CoinbaseKey: coinbasePrivKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 	// prepare shutter config for the next engine api tester
 	shutterPort, err := freeport.NextFreePort()
@@ -338,8 +343,8 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		require.NoError(t, err)
 	})
 	// now that we've deployed all shutter contracts - we can restart erigon with shutter enabled
-	eat.Close(t)
-	eat = engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	require.NoError(t, eat.Close())
+	eat, err = engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:           logger,
 		DataDir:          dataDir,
 		Genesis:          genesis,
@@ -347,6 +352,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		EthConfigTweaker: func(ethConfig *ethconfig.Config) { ethConfig.Shutter = shutterConfig },
 		MockClState:      eat.MockCl.State(),
 	})
+	require.NoError(t, err)
 	// need to recreate these since we have a new engine api tester with new ports
 	cl = testhelpers.NewMockCl(logger, eat.MockCl, slotCalculator)
 	err = cl.Initialise(ctx)

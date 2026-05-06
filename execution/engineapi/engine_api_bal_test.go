@@ -48,6 +48,7 @@ import (
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
 // BAL hash mismatch returned by ProcessBAL.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
+	ctx := t.Context()
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -67,11 +68,16 @@ func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 		}
 	}
 
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 
 	receiver := common.HexToAddress("0xaaaa")
@@ -528,6 +534,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 // assertoor suite fail. Runs under -race should eventually expose non-
 // determinism sources that survive a single execution.
 func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
+	ctx := t.Context()
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -550,11 +557,16 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		}
 	}
 
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlInfo),
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
