@@ -37,6 +37,12 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
+	// Consume additional rate-limit tokens proportional to the requested block count.
+	// The wrapper already consumed 1 token for admission.
+	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err
@@ -98,6 +104,12 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	if len(blockRoots) == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
+
+	// Consume additional rate-limit tokens proportional to the number of roots.
+	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err

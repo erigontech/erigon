@@ -19,7 +19,7 @@ outputs:
     value: ${{ steps.restore.outputs.cache-matched-key }}
   primary-key:
     description: "The primary cache key (for use by save-mod-cache)"
-    value: gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+    value: ${{ steps.restore.outputs.cache-primary-key }}
 
 runs:
   using: composite

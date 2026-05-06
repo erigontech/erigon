@@ -22,6 +22,12 @@ const (
 	IsLittleEndianFeature Features = 0b1
 )
 
+// headerSize is the fixed byte layout of the fusefilter on-disk header:
+//
+//	1B version + 3B features + 4B SegmentCount + 4B SegmentCountLength +
+//	8B Seed + 4B SegmentLength + 4B SegmentLengthMask + 8B fingerprints-len.
+const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
+
 type Reader struct {
 	inner     *xorfilter.BinaryFuse[uint8]
 	keepInMem bool // keep it in mem insted of mmap
@@ -72,7 +78,6 @@ func NewReader(filePath string) (*Reader, error) {
 func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 	filter := &xorfilter.BinaryFuse[uint8]{}
 
-	const headerSize = 1 + 3 + 4 + 4 + 8 + 4 + 4 + 8
 	header, data := m[:headerSize], m[headerSize:]
 	v := header[0]
 
@@ -85,7 +90,7 @@ func NewReaderOnBytes(m []byte, fName string) (*Reader, int, error) {
 		return nil, 0, fmt.Errorf("file %s is not compatible with your machine (different Endianness), but you can run `erigon snapshots index`", fName)
 	}
 
-	filter.SegmentCount = binary.BigEndian.Uint32(header[4+4:])
+	filter.SegmentCount = binary.BigEndian.Uint32(header[4:])
 	filter.SegmentCountLength = binary.BigEndian.Uint32(header[4+4:])
 	filter.Seed = binary.BigEndian.Uint64(header[4+4+4:])
 	filter.SegmentLength = binary.BigEndian.Uint32(header[4+4+4+8:])

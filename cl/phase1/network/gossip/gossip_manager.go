@@ -27,6 +27,9 @@ import (
 	"unicode"
 
 	"github.com/c2h5oh/datasize"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -37,9 +40,12 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+// PeerBanner is an interface for banning misbehaving peers.
+type PeerBanner interface {
+	BanPeer(pid string)
+}
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
@@ -52,6 +58,7 @@ type GossipManager struct {
 	registeredServices []GossipService
 	stats              *gossipMessageStats
 	p2p                p2p.P2PManager
+	peerBanner         PeerBanner
 
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
@@ -90,8 +97,13 @@ func NewGossipManager(
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
-	gm.stats.goPrintStats(cctx)
+	//gm.stats.goPrintStats(cctx)
 	return gm
+}
+
+// SetPeerBanner sets the peer banner used to ban peers that fail message verification.
+func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
+	g.peerBanner = pb
 }
 
 // Close gracefully shuts down the GossipManager and all its goroutines
@@ -176,8 +188,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
-			log.Warn("[GossipManager] reject message", "topic", name, "err", err)
+			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
+			if g.peerBanner != nil {
+				g.peerBanner.BanPeer(string(pid))
+			}
 			return pubsub.ValidationReject
 		}
 
@@ -189,7 +204,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
-	validator := g.newPubsubValidator(service)
+	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err

@@ -17,7 +17,6 @@
 package handlers
 
 import (
-	"encoding/hex"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -134,7 +133,7 @@ func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
 		return err
 	}
 	copy(status.ForkDigest[:], forkDigest[:])
-	log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
-		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
+	//log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
+	//	"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
 	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

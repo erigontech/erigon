@@ -14,10 +14,10 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 	defer tx.Rollback()
-	pruneDistance := uint64(1_000_000)
+	const blockPruneDistance = uint64(1_000_000)
 
 	if !cfg.caplinConfig.ArchiveBlocks {
-		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-pruneDistance); err != nil {
+		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-blockPruneDistance); err != nil {
 			return err
 		}
 	}
@@ -26,6 +26,11 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 	cfg.blobStore.Prune()
-	cfg.peerDas.Prune(pruneDistance)
+	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
+	if columnKeepSlots == 0 {
+		// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+		columnKeepSlots = cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
+	}
+	cfg.peerDas.Prune(columnKeepSlots)
 	return nil
 }

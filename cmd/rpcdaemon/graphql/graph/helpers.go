@@ -11,9 +11,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func convertDataToStringP(abstractMap map[string]any, field string) *string {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result string
 
 	switch v := abstractMap[field].(type) {
@@ -34,6 +38,8 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 		if reflect.ValueOf(abstractMap[field]).IsZero() {
 			return nil
 		}
+		result = v.String()
+	case accounts.Address:
 		result = v.String()
 	case common.Address:
 		result = v.String()
@@ -61,6 +67,9 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 }
 
 func convertDataToIntP(abstractMap map[string]any, field string) *int {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result int
 
 	switch v := abstractMap[field].(type) {
@@ -89,6 +98,9 @@ func convertDataToIntP(abstractMap map[string]any, field string) *int {
 }
 
 func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result uint64
 
 	switch v := abstractMap[field].(type) {

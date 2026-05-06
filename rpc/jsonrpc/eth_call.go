@@ -56,17 +56,33 @@ import (
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
-// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
-// allowed to produce in order to speed up calculations.
-const estimateGasErrorRatio = 0.015
+const (
+	// estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
+	// allowed to produce in order to speed up calculations.
+	estimateGasErrorRatio = 0.015
+
+	// maxGetProofKeys is the maximum number of storage keys allowed in a single eth_getProof request.
+	maxGetProofKeys = 1024
+)
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
+
+	// Use the block overlay if available — reads uncommitted data from the
+	// pre-commit overlay so consumers don't need to wait for DB commit.
+	var tx kv.TemporalTx = roTx
+	if api.filters != nil {
+		if sd := api.filters.LatestSD(); sd != nil {
+			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
+				tx = overlayTx
+			}
+		}
+	}
 
 	var blockNrOrHash rpc.BlockNumberOrHash
 	if requestedBlock != nil {
@@ -97,7 +113,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +185,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
+	// Use overridden header for fork-detection and gas ceiling; keep original for
+	// DB lookups (state reader, prune history) which must reference the on-chain block.
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	blockNum := header.Number
 
 	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
@@ -176,12 +196,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
+	stateTx := api.filters.WithTemporalOverlay(dbtx)
+	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -201,9 +222,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
-		hi = header.GasLimit
+		hi = effectiveHeader.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) && !chainConfig.IsAmsterdam(header.Time) {
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(effectiveHeader.Time) && !chainConfig.IsAmsterdam(effectiveHeader.Time) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
 		// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
 		hi = params.MaxTxnGasLimit
@@ -259,7 +280,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, header, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
@@ -294,7 +315,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	if failed {
 		if result != nil && !errors.Is(result.Err, vm.ErrOutOfGas) {
-			if len(result.Revert()) > 0 {
+			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				return 0, ethapi2.NewRevertError(result)
 			}
 			return 0, result.Err
@@ -378,6 +399,13 @@ type StorageKeysInfo struct {
 
 // GetProof implements eth_getProof partially; Proofs are available only with the `latest` block tag.
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+	if len(storageKeys) > maxGetProofKeys {
+		return nil, &rpc.CustomError{
+			Message: fmt.Sprintf("too many storage keys requested (max %d, got %d)", maxGetProofKeys, len(storageKeys)),
+			Code:    rpc.ErrCodeInvalidParams,
+		}
+	}
+
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -541,6 +569,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	// get storage key proofs
 	for i, storageKey := range storageKeys {
+		// Stop early if the RPC request was canceled while proofs are being built.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		proof.StorageProof[i].Key = getKey(storageKey)
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash.Bytes())) == 0 {
@@ -550,9 +582,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
+		addrHash := crypto.HashData(address.Bytes())
+		keyHash := crypto.HashData(storageKey.Hash.Bytes())
 		fullKey := make([]byte, 0, 64)
-		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
-		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
+		fullKey = append(fullKey, addrHash[:]...)
+		fullKey = append(fullKey, keyHash[:]...)
 
 		// get proof for the given key
 		storageProof, err := proofTrie.Prove(fullKey, len(proof.AccountProof), true)
@@ -825,7 +859,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}

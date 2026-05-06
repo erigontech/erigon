@@ -141,7 +141,7 @@ func addSszTests() {
 		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
 		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})). Not needed.
-		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
+		With("SyncAggregate", getSSZStaticConsensusTest(cltypes.NewSyncAggregate())).
 		With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})).
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
@@ -158,7 +158,7 @@ func addSszTests() {
 			}, withTestJson())).
 		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
-				return cltypes.NewLightClientUpdate(v)
+				return cltypes.NewLightClientUpdate(v, &clparams.MainnetBeaconConfig)
 			}, withTestJson())).
 		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {

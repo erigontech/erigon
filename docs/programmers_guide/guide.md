@@ -22,7 +22,7 @@ Number of the type `uint64`.
 
 For non-contract accounts, nonce is important in two contexts. Firstly, all transactions signed by an account, have to
 appear in the ledger in the order of strictly increasing nonces (without gaps). This check is performed by member
-function `preCheck` of type `StateTransition` [core/state_transition.go](../../core/state_transition.go)
+function `preCheck` of type `TxnExecutor` [execution/protocol/txn_executor.go](../../execution/protocol/txn_executor.go)
 Secondly, if a transaction signed by an account is sent to no particular address (with intention of creating a contract)
 , and it ends up creating a new smart contract account, the address of such newly created smart contract account is
 calculated based on the current nonce of the "creator" account. For smart contract accounts, nonce is important

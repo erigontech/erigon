@@ -207,7 +207,7 @@ func opTload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	loc := scope.Stack.peek()
 	key := accounts.InternKey(loc.Bytes32())
 	val := evm.IntraBlockState().GetTransientState(scope.Contract.Address(), key)
-	loc.SetBytes(val.Bytes())
+	*loc = val
 	return pc, nil, nil
 }
 
@@ -383,5 +383,7 @@ func enable7843(jt *JumpTable) {
 // enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
 func enable8037(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateGasEIP8037
+	jt[CREATE].dynamicGas = gasCreateEip8037
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
+	jt[CREATE2].dynamicGas = gasCreate2Eip8037
 }

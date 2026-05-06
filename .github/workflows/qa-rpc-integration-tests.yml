@@ -1,6 +1,10 @@
 name: QA - RPC Integration Tests
 
 on:
+  push:
+    branches:
+      - main
+      - 'release/**'
   pull_request:
     branches:
       - main
@@ -16,10 +20,12 @@ concurrency:
   group: >-
     ${{
       github.event_name == 'pull_request' &&
-      format('{0}-{1}', github.workflow, github.head_ref) ||
+      format('{0}-{1}-{2}', github.workflow, github.event_name, github.head_ref) ||
+      github.event_name == 'push' &&
+      format('{0}-{1}-{2}', github.workflow, github.event_name, github.ref_name) ||
       format('{0}-{1}', github.workflow, github.run_id)
     }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   mainnet-rpc-integ-tests:
@@ -34,6 +40,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
 
       - name: Set reference data dir based on branch
         run: |
@@ -64,10 +75,10 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
 
       - name: Restore rpc-tests cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v1.121.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-${{ env.RPC_VERSION }}
 
       - name: Run RPC Integration Tests
         id: test_step
@@ -129,7 +140,7 @@ jobs:
 
       - name: Upload test results
         if: always() && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: ${{ env.TEST_RESULT_DIR }}

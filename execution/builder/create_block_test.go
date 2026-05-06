@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -36,7 +37,7 @@ func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 		Time:   1764800001,                // Timestamp (greater than Osaka activation time)
 	}
 
-	mb := &BuiltBlock{
+	mb := &exec.AssembledBlock{
 		Header:      header,
 		Uncles:      []*types.Header{},
 		Withdrawals: nil,

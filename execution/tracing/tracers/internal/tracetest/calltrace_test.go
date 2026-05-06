@@ -61,7 +61,7 @@ type callContext struct {
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Index    uint64         `json:"index"`
+	Index    hexutil.Uint64 `json:"index"`
 	Address  common.Address `json:"address"`
 	Topics   []common.Hash  `json:"topics"`
 	Data     hexutil.Bytes  `json:"data"`
@@ -279,7 +279,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	baseFee := test.Context.BaseFee
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: *tx.GetEffectiveGasTip(baseFee),
+		GasPrice: tx.GetEffectiveGasTip(baseFee),
 	}
 	m := execmoduletester.New(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -295,8 +295,8 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 		snap := statedb.PushSnapshot()
-		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
+		st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+		if _, err = st.Execute(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
 		if _, err = tracer.GetResult(); err != nil {
@@ -375,8 +375,8 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-	vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	vmRet, err := st.Execute(true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -35,6 +36,10 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/txnprovider"
 )
+
+// SDProvider returns the latest published SharedDomains from FCU, or nil if none.
+// Used by the builder to read uncommitted state during background commits.
+type SDProvider func() *execctx.SharedDomains
 
 // Builder runs the three block-building steps (createBlock, execBlock, finishBlock) directly
 // without staged-sync machinery. Its Build method satisfies BlockBuilderFunc and can
@@ -54,6 +59,7 @@ type Builder struct {
 	txnProvider           txnprovider.TxnProvider
 	sealCancel            chan struct{}
 	latestBlockBuiltStore *LatestBlockBuiltStore
+	sdProvider            SDProvider
 	logger                log.Logger
 }
 
@@ -71,6 +77,7 @@ func NewBuilder(
 	txnProvider txnprovider.TxnProvider,
 	sealCancel chan struct{},
 	latestBlockBuiltStore *LatestBlockBuiltStore,
+	sdProvider SDProvider,
 	logger log.Logger,
 ) *Builder {
 	return &Builder{
@@ -88,6 +95,7 @@ func NewBuilder(
 		txnProvider:           txnProvider,
 		sealCancel:            sealCancel,
 		latestBlockBuiltStore: latestBlockBuiltStore,
+		sdProvider:            sdProvider,
 		logger:                logger,
 	}
 }
@@ -106,14 +114,14 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}()
 
-	// Per-build state: fresh BuiltBlock and result channel, shared pendingBlockCh.
+	// Per-build state: fresh AssembledBlock and result channel, shared pendingBlockCh.
 	perBuildCfg := *b.builderCfg
 	perBuildCfg.Etherbase = param.SuggestedFeeRecipient
 	state := BuilderState{
 		BuilderConfig:   &perBuildCfg,
 		PendingResultCh: b.pendingBlockCh,
 		BuilderResultCh: make(chan *types.BlockWithReceipts, 1),
-		BuiltBlock:      &BuiltBlock{},
+		BuiltBlock:      &exec.AssembledBlock{},
 	}
 
 	tx, err := b.db.BeginTemporalRo(b.ctx)
@@ -122,28 +130,50 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(b.ctx, tx, b.logger)
+	// When a published SD is available (background commit in progress), create
+	// a child SD that reads domain state from the parent's mem batch and table
+	// data from the parent's overlay. The child's own writes are local and
+	// discarded after block construction.
+	var compositeTx kv.TemporalTx = tx
+	var parentSD *execctx.SharedDomains
+	if b.sdProvider != nil {
+		parentSD = b.sdProvider()
+	}
+	if parentSD != nil {
+		if overlay := parentSD.BlockOverlay(); overlay != nil {
+			compositeTx = overlay.NewReadView(tx)
+		}
+	}
+
+	sd, err := execctx.NewSharedDomains(b.ctx, compositeTx, b.logger)
 	if err != nil {
 		return nil, err
 	}
 	defer sd.Close()
 
-	executionAt, err := stages.GetStageProgress(tx, stages.Execution)
+	if parentSD != nil {
+		sd.SetParent(parentSD)
+	}
+
+	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
 	if err != nil {
 		return nil, err
 	}
-
 	createCfg := StageBuilderCreateBlockCfg(state, b.chainConfig, b.engine, param, b.blockReader)
-	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, b.txnProvider, b.blockReader)
+	txnProvider := b.txnProvider
+	if param.CustomTxnProvider != nil {
+		txnProvider = param.CustomTxnProvider
+	}
+	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
-	if err := createBlock(b.ctx, sd, tx, executionAt, createCfg, b.logger); err != nil {
+	if err := createBlock(b.ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := execBlock(b.ctx, sd, tx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
+	if err := execBlock(b.ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := finishBlock(tx, finishCfg, b.logger); err != nil {
+	if err := finishBlock(compositeTx, finishCfg, b.logger); err != nil {
 		return nil, err
 	}
 

@@ -17,6 +17,7 @@
 package stateless
 
 import (
+	"errors"
 	"io"
 
 	"github.com/erigontech/erigon/execution/rlp"
@@ -41,6 +42,9 @@ func (w *Witness) toExtWitness() *extWitness {
 
 // fromExtWitness converts the consensus witness format into our internal one.
 func (w *Witness) fromExtWitness(ext *extWitness) error {
+	if len(ext.Headers) == 0 {
+		return errors.New("witness must contain at least one header")
+	}
 	w.context = ext.Context
 	w.Headers = ext.Headers
 	w.State = make(map[string]struct{}, len(ext.State))

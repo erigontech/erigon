@@ -125,9 +125,7 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 
 func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config, logger log.Logger) *ethconfig.Config {
 	ethConfig := ethconfig.Defaults // Needs to be a copy, not pointer
-	utils.SetEthConfig(ctx, nodeConfig, &ethConfig, logger)
-	erigoncli.ApplyFlagsForEthConfig(ctx, &ethConfig, logger)
-
+	erigoncli.BuildEthConfig(ctx, nodeConfig, &ethConfig, logger)
 	return &ethConfig
 }
 

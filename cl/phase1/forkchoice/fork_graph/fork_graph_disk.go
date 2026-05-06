@@ -96,7 +96,8 @@ type forkGraphDisk struct {
 	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
 
 	// current state data
-	currentState *state.CachingBeaconState
+	currentState          *state.CachingBeaconState
+	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints sync.Map
@@ -176,8 +177,7 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 	if f.currentState == nil {
 		return false
 	}
-	blockRootState, _ := f.currentState.BlockRoot()
-	return blockRoot == blockRootState
+	return blockRoot == f.currentStateBlockRoot
 }
 
 // Add a new node and edge to the graph
@@ -269,12 +269,14 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
 			f.currentState = nil
+			f.currentStateBlockRoot = common.Hash{}
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 	}
 
 	f.currentState = newState
+	f.currentStateBlockRoot = common.Hash(blockRoot)
 
 	// update diff storages.
 	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
@@ -402,11 +404,7 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 
 func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
 	if f.currentState != nil && !alwaysCopy {
-		currentStateBlockRoot, err := f.currentState.BlockRoot()
-		if err != nil {
-			return nil, err
-		}
-		if currentStateBlockRoot == blockRoot {
+		if f.currentStateBlockRoot == blockRoot {
 			return f.currentState, nil
 		}
 	}
@@ -458,6 +456,7 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
 			if addChainSegment {
 				f.currentState = nil // reset the state if it fails here.
+				f.currentStateBlockRoot = common.Hash{}
 			}
 			return nil, err
 		}

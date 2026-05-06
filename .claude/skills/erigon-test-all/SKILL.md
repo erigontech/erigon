@@ -7,10 +7,35 @@ description: Run the full Erigon test suite locally using GOGC=80 make test-all.
 
 Runs the complete test suite with 60-minute timeout and coverage output. Takes ~30 minutes.
 
+## Prerequisite: Test fixtures
+
+`make test-all` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+
+Two side prerequisites still apply:
+
+```bash
+git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
+```
+
+The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
+
+## Prerequisite: Create RAM Disk
+
+Before running `make test-all`, create a RAM disk and export its path as `ERIGON_EXECUTION_TESTS_TMPDIR`:
+
+```bash
+path=$(bash tools/create-ramdisk)
+```
+
+Then prepend `ERIGON_EXECUTION_TESTS_TMPDIR=$path` to the test command (see below). The `execution/tests` suite does heavy temp-file I/O; backing that with tmpfs avoids disk bottlenecks and matches how CI runs the same workflow (`ramdisk: true` in `test-all-erigon.yml`, which invokes the same `tools/create-ramdisk` script via `setup-erigon`).
+
+The script is cross-platform (Linux tmpfs, macOS hdiutil, Windows ImDisk). Linux requires `sudo` to mount tmpfs at `/mnt/erigon-ramdisk`. Override size with `RAMDISK_SIZE_MB` (default 2048).
+
 ## Command
 
 ```bash
-GOGC=80 make test-all
+ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all
 ```
 
 Equivalent to the **"All tests"** GitHub Actions workflow (`test-all-erigon.yml`).
@@ -54,7 +79,7 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `make lint && make erigon integration && GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 

@@ -19,25 +19,25 @@ package misc
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // See https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7251.md#system-call
-func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.IntraBlockState) (*types.FlatRequest, error) {
-	codeSize, err := state.GetCodeSize(params.ConsolidationRequestAddress)
+func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.IntraBlockState, consolidationRequestAddress accounts.Address) (*types.FlatRequest, error) {
+	codeSize, err := state.GetCodeSize(consolidationRequestAddress)
 	if err != nil {
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, fmt.Errorf("[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", params.ConsolidationRequestAddress)
+		return nil, fmt.Errorf("[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", consolidationRequestAddress)
 	}
 
-	res, err := syscall(params.ConsolidationRequestAddress, nil)
+	res, err := syscall(consolidationRequestAddress, nil)
 	if err != nil {
-		return nil, fmt.Errorf("[EIP-7251] Unprecedented Syscall failure: ConsolidationRequestAddress=%x error=%s ", params.ConsolidationRequestAddress, err.Error())
+		return nil, fmt.Errorf("[EIP-7251] Unprecedented Syscall failure: ConsolidationRequestAddress=%x error=%s", consolidationRequestAddress, err.Error())
 	}
 	if res != nil {
 		// Just append the contract output as the request data

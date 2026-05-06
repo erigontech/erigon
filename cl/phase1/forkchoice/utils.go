@@ -69,15 +69,40 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	})
 
 	// get rid of children
+	finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
 	f.childrens.Range(func(k, v any) bool {
-		if v.(childrens).parentSlot <= newFinalized.Epoch*f.beaconCfg.SlotsPerEpoch {
+		if v.(childrens).parentSlot <= finalizedSlot {
 			f.childrens.Delete(k)
 			delete(f.headSet, k.(common.Hash))
 		}
 		return true
 	})
-	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-	f.forkGraph.Prune(slotToPrune)
+
+	// Clean up per-block unrealized justifications/finalizations for finalized blocks.
+	// Also delete entries whose headers have already been pruned from the fork graph
+	// to prevent orphaned entries from accumulating.
+	f.unrealizedJustifications.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if !has || header.Slot <= finalizedSlot {
+			f.unrealizedJustifications.Delete(k)
+		}
+		return true
+	})
+	f.unrealizedFinalizations.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if !has || header.Slot <= finalizedSlot {
+			f.unrealizedFinalizations.Delete(k)
+		}
+		return true
+	})
+
+	// Guard against uint64 underflow during the first 3 epochs after genesis.
+	if newFinalized.Epoch > 3 {
+		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
+		f.forkGraph.Prune(slotToPrune)
+	}
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.

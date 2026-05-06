@@ -105,10 +105,11 @@ func DialJsonRpcClient(url string, jwtSecret []byte, logger log.Logger, opts ...
 
 	// Always retry on transient server errors (e.g., server shutting down returning
 	// empty response or 503 Service Unavailable).
-	defaultCheckers := []RetryableErrChecker{
+	defaultCheckers := make([]RetryableErrChecker, 0, 2+len(options.retryableErrCheckers))
+	defaultCheckers = append(defaultCheckers,
 		ErrContainsRetryableErrChecker("empty response from JSON-RPC server"),
 		ErrContainsRetryableErrChecker("503 Service Unavailable"),
-	}
+	)
 	options.retryableErrCheckers = append(defaultCheckers, options.retryableErrCheckers...)
 
 	res := &JsonRpcClient{

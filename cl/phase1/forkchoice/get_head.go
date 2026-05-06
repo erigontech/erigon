@@ -213,18 +213,28 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
-	currentJustifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
+	// Fall back to realized checkpoints if unrealized not available
+	currentJustifiedCheckpoint, has := f.getUnrealizedJustification(blockRoot)
 	if !has {
-		return false
+		currentJustifiedCheckpoint, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		if !has {
+			return false
+		}
 	}
-	finalizedJustifiedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+	// Use per-block unrealized finalized checkpoint, fall back to realized
+	finalizedJustifiedCheckpoint, has := f.getUnrealizedFinalization(blockRoot)
 	if !has {
-		return false
+		finalizedJustifiedCheckpoint, has = f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !has {
+			return false
+		}
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	if (justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
-		(finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
+	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)
+	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)
+	if justifiedOk && finalizedOk {
 		blocks[blockRoot] = header
 		return true
 	}

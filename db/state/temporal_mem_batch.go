@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 
 	btree2 "github.com/tidwall/btree"
@@ -73,8 +74,20 @@ type TemporalMemBatch struct {
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 
-	unwindToTxNum   uint64
+	unwindToTxNum uint64
+	// unwindChangeset is keyed by the pre-step portion of each entry's Key
+	// (`Key[:len(Key)-8]`) and is consulted only by the getLatest fallback —
+	// it's intentionally collapsed to one entry per real key so a pre-unwind
+	// value can be found by the same key the overlay uses.
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	// unwindChangesetRaw preserves every diff entry (distinct by Key+step) so
+	// Flush can replay a complete unwind against MDBX, including multiple
+	// step entries for the same real key (e.g. a commitment branch that was
+	// written in both step N and N+1 during forward execution). Collapsing
+	// these — as unwindChangeset does — loses every step except the one that
+	// happened to be iterated last, leaving orphan domain entries at steps
+	// above the unwind target.
+	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
 }
@@ -162,7 +175,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 				putValueSize += len(val)
 			} else {
 				putValueSize += len(val) - len(old[len(old)-1].data)
-				sd.storage.Set(key, []dataWithTxNum{valWithStep})
+				old[0] = valWithStep
+				sd.storage.Set(key, old[:1])
 			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
@@ -180,7 +194,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putValueSize += len(val)
 		} else {
 			putValueSize += len(val) - len(old[len(old)-1].data)
-			sd.domains[domain][key] = []dataWithTxNum{valWithStep}
+			old[0] = valWithStep
+			sd.domains[domain][key] = old[:1]
 		}
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
@@ -290,6 +305,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
+	sd.unwindChangesetRaw = nil
 
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
@@ -305,7 +321,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	}
 }
 
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
@@ -319,7 +335,7 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
 	var firstKey, firstVal []byte
 	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte) (bool, error) {
 		if lv, _, ok := sd.getLatest(domain, k); ok {
 			v = lv
 		}
@@ -332,6 +348,41 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
+}
+
+// HasPrefixInRAM reports whether the RAM batch contains any non-deleted entry
+// for the given domain whose key starts with prefix.  It never touches disk or
+// segment files — only the in-memory btree (StorageDomain) or the domain map.
+func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	if domain == kv.StorageDomain {
+		prefixStr := common.ToStringZeroCopy(prefix)
+		iter := sd.storage.Iter()
+		for ok := iter.Seek(prefixStr); ok; ok = iter.Next() {
+			if !strings.HasPrefix(iter.Key(), prefixStr) {
+				break
+			}
+			vals := iter.Value()
+			if len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+				return true
+			}
+		}
+		return false
+	}
+
+	prefixStr := common.ToStringZeroCopy(prefix)
+	for k, vals := range sd.domains[domain] {
+		if strings.HasPrefix(k, prefixStr) && len(vals) > 0 && len(vals[len(vals)-1].data) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (sd *TemporalMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
+	return sd.currentChangesAccumulator
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
@@ -382,16 +433,75 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
 	sd.unwindToTxNum = unwindToTxNum
+
+	// Drop overlay entries stamped with txNum > unwindToTxNum. Without this,
+	// getLatest returns entries written inside the unwound range because it
+	// picks dataWithTxNums[len-1] without consulting sd.unwindToTxNum — the
+	// unwindChangeset fallback below is only reachable on an overlay miss.
+	// Observed as post-Fusaka gas-used mismatches after forkchoice-driven
+	// unwinds (an SSTORE on a slot first-written inside the unwound range
+	// charges SSTORE_RESET instead of SSTORE_SET — a 17100 gas shortfall
+	// per slot). Keys whose slice empties out are removed so the
+	// unwindChangeset fallback can supply the pre-unwind answer.
+	pruneSlice := func(entries []dataWithTxNum) []dataWithTxNum {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.txNum <= unwindToTxNum {
+				kept = append(kept, e)
+			}
+		}
+		return kept
+	}
+	for d := range sd.domains {
+		for k, entries := range sd.domains[d] {
+			kept := pruneSlice(entries)
+			if len(kept) == 0 {
+				delete(sd.domains[d], k)
+			} else {
+				sd.domains[d][k] = kept
+			}
+		}
+	}
+	// Collect first, mutate after: btree.Scan doesn't allow Set/Delete during traversal.
+	type storageEdit struct {
+		key  string
+		kept []dataWithTxNum
+	}
+	var edits []storageEdit
+	sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+		kept := pruneSlice(entries)
+		if len(kept) != len(entries) {
+			edits = append(edits, storageEdit{k, kept})
+		}
+		return true
+	})
+	for _, e := range edits {
+		if len(e.kept) == 0 {
+			sd.storage.Delete(e.key)
+		} else {
+			sd.storage.Set(e.key, e.kept)
+		}
+	}
+
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	var unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	if changeset != nil {
 		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
+		unwindChangesetRaw = &[kv.DomainLen][]kv.DomainEntryDiff{}
 
 		for domain, changes := range changeset {
 			if unwindChangeset[domain] == nil {
 				unwindChangeset[domain] = map[string]kv.DomainEntryDiff{}
 			}
+
+			// unwindChangesetRaw preserves every (key, step) entry — Flush needs
+			// the full list to delete every orphan step entry from MDBX.
+			unwindChangesetRaw[domain] = append(unwindChangesetRaw[domain][:0], changes...)
 
 			for _, change := range changes {
 				unwindChangeset[domain][change.Key[:len(change.Key)-8]] = change
@@ -400,6 +510,7 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 	}
 
 	sd.unwindChangeset = unwindChangeset
+	sd.unwindChangesetRaw = unwindChangesetRaw
 }
 
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -507,6 +618,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		if sd.unwindChangeset == nil {
 			sd.unwindToTxNum = other.unwindToTxNum
 			sd.unwindChangeset = other.unwindChangeset
+			sd.unwindChangesetRaw = other.unwindChangesetRaw
 		} else {
 			for domain, otherDiffs := range other.unwindChangeset {
 				for key, otherDiff := range otherDiffs {
@@ -521,6 +633,28 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
+			// Also merge the raw changesets — Flush walks these to ensure every
+			// step entry in MDBX gets reverted, not just the collapsed one.
+			//
+			// Precondition: both sd.unwindChangesetRaw[domain] and otherDiffs
+			// must be sorted by Key; MergeDiffSets relies on that ordering.
+			// The invariant is established upstream — DomainDiff.GetDiffSet
+			// sorts (db/kv/helpers.go), the serialize/deserialize pair
+			// preserves order, TemporalMemBatch.Unwind copies its sorted input
+			// verbatim, and MergeDiffSets itself returns sorted output.
+			if other.unwindChangesetRaw != nil {
+				if sd.unwindChangesetRaw == nil {
+					sd.unwindChangesetRaw = other.unwindChangesetRaw
+				} else {
+					for domain, otherDiffs := range other.unwindChangesetRaw {
+						if sd.unwindToTxNum < other.unwindToTxNum {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(otherDiffs, sd.unwindChangesetRaw[domain])
+						} else {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(sd.unwindChangesetRaw[domain], otherDiffs)
+						}
+					}
+				}
+			}
 			if sd.unwindToTxNum < other.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
@@ -532,17 +666,19 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.unwindChangeset != nil {
-		var changeSet [kv.DomainLen][]kv.DomainEntryDiff
-		for domain, diffEntries := range sd.unwindChangeset {
-			for _, entry := range diffEntries {
-				changeSet[domain] = append(changeSet[domain], entry)
-			}
-			sort.Slice(changeSet[domain], func(i, j int) bool {
-				return changeSet[domain][i].Key < changeSet[domain][j].Key
+	if sd.unwindChangesetRaw != nil {
+		// Replay against the RAW (step-preserving) changeset — the collapsed
+		// unwindChangeset would lose every (key, step) entry except one per
+		// real key, which leaves orphan domain-values entries at steps above
+		// the unwind target (observed on mainnet for the commitment domain).
+		for domain := range sd.unwindChangesetRaw {
+			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
+				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
 			})
 		}
-		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+		if err := tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw); err != nil {
+			return err
+		}
 	}
 
 	if err := sd.flushDiffSet(ctx, tx); err != nil {

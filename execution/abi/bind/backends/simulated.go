@@ -99,8 +99,10 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 		// Amsterdam required parallel processing
 		// - remove this once all tests pass with parallel as default
 		var copy chain.Config
-		copier.Copy(&copy, config)
-		config.AmsterdamTime = nil
+		if err := copier.Copy(&copy, config); err != nil {
+			panic(err)
+		}
+		copy.AmsterdamTime = nil
 		config = &copy
 	}
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
@@ -128,7 +130,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // NewSimulatedBackend A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainBerlinConfig, gasLimit)
 	return b
 }
 
@@ -767,7 +769,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	return protocol.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
+	return protocol.NewTxnExecutor(vmEnv, msg, gasPool).Execute(true /* refunds */, false /* gasBailout */)
 }
 
 // SendTransaction updates the pending block to include the given transaction.

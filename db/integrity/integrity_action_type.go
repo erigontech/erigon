@@ -16,6 +16,10 @@
 
 package integrity
 
+import (
+	"sort"
+)
+
 type Check string
 
 const (
@@ -105,17 +109,30 @@ const (
 	// bidirectional correspondence rather than just reference validity.
 	StateVerify Check = "StateVerify"
 
+	// StateProgress verifies state files aren't ahead of block files. Checks that the
+	// commitment domain progress doesn't exceed the frozen block files progress.
+	// Prevents inconsistent states where state snapshots are more recent than block snapshots.
+	StateProgress Check = "StateProgress"
+
 	// Publishable validates snapshot publication readiness. Checks that all required snapshot
 	// files exist and are properly structured: block snapshots, state snapshots, beacon/caplin
 	// snapshots, and required metadata files (salt files). This is the final check before
 	// publishing snapshots for external distribution.
 	Publishable Check = "Publishable"
+
+	// ReceiptRootIntegrity verifies that receipts from RCache domain produce receipt roots
+	// matching block headers. Reads receipts from RCache, computes the receipt root via
+	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
+	// but for receipt roots instead of state roots.
+	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
 )
 
+// FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
+// budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs,
-	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	StateProgress, Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
 var SlowChecks = []Check{StateVerify}
@@ -124,3 +141,28 @@ var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+
+// SortChecksByCost returns a copy of checks ordered by their position in FastChecks
+// (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
+func SortChecksByCost(checks []Check) []Check {
+	rank := make(map[Check]int, len(FastChecks))
+	for i, c := range FastChecks {
+		rank[c] = i
+	}
+	out := append([]Check{}, checks...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, oki := rank[out[i]]
+		rj, okj := rank[out[j]]
+		switch {
+		case oki && okj:
+			return ri < rj
+		case oki:
+			return true
+		case okj:
+			return false
+		default:
+			return false
+		}
+	})
+	return out
+}

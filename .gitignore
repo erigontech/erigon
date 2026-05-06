@@ -25,6 +25,9 @@ docs/readthedocs/build
 .project
 .settings
 
+# Lazy-downloaded test fixture tarballs (see Makefile target test-fixtures)
+/test-fixtures-cache/
+
 # Used by mdbx Makefile
 /ethdb/mdbx/dist/CMakeFiles/*
 /ethdb/mdbx/dist/CMakeCache*
@@ -127,3 +130,6 @@ mdbx.lck
 # place to store task-specific agent .md files that we do not want to commit to main repo
 agentspecs/
 .claude/worktrees/
+
+# ralphex progress logs
+.ralphex/progress/

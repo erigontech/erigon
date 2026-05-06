@@ -18,7 +18,6 @@ package seg
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -37,7 +36,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	file := filepath.Join(tmpDir, "compressed")
 	cfg := DefaultCfg
 	cfg.MinPatternScore = 100
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +96,7 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 	cfg.MinPatternScore = 1
 	cfg.Workers = 2
 	cfg.ExpectMetadata = hasMetadata
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +340,7 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 

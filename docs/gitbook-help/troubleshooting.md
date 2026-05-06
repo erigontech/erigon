@@ -32,3 +32,44 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag.
 17. **Report a Bug:** If all else fails, open a detailed bug report on GitHub with logs, version info, and a clear description of the problem.
 18. **Engage with the Community:** The Erigon Discord server is an invaluable resource for seeking help from core developers and experienced users.
+
+---
+
+**Collecting Diagnostics for Bug Reports**
+
+Before opening a GitHub issue, gather the following information to help the team reproduce and fix your problem faster.
+
+**Dump goroutine stacks** (sends `SIGUSR1` to the running process — safe, non-destructive):
+
+```bash
+kill -SIGUSR1 $(pidof erigon)
+# Stack traces are printed to the erigon log / stdout
+```
+
+**Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
+
+```bash
+# CPU profile — 30-second sample
+curl -o cpu.pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Heap profile
+curl -o heap.pprof http://localhost:6060/debug/pprof/heap
+
+# Inspect locally
+go tool pprof -http=:8080 cpu.pprof
+```
+
+Attach the `.pprof` files and the goroutine dump to your GitHub issue.
+
+---
+
+**Hetzner Cloud / Dedicated Server Firewall Note**
+
+Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+
+| Purpose        | Port  | Protocol |
+| -------------- | ----- | -------- |
+| P2P (Ethereum) | 30303 | TCP+UDP  |
+| P2P (Caplin)   | 9000  | TCP+UDP  |
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.

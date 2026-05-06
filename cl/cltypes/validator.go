@@ -29,7 +29,6 @@ import (
 
 const (
 	DepositProofLength = 33
-	SyncCommitteeSize  = 512
 )
 
 type DepositData struct {

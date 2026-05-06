@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 type Status int
@@ -63,7 +63,7 @@ type EngineBlockDownloader struct {
 func NewEngineBlockDownloader(
 	ctx context.Context,
 	logger log.Logger,
-	executionClient executionproto.ExecutionClient,
+	executionClient execmodule.ExecutionModule,
 	blockReader services.FullBlockReader,
 	db kv.RoDB,
 	config *chain.Config,
@@ -153,11 +153,11 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
-	if status == executionproto.ExecutionStatus_TooFarAway || status == executionproto.ExecutionStatus_Busy {
+	if status == execmodule.ExecutionStatusTooFarAway || status == execmodule.ExecutionStatusBusy {
 		e.logger.Info("[EngineBlockDownloader] block verification skipped")
 		return nil
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		e.ReportBadHeader(tip.Hash(), latestValidHash)
 		return errors.New("block segments downloaded are invalid")
 	}
@@ -234,17 +234,17 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 		return err
 	}
 	switch status {
-	case executionproto.ExecutionStatus_BadBlock:
+	case execmodule.ExecutionStatusBadBlock:
 		e.ReportBadHeader(block.Hash(), lastValidHash)
 		e.ReportBadHeader(requested, lastValidHash)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
-	case executionproto.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusTooFarAway:
 		e.logger.Debug(
 			"[EngineBlockDownloader] skipping validation of block batch download due to exec status too far away",
 			"tip", block.Hash(),
 			"latestValidHash", lastValidHash,
 		)
-	case executionproto.ExecutionStatus_Success: // proceed to UpdateForkChoice
+	case execmodule.ExecutionStatusSuccess: // proceed to UpdateForkChoice
 	default:
 		return fmt.Errorf(
 			"unsuccessful status when validating batch download: status=%s, tip=%s, latestValidHash=%s",
@@ -257,7 +257,7 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	if err != nil {
 		return err
 	}
-	if fcuStatus != executionproto.ExecutionStatus_Success {
+	if fcuStatus != execmodule.ExecutionStatusSuccess {
 		return fmt.Errorf(
 			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",
 			fcuStatus,

@@ -42,26 +42,77 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 	}).HashSSZ()
 }
 
+// baseOffsetSSZ computes the fixed portion of the SSZ encoding (all fixed-size
+// fields plus 4-byte offsets for each variable-length field). This is derived
+// from beaconConfig so it works with any preset (mainnet, minimal, custom).
 func (b *BeaconState) baseOffsetSSZ() uint32 {
-	switch b.version {
-	case clparams.Phase0Version:
-		return 2687377
-	case clparams.AltairVersion:
-		return 2736629
-	case clparams.BellatrixVersion:
-		return 2736633
-	case clparams.CapellaVersion:
-		return 2736653
-	case clparams.DenebVersion:
-		return 2736653
-	case clparams.ElectraVersion:
-		return 2736653
-	case clparams.FuluVersion:
-		return 2736653
-	default:
-		// ?????
-		panic("tf is that")
+	cfg := b.beaconConfig
+	size := uint32(0)
+
+	// Phase0 base fields (all versions):
+	size += 8                                          // genesis_time
+	size += 32                                         // genesis_validators_root
+	size += 8                                          // slot
+	size += 16                                         // fork (prev_version + cur_version + epoch)
+	size += 112                                        // latest_block_header
+	size += uint32(cfg.SlotsPerHistoricalRoot) * 32    // block_roots (Vector[Hash, SLOTS_PER_HISTORICAL_ROOT])
+	size += uint32(cfg.SlotsPerHistoricalRoot) * 32    // state_roots (Vector[Hash, SLOTS_PER_HISTORICAL_ROOT])
+	size += 4                                          // historical_roots offset (List, variable)
+	size += 72                                         // eth1_data
+	size += 4                                          // eth1_data_votes offset (List, variable)
+	size += 8                                          // eth1_deposit_index
+	size += 4                                          // validators offset (List, variable)
+	size += 4                                          // balances offset (List, variable)
+	size += uint32(cfg.EpochsPerHistoricalVector) * 32 // randao_mixes (Vector[Hash, EPOCHS_PER_HISTORICAL_VECTOR])
+	size += uint32(cfg.EpochsPerSlashingsVector) * 8   // slashings (Vector[uint64, EPOCHS_PER_SLASHINGS_VECTOR])
+
+	if b.version == clparams.Phase0Version {
+		size += 4 // previous_epoch_attestations offset
+		size += 4 // current_epoch_attestations offset
+	} else {
+		// Altair+
+		size += 4 // previous_epoch_participation offset
+		size += 4 // current_epoch_participation offset
 	}
+
+	size += 1  // justification_bits
+	size += 40 // previous_justified_checkpoint (epoch + root)
+	size += 40 // current_justified_checkpoint
+	size += 40 // finalized_checkpoint
+
+	if b.version >= clparams.AltairVersion {
+		size += 4                                     // inactivity_scores offset (List, variable)
+		size += uint32(cfg.SyncCommitteeSize)*48 + 48 // current_sync_committee
+		size += uint32(cfg.SyncCommitteeSize)*48 + 48 // next_sync_committee
+	}
+
+	if b.version >= clparams.BellatrixVersion {
+		size += 4 // latest_execution_payload_header offset (variable)
+	}
+
+	if b.version >= clparams.CapellaVersion {
+		size += 8 // next_withdrawal_index
+		size += 8 // next_withdrawal_validator_index
+		size += 4 // historical_summaries offset (List, variable)
+	}
+
+	if b.version >= clparams.ElectraVersion {
+		size += 8 // deposit_requests_start_index
+		size += 8 // deposit_balance_to_consume
+		size += 8 // exit_balance_to_consume
+		size += 8 // earliest_exit_epoch
+		size += 8 // consolidation_balance_to_consume
+		size += 8 // earliest_consolidation_epoch
+		size += 4 // pending_deposits offset
+		size += 4 // pending_partial_withdrawals offset
+		size += 4 // pending_consolidations offset
+	}
+
+	if b.version >= clparams.FuluVersion {
+		size += uint32((cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch) * 8 // proposer_lookahead (Vector)
+	}
+
+	return size
 }
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -136,14 +187,9 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	size += b.historicalSummaries.EncodingSizeSSZ()
 
 	if b.version >= clparams.ElectraVersion {
-		// 6 uint64 fields
-		size += 6 * 8
 		size += b.pendingDeposits.EncodingSizeSSZ()
 		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
 		size += b.pendingConsolidations.EncodingSizeSSZ()
-	}
-	if b.version >= clparams.FuluVersion {
-		size += b.proposerLookahead.EncodingSizeSSZ()
 	}
 	return
 }

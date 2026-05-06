@@ -80,6 +80,7 @@ var (
 	errSelf             = errors.New("is self")
 	errAlreadyDialing   = errors.New("already dialing")
 	errAlreadyConnected = errors.New("already connected")
+	errPendingInbound   = errors.New("peer has pending inbound connection")
 	errRecentlyDialed   = errors.New("recently dialed")
 	errNotWhitelisted   = errors.New("not contained in netrestrict whitelist")
 	errNoPort           = errors.New("node does not provide TCP port")
@@ -96,25 +97,28 @@ var (
 //     to create peer connections to nodes arriving through the iterator.
 type dialScheduler struct {
 	dialConfig
-	mutex       sync.Mutex
-	setupFunc   dialSetupFunc
-	wg          sync.WaitGroup
-	cancel      context.CancelFunc
-	ctx         context.Context
-	nodesIn     chan *enode.Node
-	doneCh      chan *dialTask
-	addStaticCh chan *enode.Node
-	remStaticCh chan *enode.Node
-	addPeerCh   chan *conn
-	remPeerCh   chan *conn
+	mutex        sync.Mutex
+	setupFunc    dialSetupFunc
+	wg           sync.WaitGroup
+	cancel       context.CancelFunc
+	ctx          context.Context
+	nodesIn      chan *enode.Node
+	doneCh       chan *dialTask
+	addStaticCh  chan *enode.Node
+	remStaticCh  chan *enode.Node
+	addPeerCh    chan *conn
+	remPeerCh    chan *conn
+	addPendingCh chan enode.ID
+	remPendingCh chan enode.ID
 
 	subProtocolVersion uint
 
 	// Everything below here belongs to loop and
 	// should only be accessed by code on the loop goroutine.
-	dialing   map[enode.ID]*dialTask // active tasks
-	peers     map[enode.ID]connFlag  // all connected peers
-	dialPeers int                    // current number of dialed peers
+	dialing        map[enode.ID]*dialTask // active tasks
+	peers          map[enode.ID]connFlag  // all connected peers
+	pendingInbound map[enode.ID]struct{}  // in-progress inbound connections.
+	dialPeers      int                    // current number of dialed peers
 
 	// The static map tracks all static dial tasks. The subset of usable static dial tasks
 	// (i.e. those passing checkDial) is kept in staticPool. The scheduler prefers
@@ -122,6 +126,15 @@ type dialScheduler struct {
 	// iterator.
 	static     map[enode.ID]*dialTask
 	staticPool []*dialTask
+
+	// staticByID is a concurrency-safe view of the static-peer enodes,
+	// indexed by enode.ID. Populated by addStatic / removeStatic so
+	// setupConn can resolve an inbound peer's full enode (with its ENR
+	// record) by pubkey, instead of falling back to a stub enode that
+	// strips custom ENR entries. Held outside the loop's exclusive
+	// state because setupConn runs on a different goroutine.
+	staticByIDMu sync.RWMutex
+	staticByID   map[enode.ID]*enode.Node
 
 	// The dial history keeps recently dialed nodes. Members of history are not dialed.
 	history          expHeap
@@ -167,18 +180,20 @@ func (cfg dialConfig) withDefaults() dialConfig {
 
 func newDialScheduler(config dialConfig, it enode.Iterator, setupFunc dialSetupFunc, subProtocolVersion uint) *dialScheduler {
 	d := &dialScheduler{
-		dialConfig:  config.withDefaults(),
-		setupFunc:   setupFunc,
-		dialing:     make(map[enode.ID]*dialTask),
-		static:      make(map[enode.ID]*dialTask),
-		peers:       make(map[enode.ID]connFlag),
-		doneCh:      make(chan *dialTask),
-		nodesIn:     make(chan *enode.Node),
-		addStaticCh: make(chan *enode.Node),
-		remStaticCh: make(chan *enode.Node),
-		addPeerCh:   make(chan *conn),
-		remPeerCh:   make(chan *conn),
-
+		dialConfig:         config.withDefaults(),
+		setupFunc:          setupFunc,
+		dialing:            make(map[enode.ID]*dialTask),
+		static:             make(map[enode.ID]*dialTask),
+		peers:              make(map[enode.ID]connFlag),
+		pendingInbound:     make(map[enode.ID]struct{}),
+		doneCh:             make(chan *dialTask),
+		nodesIn:            make(chan *enode.Node),
+		addStaticCh:        make(chan *enode.Node),
+		remStaticCh:        make(chan *enode.Node),
+		addPeerCh:          make(chan *conn),
+		remPeerCh:          make(chan *conn),
+		addPendingCh:       make(chan enode.ID),
+		remPendingCh:       make(chan enode.ID),
 		subProtocolVersion: subProtocolVersion,
 		errors:             map[string]uint{},
 	}
@@ -198,6 +213,12 @@ func (d *dialScheduler) stop() {
 
 // addStatic adds a static dial candidate.
 func (d *dialScheduler) addStatic(n *enode.Node) {
+	d.staticByIDMu.Lock()
+	if d.staticByID == nil {
+		d.staticByID = make(map[enode.ID]*enode.Node)
+	}
+	d.staticByID[n.ID()] = n
+	d.staticByIDMu.Unlock()
 	select {
 	case d.addStaticCh <- n:
 	case <-d.ctx.Done():
@@ -206,10 +227,23 @@ func (d *dialScheduler) addStatic(n *enode.Node) {
 
 // removeStatic removes a static dial candidate.
 func (d *dialScheduler) removeStatic(n *enode.Node) {
+	d.staticByIDMu.Lock()
+	delete(d.staticByID, n.ID())
+	d.staticByIDMu.Unlock()
 	select {
 	case d.remStaticCh <- n:
 	case <-d.ctx.Done():
 	}
+}
+
+// lookupStatic returns the enode for a configured static peer by ID, or
+// nil if no static entry exists. Used by Server.setupConn to resolve
+// inbound connections from known static peers to their full enode (with
+// custom ENR entries) instead of the stub created from pubkey + addr.
+func (d *dialScheduler) lookupStatic(id enode.ID) *enode.Node {
+	d.staticByIDMu.RLock()
+	defer d.staticByIDMu.RUnlock()
+	return d.staticByID[id]
 }
 
 // peerAdded updates the peer set.
@@ -224,6 +258,22 @@ func (d *dialScheduler) peerAdded(c *conn) {
 func (d *dialScheduler) peerRemoved(c *conn) {
 	select {
 	case d.remPeerCh <- c:
+	case <-d.ctx.Done():
+	}
+}
+
+// inboundPending notifies the scheduler about a pending inbound connection.
+func (d *dialScheduler) inboundPending(id enode.ID) {
+	select {
+	case d.addPendingCh <- id:
+	case <-d.ctx.Done():
+	}
+}
+
+// inboundCompleted notifies the scheduler that an inbound connection completed or failed.
+func (d *dialScheduler) inboundCompleted(id enode.ID) {
+	select {
+	case d.remPendingCh <- id:
 	case <-d.ctx.Done():
 	}
 }
@@ -291,6 +341,15 @@ loop:
 			}
 			delete(d.peers, c.node.ID())
 			d.updateStaticPool(c.node.ID())
+
+		case id := <-d.addPendingCh:
+			d.pendingInbound[id] = struct{}{}
+			d.log.Trace("Marked node as pending inbound", "id", id)
+
+		case id := <-d.remPendingCh:
+			delete(d.pendingInbound, id)
+			d.updateStaticPool(id)
+			d.log.Trace("Unmarked node as pending inbound", "id", id)
 
 		case node := <-d.addStaticCh:
 			id := node.ID()
@@ -413,6 +472,10 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 	}
 	if _, ok := d.peers[n.ID()]; ok {
 		return errAlreadyConnected
+	}
+	if _, ok := d.pendingInbound[n.ID()]; ok {
+		// Let the inbound handshake finish instead of racing it with a new outbound dial.
+		return errPendingInbound
 	}
 	if d.netRestrict != nil && !d.netRestrict.Contains(n.IP()) {
 		return errNotWhitelisted

@@ -3,6 +3,11 @@ name: Benchmarks
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -18,20 +23,31 @@ jobs:
         with:
           fetch-depth: 1
 
-      # No submodules, LFS, or space cleanup needed: benchmark functions
-      # only use in-memory or local testdata/ files. Submodules
-      # (legacy-tests, execution-spec-tests) and LFS fixtures are only
-      # read by regular Test* functions.
+      # No submodules or LFS needed: benchmark functions only use
+      # in-memory or local testdata/ files. Space cleanup is needed
+      # for the cache-warming path (go test -run=^$ ./...) which
+      # compiles test binaries for every package.
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          cleanup-space: true
 
       - name: Run benchmarks
-        if: github.event_name == 'pull_request'
+        if: '!inputs.cache-warming-only'
         run: make test-bench
 
       - name: Build test binaries (cache warming)
-        if: github.event_name != 'pull_request'
+        if: inputs.cache-warming-only
         run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

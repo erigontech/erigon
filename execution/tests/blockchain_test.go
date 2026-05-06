@@ -462,7 +462,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   libchain.TestChainConfig,
+			Config:   libchain.TestChainBerlinConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -1075,7 +1075,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1370,7 +1370,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1485,12 +1485,12 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1613,7 +1613,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1694,7 +1694,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1817,11 +1817,11 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -2022,12 +2022,12 @@ func TestInitThenFailCreateContract(t *testing.T) {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2111,7 +2111,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2326,7 +2326,8 @@ func TestEIP1559Transition(t *testing.T) {
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		baseFee := block.BaseFee()
-		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
+		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
+		effectiveTip := tip.Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
