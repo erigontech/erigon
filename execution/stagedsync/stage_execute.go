@@ -217,6 +217,15 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
+	// Surgically evict keys touched by the unwound blocks from the state cache.
+	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
+	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
+		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+		if err != nil {
+			unwindTargetHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
+	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
@@ -391,7 +400,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
 	// Discard any pending deferred commitment updates from the previous
 	// (failed) execution. If left in place, the next ComputeCommitment
@@ -445,6 +454,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
@@ -453,12 +465,34 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
+	// /2 budget. Use a base budget of one-third of a slot and extend it
+	// adaptively when there is a large prunable backlog, capped at two-thirds
+	// of a slot so FCU still has time. The proper fix is a background prune
+	// that defers to FCU when work is pending — out of scope here.
+	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
+	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
+	quickPruneTimeout := baseTimeout
+	if hasAgg, ok := cfg.db.(state.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*state.Aggregator); ok && agg != nil {
+			// Each 100 prunable steps adds 200ms. 1000-step backlog -> +2s.
+			extra := time.Duration(agg.MaxPrunableStepsBacklog()/100) * 200 * time.Millisecond
+			quickPruneTimeout = baseTimeout + extra
+			if quickPruneTimeout > maxTimeout {
+				quickPruneTimeout = maxTimeout
+			}
+		}
+	}
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
 	}
 
+	// AlwaysGenerateChangesets disables this prune so the node retains
+	// changesets for unwinds deeper than MaxReorgDepth (debug / integration
+	// tool / explicit --experimental.always-generate-changesets flag).
+	// Without the guard, the flag still controls *generation* but every
+	// generated changeset is pruned 96 blocks later, defeating the point.
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb

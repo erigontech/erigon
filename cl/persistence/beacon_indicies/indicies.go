@@ -381,7 +381,7 @@ func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
 		return err
 	}
 	defer cursor.Close()
-	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Prev() {
+	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Next() {
 		if len(k) != 40 {
 			continue
 		}

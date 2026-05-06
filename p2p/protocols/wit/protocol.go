@@ -39,6 +39,12 @@ const (
 	MaximumCachedWitnessOnARequest = 200 * 1024 * 1024 // 200 MB, the maximum amount of memory a request can demand while getting witness
 	MaximumResponseSize            = 16 * 1024 * 1024  // 16 MB, helps to fast fail check
 
+	// MaxWitnessPages caps the TotalPages a peer may advertise in a response. A
+	// legitimate witness fits in MaximumCachedWitnessOnARequest bytes split into
+	// PageSize chunks; anything larger is attacker-inflated and would drive
+	// unbounded allocation in the response handler.
+	MaxWitnessPages = (MaximumCachedWitnessOnARequest + PageSize - 1) / PageSize
+
 	// RetentionBlocks defines how many recent blocks to keep witness data for
 	RetentionBlocks = 10_000
 )

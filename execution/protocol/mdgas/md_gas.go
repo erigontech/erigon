@@ -39,13 +39,6 @@ func NewFullMdGas(regular, state, blob uint64) FullMdGas {
 	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
 }
 
-func (g MdGas) Minus(other MdGas) MdGas {
-	return MdGas{
-		Regular: g.Regular - other.Regular,
-		State:   g.State - other.State,
-	}
-}
-
 func (g MdGas) Plus(other MdGas) MdGas {
 	return MdGas{
 		Regular: g.Regular + other.Regular,

@@ -69,9 +69,9 @@ func TestLightClientOptimistic(t *testing.T) {
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee: &solid.SyncCommittee{},
+		NextSyncCommittee: solid.NewSyncCommittee(),
 		SignatureSlot:     1234,
-		SyncAggregate:     &cltypes.SyncAggregate{},
+		SyncAggregate:     cltypes.NewSyncAggregate(),
 		FinalizedHeader:   cltypes.NewLightClientHeader(clparams.AltairVersion),
 		// 8 is fine as this is a test
 		FinalityBranch:          solid.NewHashVector(8),
@@ -140,9 +140,9 @@ func TestLightClientFinality(t *testing.T) {
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -213,9 +213,9 @@ func TestLightClientBootstrap(t *testing.T) {
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -224,7 +224,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	reqRoot := common.Hash{1, 2, 3}
 	f.LightClientBootstraps[reqRoot] = &cltypes.LightClientBootstrap{
 		Header:                     cltypes.NewLightClientHeader(clparams.AltairVersion),
-		CurrentSyncCommittee:       &solid.SyncCommittee{1, 2, 3, 5, 6},
+		CurrentSyncCommittee:       solid.NewSyncCommittee(),
 		CurrentSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
 	f.LightClientBootstraps[reqRoot].Header.Beacon.Slot = altairSlot
@@ -295,23 +295,15 @@ func TestLightClientUpdates(t *testing.T) {
 	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
-	up := &cltypes.LightClientUpdate{
-		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
-		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
-		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
-		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
-		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
-	}
-	up.AttestedHeader.Beacon.Slot = altairSlot
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+
 	// just some stupid randomization
 	for i := 1; i < 5; i++ {
-		upC := *up
+		upC := cltypes.NewLightClientUpdate(clparams.AltairVersion, beaconCfg)
+		upC.AttestedHeader.Beacon.Slot = altairSlot
 		upC.SignatureSlot = uint64(i)
-		f.LCUpdates[uint64(i)] = &upC
+		f.LCUpdates[uint64(i)] = upC
 	}
-	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -383,7 +375,7 @@ func TestLightClientUpdates(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		update := cltypes.NewLightClientUpdate(version)
+		update := cltypes.NewLightClientUpdate(version, beaconCfg)
 		if err = update.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return

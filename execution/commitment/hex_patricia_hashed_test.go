@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/bits"
 	"math/rand"
 	"sort"
 	"sync/atomic"
@@ -1156,6 +1157,51 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	require.Equal(t, withoutRestore, afterRestore)
 }
 
+func TestHexPatriciaHashedLoadStateIfNeededReturnsCounters(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	addrHex := "00112233445566778899aabbccddeeff00112233"
+	slotHex := "0000000000000000000000000000000000000000000000000000000000000042"
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(addrHex, 1).
+		Nonce(addrHex, 2).
+		Storage(addrHex, slotHex, "01").
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	hph := NewHexPatriciaHashed(length.Addr, ms)
+
+	t.Run("account", func(t *testing.T) {
+		var accountCell cell
+		addr := common.FromHex("0x" + addrHex)
+		copy(accountCell.accountAddr[:], addr)
+		accountCell.accountAddrLen = int16(len(addr))
+
+		counters := skipStat{accSkipped: 3}
+		got, err := hph.loadStateIfNeeded(&accountCell, counters)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), got.accLoaded)
+		require.Equal(t, counters.accSkipped, got.accSkipped)
+		require.True(t, accountCell.loaded.account())
+	})
+
+	t.Run("storage", func(t *testing.T) {
+		var storageCell cell
+		storageKey := append(common.FromHex("0x"+addrHex), common.FromHex("0x"+slotHex)...)
+		copy(storageCell.storageAddr[:], storageKey)
+		storageCell.storageAddrLen = int16(len(storageKey))
+
+		counters := skipStat{storSkipped: 4}
+		got, err := hph.loadStateIfNeeded(&storageCell, counters)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), got.storLoaded)
+		require.Equal(t, counters.storSkipped, got.storSkipped)
+		require.True(t, storageCell.loaded.storage())
+	})
+}
+
 func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	t.Parallel()
 
@@ -1760,19 +1806,22 @@ func TestCell_fillFromFields(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 	rnd := rand.New(rand.NewSource(0))
 
-	cg := func(nibble int, skip bool) (*cell, error) {
+	// Apply stateHash to cells with account or storage data (matches old callback behavior)
+	for bitset := bm; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
 		c := row[nibble]
 		if c.storageAddrLen > 0 || c.accountAddrLen > 0 {
 			rnd.Read(c.stateHash[:])
 			c.stateHashLen = 32
 		}
 		fmt.Printf("enc cell %x %v\n", nibble, c.FullString())
-
-		return c, nil
+		bitset ^= bit
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	//original := common.Copy(enc)
@@ -1816,6 +1865,109 @@ func cellMustEqual(tb testing.TB, first, second *cell) {
 	require.Equal(tb, first.stateHash[:first.stateHashLen], second.stateHash[:second.stateHashLen])
 
 	// encode doesn't code Nonce, Balance, CodeHash and Storage, Delete fields
+}
+
+func Test_HexPatriciaHashed_hashRow(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+	hph.SetTrace(false)
+
+	row := 0
+	depth := int16(0)
+
+	// Set up 3 cells at nibbles 1, 5, 10 as pure hash nodes.
+	// computeCellHash for these returns [0xA0, hash...] (33 bytes).
+	hph.afterMap[row] = (1 << 1) | (1 << 5) | (1 << 10)
+
+	for _, nibble := range []int{1, 5, 10} {
+		cell := &hph.grid[row][nibble]
+		cell.hashLen = 32
+		for i := range cell.hash {
+			cell.hash[i] = byte(nibble*17 + i) // unique per nibble
+		}
+	}
+
+	// Step 1: Run the old two-step approach to get reference values.
+	hph.keccak2.Reset()
+	b := [...]byte{0x80}
+	err := hph.feedBranchHashesToKeccak(row, depth, b[:])
+	require.NoError(t, err)
+
+	var refHash [32]byte
+	_, err = hph.keccak2.Read(refHash[:])
+	require.NoError(t, err)
+
+	var refCellData [16]cellEncodeData
+	for bitset := hph.afterMap[row]; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		refCellData[nibble] = cellEncodeDataFromCell(&hph.grid[row][nibble])
+		bitset ^= bit
+	}
+
+	// Step 2: Run hashRow (new single-pass approach).
+	// Note: computeCellHash for pure hash nodes is idempotent, so calling twice is safe.
+	hph.keccak2.Reset()
+	cellData, err := hph.hashRow(row, depth)
+	require.NoError(t, err)
+
+	var newHash [32]byte
+	_, err = hph.keccak2.Read(newHash[:])
+	require.NoError(t, err)
+
+	// Step 3: Verify equivalence.
+	require.Equal(t, refHash, newHash, "keccak2 hash must match between old and new approach")
+
+	// Verify cellEncodeData for present nibbles
+	for _, nibble := range []int{1, 5, 10} {
+		require.Equal(t, refCellData[nibble].hashLen, cellData[nibble].hashLen, "nibble %d hashLen", nibble)
+		require.Equal(t, refCellData[nibble].hash, cellData[nibble].hash, "nibble %d hash", nibble)
+		require.Equal(t, refCellData[nibble].extLen, cellData[nibble].extLen, "nibble %d extLen", nibble)
+		require.Equal(t, refCellData[nibble].accountAddrLen, cellData[nibble].accountAddrLen, "nibble %d accountAddrLen", nibble)
+		require.Equal(t, refCellData[nibble].storageAddrLen, cellData[nibble].storageAddrLen, "nibble %d storageAddrLen", nibble)
+		require.Equal(t, refCellData[nibble].stateHashLen, cellData[nibble].stateHashLen, "nibble %d stateHashLen", nibble)
+	}
+
+	// Verify cellEncodeData for absent nibbles are zero-valued
+	for nibble := 0; nibble < 16; nibble++ {
+		if nibble == 1 || nibble == 5 || nibble == 10 {
+			continue
+		}
+		require.Equal(t, int16(0), cellData[nibble].hashLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].extLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].accountAddrLen, "nibble %d should be empty", nibble)
+		require.Equal(t, int16(0), cellData[nibble].storageAddrLen, "nibble %d should be empty", nibble)
+	}
+
+	// Verify non-zero hash was produced
+	require.NotEqual(t, [32]byte{}, newHash, "keccak2 hash must be non-zero")
+}
+
+func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
+	t.Parallel()
+
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms)
+
+	// afterMap=0 means all 17 slots are empty (0x80 each)
+	hph.afterMap[0] = 0
+
+	hph.keccak2.Reset()
+	cellData, err := hph.hashRow(0, 0)
+	require.NoError(t, err)
+
+	// All cellEncodeData should be zero
+	for nibble := 0; nibble < 16; nibble++ {
+		require.Equal(t, int16(0), cellData[nibble].hashLen)
+	}
+
+	// keccak2 should still produce a hash (of 17 x 0x80 bytes)
+	var hash [32]byte
+	_, err = hph.keccak2.Read(hash[:])
+	require.NoError(t, err)
+	require.NotEqual(t, [32]byte{}, hash)
 }
 
 func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
@@ -3196,4 +3348,98 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			[][]byte{accountA, fullStorageKey},
 			[]bool{true, false})
 	})
+}
+
+// Test_ModeUpdate_SiblingConsistency verifies that ModeUpdate produces
+// the same trie root as ModeDirect when processing two consecutive blocks,
+// where block 2 modifies only a subset of accounts from block 1.
+// The sibling accounts (untouched in block 2) must be correctly encoded
+// in branch nodes — specifically, they should be inlined when small enough,
+// not hashed. A stale cached cell in the trie could cause the sibling to
+// be hashed instead of inlined, producing a different branch encoding.
+func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
+	// TODO(#20961): ModeUpdate produces a different root than ModeDirect when
+	// only a subset of sibling accounts is touched in a follow-up block — the
+	// untouched sibling cell is being hashed instead of inlined, so the branch
+	// node's encoding diverges. Failing test left as the regression marker.
+	// Fix is non-trivial (cell-cache invalidation in HexPatriciaHashed).
+	t.Skip("known parallel-calc sibling-encoding bug, see #20961")
+	t.Parallel()
+	ctx := context.Background()
+
+	// Create two accounts that share a branch node prefix.
+	// Account A (addr 00) and Account B (addr 01) are siblings.
+	// Block 1: both modified. Block 2: only A modified.
+
+	// --- ModeDirect (serial baseline) ---
+	msDirect := NewMockState(t)
+	hphDirect := NewHexPatriciaHashed(1, msDirect)
+
+	// Block 1: both accounts
+	plainKeys1, updates1 := NewUpdateBuilder().
+		Balance("00", 100).
+		Nonce("00", 1).
+		Balance("01", 200).
+		Nonce("01", 2).
+		Balance("02", 300).
+		Nonce("02", 3).
+		Build()
+
+	err := msDirect.applyPlainUpdates(plainKeys1, updates1)
+	require.NoError(t, err)
+
+	upds1Direct := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
+	defer upds1Direct.Close()
+
+	root1Direct, err := hphDirect.Process(ctx, upds1Direct, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	t.Logf("ModeDirect block 1 root: %x", root1Direct)
+
+	// Block 2: only account 00 modified — partial Update (only balance).
+	// The trie must handle this correctly: sibling cells from block 1
+	// should retain their full account data for proper branch encoding.
+	plainKeys2, updates2 := NewUpdateBuilder().
+		Balance("00", 150).
+		Build()
+
+	err = msDirect.applyPlainUpdates(plainKeys2, updates2)
+	require.NoError(t, err)
+
+	upds2Direct := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys2, updates2)
+	defer upds2Direct.Close()
+
+	root2Direct, err := hphDirect.Process(ctx, upds2Direct, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	t.Logf("ModeDirect block 2 root: %x", root2Direct)
+
+	// --- ModeUpdate (parallel calculator) ---
+	msUpdate := NewMockState(t)
+	hphUpdate := NewHexPatriciaHashed(1, msUpdate)
+
+	// Block 1: same accounts
+	err = msUpdate.applyPlainUpdates(plainKeys1, updates1)
+	require.NoError(t, err)
+
+	upds1Update := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys1, updates1)
+	defer upds1Update.Close()
+
+	root1Update, err := hphUpdate.Process(ctx, upds1Update, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	t.Logf("ModeUpdate block 1 root: %x", root1Update)
+
+	require.Equal(t, root1Direct, root1Update, "block 1 roots should match between ModeDirect and ModeUpdate")
+
+	// Block 2: only account 00 modified
+	err = msUpdate.applyPlainUpdates(plainKeys2, updates2)
+	require.NoError(t, err)
+
+	upds2Update := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys2, updates2)
+	defer upds2Update.Close()
+
+	root2Update, err := hphUpdate.Process(ctx, upds2Update, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	t.Logf("ModeUpdate block 2 root: %x", root2Update)
+
+	require.Equal(t, root2Direct, root2Update,
+		"block 2 roots should match — sibling accounts must be encoded consistently")
 }

@@ -528,10 +528,10 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
-// fetchChainToml fetches a single chain's TOML file from the snapshot CDN.
+// FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
 // TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
 // Remove the copies in erigon-snapshot once this is the canonical location.
-func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+func FetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
 	if source == snapshothashes.R2 {
 		url = ChainTomlR2URL(branch, chain)
@@ -578,11 +578,11 @@ func LoadRemotePreverified(ctx context.Context, chainName string) error {
 	} else {
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
-		hashes, err := fetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		hashes, err := FetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			hashes, err = FetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
 			if err != nil {
 				return err
 			}

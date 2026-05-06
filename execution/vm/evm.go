@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -210,14 +209,6 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		evm.stateGasConsumed = savedStateGasConsumed
 	}
 
-	// Compute spill: state gas that was charged from gas_left (regular)
-	// because the reservoir was insufficient.
-	reservoirUsed := initialChildState - gas.State
-	var spill uint64
-	if childStateConsumed > reservoirUsed {
-		spill = childStateConsumed - reservoirUsed
-	}
-
 	// EIP-8037: "On child revert or exceptional halt, all state gas
 	// consumed by the child, both from the reservoir and any that spilled
 	// into gas_left, is restored to the parent's reservoir."
@@ -225,6 +216,16 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		if err == ErrExecutionReverted {
 			// Top-level REVERT: restore spill to gas_left for refund
 			// accounting; track it for receipt gas calculation.
+			// Spill = state gas that was charged from gas_left (regular)
+			// because the reservoir was insufficient. When gas.State >
+			// initialChildState the reservoir grew via sub-child reverts —
+			// no reservoir was consumed net, so all childStateConsumed
+			// was spilled.
+			var reservoirUsed uint64
+			if initialChildState > gas.State {
+				reservoirUsed = initialChildState - gas.State
+			}
+			spill := childStateConsumed - reservoirUsed
 			gas.Regular += spill
 			evm.revertedSpillGas += spill
 		}
@@ -232,8 +233,9 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		// reservoir stays as-is for block gas accounting.
 	} else {
 		// Child frame (depth > 0): restore all consumed state gas
-		// (reservoir-sourced + spill) to the reservoir.
-		gas.State = initialChildState + spill
+		// (reservoir-sourced + spill) to the reservoir, preserving any
+		// sub-child restorations already in the reservoir.
+		gas.State += childStateConsumed
 		// Regular gas: REVERT preserves it (step 2 doesn't apply);
 		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
@@ -247,6 +249,10 @@ func (evm *EVM) CallGasTemp() uint64 {
 // SetCallGasTemp sets the callGasTemp for the EVM
 func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
+}
+
+func isSystemCall(caller accounts.Address) bool {
+	return caller == params.SystemAddress
 }
 
 // SetPrecompiles sets the precompiles for the EVM
@@ -296,12 +302,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	syscall := isSystemCall(caller)
+
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
-		// Only check when value is non-zero — matching geth's short-circuit
-		// behavior. Calling CanTransfer for zero-value calls (e.g. system
-		// calls) creates spurious balance reads on the caller that pollute
-		// the Block Access List (EIP-7928).
+		// Skip the check for zero-value calls, matching geth's short-circuit.
 		if !value.IsZero() {
 			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 			if err != nil {
@@ -322,18 +327,46 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
+			// Under Spurious Dragon, a zero-value CALL to a non-existent
+			// non-precompile account short-circuits as a no-op instead of
+			// creating the account. This also preserves the EIP-4788
+			// beacon-root syscall's "no-op when not deployed" semantics at
+			// the fork-transition block, before the contract is deployed.
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+		// System calls use TouchAccount instead of Transfer to avoid
+		// spurious balance reads on the caller that would pollute the
+		// Block Access List (EIP-7928). The touch is still needed so
+		// AuRa/Gnosis keeps the empty system account in the PMT.
+		if syscall && value.IsZero() {
+			if err := evm.intraBlockState.TouchAccount(caller); err != nil {
+				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+		} else {
+			// Normal (non-syscall) calls always go through Transfer —
+			// this handles both value movement and the zero-balance touch
+			// required for state clearing.
+			if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
+				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
+		}
 	} else if typ == STATICCALL {
-		// We do an AddBalance of zero here, just in order to trigger a touch.
-		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
-		// but is the correct thing to do and matters on other networks, in tests, and potential
-		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		// Trigger a touch on the callee so EIP-161 state clearing applies to
+		// empty accounts (matters on test networks; on Mainnet all empties are
+		// gone by Byzantium). Use TouchAccount rather than AddBalance(0): the
+		// latter has a serial-mode shortcut for the RIPEMD-160 precompile
+		// (special-snowflake balance-increase path) that bypasses
+		// GetOrNewStateObject. Without loading the account the FinalizeTx
+		// "exists in dirties but not stateObjects → skip" branch fires and
+		// the touch never reaches state-clearing — diverging from
+		// CALL's behavior, which loads the account via Exist() before the
+		// zero-value Transfer. Affects ethereum/tests RevertPrecompiledTouch_d3.
+		if err := evm.intraBlockState.TouchAccount(addr); err != nil {
+			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
 	}
 
 	savedStateGasConsumed := evm.stateGasConsumed
@@ -553,7 +586,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules)
+	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
+		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
@@ -644,25 +679,24 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 }
 
 // Create creates a new contract using code as deployment code.
+// If salt is non-nil, CREATE2 addressing is used (keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]);
+// otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
-	nonce, err := evm.intraBlockState.GetNonce(caller)
-	if err != nil {
-		return nil, accounts.NilAddress, mdgas.MdGas{}, err
+func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
+	ch := &codeAndHash{code: code}
+	op := CREATE
+	if salt != nil {
+		op = CREATE2
+		contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), ch.Hash()))
+	} else {
+		var nonce uint64
+		nonce, err = evm.intraBlockState.GetNonce(caller)
+		if err != nil {
+			return nil, accounts.NilAddress, mdgas.MdGas{}, err
+		}
+		contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}
-	contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
-	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
-}
-
-// Create2 creates a new contract using code as deployment code.
-//
-// The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
-// instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
-// DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller accounts.Address, code []byte, gasRemaining mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas mdgas.MdGas, err error) {
-	codeAndHash := &codeAndHash{code: code}
-	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash()))
-	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
+	return evm.create(caller, ch, gasRemaining, endowment, contractAddr, op, true /* incrementNonce */, bailout)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.

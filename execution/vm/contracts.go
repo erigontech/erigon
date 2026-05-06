@@ -32,7 +32,7 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
+	evmone "github.com/erigontech/evmone_precompiles"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -568,7 +568,6 @@ var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
 	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
-	patchedBig1                     = patched_big.NewInt(1)
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
@@ -612,22 +611,28 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		input = input[:0]
 	}
 	// Retrieve the operands and execute the exponentiation
-	var (
-		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-	)
+	base := getData(input, 0, baseLen)
+	exp := getData(input, baseLen, expLen)
+	mod := getData(input, baseLen+expLen, modLen)
 
 	// Allocate the result buffer once, zero-filled.
 	result := make([]byte, modLen)
 	switch {
-	case mod.Cmp(patchedBig1) <= 0:
+	case !bitutil.TestBytes(mod[:len(mod)-1]) && mod[len(mod)-1] <= 1:
 		// Leave the result as zero for mod 0 (undefined) and 1
-	case base.Cmp(patchedBig1) == 0:
+	case len(base) > 0 && !bitutil.TestBytes(base[:len(base)-1]) && base[len(base)-1] == 1:
 		// If base == 1 (and mod > 1), then the result is 1
 		result[modLen-1] = 1
+	case modLen > 32 && len(exp) > 0 && !bitutil.TestBytes(exp[:len(exp)-1]):
+		// For small exponents (≤255) with large moduli (>256 bits), use Go's math/big
+		// directly. evmone uses Montgomery multiplication whose O(n²) setup (converting
+		// to Montgomery form) doesn't pay off when the exponent only needs a few squarings.
+		baseBig := new(big.Int).SetBytes(base)
+		expBig := new(big.Int).SetBytes(exp)
+		modBig := new(big.Int).SetBytes(mod)
+		baseBig.Exp(baseBig, expBig, modBig).FillBytes(result)
 	default:
-		base.Exp(base, exp, mod).FillBytes(result)
+		evmone.ModExp(result, base, exp, mod)
 	}
 	return result, nil
 }

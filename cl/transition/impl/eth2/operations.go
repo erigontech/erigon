@@ -357,10 +357,12 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, body cltypes.Gene
 			prevRandao,
 		)
 	}
-	if time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+	expectedTimestamp := state.ComputeTimestampAtSlot(s, s.Slot())
+	if time != expectedTimestamp {
 		// Verify timestamp
 		// assert payload.timestamp == compute_timestamp_at_slot(state, state.slot)
-		return errors.New("ProcessExecutionPayload: invalid Eth1 timestamp")
+		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp: got %d, expected %d (slot=%d, genesisTime=%d, genesisSlot=%d, secsPerSlot=%d)",
+			time, expectedTimestamp, s.Slot(), s.GenesisTime(), s.BeaconConfig().GenesisSlot, s.BeaconConfig().SecondsPerSlot)
 	}
 
 	// Verify commitments are under limit

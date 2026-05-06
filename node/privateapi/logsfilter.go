@@ -225,7 +225,7 @@ func logNotificationToProto(lg *notifications.LogNotification) *remoteproto.Subs
 	return &remoteproto.SubscribeLogsReply{
 		Address:          gointerfaces.ConvertAddressToH160(lg.Address),
 		BlockHash:        gointerfaces.ConvertHashToH256(lg.BlockHash),
-		BlockNumber:      lg.BlockNumber,
+		BlockNumber:      uint64(lg.BlockNumber),
 		Data:             lg.Data,
 		LogIndex:         uint64(lg.Index),
 		Topics:           topics,

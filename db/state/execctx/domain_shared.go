@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -76,11 +77,13 @@ type accHolder interface {
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
+	if doms != nil {
+		defer doms.Close()
+	}
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err, "stack", dbg.Stack())
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
 	}
-	defer doms.Close()
 	return false
 }
 
@@ -95,8 +98,12 @@ type SharedDomains struct {
 	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
-	mem               kv.TemporalMemBatch
-	metrics           changeset.DomainMetrics
+	// disableInlineTouchKey when true, DomainPut skips the TouchKey call.
+	// Used when the commitment calculator goroutine owns the Updates buffer
+	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
+	disableInlineTouchKey bool
+	mem                   kv.TemporalMemBatch
+	metrics               changeset.DomainMetrics
 
 	// blockOverlay is an in-memory overlay for block-level metadata writes (headers, bodies,
 	// canonical hashes, TD, stage progress, forkchoice markers). It allows execution to
@@ -117,6 +124,17 @@ type SharedDomains struct {
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+	tv := commitment.VariantHexPatriciaTrie
+	if statecfg.ExperimentalConcurrentCommitment {
+		tv = commitment.VariantConcurrentHexPatricia
+	}
+	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)
+}
+
+// NewSharedDomainsWithTrieVariant is like NewSharedDomains but accepts an
+// explicit trie variant instead of reading the global statecfg flag. Use this
+// when the caller needs a specific variant without mutating process-wide state.
+func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logger log.Logger, tv commitment.TrieVariant) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -125,16 +143,22 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
-
-	tv := commitment.VariantHexPatriciaTrie
-	if statecfg.ExperimentalConcurrentCommitment {
-		tv = commitment.VariantConcurrentHexPatricia
-	}
-
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
+	_, blockNum, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
 		return sd, err
+	}
+
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
+	if blockNum > 0 {
+		lastBn, _, err := rawdbv3.TxNums.Last(tx)
+		if err != nil {
+			return sd, err
+		}
+		if lastBn < blockNum {
+			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
 	}
 
 	return sd, nil
@@ -364,7 +388,9 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	if resetCommitment && sd.sdCtx != nil {
+	// When the commitment calculator goroutine owns the Updates buffer,
+	// skip ClearRam on the commitment context to avoid concurrent btree access.
+	if resetCommitment && sd.sdCtx != nil && !sd.disableInlineTouchKey {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
@@ -388,6 +414,18 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+
+// SetDisableInlineTouchKey disables the TouchKey call inside DomainPut/DomainDel.
+// When the commitment calculator goroutine owns the Updates buffer, the inline
+// TouchKey must be disabled to avoid concurrent writes.
+func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
+	sd.disableInlineTouchKey = disable
+}
+
+// InlineTouchKeyDisabled returns true when inline TouchKey is disabled.
+func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
+	return sd.disableInlineTouchKey
+}
 
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
@@ -426,6 +464,7 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
@@ -480,16 +519,31 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	type MeteredGetter interface {
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+	}
+
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
+			if dbg.AssertStateCache {
+				// Fetch authoritative value from the backing tx and panic on any divergence.
+				// sd.mem and sd.parent.mem were already checked above and missed, so the
+				// backing tx is the single source of truth for this key at this point.
+				var vDB []byte
+				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
+					vDB, _, _, _ = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
+				} else {
+					vDB, _, _ = tx.GetLatest(domain, k)
+				}
+				if !bytes.Equal(v, vDB) {
+					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
+						domain, k, v, vDB, sd.txNum))
+				}
+			}
 			return v, 0, nil
 		}
-	}
-
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
@@ -582,8 +636,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, v)
-
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
 	if prevVal == nil {
 		var err error
 		prevVal, _, err = sd.GetLatest(domain, roTx, k)
@@ -619,7 +674,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil)
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, nil)
+	}
 
 	if prevVal == nil {
 		var err error
@@ -791,7 +848,9 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		if err != nil {
 			return changes, err
 		}
-		sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		if !sd.disableInlineTouchKey {
+			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		}
 		changes++
 	}
 	return changes, nil

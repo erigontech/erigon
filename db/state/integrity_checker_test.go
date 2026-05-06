@@ -1,7 +1,6 @@
 package state
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -17,6 +16,7 @@ import (
 )
 
 func TestDependency(t *testing.T) {
+	t.Parallel()
 	// shouldn't pass dependency file not present in dependent
 	// commitment.0-1, 1-2 => 0-1, 1-2
 	// account.0-1, 1-2, 0-2 => 0-1, 1-2
@@ -57,6 +57,7 @@ func TestDependency(t *testing.T) {
 }
 
 func TestDependency_UnindexedMerged(t *testing.T) {
+	t.Parallel()
 	// shouldn't allow to delete file
 	// commitment.0-1, 1-2, 0-2; but 0-2 is unindexed
 	// account.0-1, 1-2, 0-2
@@ -99,6 +100,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 }
 
 func TestDependency_DisableInterDomain(t *testing.T) {
+	t.Parallel()
 	// DisableInterDomain should bypass domain→domain (inter-domain) checks
 	// while preserving II→history (intra-domain) checks.
 	//
@@ -170,7 +172,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	t.Helper()
 
 	base := fmt.Sprintf(dirs.Snap+"/commitment.%d-%d", startTxNum, endTxNum)
-	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
+	comp, err := seg.NewCompressor(t.Context(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
 	defer comp.Close()
@@ -198,7 +200,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		require.NotNil(t, index)
 		defer index.Close()
 
-		require.NoError(t, index.Build(context.Background()))
+		require.NoError(t, index.Build(t.Context()))
 
 		idx0 = recsplit.MustOpen(base + "index")
 		t.Cleanup(idx0.Close)

@@ -22,10 +22,40 @@ For API usage refer to the below official resources:
 
 ### eth\_getProof
 
-To enable the `eth_getProof` JSON-RPC method, you must explicitly activate the storage of commitment history. Add the following option to your Erigon instance:
+`eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
+
+To enable historical proof support, activate commitment history storage at startup:
 
 ```
 --prune.include-commitment-history=true
 ```
 
-This will allows for blazing fast retrieval of Merkle proofs for executed blocks.
+{% hint style="warning" %}
+**RAM requirement:** Historical `eth_getProof` requires at least **+32 GB RAM** to operate efficiently. Running without sufficient memory will severely degrade node performance.
+{% endhint %}
+
+This enables blazing fast retrieval of Merkle proofs for any executed block.
+
+### eth\_getStorageValues
+
+`eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.
+
+**Parameters**
+
+| Parameter    | Type             | Description                                          |
+| ------------ | ---------------- | ---------------------------------------------------- |
+| address      | STRING           | The account address to query storage for             |
+| storageKeys  | ARRAY of STRING  | List of 32-byte storage slot keys (hex-encoded)      |
+| blockNumber  | STRING or NUMBER | Block number or tag (`"latest"`, `"earliest"`, etc.) |
+
+**Example**
+
+{% code overflow="wrap" %}
+```bash
+curl --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":["0xAddress","["0x0000000000000000000000000000000000000000000000000000000000000001"],"latest"],"id":1}' -H "Content-Type: application/json" -X POST http://localhost:8545
+```
+{% endcode %}
+
+**Returns**
+
+An object mapping each requested storage key to its 32-byte value.

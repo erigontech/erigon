@@ -138,10 +138,11 @@ func (pt *PeerTracker) BlockHashPresent(peerId *PeerId, blockHash common.Hash) {
 }
 
 func (pt *PeerTracker) PeerDisconnected(peerId *PeerId) {
+	pt.logger.Trace(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
+
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	pt.logger.Debug(peerTrackerLogPrefix("peer disconnected"), "peerId", peerId.String())
 	delete(pt.peerSyncProgresses, *peerId)
 	delete(pt.peerKnownBlockAnnounces, *peerId)
 }
@@ -154,7 +155,7 @@ func (pt *PeerTracker) PeerConnected(peerId *PeerId) {
 }
 
 func (pt *PeerTracker) peerConnected(peerId *PeerId) {
-	pt.logger.Debug(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
+	pt.logger.Trace(peerTrackerLogPrefix("peer connected"), "peerId", peerId.String())
 
 	peerIdVal := *peerId
 	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {

@@ -172,7 +172,15 @@ func (ba *BlockAssembler) AddTransactions(
 	logPrefix string,
 	logger log.Logger) (types.Logs, bool, error) {
 
-	txnIdx := ibs.TxnIndex() + 1
+	// Use len(ba.Txns) instead of ibs.TxnIndex()+1 to avoid gaps in the
+	// BAL access index sequence. When a batch ends with a failed tx,
+	// ibs.TxnIndex() reflects the failed tx's index (set by SetTxContext
+	// before execution). Since failed txs don't increment txnIdx, the
+	// next batch would start at failedIdx+1, skipping one index. Using
+	// the actual included tx count ensures gap-free numbering that
+	// matches the validator's parallel executor (which assigns txIndex
+	// based on position in the block's transaction list).
+	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
 	// EIP-8037: initialize the pool from cumulative regular gas, not the
 	// bottleneck (max of regular, state) stored in header.GasUsed. This

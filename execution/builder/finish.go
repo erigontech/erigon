@@ -92,11 +92,8 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
-		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
-		if cfg.engine.Type() != chain.CliqueRules {
-			cfg.builderState.BuilderResultCh <- blockWithReceipts
-			return nil
-		}
+		cfg.builderState.BuilderResultCh <- blockWithReceipts
+		return nil
 	}
 
 	select {

@@ -154,6 +154,6 @@ func BenchmarkCurrentLargeList(b *testing.B) {
 
 func BenchmarkRlpHashHeader(b *testing.B) {
 	for b.Loop() {
-		rlpHash(benchHeader)
+		RlpHash(benchHeader)
 	}
 }

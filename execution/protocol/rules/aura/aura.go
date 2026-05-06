@@ -19,6 +19,7 @@ package aura
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -27,13 +28,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -879,8 +880,11 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
 }
 
+// SignerFn hashes and signs the data to be signed by a backing account.
+type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
+
 // Authorize injects a private key into the rules engine to mint new blocks with.
-func (c *AuRa) Authorize(signer common.Address, signFn clique.SignerFn) {
+func (c *AuRa) Authorize(signer common.Address, signFn SignerFn) {
 	c.signerMutex.Lock()
 	defer c.signerMutex.Unlock()
 
@@ -1015,7 +1019,42 @@ func calculateScore(parentStep, currentStep, currentEmptySteps uint64) uint256.I
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
-	return clique.SealHash(header)
+	return sealHash(header)
+}
+
+// sealHash returns the hash of a block prior to it being sealed.
+func sealHash(header *types.Header) (hash common.Hash) {
+	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(hasher)
+	encodeSigHeader(hasher, header)
+	hasher.Sum(hash[:0])
+	return hash
+}
+
+func encodeSigHeader(w io.Writer, header *types.Header) {
+	enc := []any{
+		header.ParentHash,
+		header.UncleHash,
+		header.Coinbase,
+		header.Root,
+		header.TxHash,
+		header.ReceiptHash,
+		header.Bloom,
+		header.Difficulty,
+		header.Number,
+		header.GasLimit,
+		header.GasUsed,
+		header.Time,
+		header.Extra[:len(header.Extra)-crypto.SignatureLength], // Yes, this will panic if extra is too short
+		header.MixDigest,
+		header.Nonce,
+	}
+	if header.BaseFee != nil {
+		enc = append(enc, header.BaseFee)
+	}
+	if err := rlp.Encode(w, enc); err != nil {
+		panic("can't encode: " + err.Error())
+	}
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
@@ -1051,7 +1090,7 @@ func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.Syste
 	return false
 }
 
-// Close implements rules.Engine. It's a noop for clique as there are no background threads.
+// Close implements rules.Engine.
 func (c *AuRa) Close() error {
 	c.db.Close()
 	common.SafeClose(c.exitCh)
@@ -1061,14 +1100,7 @@ func (c *AuRa) Close() error {
 // APIs implements rules.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
 func (c *AuRa) APIs(chain rules.ChainHeaderReader) []rpc.API {
-	return []rpc.API{
-		//{
-		//Namespace: "clique",
-		//Version:   "1.0",
-		//Service:   &API{chain: chain, clique: c},
-		//Public:    false,
-		//}
-	}
+	return []rpc.API{}
 }
 
 // nolint
