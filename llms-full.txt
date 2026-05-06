@@ -49,11 +49,6 @@ Erigon Client Documentation
   Interacting with Erigon
   JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
 
-<Link
-  className="lp-card"
-  to="/get-started/why-using-erigon"
-  style=}
->
   
     
     
@@ -130,22 +125,6 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 Erigon is an Ethereum execution client focused on performance, low disk usage, and modular architecture.
 
 A core benefit of Erigon is its **reduced disk footprint** across all available sync modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
-
-  {[
-    ,
-    ,
-    ,
-    ,
-  ].map(() => (
-    <div key= style={{
-      textAlign:'center', padding:'1.25rem 1rem', borderRadius:'8px',
-      border:'1px solid var(--ifm-color-emphasis-200)',
-      background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
-    }}>
-      
-      
-    
-  ))}
 
 ## Key Architectural & Performance Advantages
 
@@ -240,21 +219,6 @@ Erigon's architecture provides measurable improvements in cost, performance, and
 ## AI-Native Node Access (MCP)
 
 Erigon ships a built-in **[Model Context Protocol (MCP) server](../fundamentals/mcp)**, enabled by default on `127.0.0.1:8553`. Connect any MCP-compatible AI assistant — Claude Code, Claude Desktop, or OpenAI Codex — directly to your node and query it in plain English, with zero integration overhead.
-
-  {[
-    "What is the ETH balance of vitalik.eth right now?",
-    "Show all ERC-20 transfers in the last 100 blocks.",
-    "Which tx in block 21,000,000 used the most gas?",
-    "My node seems stuck — check sync status and recent logs.",
-  ].map((q) => (
-    <div key= style={{
-      padding:'0.85rem 1rem', borderRadius:'8px',
-      background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
-      border:'1px solid var(--ifm-color-emphasis-200)',
-      fontSize:'0.82rem', color:'var(--ifm-color-emphasis-700)',
-      fontStyle:'italic', lineHeight:1.5,
-    }}>
-  ))}
 
 The interface is **read-only** and localhost-bound — no risk of unintended state changes. For developers this means instant on-chain lookups during development, natural-language log triage, and a complete RPC surface accessible without writing a single line of code.
 
@@ -448,30 +412,18 @@ See [Basic Usage](../fundamentals/basic-usage) and [Configuring Erigon](../funda
 # Installation
 URL: https://docs.erigon.tech/get-started/installation
 
-const el = document.getElementById(id);
-  if (!el) return;
-  const scroll = () => el.scrollIntoView();
-  if (!el.open) {
-    el.addEventListener('toggle', scroll, );
-    el.open = true;
-  } else {
-    scroll();
-  }
-};
-
-# Installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
-   }>Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
-   }>Docker — Run Erigon in an isolated container. Recommended for most users.
-   }>Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
+Pre-built Binaries — Fastest way to get started. Download and run a pre-compiled binary for your architecture.
+Docker — Run Erigon in an isolated container. Recommended for most users.
+Build from Source — Full control over the build. Requires Go, C++ compiler, and CLI experience.
 
-   }>Docker — Run Erigon in an isolated container. The recommended method on macOS.
-   }>Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
+Docker — Run Erigon in an isolated container. The recommended method on macOS.
+Build from Source — Compile directly on your Mac. Requires Go, Clang/GCC, and CLI experience.
 
-   }>Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
-   }>WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
+Native Compilation — Compile and run Erigon directly on Windows using Chocolatey, MinGW, and Go.
+WSL (Windows Subsystem for Linux) — Run a full Linux environment on Windows. Recommended for best performance.
 
 ### All Operating Systems
 
@@ -571,7 +523,7 @@ To verify the integrity and ensure your downloaded Erigon file hasn't been corru
 Next, use the `sha256sum` command followed by the name of your downloaded binary (e.g., `erigon_v3.x.x_linux_amd64.tar.gz`).
 
 ```sh
-sha256sum <DOWNLOADED_FILE_NAME>
+sha256sum 
 ```
 
 Example with a `tar.gz` file:
@@ -1247,7 +1199,7 @@ erigon --chain=gnosis --externalcl
 If your CL client is on a different device, add the following flags:
 
 * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-* `--authrpc.vhosts <CL_host>` where `<CL_host>` is the source host or the appropriate hostname that your CL client is using.
+* `--authrpc.vhosts ` where `` is the source host or the appropriate hostname that your CL client is using.
 
 ### 2. Install Lighthouse
 
@@ -1319,7 +1271,7 @@ You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with 
     If your Consensus Layer (CL) client is on a different device, add the following flags:
 
     * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-    * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
+    * `--authrpc.vhosts ` where \ is the source host or the appropriate hostname that your CL client is using.
 2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
 
     Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
@@ -4085,7 +4037,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -4198,7 +4150,7 @@ Flags:
       --metrics                            Enable metrics collection and reporting
       --metrics.addr string                Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                   Metrics HTTP server listening port (default 6061)
-      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
+      --nat string                         NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:)
                                            			 "" or "none"         Default - do not nat
                                            			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
                                            			 "any"                Uses the first auto-detected mechanism
@@ -7205,11 +7157,11 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
     Use the Erigon CLI command to verify that your registration was successful:
 ```bash
-    erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
+    erigon shutter-validator-reg-check --chain  --el-url  --validator-info-file 
     ```
 * `--chain` valid values are `gnosis` or `chiado`
     * `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
-    * `<VALIDATOR_INFO_JSON>` is the file generated during registration.
+    * `` is the file generated during registration.
 
     for example:
 ```bash
@@ -7541,7 +7493,7 @@ The **`RES`** (Resident) column in `htop` combines the memory used by the applic
 For a more accurate view of Erigon's memory usage, use one of these tools:
 
 * **`vmmap -summary PID`** _(macOS only)_: Shows a detailed breakdown with separate **`MALLOC ZONE`** and **`REGION TYPE`** sections for application memory and OS page cache.
-* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc/<PID>/smaps`.
+* **`pmap -x PID`** _(Linux)_: Prints a per-mapping breakdown of RSS and dirty pages. For the full raw detail use `cat /proc//smaps`.
 * **Prometheus Dashboard**: This provides a graphical representation of the Go application's memory usage, excluding the OS page cache. You can run it with `make prometheus` and access it in your browser at `localhost:3000` with the credentials `admin/admin`. See [Creating a Dashboard](/fundamentals/creating-a-dashboard) for full setup instructions.
 
 Erigon typically uses about **4 GB of RAM** during a genesis sync and about **1 GB** during normal operation. The OS page cache, however, can use an unlimited amount of memory.

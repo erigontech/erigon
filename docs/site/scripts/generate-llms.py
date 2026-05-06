@@ -57,14 +57,78 @@ def _sub_outside_backticks(pattern, repl, line):
     )
 
 
+def _strip_multiline_expr_blocks(text):
+    """Strip multi-line inline JSX expression blocks that open with { on their own line.
+
+    Handles constructs like:
+        {[
+          {stat:'10x', label:'...'},
+        ].map(({stat, label}) => (
+          <div key={stat}>...</div>
+        ))}
+    which contain nested braces that defeat the single-line {0,120} pass.
+    Tracks brace depth; skips lines inside code fences.
+    """
+    out = []
+    in_fence = False
+    skip_depth = 0
+
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            if skip_depth == 0:
+                in_fence = not in_fence
+            out.append(line)
+            continue
+
+        if in_fence:
+            out.append(line)
+            continue
+
+        if skip_depth > 0:
+            for ch in line:
+                if ch == '{':
+                    skip_depth += 1
+                elif ch == '}':
+                    skip_depth -= 1
+            if skip_depth < 0:
+                skip_depth = 0
+            continue  # discard this line (part of expression block)
+
+        # Detect opening of a multi-line expression block: line starts with {
+        if line.lstrip().startswith('{'):
+            depth = sum(1 if c == '{' else -1 if c == '}' else 0 for c in line)
+            if depth > 0:
+                skip_depth = depth
+                continue  # discard opening line
+
+        out.append(line)
+
+    return "\n".join(out)
+
+
 def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
-    # Remove import/export statements (always line-level, safe to strip globally)
-    text = re.sub(r"^(import|export)\s+.+$", "", text, flags=re.MULTILINE)
+    # Remove single-line import statements
+    text = re.sub(r"^import\s+.+$", "", text, flags=re.MULTILINE)
+    # Remove multi-line export const/function blocks ending with };
+    # The single-line pass below only catches the opening line; this handles the body.
+    text = re.sub(r"^export\b.*?^};\s*$\n?", "", text, flags=re.MULTILINE | re.DOTALL)
+    # Remove any remaining single-line export statements
+    text = re.sub(r"^export\s+.+$", "", text, flags=re.MULTILINE)
     # Remove {/* comments */} — JSX block comments don't appear inside code fences
     text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
-    # Line-by-line pass: track fenced code blocks and apply MDX-specific stripping
-    # only outside fences, preserving placeholders and brace-heavy content inside fences.
+    # Pre-pass: strip multi-line JSX component opening/closing tags before
+    # line-by-line processing. [^>]* matches newlines (char class, not .), so
+    # <Link\n  prop="val"\n> is consumed in one shot without needing DOTALL.
+    # Restricted to PascalCase names so <PLACEHOLDER> tokens in code and prose survive.
+    text = re.sub(r"<[A-Z][a-zA-Z]*[^>]*>", "", text)
+    text = re.sub(r"</[A-Z][a-zA-Z]*>", "", text)
+    # Pre-pass: strip multi-line inline JSX expression blocks that start with {
+    # on their own line (e.g. {[...].map(...)}). These contain nested braces that
+    # defeat the single-line {0,120} pattern used in the loop below. The brace
+    # counter runs outside code fences only.
+    text = _strip_multiline_expr_blocks(text)
+    # Line-by-line pass: apply remaining stripping only outside fenced code blocks.
     out, in_fence = [], False
     for line in text.splitlines():
         if line.lstrip().startswith("```"):
@@ -75,14 +139,17 @@ def strip_mdx(text):
             # Preserve lines inside code fences completely unchanged
             out.append(line)
         else:
-            # Outside fences: strip HTML/JSX tags and JSX expressions.
-            # Use backtick-aware substitution so inline code spans like
-            # `erigon:v{ERIGON_VERSION}` or `<YOUR_ADDRESS>` are preserved.
+            # Strip lowercase HTML tags and JSX expressions, backtick-aware so
+            # inline code spans like `<YOUR_ADDRESS>` and `{ERIGON_VERSION}` survive.
             line = _sub_outside_backticks(r"<[A-Za-z][^>]*/?>", "", line)
             line = _sub_outside_backticks(r"</[A-Za-z][^>]*>", "", line)
-            line = _sub_outside_backticks(r"\{[^}]{1,120}\}", "", line)
-            # Preserve indentation — dropping lstrip() keeps nested lists and
-            # indented continuations intact (JSX-orphaned spaces are harmless).
+            # Apply {expr} stripping twice: first pass handles inner brace of {{...}},
+            # second pass catches the outer {} left behind. {0,120} also strips {}.
+            line = _sub_outside_backticks(r"\{[^}]{0,120}\}", "", line)
+            line = _sub_outside_backticks(r"\{[^}]{0,120}\}", "", line)
+            # Remove }> prefix artifact: remnant when [^>] stops at > inside => arrow
+            # functions in JSX attributes (e.g. onClick={e => {...}}>).
+            line = re.sub(r"^\s*\}\s*>", "", line)
             out.append(line)
     text = "\n".join(out)
     # Collapse 3+ blank lines to 2
