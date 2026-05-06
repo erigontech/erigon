@@ -237,6 +237,16 @@ test-all: test-fixtures test-filtered
 .PHONY: test-fixtures
 test-fixtures:
 	tools/test-fixtures.sh
+	# cl/spectest excludes these forks: stale or experimental fixtures that
+	# don't pass against caplin yet. Apply post-extract so the exclusions
+	# also hold under `make test-all` / `make test-group` / etc., not just
+	# under `cd cl/spectest && make tests`.
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m

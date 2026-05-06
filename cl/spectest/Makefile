@@ -1,15 +1,7 @@
 .PHONY: clean setup example run clean
 
 tests:
-	../../tools/test-fixtures.sh ../../test-fixtures.json ../../test-fixtures-cache
-	# not needed for now (run after every fixture refresh in case the
-	# tarball was re-extracted)
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
-	rm -rf ../../test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
+	$(MAKE) -C ../.. test-fixtures
 
 clean:
 	rm -rf ../../test-fixtures-cache/cl_mainnet
