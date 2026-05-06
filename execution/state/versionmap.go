@@ -40,6 +40,8 @@ func (p AccountPath) String() string {
 		return "Destruct"
 	case StoragePath:
 		return "Storage"
+	case CreateContractPath:
+		return "CreateContract"
 	default:
 		return fmt.Sprintf(" Unknown %d", p)
 	}
@@ -61,6 +63,7 @@ const (
 	CodeHashPath
 	CodeSizePath
 	StoragePath
+	CreateContractPath
 )
 
 type AccountKey struct {
@@ -94,6 +97,26 @@ func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 
 func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
+}
+
+// StorageKeys returns every storage slot key recorded for addr. Used by
+// normalizeWriteSet to emit synthetic delete entries for every slot of a
+// selfdestructed contract, matching DomainDelPrefix behaviour from the
+// sequential path.
+func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	addrMap, ok := vm.s[addr]
+	if !ok {
+		return nil
+	}
+	var keys []accounts.StorageKey
+	for ak := range addrMap {
+		if ak.Path == StoragePath {
+			keys = append(keys, ak.Key)
+		}
+	}
+	return keys
 }
 
 func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
@@ -231,6 +254,33 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	}
 
 	return
+}
+
+// LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) at which a write
+// exists for the given (addr, path, key). Returns ok=false when no entry
+// exists at or below the limit. Used to detect account revival after a
+// SelfDestruct: any newer non-SelfDestruct write at a strictly higher
+// TxIndex re-creates the account.
+func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int) (int, bool) {
+	if vm == nil {
+		return 0, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+
+	cells := vm.getKeyCells(addr, path, key, nil)
+	if cells == nil {
+		return 0, false
+	}
+	highest := UnknownDep
+	cells.Descend(txIdxLimit, func(k int, _ *WriteCell) bool {
+		highest = k
+		return false
+	})
+	if highest == UnknownDep {
+		return 0, false
+	}
+	return highest, true
 }
 
 // FlushVersionedWrites atomically flushes all writes to the version map
@@ -479,6 +529,10 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		}
 		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
 			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+	case StoragePath:
+		rv, ok1 := readVal.(uint256.Int)
+		wv, ok2 := writeVal.(uint256.Int)
+		return ok1 && ok2 && rv.Eq(&wv)
 	default:
 		return false
 	}
