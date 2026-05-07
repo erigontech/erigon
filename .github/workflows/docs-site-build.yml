@@ -21,6 +21,17 @@ jobs:
             echo "docs/site/package.json not found — skipping build"
           fi
 
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.present == 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Verify llms.txt artifacts are up to date
+        if: steps.guard.outputs.present == 'true'
+        run: |
+          python3 docs/site/scripts/generate-llms.py --check
+          python3 -m unittest discover docs/site/scripts -v
+
       - uses: actions/setup-node@v4
         if: steps.guard.outputs.present == 'true'
         with:
