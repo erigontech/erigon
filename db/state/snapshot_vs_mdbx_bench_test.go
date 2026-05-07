@@ -54,7 +54,11 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
@@ -89,14 +93,182 @@ func openSnapBench(b *testing.B, domain kv.Domain) *snapBenchSetup {
 // openSnapBenchRealDatadir opens an existing chaindata+snapshots
 // datadir read-only and picks keys from production files.
 //
-// TODO: wire this up. Open via the same path turbo/node uses: open
-// MDBX RwDB, open *state.Aggregator, wrap via temporal.New, begin RO
-// tx, type-assert tx.AggTx() to *AggregatorRoTx. Then call pickKeys.
-func openSnapBenchRealDatadir(b *testing.B, domain kv.Domain, datadir string) *snapBenchSetup {
+// Uses MDBX Accede mode (don't create, must already exist) and
+// state.New(...).MustOpen which loads the on-disk schema. ResolveDB
+// settings reads stepSize / stepsInFrozenFile from the existing DB.
+//
+// CAUTION: opening a chaindata that another erigon process is writing
+// to is risky. Bench against an idle copy. The script that drives
+// these benches typically does prepare-run.sh first to snapshot a
+// fresh chaindata copy under /erigon-data/perf-devnet-3-run/ or
+// similar. Pass that path via --snapdatadir.
+func openSnapBenchRealDatadir(b *testing.B, domain kv.Domain, datadirPath string) *snapBenchSetup {
 	b.Helper()
-	b.Skip("TODO: real-datadir bootstrap (open MDBX + Aggregator + temporal.DB " +
-		"the same way cmd/erigon does, then BeginTemporalRo)")
-	return nil
+	logger := log.New()
+	dirs := datadir.New(datadirPath)
+
+	rawDB := mdbx.New(dbcfg.ChainDB, logger).
+		Path(dirs.Chaindata).
+		Accede(true). // must exist; do not create
+		MustOpen()
+	b.Cleanup(rawDB.Close)
+
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, false /*noDownloader*/)
+	require.NoError(b, err, "ResolveErigonDBSettings")
+
+	agg := state.New(dirs).
+		Logger(logger).
+		WithErigonDBSettings(settings).
+		MustOpen(b.Context(), rawDB)
+	require.NoError(b, agg.OpenFolder(), "agg.OpenFolder")
+	b.Cleanup(agg.Close)
+
+	tdb, err := temporal.New(rawDB, agg)
+	require.NoError(b, err)
+	b.Cleanup(tdb.Close)
+
+	tx, err := tdb.BeginTemporalRo(b.Context())
+	require.NoError(b, err)
+	b.Cleanup(func() { tx.Rollback() })
+
+	aggTx, ok := tx.AggTx().(*state.AggregatorRoTx)
+	require.True(b, ok, "tx.AggTx() must be *state.AggregatorRoTx")
+
+	mdbxKeys, fileKeys := pickRealDatadirKeys(b, aggTx, tx, domain, 10_000)
+	require.NotEmpty(b, fileKeys, "no file-resident keys found in %s for domain %v", datadirPath, domain)
+	if len(mdbxKeys) == 0 {
+		// Heavily pruned production datadir — every MDBX row is
+		// step-shadowed by a file. The MDBX-side sub-benches will skip
+		// (runH0 short-circuits on empty key set). Compare File_path
+		// against the synthetic MDBX_path baseline; clearly note the
+		// cross-mode caveat in the issue write-up.
+		b.Logf("real-datadir: no MDBX-resident keys (datadir is fully pruned). " +
+			"File_path numbers are real; cross-reference MDBX_path against the synthetic bench.")
+	}
+	b.Logf("real-datadir keys: mdbx=%d file=%d (domain=%v, path=%s)",
+		len(mdbxKeys), len(fileKeys), domain, datadirPath)
+
+	return &snapBenchSetup{
+		tx:       tx,
+		aggTx:    aggTx,
+		domain:   domain,
+		mdbxKeys: mdbxKeys,
+		fileKeys: fileKeys,
+	}
+}
+
+// pickRealDatadirKeys walks the existing datadir to find up to
+// `target` MDBX-resident and `target` file-resident keys for the
+// given domain.
+//
+// Strategy A — cursor-walk the per-domain values table for
+// MDBX-resident keys (those rows ARE in MDBX by definition). Strip
+// the trailing 8-byte inverted-step from each row's key.
+//
+// Strategy B — for file-resident keys, randomly sample address-sized
+// or storage-key-sized byte strings from the cursor walk's MDBX keys
+// (deterministic via seeded RNG): for each candidate, query
+// DebugGetLatestFromFiles. If the file path returns ok and MDBX does
+// NOT, the key is file-resident. This is approximate — keys that
+// exist BOTH in MDBX and files (during prune transitions) are
+// classified as MDBX-resident, which is what we want for bench
+// timing accuracy (MDBX always wins on getLatest).
+//
+// Practical note: in production datadirs the MDBX values table
+// usually has fewer rows than the snapshot files combined, so we
+// expect mdbxKeys to fill faster than fileKeys. To find file-only
+// keys we'd need to walk the .kv files directly via seg.Decompressor
+// — that's a follow-on once Strategy B is shown to be insufficient.
+func pickRealDatadirKeys(b *testing.B, aggTx *state.AggregatorRoTx, tx kv.TemporalTx, domain kv.Domain, target int) (mdbxKeys, fileKeys [][]byte) {
+	b.Helper()
+	table := domainValsTable(b, domain)
+
+	c, err := tx.Cursor(table)
+	require.NoError(b, err)
+	defer c.Close()
+
+	const stepSuffixLen = 8 // values-table key = realKey || invertedStep
+	seen := make(map[string]struct{})
+	var rowsScanned, dbOkCount int
+
+	// First pass: collect MDBX-resident keys directly from the values table.
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		require.NoError(b, err)
+		rowsScanned++
+		if len(k) <= stepSuffixLen {
+			continue // unexpected; skip
+		}
+		realKey := append([]byte(nil), k[:len(k)-stepSuffixLen]...)
+		ks := string(realKey)
+		if _, dup := seen[ks]; dup {
+			continue
+		}
+		seen[ks] = struct{}{}
+
+		// Confirm MDBX residency via DebugGetLatestFromDB so we don't
+		// include keys that, despite having a row here, don't actually
+		// resolve in the read path (edge cases around step bounds).
+		_, _, dbOk, err := aggTx.DebugGetLatestFromDB(domain, realKey, tx)
+		require.NoError(b, err)
+		if dbOk {
+			dbOkCount++
+			mdbxKeys = append(mdbxKeys, realKey)
+			if len(mdbxKeys) >= target {
+				break
+			}
+		}
+	}
+	b.Logf("first-pass scan: table=%s rows=%d unique_keys=%d dbOk=%d",
+		table, rowsScanned, len(seen), dbOkCount)
+
+	// Second pass: walk the same cursor again looking for keys that
+	// MISS MDBX but HIT files. Iterating the values table catches
+	// keys that left a row but have all data in files (delete
+	// markers, post-prune residue), which is approximate but cheap.
+	// For a full file-only walk we'd open the .kv decompressor; this
+	// is good enough for the H0 first cut.
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if len(fileKeys) >= target {
+			break
+		}
+		require.NoError(b, err)
+		if len(k) <= stepSuffixLen {
+			continue
+		}
+		realKey := append([]byte(nil), k[:len(k)-stepSuffixLen]...)
+
+		_, _, dbOk, err := aggTx.DebugGetLatestFromDB(domain, realKey, tx)
+		require.NoError(b, err)
+		if dbOk {
+			continue // MDBX already serves this; not file-only
+		}
+		_, fileOk, _, _, err := aggTx.DebugGetLatestFromFiles(domain, realKey, 0)
+		require.NoError(b, err)
+		if fileOk {
+			fileKeys = append(fileKeys, realKey)
+		}
+	}
+
+	return mdbxKeys, fileKeys
+}
+
+// domainValsTable returns the MDBX values-table name for the given
+// domain. Used by pickRealDatadirKeys to cursor-walk MDBX directly.
+func domainValsTable(b *testing.B, domain kv.Domain) string {
+	b.Helper()
+	switch domain {
+	case kv.AccountsDomain:
+		return kv.TblAccountVals
+	case kv.StorageDomain:
+		return kv.TblStorageVals
+	case kv.CodeDomain:
+		return kv.TblCodeVals
+	case kv.CommitmentDomain:
+		return kv.TblCommitmentVals
+	default:
+		b.Fatalf("domainValsTable: domain %v not mapped", domain)
+		return ""
+	}
 }
 
 // openSnapBenchSynthetic builds an in-memory aggregator with a known
@@ -316,6 +488,17 @@ func warmup(tx kv.TemporalTx, domain kv.Domain, keys [][]byte) {
 	}
 }
 
+// skipIfEmpty short-circuits the calling sub-bench when the key set
+// is empty (real-datadir mode often has no MDBX-resident keys after
+// aggressive pruning).
+func skipIfEmpty(b *testing.B, name string, keys [][]byte) bool {
+	if len(keys) == 0 {
+		b.Skipf("no keys for %s sub-bench", name)
+		return true
+	}
+	return false
+}
+
 // runH0 is the H0 measurement body. Four sub-benches:
 //
 //   - MDBX_path: tx.GetLatest with key in MDBX. Hits getLatestFromDb
@@ -346,6 +529,9 @@ func runH0(b *testing.B, setup *snapBenchSetup) {
 	warmup(setup.tx, setup.domain, setup.fileKeys)
 
 	b.Run("MDBX_path", func(b *testing.B) {
+		if skipIfEmpty(b, "MDBX_path", setup.mdbxKeys) {
+			return
+		}
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
 			_, _, _ = setup.tx.GetLatest(setup.domain, setup.mdbxKeys[i%len(setup.mdbxKeys)])
@@ -353,6 +539,9 @@ func runH0(b *testing.B, setup *snapBenchSetup) {
 	})
 
 	b.Run("File_path", func(b *testing.B) {
+		if skipIfEmpty(b, "File_path", setup.fileKeys) {
+			return
+		}
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
 			_, _, _ = setup.tx.GetLatest(setup.domain, setup.fileKeys[i%len(setup.fileKeys)])
@@ -363,6 +552,9 @@ func runH0(b *testing.B, setup *snapBenchSetup) {
 	// Strips MDBX-miss cost from File_path so we see pure file-side
 	// work (Bloom -> recsplit -> seg decompress).
 	b.Run("Forced_file_path", func(b *testing.B) {
+		if skipIfEmpty(b, "Forced_file_path", setup.fileKeys) {
+			return
+		}
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
 			_, _, _, _, _ = setup.aggTx.DebugGetLatestFromFiles(
@@ -374,6 +566,9 @@ func runH0(b *testing.B, setup *snapBenchSetup) {
 	// Strips routing/dispatch overhead from MDBX_path so we see pure
 	// MDBX cursor work.
 	b.Run("Forced_db_path", func(b *testing.B) {
+		if skipIfEmpty(b, "Forced_db_path", setup.mdbxKeys) {
+			return
+		}
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
 			_, _, _, _ = setup.aggTx.DebugGetLatestFromDB(
@@ -386,6 +581,9 @@ func runH0(b *testing.B, setup *snapBenchSetup) {
 	// pure xorfilter "not present" probe per file. Gives the Bloom-miss
 	// cost in isolation — useful for H1 (per-file Bloom probe overhead).
 	b.Run("Bloom_miss_path", func(b *testing.B) {
+		if skipIfEmpty(b, "Bloom_miss_path", setup.mdbxKeys) {
+			return
+		}
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
 			_, _, _, _, _ = setup.aggTx.DebugGetLatestFromFiles(
