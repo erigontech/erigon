@@ -183,12 +183,19 @@ func (h *cleanupHandle) close() error {
 // returning.
 func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs) (EngineApiTester, error) {
 	logger := args.Logger
+	// Derive a child ctx tied to the tester's lifetime so background goroutines
+	// spawned by the eth backend (rpcdaemon state-change loop, etc.) terminate
+	// when Close is called, even if the caller's ctx outlives this tester.
+	// Tests/CLIs that create many testers in one process would otherwise leak
+	// these goroutines.
+	ctx, cancel := context.WithCancel(ctx)
 	cleanup := &cleanupHandle{}
 	success := false
 	defer func() {
 		if success {
 			return
 		}
+		cancel()
 		// Run accumulated cleanups LIFO if init failed before hand-off.
 		err := cleanup.close()
 		if err != nil {
@@ -363,6 +370,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			return EngineApiTester{}, fmt.Errorf("build initial empty block 1: %w", err)
 		}
 	}
+	// Cancel runs as the FIRST cleanup on Close (cleanups are LIFO, so this
+	// must be appended last) — that way ctx-watching background goroutines
+	// see Done before downstream resources (DB, node) are torn down.
+	addCleanup(func() error { cancel(); return nil })
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,

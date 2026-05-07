@@ -22,8 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/urfave/cli/v2"
@@ -80,7 +82,11 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	}
 	workers := cliCtx.Int(WorkersFlag.Name)
 	if workers <= 0 {
-		workers = 1
+		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
+		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
+		// ~4.3GB peak RSS. Higher values barely improve wall time and
+		// values >24 risk MDBX virtual-memory exhaustion.
+		workers = 8
 	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
@@ -162,11 +168,20 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 // of execution given to a worker — a worker creates one EngineApiTester for
 // the group's (fork, preAllocHash), runs all tests in the group sequentially
 // on that tester, then evicts it.
+//
+// Files under any pre_alloc/ directory are skipped: those are pre-allocation
+// inputs (consumed via --pre-alloc-dir), not test fixtures, and they don't
+// follow the engine-x JSON schema. Every other JSON in the tree is expected
+// to be a valid engine-x fixture; an unmarshal error is treated as a hard
+// failure rather than silently skipped.
 func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]engineXNamedTest, int, error) {
 	files := collectFiles(path)
 	groups := make(map[engineXGroupKey][]engineXNamedTest)
 	total := 0
 	for _, fname := range files {
+		if isUnderPreAlloc(fname) {
+			continue
+		}
 		src, err := os.ReadFile(fname)
 		if err != nil {
 			return nil, 0, fmt.Errorf("read %s: %w", fname, err)
@@ -186,6 +201,17 @@ func loadEngineXGroups(path string, re *regexp.Regexp) (map[engineXGroupKey][]en
 		}
 	}
 	return groups, total, nil
+}
+
+// isUnderPreAlloc reports whether any directory component of p is named
+// "pre_alloc" — those are pre-allocation inputs, not test fixtures.
+func isUnderPreAlloc(p string) bool {
+	for _, c := range strings.Split(filepath.ToSlash(p), "/") {
+		if c == "pre_alloc" {
+			return true
+		}
+	}
+	return false
 }
 
 // runEngineXGroup executes every test in the group sequentially on a single

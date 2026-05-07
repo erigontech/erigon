@@ -912,6 +912,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		defer dbg.LogPanic()
 		for {
 			select {
+			case <-ctx.Done():
+				logger.Debug("[mined blocks listener] ctx done")
+				return
 			case b := <-backend.minedBlocks:
 				if !sentryMcDisableBlockDownload {
 					// Add mined header and block body before broadcast. This is because the broadcast call

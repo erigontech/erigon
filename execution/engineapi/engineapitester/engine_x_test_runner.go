@@ -86,25 +86,6 @@ type EngineXTestRunner struct {
 	mu        sync.Mutex
 	testers   map[Fork]map[PreAllocHash]testerEntry
 	wg        sync.WaitGroup
-	cleanups  []func() error
-}
-
-// Close releases all cached testers and removes any temp directories created
-// for them. Cleanup callbacks run LIFO; errors are joined so a single late
-// failure does not skip earlier cleanups.
-func (extr *EngineXTestRunner) Close() error {
-	extr.mu.Lock()
-	defer extr.mu.Unlock()
-	var errs []error
-	for i := len(extr.cleanups) - 1; i >= 0; i-- {
-		err := extr.cleanups[i]()
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	extr.cleanups = nil
-	extr.testers = nil
-	return errors.Join(errs...)
 }
 
 // testerEntry pairs a cached EngineApiTester with the temp directory created
@@ -116,49 +97,59 @@ type testerEntry struct {
 
 // Close releases all cached testers and removes any temp directories created
 // for them. Errors are joined so a single late failure does not skip earlier
-// cleanups.
+// cleanups. The map is snapshotted under the lock and then drained without
+// it, so the slow tester.Close + dir.RemoveAll work runs in parallel rather
+// than serialised behind extr.mu.
 func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
-	defer extr.mu.Unlock()
-	var errs []error
-	for fork, perAlloc := range extr.testers {
-		for preAllocHash := range perAlloc {
-			err := extr.evict(fork, preAllocHash)
-			if err != nil {
-				errs = append(errs, err)
-			}
+	var entries []testerEntry
+	for _, perAlloc := range extr.testers {
+		for _, entry := range perAlloc {
+			entries = append(entries, entry)
 		}
 	}
 	extr.testers = nil
+	extr.mu.Unlock()
+	var errs []error
+	for _, entry := range entries {
+		err := extr.evict(entry)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
 }
 
 // Evict closes the tester for (fork, preAllocHash) and removes its temp dir.
 // Safe to call when no such tester exists. Use this to free a tester after a
 // group of tests has finished, so a worker slot can host another (fork,
-// preAllocHash) combination.
+// preAllocHash) combination. The lock is held only long enough to remove the
+// entry from the map; the slow tester.Close and dir.RemoveAll run unlocked
+// so other workers can concurrently enter getOrCreateTester / Evict.
 func (extr *EngineXTestRunner) Evict(fork Fork, preAllocHash PreAllocHash) error {
 	extr.mu.Lock()
-	defer extr.mu.Unlock()
-	return extr.evict(fork, preAllocHash)
-}
-
-// evict is the locked-caller variant of Evict: it assumes extr.mu is already
-// held. Used by both the public Evict and Close to share the close-and-remove
-// logic without re-entering the lock.
-func (extr *EngineXTestRunner) evict(fork Fork, preAllocHash PreAllocHash) error {
 	perAlloc, ok := extr.testers[fork]
 	if !ok {
+		extr.mu.Unlock()
 		return nil
 	}
 	entry, ok := perAlloc[preAllocHash]
 	if !ok {
+		extr.mu.Unlock()
 		return nil
 	}
 	delete(perAlloc, preAllocHash)
 	if len(perAlloc) == 0 {
 		delete(extr.testers, fork)
 	}
+	extr.mu.Unlock()
+	return extr.evict(entry)
+}
+
+// evict performs the slow close-and-remove for a single tester. It does NOT
+// touch extr.mu or extr.testers — callers are responsible for removing the
+// entry from the map first. Shared by Evict (single-key) and Close (drain).
+func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	var errs []error
 	err := entry.tester.Close()
 	if err != nil {
@@ -206,32 +197,62 @@ func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTest
 	return nil
 }
 
+// getOrCreateTester returns a cached tester for (fork, preAllocHash) if one
+// exists, otherwise it creates a new one. The slow InitialiseEngineApiTester
+// path runs WITHOUT extr.mu held so other workers can hit the cache or start
+// their own creates concurrently. If two callers race to create for the same
+// key, the second one's tester is closed and the first one's cached tester is
+// returned (rare in practice — workers in the CLI handle distinct keys).
 func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllocHash) (EngineApiTester, error) {
 	extr.mu.Lock()
-	defer extr.mu.Unlock()
-	testersPerAlloc, ok := extr.testers[fork]
-	if ok {
-		entry, ok := testersPerAlloc[preAllocHash]
-		if ok {
+	if perAlloc, ok := extr.testers[fork]; ok {
+		if entry, ok := perAlloc[preAllocHash]; ok {
+			extr.mu.Unlock()
 			return entry.tester, nil
 		}
-	} else {
-		testersPerAlloc = make(map[PreAllocHash]testerEntry)
-		extr.testers[fork] = testersPerAlloc
 	}
-	// create an engine api tester for [fork, preAllocHash] tuple
+	extr.mu.Unlock()
+	// Slow path: build the genesis + data dir + node *without* holding the
+	// lock so concurrent getOrCreateTester / Evict calls for other keys can
+	// proceed.
+	entry, err := extr.createTester(fork, preAllocHash)
+	if err != nil {
+		return EngineApiTester{}, err
+	}
+	// Re-acquire the lock to publish the entry. If a concurrent caller for
+	// the same (fork, preAllocHash) pair already published one, discard ours.
+	extr.mu.Lock()
+	perAlloc, ok := extr.testers[fork]
+	if !ok {
+		perAlloc = make(map[PreAllocHash]testerEntry)
+		extr.testers[fork] = perAlloc
+	} else if existing, ok := perAlloc[preAllocHash]; ok {
+		extr.mu.Unlock()
+		// Lost the race; close our duplicate. evict acquires no locks and is
+		// safe to call here.
+		_ = extr.evict(entry)
+		return existing.tester, nil
+	}
+	perAlloc[preAllocHash] = entry
+	extr.mu.Unlock()
+	return entry.tester, nil
+}
+
+// createTester builds a fresh EngineApiTester for (fork, preAllocHash). The
+// caller is responsible for caching/publishing the result. No locks are taken.
+func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash) (testerEntry, error) {
 	forkConfig, ok := testforks.Forks[fork.String()]
 	if !ok {
-		return EngineApiTester{}, testforks.UnsupportedForkError{Name: fork.String()}
+		return testerEntry{}, testforks.UnsupportedForkError{Name: fork.String()}
 	}
 	alloc, ok := extr.preAllocs[preAllocHash]
 	if !ok {
-		return EngineApiTester{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
+		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
 	err := copier.Copy(&forkConfigCopy, forkConfig)
 	if err != nil {
-		return EngineApiTester{}, err
+		return testerEntry{}, err
 	}
 	forkConfig = &forkConfigCopy
 	var genesis types.Genesis
@@ -266,7 +287,7 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	}
 	dataDir, err := os.MkdirTemp("", "enginex-tester-*")
 	if err != nil {
-		return EngineApiTester{}, fmt.Errorf("create temp data dir: %w", err)
+		return testerEntry{}, fmt.Errorf("create temp data dir: %w", err)
 	}
 	engineApiClientTimeout := 10 * time.Minute
 	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
@@ -284,10 +305,9 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		// returned, so its own cleanups have already run inside
 		// InitialiseEngineApiTester's rollback path.
 		_ = dir.RemoveAll(dataDir)
-		return EngineApiTester{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
+		return testerEntry{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
 	}
-	testersPerAlloc[preAllocHash] = testerEntry{tester: tester, dataDir: dataDir}
-	return tester, nil
+	return testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
 func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
