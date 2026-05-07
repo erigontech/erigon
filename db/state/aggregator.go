@@ -2090,18 +2090,35 @@ func (a *Aggregator) DeleteCommitmentHistoryFilesBelow(threshold uint64) int {
 	if len(pathsToRemove) == 0 {
 		return 0
 	}
+	deleted := make([]string, 0, len(pathsToRemove))
 	for _, p := range pathsToRemove {
-		if err := dir.RemoveFile(p); err != nil {
+		rel, err := filepath.Rel(a.dirs.Snap, p)
+		if err != nil {
+			a.logger.Warn("[agg] commitment-history retention: relative path", "err", err, "path", p)
+			continue
+		}
+		deleted = append(deleted, rel)
+	}
+	// Match cleanAfterMerge ordering: de-register from downloader before unlinking,
+	// otherwise the downloader may recreate files after local removal.
+	a.onFilesDelete(deleted)
+
+	removed := 0
+	for _, p := range pathsToRemove {
+		if err := dir.RemoveFile(p); err != nil && !os.IsNotExist(err) {
 			a.logger.Warn("[agg] commitment-history retention: remove file", "err", err, "path", p)
+			continue
 		}
 		// .torrent absent for locally-built files; ignore.
 		_ = dir.RemoveFile(p + ".torrent")
+		removed++
 	}
-	return len(pathsToRemove)
+	return removed
 }
 
-// markCommitmentHistoryBelowDeletable holds dirtyFilesLock for the BTree
-// mutation only; physical file removal happens outside the lock.
+// markCommitmentHistoryBelowDeletable holds dirtyFilesLock while removing the
+// files from dirtyFiles. deleteMergeFile may also close and unlink non-frozen
+// files; frozen files are force-removed by DeleteCommitmentHistoryFilesBelow.
 func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold uint64) []string {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()

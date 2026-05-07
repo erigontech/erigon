@@ -41,7 +41,8 @@ func TestIsCommitmentHistorySegmentExpired(t *testing.T) {
 	}{
 		{"retention inactive (minStep=0)", 0, 0, 64, false},
 		{"segment far below boundary", 2815, 0, 64, true},
-		{"segment just below boundary", 2815, 2752, 2816, true},
+		{"segment ending exactly at boundary", 2815, 2752, 2815, true},
+		{"segment overlapping boundary", 2815, 2752, 2816, false},
 		{"segment exactly at boundary", 2815, 2815, 2879, false},
 		{"segment just above boundary", 2815, 2816, 2880, false},
 		{"segment far above boundary", 2815, 2900, 2964, false},

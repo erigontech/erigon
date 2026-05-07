@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -555,6 +556,41 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
 			"transformer must not be called when values.needMerge=false")
 	}
+}
+
+func TestAggregator_DeleteCommitmentHistoryFilesBelowNotifiesDownloader(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	_, agg := testDbAndAggregatorv3(t, 10)
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	var deleted []string
+	agg.OnFilesChange(func([]string) {}, func(files []string) {
+		deleted = append(deleted, files...)
+	})
+
+	removed := agg.DeleteCommitmentHistoryFilesBelow(10)
+	require.Equal(t, 4, removed)
+	require.Len(t, deleted, 4)
+	for _, p := range deleted {
+		require.False(t, filepath.IsAbs(p))
+	}
+	require.True(t, hasPathSuffix(deleted, filepath.Join("history", "v1.0-commitment.0-1.v")))
+	require.True(t, hasPathSuffix(deleted, filepath.Join("accessor", "v1.0-commitment.0-1.vi")))
+	require.True(t, hasPathSuffix(deleted, filepath.Join("idx", "v1.0-commitment.0-1.ef")))
+	require.True(t, hasPathSuffix(deleted, filepath.Join("accessor", "v1.0-commitment.0-1.efi")))
+}
+
+func hasPathSuffix(paths []string, suffix string) bool {
+	for _, p := range paths {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {

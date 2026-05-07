@@ -255,10 +255,11 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
-// isCommitmentHistorySegmentExpired reports whether segment p starts below
+// isCommitmentHistorySegmentExpired reports whether segment p ends at or below
 // commitmentMinStep, which the caller pre-computes once per sync from the
 // retention boundary. Returns false when commitmentMinStep is 0 (retention
-// inactive) or the filename can't be parsed.
+// inactive) or the filename can't be parsed. Segments overlapping the boundary
+// are kept because they can still contain retained commitment history.
 func isCommitmentHistorySegmentExpired(p snapcfg.PreverifiedItem, commitmentMinStep uint64) bool {
 	if commitmentMinStep == 0 {
 		return false
@@ -267,7 +268,7 @@ func isCommitmentHistorySegmentExpired(p snapcfg.PreverifiedItem, commitmentMinS
 	if !ok {
 		return false
 	}
-	return s.From < commitmentMinStep
+	return s.To <= commitmentMinStep
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
