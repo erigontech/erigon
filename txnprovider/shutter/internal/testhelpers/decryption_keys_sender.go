@@ -132,7 +132,8 @@ func DecryptionKeysPublishMsgEnveloped(
 		return nil, err
 	}
 
-	ipsWithSlot := shutter.IdentityPreimages{slotIp}
+	ipsWithSlot := make(shutter.IdentityPreimages, 0, 1+len(ips))
+	ipsWithSlot = append(ipsWithSlot, slotIp)
 	ipsWithSlot = append(ipsWithSlot, ips...)
 	keys, err := ekg.DecryptionKeys(signers, ipsWithSlot)
 	if err != nil {

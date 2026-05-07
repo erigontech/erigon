@@ -62,14 +62,12 @@ type preverifiedRegistry struct {
 
 var registry = &preverifiedRegistry{
 	raw: map[string][]byte{
-		networkname.Mainnet:    snapshothashes.Mainnet,
-		networkname.Sepolia:    snapshothashes.Sepolia,
-		networkname.Amoy:       snapshothashes.Amoy,
-		networkname.BorMainnet: snapshothashes.BorMainnet,
-		networkname.Gnosis:     snapshothashes.Gnosis,
-		networkname.Chiado:     snapshothashes.Chiado,
-		networkname.Hoodi:      snapshothashes.Hoodi,
-		networkname.Bloatnet:   snapshothashes.Bloatnet,
+		networkname.Mainnet:  snapshothashes.Mainnet,
+		networkname.Sepolia:  snapshothashes.Sepolia,
+		networkname.Gnosis:   snapshothashes.Gnosis,
+		networkname.Chiado:   snapshothashes.Chiado,
+		networkname.Hoodi:    snapshothashes.Hoodi,
+		networkname.Bloatnet: snapshothashes.Bloatnet,
 	},
 	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
@@ -145,14 +143,12 @@ func (r *preverifiedRegistry) Has(networkName string) bool {
 }
 
 var snapshotHashPtrs = map[string]*[]byte{
-	networkname.Mainnet:    &snapshothashes.Mainnet,
-	networkname.Sepolia:    &snapshothashes.Sepolia,
-	networkname.Amoy:       &snapshothashes.Amoy,
-	networkname.BorMainnet: &snapshothashes.BorMainnet,
-	networkname.Gnosis:     &snapshothashes.Gnosis,
-	networkname.Chiado:     &snapshothashes.Chiado,
-	networkname.Hoodi:      &snapshothashes.Hoodi,
-	networkname.Bloatnet:   &snapshothashes.Bloatnet,
+	networkname.Mainnet:  &snapshothashes.Mainnet,
+	networkname.Sepolia:  &snapshothashes.Sepolia,
+	networkname.Gnosis:   &snapshothashes.Gnosis,
+	networkname.Chiado:   &snapshothashes.Chiado,
+	networkname.Hoodi:    &snapshothashes.Hoodi,
+	networkname.Bloatnet: &snapshothashes.Bloatnet,
 }
 
 func fromEmbeddedToml(in []byte) Preverified {
@@ -504,14 +500,12 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 
 // EmbeddedWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
 var EmbeddedWebseedsRaw = map[string][]byte{
-	networkname.Mainnet:    webseed.Mainnet,
-	networkname.Sepolia:    webseed.Sepolia,
-	networkname.Amoy:       webseed.Amoy,
-	networkname.BorMainnet: webseed.BorMainnet,
-	networkname.Gnosis:     webseed.Gnosis,
-	networkname.Chiado:     webseed.Chiado,
-	networkname.Hoodi:      webseed.Hoodi,
-	networkname.Bloatnet:   webseed.Bloatnet,
+	networkname.Mainnet:  webseed.Mainnet,
+	networkname.Sepolia:  webseed.Sepolia,
+	networkname.Gnosis:   webseed.Gnosis,
+	networkname.Chiado:   webseed.Chiado,
+	networkname.Hoodi:    webseed.Hoodi,
+	networkname.Bloatnet: webseed.Bloatnet,
 }
 
 // GetEmbeddedWebseeds parses and returns the webseed URLs for a single chain.
@@ -534,10 +528,10 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
-// fetchChainToml fetches a single chain's TOML file from the snapshot CDN.
+// FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
 // TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
 // Remove the copies in erigon-snapshot once this is the canonical location.
-func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+func FetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
 	if source == snapshothashes.R2 {
 		url = ChainTomlR2URL(branch, chain)
@@ -584,11 +578,11 @@ func LoadRemotePreverified(ctx context.Context, chainName string) error {
 	} else {
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
-		hashes, err := fetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		hashes, err := FetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			hashes, err = FetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
 			if err != nil {
 				return err
 			}

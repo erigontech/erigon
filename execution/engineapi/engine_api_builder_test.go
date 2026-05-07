@@ -42,7 +42,14 @@ import (
 )
 
 func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
@@ -73,7 +80,14 @@ func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 }
 
 func TestEngineApiMultiBlockSequence(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 
@@ -96,7 +110,14 @@ func TestEngineApiMultiBlockSequence(t *testing.T) {
 }
 
 func TestEngineApiEmptyBlockProduction(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// Build block with no pending transactions.
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
@@ -108,7 +129,14 @@ func TestEngineApiEmptyBlockProduction(t *testing.T) {
 }
 
 func TestEngineApiBuiltBlockWithContractDeployAndCall(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// Deploy Changer contract.
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
@@ -137,7 +165,14 @@ func TestEngineApiBuiltBlockWithContractDeployAndCall(t *testing.T) {
 }
 
 func TestEngineApiBuiltBlockReorgRecovery(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
 
@@ -179,13 +214,21 @@ func TestEngineApiBuiltBlockReorgRecovery(t *testing.T) {
 }
 
 func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
-	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	genesis.GasLimit = 150_000 // ~7 simple transfers at 21K gas each
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, log.LvlDebug),
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
@@ -222,7 +265,14 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 }
 
 func TestEngineApiSequentialNonceAdvancement(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		receiver := common.HexToAddress("0x42")
@@ -261,7 +311,10 @@ func TestEngineApiSequentialNonceAdvancement(t *testing.T) {
 }
 
 func TestEngineApiMultipleSendersInBlock(t *testing.T) {
-	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	secondKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	secondAddr := crypto.PubkeyToAddress(secondKey.PublicKey)
@@ -269,11 +322,16 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 		Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil), // 1000 ETH
 	}
 
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, log.LvlDebug),
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		receiver := common.HexToAddress("0x42")
@@ -310,14 +368,22 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 }
 
 func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
-	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	genesis.Config.AmsterdamTime = nil // EIP-8037 state gas changes intrinsic costs; test pre-Amsterdam
 	genesis.GasLimit = 200_000         // tight budget for contracts + transfers
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, log.LvlDebug),
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
@@ -374,7 +440,14 @@ func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 // passes validation via NewPayload (ExecV3). This exercises the builder's state root
 // computation when system calls during finalization read state written by user txns.
 func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 

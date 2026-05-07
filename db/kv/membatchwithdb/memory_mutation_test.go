@@ -17,7 +17,6 @@
 package membatchwithdb_test
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -59,7 +58,7 @@ func TestPutAppendHas(t *testing.T) {
 	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	exist, err := batch.Has(kv.HeaderNumber, []byte("AAAA"))
 	require.NoError(t, err)
@@ -168,7 +167,7 @@ func TestFlush(t *testing.T) {
 	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5"))
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	value, err := rwTx.GetOne(kv.HeaderNumber, []byte("BAAA"))
 	require.NoError(t, err)
@@ -188,7 +187,7 @@ func TestForEach(t *testing.T) {
 	require.NoError(t, err)
 	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	var keys []string
 	var values []string
@@ -228,7 +227,7 @@ func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)
 	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	tx, err := db.BeginTemporalRw(tb.Context()) //nolint:gocritic
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -515,7 +514,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	require.NoError(t, cursor.DeleteCurrentDuplicates())
 
-	require.NoError(t, batch.Flush(context.Background(), rwTx))
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	var keys []string
 	var values []string
@@ -617,7 +616,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	// Open a fresh RO tx as the overlay's backing tx (simulates InsertBlocks).
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -638,7 +637,7 @@ func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			readerTx, err := db.BeginRo(context.Background())
+			readerTx, err := db.BeginRo(t.Context())
 			if err != nil {
 				t.Errorf("reader %d: BeginRo: %v", id, err)
 				return
@@ -713,7 +712,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	}
 	require.NoError(t, rwTx.Commit())
 
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -727,7 +726,7 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		readerTx, err := db.BeginRo(context.Background())
+		readerTx, err := db.BeginRo(t.Context())
 		if err != nil {
 			t.Errorf("reader: BeginRo: %v", err)
 			return

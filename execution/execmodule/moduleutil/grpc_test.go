@@ -35,7 +35,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		key, _      = crypto.GenerateKey()
 		txs         = make([]types.Transaction, txCount)
 		receipts    = make([]*types.Receipt, len(txs))
-		signer      = types.LatestSigner(chain.TestChainConfig)
+		signer      = types.LatestSigner(chain.AllProtocolChanges)
 		uncles      = make([]*types.Header, uncleCount)
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -173,7 +174,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	interrupt := cfg.interrupt
 	const amount = 50
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, filterReader, filterWriter, logger)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, ba.CumulativeGasUsed(), amount, executionAt, yielded, filterReader, filterWriter, logger)
 		if err != nil {
 			return err
 		}
@@ -250,6 +251,7 @@ func getNextTransactions(
 	cfg BuilderExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
+	gasUsed protocol.GasUsed,
 	amount int,
 	executionAt uint64,
 	alreadyYielded mapset.Set[[32]byte],
@@ -258,7 +260,6 @@ func getNextTransactions(
 	logger log.Logger,
 ) ([]types.Transaction, error) {
 	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
-	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
@@ -272,8 +273,14 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		txnprovider.WithGasTarget(remainingGas),
-		txnprovider.WithBlobGasTarget(remainingBlobGas),
+		// EIP-8037: remaining regular gas is the primary budget; remaining state
+		// gas filters by intrinsic state gas. Execution-time state gas (SSTOREs)
+		// is enforced by post-execution rollback in the block assembler.
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
+			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockState,
+			remainingBlobGas,
+		)),
 		txnprovider.WithTxnIdsFilter(alreadyYielded),
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
 	}

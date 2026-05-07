@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type HexStdOutWriter struct{}
@@ -302,7 +303,7 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 		case nil:
 			return common.Hash{}, fmt.Errorf("premature nil: pos %d, hexKey %x", pos, hexKey)
 		case *ShortNode:
-			matchlen := prefixLen(hexKey[pos:], n.Key)
+			matchlen := nibbles.CommonPrefixLen(hexKey[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				nd = n.Val
 				pos += matchlen

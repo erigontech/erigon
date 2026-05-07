@@ -58,7 +58,7 @@ func TestStoreCapture(t *testing.T) {
 
 	var (
 		logger   = NewStructLogger(nil)
-		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
@@ -82,7 +82,7 @@ func TestStoreCapture(t *testing.T) {
 //	c := vm.NewJumpDestCache()
 //	var (
 //		logger   = NewStructLogger(nil)
-//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 //		mem      = vm.NewMemory()
 //		stack    = vm.New()
 //		contract = vm.NewContract(&dummyContractRef{}, accounts.ZeroAddress, new(uint256.Int), 0, c)

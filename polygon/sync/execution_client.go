@@ -24,14 +24,11 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 var (
@@ -51,7 +48,7 @@ type ExecutionClient interface {
 	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error)
 }
 
-func newExecutionClient(logger log.Logger, client executionproto.ExecutionClient) *executionClient {
+func newExecutionClient(logger log.Logger, client execmodule.ExecutionModule) *executionClient {
 	return &executionClient{
 		logger: logger,
 		client: client,
@@ -60,17 +57,17 @@ func newExecutionClient(logger log.Logger, client executionproto.ExecutionClient
 
 type executionClient struct {
 	logger log.Logger
-	client executionproto.ExecutionClient
+	client execmodule.ExecutionModule
 }
 
 func (e *executionClient) Prepare(ctx context.Context) error {
 	return e.retryBusy(ctx, "ready", func() error {
-		ready, err := e.client.Ready(ctx, &emptypb.Empty{})
+		ready, err := e.client.Ready(ctx)
 		if err != nil {
 			return err
 		}
 
-		if !ready.Ready {
+		if !ready {
 			return ErrExecutionClientBusy // gets retried
 		}
 
@@ -79,21 +76,24 @@ func (e *executionClient) Prepare(ctx context.Context) error {
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+	rawBlocks := make([]*types.RawBlock, len(blocks))
+	for i, blk := range blocks {
+		rawBlocks[i] = &types.RawBlock{
+			Header: blk.HeaderNoCopy(),
+			Body:   blk.RawBody(),
+		}
 	}
 
 	return e.retryBusy(ctx, "insertBlocks", func() error {
-		response, err := e.client.InsertBlocks(ctx, request)
+		status, err := e.client.InsertBlocks(ctx, rawBlocks)
 		if err != nil {
 			return err
 		}
 
-		status := response.Result
 		switch status {
-		case executionproto.ExecutionStatus_Success:
+		case execmodule.ExecutionStatusSuccess:
 			return nil
-		case executionproto.ExecutionStatus_Busy:
+		case execmodule.ExecutionStatusBusy:
 			return ErrExecutionClientBusy // gets retried
 		default:
 			return fmt.Errorf("executionClient.InsertBlocks failure status: %s", status.String())
@@ -103,36 +103,28 @@ func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Bloc
 
 func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error) {
 	tipHash := tip.Hash()
-
-	request := executionproto.ForkChoice{
-		HeadBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
-		SafeBlockHash:      gointerfaces.ConvertHashToH256(tipHash),
-		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizedHeader.Hash()),
-		Timeout:            0,
-	}
+	finalizedHash := finalizedHeader.Hash()
 
 	var latestValidHash common.Hash
 	err := e.retryBusy(ctx, "updateForkChoice", func() error {
-		r, err := e.client.UpdateForkChoice(ctx, &request)
+		r, err := e.client.UpdateForkChoice(ctx, tipHash, tipHash, finalizedHash)
 		if err != nil {
 			return err
 		}
 
-		if r.LatestValidHash != nil {
-			latestValidHash = gointerfaces.ConvertH256ToHash(r.LatestValidHash)
-		}
+		latestValidHash = r.LatestValidHash
 
 		switch r.Status {
-		case executionproto.ExecutionStatus_Success:
+		case execmodule.ExecutionStatusSuccess:
 			return nil
-		case executionproto.ExecutionStatus_BadBlock:
-			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateBadBlock, r.Status, r.ValidationError)
-		case executionproto.ExecutionStatus_Busy:
+		case execmodule.ExecutionStatusBadBlock:
+			return fmt.Errorf("%w: status=%s, validationErr='%s'", ErrForkChoiceUpdateBadBlock, r.Status, r.ValidationError)
+		case execmodule.ExecutionStatusBusy:
 			return ErrExecutionClientBusy // gets retried
-		case executionproto.ExecutionStatus_TooFarAway:
+		case execmodule.ExecutionStatusTooFarAway:
 			return ErrForkChoiceUpdateTooFarBehind
 		default:
-			return fmt.Errorf("%w: status=%d, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
+			return fmt.Errorf("%w: status=%s, validationErr='%s'", ErrForkChoiceUpdateFailure, r.Status, r.ValidationError)
 		}
 	})
 
@@ -140,45 +132,15 @@ func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Heade
 }
 
 func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {
-	response, err := e.client.CurrentHeader(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, err
-	}
-
-	return moduleutil.HeaderRpcToHeader(response.Header)
+	return e.client.CurrentHeader(ctx)
 }
 
 func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
-	response, err := e.client.GetHeader(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &blockNum,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	headerRpc := response.GetHeader()
-	if headerRpc == nil {
-		return nil, nil
-	}
-
-	header, err := moduleutil.HeaderRpcToHeader(headerRpc)
-	if err != nil {
-		return nil, err
-	}
-
-	return header, nil
+	return e.client.GetHeader(ctx, nil, &blockNum)
 }
 
 func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
-	response, err := e.client.GetTD(ctx, &executionproto.GetSegmentRequest{
-		BlockNumber: &blockNum,
-		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return moduleutil.ConvertBigIntFromRpc(response.GetTd()), nil
+	return e.client.GetTD(ctx, &blockHash, &blockNum)
 }
 
 func (e *executionClient) retryBusy(ctx context.Context, label string, f func() error) error {

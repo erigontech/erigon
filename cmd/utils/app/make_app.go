@@ -112,6 +112,7 @@ func appFlags(cliFlags []cli.Flag) []cli.Flag {
 			continue
 		}
 		newFlags = append(newFlags, v)
+		seen[v.String()] = struct{}{}
 	}
 
 	return newFlags

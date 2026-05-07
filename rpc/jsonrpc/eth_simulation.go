@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -59,6 +58,12 @@ import (
 const (
 	// maxSimulateBlocks is the maximum number of blocks that can be simulated in a single request.
 	maxSimulateBlocks = 256
+
+	// maxSimulateCallsPerBlock is the maximum number of calls allowed in a single simulated block.
+	maxSimulateCallsPerBlock = 5000
+
+	// maxSimulateTotalCalls is the maximum total number of calls allowed across all simulated blocks in a single request.
+	maxSimulateTotalCalls = 10000
 
 	// timestampIncrement is the default increment between block timestamps.
 	timestampIncrement = 12
@@ -99,6 +104,9 @@ type SimulationResult []SimulatedBlockResult
 func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
 	if len(req.BlockStateCalls) == 0 {
 		return nil, errors.New("empty input")
+	}
+	if err := validateSimulationRequest(req.BlockStateCalls); err != nil {
+		return nil, err
 	}
 	// Default to the latest block if no block parameter is given.
 	if blockParameter.BlockHash == nil && blockParameter.BlockNumber == nil {
@@ -165,17 +173,37 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber, blockHashOverrides)
 		if err != nil {
 			return nil, err
 		}
+		blockHashOverrides[current.NumberU64()] = current.Hash()
 		simulatedBlockResults = append(simulatedBlockResults, blockResult)
 		headers[index] = current.Header()
 		parent = current.Header()
 	}
 
 	return simulatedBlockResults, nil
+}
+
+func validateSimulationRequest(blocks []SimulatedBlock) error {
+	// Reject requests that exceed the maximum number of simulated blocks.
+	if len(blocks) > maxSimulateBlocks {
+		return clientLimitExceededError(fmt.Sprintf("too many blocks in request: %d > %d", len(blocks), maxSimulateBlocks))
+	}
+	var totalCalls int
+	for _, block := range blocks {
+		if len(block.Calls) > maxSimulateCallsPerBlock {
+			return clientLimitExceededError(fmt.Sprintf("too many calls in block: %d > %d", len(block.Calls), maxSimulateCallsPerBlock))
+		}
+		totalCalls += len(block.Calls)
+		if totalCalls > maxSimulateTotalCalls {
+			return clientLimitExceededError(fmt.Sprintf("too many calls: %d > %d", totalCalls, maxSimulateTotalCalls))
+		}
+	}
+	return nil
 }
 
 type simulator struct {
@@ -209,6 +237,10 @@ func newSimulator(
 	evmCallTimeout time.Duration,
 	commitmentHistory bool,
 ) *simulator {
+	// The gas pool is intentionally shared across all simulated blocks as a global gas budget
+	// (similar to eth_call's gas cap). Per-block gas limits are enforced separately via
+	// blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the total gas
+	// consumed across the entire simulation request.
 	return &simulator{
 		base:              header,
 		chainConfig:       chainConfig,
@@ -340,31 +372,37 @@ func (s *simulator) sanitizeCall(
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
-	// Let the call run wild unless explicitly specified.
+
+	// Determine the effective per-call gas cap: use globalGasCap if set, otherwise a large safety bound.
+	effectiveCap := globalGasCap
+	if effectiveCap == 0 {
+		effectiveCap = uint64(math.MaxUint64 / 2)
+	}
+
 	if args.Gas == nil {
+		// Default to remaining block gas, but capped by the node's effective gas cap.
 		remaining := blockContext.GasLimit - gasUsed
+		if remaining > effectiveCap {
+			remaining = effectiveCap
+		}
 		args.Gas = (*hexutil.Uint64)(&remaining)
+	} else {
+		// Cap user-specified gas against the node's gas cap.
+		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
+			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
+			args.Gas = (*hexutil.Uint64)(&globalGasCap)
+		}
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
+
 	if args.ChainID == nil {
-		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID)
+		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
+		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
 	} else {
 		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
-		}
-	}
-	if args.Gas == nil {
-		gas := globalGasCap
-		if gas == 0 {
-			gas = uint64(math.MaxUint64 / 2)
-		}
-		args.Gas = (*hexutil.Uint64)(&gas)
-	} else {
-		if globalGasCap > 0 && globalGasCap < uint64(*args.Gas) {
-			log.Warn("Caller gas above allowance, capping", "requested", args.Gas, "cap", globalGasCap)
-			args.Gas = (*hexutil.Uint64)(&globalGasCap)
 		}
 	}
 	if baseFee == nil {
@@ -471,6 +509,7 @@ func (s *simulator) simulateBlock(
 	parent *types.Header,
 	ancestors []*types.Header,
 	latest bool,
+	blockHashOverrides ethapi.BlockHashOverrides,
 ) (SimulatedBlockResult, *types.Block, error) {
 	header.ParentHash = parent.Hash()
 	if s.chainConfig.IsLondon(header.Number.Uint64()) {
@@ -493,7 +532,6 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
@@ -516,10 +554,14 @@ func (s *simulator) simulateBlock(
 
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
+	var overrideDirtyAccounts map[accounts.Address]struct{}
 	if stateOverrides != nil {
 		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
 			return nil, nil, err
 		}
+		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
+		// override-only accounts (they were not "touched" by any transaction).
+		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -583,6 +625,12 @@ func (s *simulator) simulateBlock(
 
 	if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+	}
+	// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
+	if len(overrideDirtyAccounts) > 0 {
+		if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
+			return nil, nil, fmt.Errorf("committing override accounts: %w", err)
+		}
 	}
 
 	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
@@ -742,7 +790,7 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	msg.SetCheckGas(s.validation)
+	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
 	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
@@ -758,18 +806,8 @@ func (s *simulator) simulateCall(
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
 
-	done := make(chan struct{})
-	defer close(done)
-
-	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, evm.Cancel)
+	defer stop()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
@@ -777,8 +815,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, txValidationError(err)
 	}
 
-	// If the timer caused an abort, return an appropriate error message
-	if timedOut.Load() {
+	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
@@ -797,7 +834,7 @@ func (s *simulator) simulateCall(
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
 			Log:            *l,
-			BlockTimestamp: header.Time,
+			BlockTimestamp: hexutil.Uint64(header.Time),
 		}
 		callResult.Logs = append(callResult.Logs, rpcLog)
 	}
@@ -1039,13 +1076,14 @@ func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Ad
 }
 
 func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
-	// The mem batch doesn't support prefix scans, so we check the canonical base-parent state.
-	// TODO: this gives a wrong answer when a prior simulated block deployed a brand-new contract
-	// (i.e. added storage to a previously storage-less account): the mem batch contains that
-	// storage but we never scan it, so HasStorage returns false for the new contract in
-	// subsequent simulation blocks. Fix: iterate r.sd.GetMemBatch() storage keys for the
-	// address as a prefix-scan fallback before (or instead of) the RangeAsOf call.
 	addressValue := address.Value()
+
+	// Check the RAM batch first: storage written by prior simulated blocks lives only in the
+	// in-memory btree and is not yet visible via RangeAsOf(firstMinTxNum).
+	if r.sd.GetMemBatch().HasPrefixInRAM(kv.StorageDomain, addressValue[:]) {
+		return true, nil
+	}
+
 	to, ok := kv.NextSubtree(addressValue[:])
 	if !ok {
 		to = nil

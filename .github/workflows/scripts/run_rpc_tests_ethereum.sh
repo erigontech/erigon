@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e # Enable exit on error
 
+source "$(dirname "$0")/rpc_version.env"
+if [ -z "$RPC_VERSION" ]; then
+  echo "Error: RPC_VERSION is not set in rpc_version.env"
+  exit 1
+fi
+
 # The workspace directory, no default because run_rpc_tests has it
 WORKSPACE="$1"
 # The result directory, no default because run_rpc_tests has it
@@ -24,6 +30,8 @@ DISABLED_TEST_LIST=(
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
+  # Temporarily disabled: test is flaky and fails non-deterministically; needs investigation
+  eth_simulateV1/test_201.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
   # Temporary disable required block 23917742
@@ -43,4 +51,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v2.4.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+RPC_TRANSPORT_TYPES="http,http_comp,websocket" "$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

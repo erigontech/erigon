@@ -7,14 +7,6 @@ type AccessTuple struct {
 	StorageKeys []string `json:"storageKeys"`
 }
 
-type Account struct {
-	Address          string `json:"address"`
-	Balance          string `json:"balance"`
-	TransactionCount uint64 `json:"transactionCount"`
-	Code             string `json:"code"`
-	Storage          string `json:"storage"`
-}
-
 type Block struct {
 	Number            uint64         `json:"number"`
 	Hash              string         `json:"hash"`
@@ -129,7 +121,7 @@ type Transaction struct {
 	R                    string         `json:"r"`
 	S                    string         `json:"s"`
 	V                    string         `json:"v"`
-	Type                 *int           `json:"type,omitempty"`
+	Type                 *uint64        `json:"type,omitempty"`
 	AccessList           []*AccessTuple `json:"accessList,omitempty"`
 	Raw                  string         `json:"raw"`
 	RawReceipt           string         `json:"rawReceipt"`

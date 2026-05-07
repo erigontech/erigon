@@ -209,6 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		input,
 		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
+		nil,
 		false,
 	)
 	return code, address.Value(), leftOverGas, err

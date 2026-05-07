@@ -204,7 +204,7 @@ var (
 		Name:             networkname.Test,
 		GenesisHash:      common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc"),
 		GenesisStateRoot: empty.RootHash,
-		Config:           chain.TestChainConfig,
+		Config:           chain.TestChainBerlinConfig,
 		//Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
 	}
