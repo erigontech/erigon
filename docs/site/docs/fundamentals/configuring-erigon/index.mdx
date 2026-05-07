@@ -99,9 +99,12 @@ Flags for managing how old chain data is handled and stored.
   * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
   * Default: `false`
-* `--snap.keepblocks`: Advanced/debug snapshot option to keep block data while working with snapshots. Intended mainly for troubleshooting or workaround scenarios.
-* `--snap.stop value`: Advanced/debug snapshot option to stop snapshot processing at a specified block or stage boundary.
-* `--snap.state.stop value`: Advanced/debug snapshot option to stop state snapshot processing at a specified block or stage boundary.
+* `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
+  * Default: `false`
+* `--snap.stop`: Workaround for snapshot-related bugs — stops producing new snapshot files (DB will grow as a result).
+  * Default: `false`
+* `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
+  * Default: `false`
 
 ### Transaction Pool (TxPool)
 
