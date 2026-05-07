@@ -107,15 +107,55 @@ def _strip_multiline_expr_blocks(text):
     return "\n".join(out)
 
 
+def _strip_mdx_module_syntax(text):
+    """Remove MDX import/export syntax only outside fenced code blocks."""
+    lines = text.splitlines()
+    out = []
+    in_fence = False
+    in_export_block = False
+
+    import_re = re.compile(r"^\s*import\s+.+$")
+    export_single_re = re.compile(
+        r"^\s*export\s+(?:default\b.+|\{.+\}\s*;?|(?:const|function|class)\b.+;?)$"
+    )
+    export_block_start_re = re.compile(r"^\s*export\s+(?:const|function|class)\b")
+    export_block_end_re = re.compile(r"^\s*};\s*$")
+
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+
+        if in_fence:
+            out.append(line)
+            continue
+
+        if in_export_block:
+            if export_block_end_re.match(line):
+                in_export_block = False
+            continue
+
+        if import_re.match(line):
+            continue
+
+        if export_single_re.match(line):
+            continue
+
+        if export_block_start_re.match(line):
+            in_export_block = True
+            continue
+
+        out.append(line)
+
+    return "\n".join(out)
+
+
 def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
-    # Remove single-line import statements
-    text = re.sub(r"^import\s+.+$", "", text, flags=re.MULTILINE)
-    # Remove multi-line export const/function blocks ending with };
-    # The single-line pass below only catches the opening line; this handles the body.
-    text = re.sub(r"^export\b.*?^};\s*$\n?", "", text, flags=re.MULTILINE | re.DOTALL)
-    # Remove any remaining single-line export statements
-    text = re.sub(r"^export\s+.+$", "", text, flags=re.MULTILINE)
+    # Remove MDX import/export statements only outside fenced code blocks.
+    # This preserves shell commands like `export VAR=...` inside ```bash fences.
+    text = _strip_mdx_module_syntax(text)
     # Remove {/* comments */} — JSX block comments don't appear inside code fences
     text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
     # Pre-pass: strip multi-line JSX component opening/closing tags before
