@@ -352,8 +352,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// (no blockResult for it) but the channel closed cleanly: that
 					// means the exec loop signaled "done" without delivering the
 					// final block.
-					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks, pe.reachedMaxBlock.Load(), pe.maxBlockNum); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult or were never delivered: %v",
+					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
 					}
 					if pe.reachedMaxBlock.Load() {
@@ -1030,32 +1030,24 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
 // did not produce a corresponding blockResult — meaning the per-block
 // validator never fired for them and an invalid block could become
-// canonical. If reachedMaxBlock is false and maxBlockNum was never
-// applied, that block is added too (the exec loop signaled "done"
-// without delivering the goal). Returns nil if the apply loop's exit
-// satisfies the completeness invariant.
+// canonical. Returns nil if every block whose tx-results arrived also
+// produced a blockResult.
+//
+// Does NOT flag maxBlockNum when !reachedMaxBlock: a partial batch
+// (size-limit hit) legitimately stops short of maxBlockNum, and the
+// stage loop's ErrLoopExhausted handling resumes from the next block
+// in a follow-up call. Flagging maxBlockNum here turns that legitimate
+// path into a spurious InvalidBlock error — the BenchmarkFeeHistory
+// 200-block fixture exhausts the 5MB batch budget at block 114 and
+// previously errored despite blocks 1..114 being applied cleanly.
 //
 // Pure function — extracted from the apply loop's channel-close branch
 // so the invariant is unit-testable. See TestApplyLoopMissingBlocks.
-func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, maxBlockNum uint64) []uint64 {
+func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
 		if _, ok := appliedBlocks[n]; !ok {
 			missing = append(missing, n)
-		}
-	}
-	if !reachedMaxBlock {
-		if _, ok := appliedBlocks[maxBlockNum]; !ok {
-			seen := false
-			for _, m := range missing {
-				if m == maxBlockNum {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				missing = append(missing, maxBlockNum)
-			}
 		}
 	}
 	return missing

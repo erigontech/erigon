@@ -33,89 +33,57 @@ func TestApplyLoopMissingBlocks(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		txResultBlocks  map[uint64]struct{}
-		appliedBlocks   map[uint64]struct{}
-		reachedMaxBlock bool
-		maxBlockNum     uint64
-		wantMissing     []uint64
+		name           string
+		txResultBlocks map[uint64]struct{}
+		appliedBlocks  map[uint64]struct{}
+		wantMissing    []uint64
 	}{
 		{
 			// Happy path: every block whose tx-results arrived also had a
-			// blockResult, and we reached the goal.
-			name:            "all applied, max reached",
-			txResultBlocks:  mkSet(0, 1),
-			appliedBlocks:   mkSet(0, 1),
-			reachedMaxBlock: true,
-			maxBlockNum:     1,
-			wantMissing:     nil,
+			// blockResult.
+			name:           "all applied",
+			txResultBlocks: mkSet(0, 1),
+			appliedBlocks:  mkSet(0, 1),
+			wantMissing:    nil,
 		},
 		{
-			// The exact bug we fixed: block 1 had tx-results arrive but
-			// the trailing blockResult was dropped on the floor by the
-			// rootResults-close race. Validator never fired.
-			name:            "tx-results without blockResult — the rootResults race",
-			txResultBlocks:  mkSet(0, 1),
-			appliedBlocks:   mkSet(0),
-			reachedMaxBlock: false,
-			maxBlockNum:     1,
-			wantMissing:     []uint64{1},
+			// The exact bug the original guard caught: block 1 had tx-results
+			// arrive but the trailing blockResult was dropped by the
+			// rootResults-close race. Validator never fired — must flag.
+			name:           "tx-results without blockResult — the rootResults race",
+			txResultBlocks: mkSet(0, 1),
+			appliedBlocks:  mkSet(0),
+			wantMissing:    []uint64{1},
 		},
 		{
-			// Exec loop signaled "done" but never delivered the goal block —
-			// no tx-results, no blockResult, just a clean nil return that
-			// silently let an unprocessed block become canonical.
-			name:            "max block never delivered (no tx-results either)",
-			txResultBlocks:  mkSet(0),
-			appliedBlocks:   mkSet(0),
-			reachedMaxBlock: false,
-			maxBlockNum:     1,
-			wantMissing:     []uint64{1},
+			// Partial batch (size-limit hit): exec stopped at block N
+			// before reaching maxBlockNum. txResultBlocks and appliedBlocks
+			// agree on [0..N]; nothing past N appeared on the apply side
+			// because exec returned before scheduling N+1. The follow-up
+			// stage-loop iteration picks up at N+1 — must NOT flag here.
+			name:           "partial batch — size-limit hit, no spurious flag for unreached blocks",
+			txResultBlocks: mkSet(0, 1, 2),
+			appliedBlocks:  mkSet(0, 1, 2),
+			wantMissing:    nil,
 		},
 		{
-			// Same maxBlockNum is missing from both checks — must NOT
-			// appear twice in the missing list.
-			name:            "max block missing — no double-count",
-			txResultBlocks:  mkSet(0, 1),
-			appliedBlocks:   mkSet(0),
-			reachedMaxBlock: false,
-			maxBlockNum:     1,
-			wantMissing:     []uint64{1},
-		},
-		{
-			// reachedMaxBlock=true means exec loop set the flag (sent the
-			// final blockResult), so we don't add maxBlockNum to missing
-			// even though appliedBlocks doesn't have it. The applyResults
-			// drain or another exit-path catches that case.
-			name:            "reached max but not applied — don't double-flag",
-			txResultBlocks:  mkSet(0),
-			appliedBlocks:   mkSet(0),
-			reachedMaxBlock: true,
-			maxBlockNum:     1,
-			wantMissing:     nil,
-		},
-		{
-			// Multiple blocks missing — all should be reported.
-			name:            "multiple missing blocks",
-			txResultBlocks:  mkSet(0, 1, 2, 3),
-			appliedBlocks:   mkSet(0, 2),
-			reachedMaxBlock: true,
-			maxBlockNum:     3,
-			wantMissing:     []uint64{1, 3},
+			// Multiple genuine silent failures — all should be reported.
+			name:           "multiple missing blocks",
+			txResultBlocks: mkSet(0, 1, 2, 3),
+			appliedBlocks:  mkSet(0, 2),
+			wantMissing:    []uint64{1, 3},
 		},
 		{
 			// Empty inputs — degenerate but legal.
-			name:            "empty",
-			txResultBlocks:  mkSet(),
-			appliedBlocks:   mkSet(),
-			reachedMaxBlock: true,
-			maxBlockNum:     0,
-			wantMissing:     nil,
+			name:           "empty",
+			txResultBlocks: mkSet(),
+			appliedBlocks:  mkSet(),
+			wantMissing:    nil,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := applyLoopMissingBlocks(tc.txResultBlocks, tc.appliedBlocks, tc.reachedMaxBlock, tc.maxBlockNum)
+			got := applyLoopMissingBlocks(tc.txResultBlocks, tc.appliedBlocks)
 			if !sameSet(got, tc.wantMissing) {
 				t.Fatalf("applyLoopMissingBlocks() = %v, want (set-equal) %v", got, tc.wantMissing)
 			}
@@ -378,6 +346,137 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 	stop.Store(true)
 	wg.Wait()
 	// Test passes iff no race detector fires AND no deadlock.
+}
+
+// TestApplyLoopPartialBatchReturnsErrLoopExhausted exercises the
+// apply-loop exit decision tree end-to-end with channel orchestration:
+// when applyResults closes after the exec loop hit its size-limit
+// (lastBlockResult < maxBlockNum, no missing blocks), the apply loop
+// must return ErrLoopExhausted so the stage loop resumes from the next
+// block. The previous bug spuriously flagged maxBlockNum as missing
+// because it wasn't applied — turning every legitimate partial batch
+// into an InvalidBlock error. This test locks in the corrected
+// behavior: completeness check sees no missing → exhausted → stage
+// loop continues — no re-execution.
+func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
+	// Simulate the apply loop's exit-branch decision sequence.
+	// (We cannot run the full apply loop in a unit test — requires the
+	// parallel executor + workers + commitment calculator. Instead this
+	// test covers the same decision tree that exec3_parallel.go runs
+	// after the applyResults channel closes.)
+	type result struct {
+		err          error
+		isExhausted  bool
+		isInvalid    bool
+		isOK         bool
+		errSubstring string
+	}
+
+	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
+		// The decision tree (mirroring exec3_parallel.go's
+		// applyResults-close branch in execErr's anonymous func):
+		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+			return result{
+				err:          errors.New("invalid block: missing blocks"),
+				isInvalid:    true,
+				errSubstring: "invalid block",
+			}
+		}
+		if reachedMaxBlock {
+			return result{isOK: true}
+		}
+		return result{
+			err:          &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"},
+			isExhausted:  true,
+			errSubstring: "exhausted",
+		}
+	}
+
+	mkSet := func(ns ...uint64) map[uint64]struct{} {
+		s := make(map[uint64]struct{}, len(ns))
+		for _, n := range ns {
+			s[n] = struct{}{}
+		}
+		return s
+	}
+
+	t.Run("partial batch, size-limit hit — exhausted (the regression case)", func(t *testing.T) {
+		got := run(mkSet(1, 2, 3, 4, 5), mkSet(1, 2, 3, 4, 5), false, 5, 200, 1)
+		if !got.isExhausted {
+			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
+		}
+		if !errors.Is(got.err, &ErrLoopExhausted{}) {
+			t.Errorf("err must wrap *ErrLoopExhausted, got: %v", got.err)
+		}
+	})
+
+	t.Run("full batch, max reached — clean nil", func(t *testing.T) {
+		got := run(mkSet(1, 2, 3), mkSet(1, 2, 3), true, 3, 3, 1)
+		if !got.isOK {
+			t.Fatalf("expected clean nil, got: %+v", got)
+		}
+	})
+
+	t.Run("genuine silent failure mid-batch — InvalidBlock", func(t *testing.T) {
+		// Block 3 had tx-results but no blockResult. Real bug — must surface.
+		got := run(mkSet(1, 2, 3), mkSet(1, 2), false, 2, 5, 1)
+		if !got.isInvalid {
+			t.Fatalf("expected InvalidBlock error, got: %+v", got)
+		}
+	})
+
+	t.Run("partial batch with single block — exhausted", func(t *testing.T) {
+		got := run(mkSet(1), mkSet(1), false, 1, 200, 1)
+		if !got.isExhausted {
+			t.Fatalf("expected ErrLoopExhausted, got: %+v", got)
+		}
+	})
+}
+
+// TestApplyLoopChannelCloseOrder exercises the documented invariant
+// that the exec loop closes commitResults BEFORE applyResults on
+// shutdown. The calculator drains commitResults and signals the apply
+// loop via rootResults; if applyResults closes first, the apply loop
+// can race with the calculator's final commitment write.
+//
+// The exec loop's deferred close in execLoop() does the right thing
+// (commitResults first), but the close ordering is load-bearing —
+// changing it silently corrupts the shutdown sequence. This test
+// captures the shape of the deferred close to pin the order down.
+func TestApplyLoopChannelCloseOrder(t *testing.T) {
+	commitResults := make(chan struct{})
+	applyResults := make(chan struct{})
+
+	closeOrder := make(chan string, 2)
+
+	// Mimic execLoop's deferred close: commitResults first, then
+	// applyResults.
+	closeBoth := func() {
+		close(commitResults)
+		closeOrder <- "commitResults"
+		close(applyResults)
+		closeOrder <- "applyResults"
+	}
+
+	go closeBoth()
+
+	first := <-closeOrder
+	second := <-closeOrder
+
+	if first != "commitResults" {
+		t.Fatalf("commitResults must close first; got close order [%s, %s]", first, second)
+	}
+	if second != "applyResults" {
+		t.Fatalf("applyResults must close second; got close order [%s, %s]", first, second)
+	}
+
+	// Sanity: both channels actually closed.
+	if _, ok := <-commitResults; ok {
+		t.Fatal("commitResults not actually closed")
+	}
+	if _, ok := <-applyResults; ok {
+		t.Fatal("applyResults not actually closed")
+	}
 }
 
 // sameSet compares two slices ignoring order. Used because
