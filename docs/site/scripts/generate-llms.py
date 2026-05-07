@@ -119,7 +119,7 @@ def _strip_mdx_module_syntax(text):
         r"^\s*export\s+(?:default\b.+|\{.+\}\s*;?|(?:const|function|class)\b.+;?)$"
     )
     export_block_start_re = re.compile(r"^\s*export\s+(?:const|function|class)\b")
-    export_block_end_re = re.compile(r"^\s*};\s*$")
+    export_block_end_re = re.compile(r"^\s*};?\s*$")
 
     for line in lines:
         if line.lstrip().startswith("```"):
@@ -151,20 +151,59 @@ def _strip_mdx_module_syntax(text):
     return "\n".join(out)
 
 
+def _split_fenced(text):
+    """Split text into (is_fenced, segment) pairs, preserving newlines."""
+    result = []
+    buf = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            if not in_fence:
+                result.append((False, "".join(buf)))
+                buf = [line]
+                in_fence = True
+            else:
+                buf.append(line)
+                result.append((True, "".join(buf)))
+                buf = []
+                in_fence = False
+        else:
+            buf.append(line)
+    if buf:
+        result.append((in_fence, "".join(buf)))
+    return result
+
+
+def _apply_nonfenced(text, *funcs):
+    """Apply each func only to text segments outside fenced code blocks."""
+    out = []
+    for is_fenced, segment in _split_fenced(text):
+        if is_fenced:
+            out.append(segment)
+        else:
+            s = segment
+            for f in funcs:
+                s = f(s)
+            out.append(s)
+    return "".join(out)
+
+
 def strip_mdx(text):
     """Remove MDX-specific syntax, leaving clean prose markdown."""
     # Remove MDX import/export statements only outside fenced code blocks.
     # This preserves shell commands like `export VAR=...` inside ```bash fences.
     text = _strip_mdx_module_syntax(text)
-    # Remove {/* comments */} — JSX block comments don't appear inside code fences
-    text = re.sub(r"\{/\*.*?\*/\}", "", text, flags=re.DOTALL)
-    # Pre-pass: strip multi-line JSX component opening/closing tags before
-    # line-by-line processing. [^>]* matches newlines (char class, not .), so
-    # <Link\n  prop="val"\n> is consumed in one shot without needing DOTALL.
-    # Requires lowercase second letter ([A-Z][a-z]) so that ALL_CAPS placeholders
-    # like <IP>, <PID>, <DOWNLOADED_FILE_NAME> in code fences are NOT stripped.
-    text = re.sub(r"<[A-Z][a-z][a-zA-Z]*[^>]*>", "", text)
-    text = re.sub(r"</[A-Z][a-z][a-zA-Z]*>", "", text)
+    # Remove JSX block comments and multi-line component tags, fence-aware so
+    # that code examples showing these patterns inside fences are not corrupted.
+    # [^>]* in the component regexes matches newlines (char class), consuming
+    # <Link\n  prop="val"\n> in one shot without DOTALL.
+    # Uppercase-then-lowercase guard keeps ALL_CAPS placeholders like <IP>, <PID>.
+    text = _apply_nonfenced(
+        text,
+        lambda t: re.sub(r"\{/\*.*?\*/\}", "", t, flags=re.DOTALL),
+        lambda t: re.sub(r"<[A-Z][a-z][a-zA-Z]*[^>]*>", "", t),
+        lambda t: re.sub(r"</[A-Z][a-z][a-zA-Z]*>", "", t),
+    )
     # Pre-pass: strip multi-line inline JSX expression blocks that start with {
     # on their own line (e.g. {[...].map(...)}). These contain nested braces that
     # defeat the single-line {0,120} pattern used in the loop below. The brace
@@ -233,10 +272,15 @@ def first_description(body):
             continue
         if not stripped:
             continue
-        if stripped.startswith(("#", "|", "-", "*", ">", "!", "[")):
+        if stripped.startswith(("#", "|", "-", "*", ">", "!")):
             continue
-        # Skip lines that look like leftover code/JSX artifacts
-        if re.search(r"(const|let|var|function|=>|\{|\}|<[a-z])", stripped):
+        # Skip reference-style link definitions: [label]: url
+        if re.match(r"\[[^\]]+\]:\s", stripped):
+            continue
+        # Skip lines with unambiguous JSX/code artifacts (arrow fn, braces, html tags).
+        # Intentionally excludes English keywords (function, let, var) to avoid
+        # false-positive skips on valid prose like "This function returns...".
+        if re.search(r"(=>|\{|\}|<[a-z][a-z])", stripped):
             continue
         if len(stripped) > 40:
             # Strip markdown links before truncating to avoid broken [text](/url…
