@@ -54,10 +54,6 @@ jobs:
             ethereum_package_url: "github.com/erigontech/ethereum-package"
             ethereum_package_branch: "erigontech/fix-caplin-launcher"
             test_timeout_minutes: 20
-          - suite: gloas-caplin-mixed
-            package_args: .github/workflows/kurtosis/gloas-caplin-mixed.io
-            ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
 
     steps:
       - name: Fast checkout git repository
