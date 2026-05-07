@@ -66,7 +66,7 @@ docker compose up
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--torrent.download.rate=512mb` sets the download rate cap. The default is `512mb` (megabytes per second). You can lower this to limit bandwidth usage, for example `--torrent.download.rate=128mb`, or set `--torrent.download.rate=Inf` to remove the limit.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
