@@ -53,24 +53,21 @@ func (p *peakSampler) Stop() uint64 {
 	return p.max.Load()
 }
 
-func benchKeys(n int, seed1, seed2 uint64) []uint64 {
-	rng := rand.New(rand.NewPCG(seed1, seed2))
-	keys := make([]uint64, n)
-	for i := range keys {
-		keys[i] = rng.Uint64()
-	}
-	return keys
-}
-
-// benchBuild runs a single Build of either Writer or WriterSharded over n random keys,
-// reporting wall time, peak heap, allocs and resulting file size as benchmark metrics.
+// benchBuild streams n random uint64 hashes through the writer's AddHash
+// (matching the production recsplit path: hashes flow one-at-a-time into the
+// off-heap mmap temp file), then drops the rng + AddHash state, runs a GC,
+// and only THEN starts the peak sampler and the bench timer for Build().
 //
-// Each iteration of b.N starts on a freshly-GC'd heap and a fresh peak sampler, so
-// the reported peak_heap_mb is the max heap residency observed during that single
-// Build call (not aggregated across iterations).
+// Why no pre-allocated []uint64 slice: if the bench keeps a slice of all keys
+// alive, that slice (8 MB at 1M keys, 80 MB at 10M) becomes a fixed floor
+// shared by both paths and masks the real Build-internal heap delta. After
+// `keys = nil; runtime.GC()` the compiler may still keep the backing array
+// reachable from a stack slot until the surrounding function returns, which
+// is exactly what made earlier readings show ~78 MB peak at n=10M sharded
+// (a number the real-file tooltest at 339M keys then disproved by reporting
+// 32 MB — i.e. ~1/256 of plain). Streaming kills the floor entirely.
 func benchBuild(b *testing.B, sharded bool, n int) {
 	b.Helper()
-	keys := benchKeys(n, 1, 2)
 
 	var totalFileBytes uint64
 	var totalPeakHeap uint64
@@ -81,82 +78,7 @@ func benchBuild(b *testing.B, sharded bool, n int) {
 		b.StopTimer()
 		dir := b.TempDir()
 		fp := filepath.Join(dir, "f")
-		runtime.GC() // stable heap baseline before the sampler starts
-		sampler := startPeakSampler(500 * time.Microsecond)
-		b.StartTimer()
 
-		if sharded {
-			w, err := NewWriterSharded(fp)
-			if err != nil {
-				b.Fatal(err)
-			}
-			w.DisableFsync()
-			for _, k := range keys {
-				if err := w.AddHash(k); err != nil {
-					b.Fatal(err)
-				}
-			}
-			if err := w.Build(); err != nil {
-				b.Fatal(err)
-			}
-			w.Close()
-		} else {
-			w, err := NewWriter(fp)
-			if err != nil {
-				b.Fatal(err)
-			}
-			w.DisableFsync()
-			for _, k := range keys {
-				if err := w.AddHash(k); err != nil {
-					b.Fatal(err)
-				}
-			}
-			if err := w.Build(); err != nil {
-				b.Fatal(err)
-			}
-			w.Close()
-		}
-
-		b.StopTimer()
-		peak := sampler.Stop()
-		totalPeakHeap += peak
-
-		st, err := os.Stat(fp)
-		if err != nil {
-			b.Fatal(err)
-		}
-		totalFileBytes += uint64(st.Size())
-		b.StartTimer()
-	}
-	b.StopTimer()
-
-	if b.N > 0 {
-		b.ReportMetric(float64(totalPeakHeap)/float64(b.N)/(1<<20), "peak_heap_mb")
-		b.ReportMetric(float64(totalFileBytes)/float64(b.N)/(1<<20), "file_size_mb")
-		b.ReportMetric(float64(n), "keys")
-	}
-}
-
-// benchBuildOnly isolates the Build() call from key generation and AddHash
-// ingestion, so peak_heap_mb reflects only what Build itself allocates on the
-// Go heap. The pre-generated `keys []uint64` slice (8 MB at n=1M) is dropped
-// before Build runs — otherwise it dominates peak_heap and hides the actual
-// builder cost we care about.
-func benchBuildOnly(b *testing.B, sharded bool, n int) {
-	b.Helper()
-
-	var totalFileBytes uint64
-	var totalPeakHeap uint64
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		dir := b.TempDir()
-		fp := filepath.Join(dir, "f")
-		keys := benchKeys(n, 1, 2)
-
-		// Ingest keys into the writer's off-heap temp file outside the timer/sampler.
 		var (
 			plainW *Writer
 			shardW *WriterSharded
@@ -167,8 +89,9 @@ func benchBuildOnly(b *testing.B, sharded bool, n int) {
 				b.Fatal(err)
 			}
 			w.DisableFsync()
-			for _, k := range keys {
-				if err := w.AddHash(k); err != nil {
+			rng := rand.New(rand.NewPCG(1, 2))
+			for j := 0; j < n; j++ {
+				if err := w.AddHash(rng.Uint64()); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -179,17 +102,15 @@ func benchBuildOnly(b *testing.B, sharded bool, n int) {
 				b.Fatal(err)
 			}
 			w.DisableFsync()
-			for _, k := range keys {
-				if err := w.AddHash(k); err != nil {
+			rng := rand.New(rand.NewPCG(1, 2))
+			for j := 0; j < n; j++ {
+				if err := w.AddHash(rng.Uint64()); err != nil {
 					b.Fatal(err)
 				}
 			}
 			plainW = w
 		}
 
-		// Drop the input slice before Build so it doesn't pollute peak_heap.
-		keys = nil
-		_ = keys
 		runtime.GC()
 		sampler := startPeakSampler(500 * time.Microsecond)
 		b.StartTimer()
@@ -226,30 +147,15 @@ func benchBuildOnly(b *testing.B, sharded bool, n int) {
 	}
 }
 
-// BenchmarkBuildOnly is the apples-to-apples Build-phase comparison: input
-// keys are not on the Go heap when the timer/sampler runs. This is what you
-// want when reasoning about the OOM, since the OOM is inside Build, not
-// AddHash (AddHash writes to a mmap-backed temp file, off-heap).
-func BenchmarkBuildOnly(b *testing.B) {
-	for _, n := range []int{100_000, 1_000_000} {
-		for _, sharded := range []bool{false, true} {
-			label := "writer"
-			if sharded {
-				label = "sharded"
-			}
-			b.Run(label+"/n="+itoaUnderscored(n), func(b *testing.B) {
-				benchBuildOnly(b, sharded, n)
-			})
-		}
-	}
-}
-
-// Build benchmarks. Run a single size with `-bench=BenchmarkBuild/sharded=false/n=1000000`
-// or compare with `go test -bench=BenchmarkBuild -run=^$ -benchtime=3x`.
+// BenchmarkBuild isolates the Build phase: input is streamed into the writer
+// (off-heap mmap), then dropped before the sampler starts. peak_heap_mb is
+// the heap residency of Build itself — exactly what causes the OOM in
+// production.
 //
-// Sizes are deliberately small enough to fit on a dev box; the goal is to demonstrate
-// the *ratio* of peak heap (Writer vs WriterSharded) rather than reproduce the
-// 3B-key OOM directly.
+// Compare paths with `go test -bench=BenchmarkBuild -run=^$ -benchtime=3x -count=5`
+// and pipe through benchstat. Sizes deliberately cap at 10M so it runs on a
+// dev box; absolute numbers extrapolate ~linearly to 3B (the bloatnet OOM
+// scenario).
 func BenchmarkBuild(b *testing.B) {
 	for _, n := range []int{100_000, 1_000_000} {
 		for _, sharded := range []bool{false, true} {
@@ -264,8 +170,9 @@ func BenchmarkBuild(b *testing.B) {
 	}
 }
 
-// BenchmarkBuildLarge is gated behind -short so `make test-short` skips it.
-// Run explicitly with `go test -bench=BenchmarkBuildLarge -run=^$ -benchtime=1x`.
+// BenchmarkBuildLarge runs the 10M-key variant. Gated by -short so the regular
+// test-short suite skips it. Run with `go test -bench=BenchmarkBuildLarge
+// -run=^$ -benchtime=1x ./db/datastruct/fusefilter/`.
 func BenchmarkBuildLarge(b *testing.B) {
 	if testing.Short() {
 		b.Skip("skipping large build benchmark in -short mode")
@@ -283,23 +190,23 @@ func BenchmarkBuildLarge(b *testing.B) {
 }
 
 // benchLookup measures the cost of N random ContainsHash probes (mix of present and
-// absent keys) on a prebuilt filter. Distinguishes hot-cache (mmap pages already
-// resident) from cold; we only run hot here since the cold path is dominated by
+// absent keys) on a prebuilt filter. Hot-cache only — the cold path is dominated by
 // IO, not by Reader vs ReaderSharded code.
 func benchLookup(b *testing.B, sharded bool, n int) {
 	b.Helper()
-	keys := benchKeys(n, 1, 2)
 	dir := b.TempDir()
 	fp := filepath.Join(dir, "f")
 
+	// Build the filter by streaming hashes (no materialised []uint64).
 	if sharded {
 		w, err := NewWriterSharded(fp)
 		if err != nil {
 			b.Fatal(err)
 		}
 		w.DisableFsync()
-		for _, k := range keys {
-			if err := w.AddHash(k); err != nil {
+		rng := rand.New(rand.NewPCG(1, 2))
+		for j := 0; j < n; j++ {
+			if err := w.AddHash(rng.Uint64()); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -313,8 +220,9 @@ func benchLookup(b *testing.B, sharded bool, n int) {
 			b.Fatal(err)
 		}
 		w.DisableFsync()
-		for _, k := range keys {
-			if err := w.AddHash(k); err != nil {
+		rng := rand.New(rand.NewPCG(1, 2))
+		for j := 0; j < n; j++ {
+			if err := w.AddHash(rng.Uint64()); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -324,7 +232,18 @@ func benchLookup(b *testing.B, sharded bool, n int) {
 		w.Close()
 	}
 
-	probes := benchKeys(2*n, 7, 11)
+	// Small fixed-size probe buffer (16k uint64 = 128 KB) is enough to defeat
+	// branch-predictor caching of the inner ContainsHash and re-used cyclically
+	// via `i%len(probes)`. Keeping it bounded means lookup bench heap stays tiny
+	// regardless of n.
+	const probesN = 16 * 1024
+	probes := make([]uint64, probesN)
+	{
+		rng := rand.New(rand.NewPCG(7, 11))
+		for i := range probes {
+			probes[i] = rng.Uint64()
+		}
+	}
 
 	type containsReader interface {
 		ContainsHash(uint64) bool
