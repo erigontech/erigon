@@ -440,7 +440,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		return nil
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.ProduceE2 {
+	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		//TODO: initialSync maybe save files progress here
 
 		var minBlockNumber uint64
