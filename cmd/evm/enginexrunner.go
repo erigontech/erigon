@@ -39,6 +39,18 @@ var engineXTestCommand = cli.Command{
 	Name:      "enginextest",
 	Usage:     "Executes engine-x test fixtures using the existing EngineXTestRunner",
 	ArgsUsage: "<path>",
+	Description: "Each test runs in its own short-lived Erigon node whose datadir lives\n" +
+		"under $TMPDIR (default /tmp). On a journaled filesystem like ext4 the\n" +
+		"per-tester create/unlink work serialises through the journal and\n" +
+		"dominates wall time. Pointing $TMPDIR at a RAM-backed filesystem cuts\n" +
+		"wall time by ~2× on Linux. Easiest cross-platform setup:\n" +
+		"\n" +
+		"    RAMDISK=$(./tools/create-ramdisk)\n" +
+		"    TMPDIR=$RAMDISK evm enginextest ...\n" +
+		"\n" +
+		"On Linux you can also use /dev/shm directly (TMPDIR=/dev/shm), which is\n" +
+		"a tmpfs sized at half of RAM by default. ~5GB free is plenty for the\n" +
+		"full EEST engine_x set.",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "pre-alloc-dir",
