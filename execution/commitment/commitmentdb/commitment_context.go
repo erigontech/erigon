@@ -340,6 +340,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		// so two builds running the same workload can be diffed offline to
 		// localise the first block at which their caches diverge. See
 		// commitment.BranchCache.Fingerprint for the hash semantics.
+		// took + keys exposed at Info so the calculator's per-block compute
+		// time is visible without enabling debug logs (used by the
+		// snapshot-vs-mdbx perf-equivalence investigation to attribute
+		// the gap inside newPayload).
 		if logCacheFingerprint {
 			if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
 				if bc := hph.BranchCache(); bc != nil {
@@ -347,7 +351,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"block", blockNum,
 						"root", hex.EncodeToString(rootHash),
 						"fp", fmt.Sprintf("%016x", bc.Fingerprint()),
-						"divergences", bc.VerifyDivergences())
+						"divergences", bc.VerifyDivergences(),
+						"took", took,
+						"keys", common.PrettyCounter(updateCount))
 				}
 			}
 		}
