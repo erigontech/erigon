@@ -853,6 +853,14 @@ func (sdc *TrieContext) ProbeStateLayers(domain kv.Domain, key []byte) (mem, par
 	return sdc.probeSd.ProbeReadLayers(domain, sdc.probeTx, key)
 }
 
+// SiteIdentity returns a stable string identifying the underlying
+// SharedDomains pointer. Used by cache write sites to tag entries with
+// the SD lineage that produced them, so divergence diagnostics can tell
+// parent-SD writes apart from fork-SD writes when the cache is shared.
+func (sdc *TrieContext) SiteIdentity() string {
+	return fmt.Sprintf("sd=%p", sdc.probeSd)
+}
+
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil

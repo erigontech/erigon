@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -3078,20 +3077,14 @@ var verifyBranchCache = dbg.EnvBool("BRANCH_CACHE_VERIFY", false)
 // further) from "deeper compute bug" (bench fails at the same block).
 var disableBranchCacheReads = dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false)
 
-// branchFromCacheOrDB reads branch data via the cache hierarchy:
+// branchFromCacheOrDB reads branch data through the SD chain:
 //   - L1: WarmupCache (ephemeral, populated by warmup workers ahead of fold)
-//   - L2: BranchCache (longer-lived; per-Process today, will be aggTx-scoped
-//     once the cross-block-persistence step lands)
-//   - L3: ctx.Branch (canonical store)
+//   - L2: ctx.Branch — sd.mem -> sd.parent.mem -> branchCache -> MDBX
 //
-// On L2 hit no further work happens. On L3 read with a non-empty result the
-// bytes are populated into BranchCache so subsequent reads (within the cache's
-// lifetime) hit L2 instead.
-//
-// L1 (WarmupCache) is intentionally checked FIRST: warmup workers may have
-// pre-fetched the branch with prefix-walk-derived freshness guarantees
-// (see warmuper.go), and L1 entries are short-lived enough that staleness
-// is bounded by Process duration.
+// The aggregator-scope BranchCache lives behind sd.mem inside sd.GetLatest;
+// CollectUpdate writes only to sd.mem, so cross-SD pollution can no longer
+// occur. L1 (WarmupCache) is still checked first for prefix-walk-derived
+// freshness within a Process.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
 		if data, found := hph.cache.GetBranch(key); found {
@@ -3104,64 +3097,9 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			hph.metrics.missBranch.Add(1)
 		}
 	}
-	if hph.branchCache != nil && !disableBranchCacheReads {
-		if data, found := hph.branchCache.Get(key); found {
-			if verifyBranchCache {
-				canonical, _, err := hph.ctx.Branch(key)
-				if err == nil && !bytes.Equal(data, canonical) {
-					hph.branchCache.RecordDivergence()
-					fields := []any{
-						"prefix", hex.EncodeToString(key),
-						"cached_len", len(data),
-						"canonical_len", len(canonical),
-						"cached", hex.EncodeToString(data),
-						"canonical", hex.EncodeToString(canonical),
-					}
-					// Origin metadata captured at cache.Put time —
-					// identifies which write site produced the stale
-					// bytes (CollectUpdate vs L3-fallback-read), with
-					// a monotonic write-seq + unix-nanos timestamp so
-					// we can correlate against the timeline of FCU /
-					// build / step events.
-					if _, origin, seq, tns, ok := hph.branchCache.GetWithOrigin(key); ok {
-						fields = append(fields,
-							"cache_origin", origin,
-							"cache_seq", seq,
-							"cache_t_ns", tns)
-					}
-					// State-layer probe: sample sd.mem, parent.mem, and
-					// tx-direct (MDBX) for the same key so the log line
-					// shows which layer holds bytes matching the cache
-					// vs ctx.Branch. Decision matrix in
-					// agentspecs/branch-cache-divergence-probe.md.
-					if probe, ok := hph.ctx.(interface {
-						ProbeStateLayers(kv.Domain, []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
-					}); ok {
-						mem, parentMem, mdbx, memOk, parentOk := probe.ProbeStateLayers(kv.CommitmentDomain, key)
-						if memOk {
-							fields = append(fields, "sd_mem", hex.EncodeToString(mem))
-						} else {
-							fields = append(fields, "sd_mem", "miss")
-						}
-						if parentOk {
-							fields = append(fields, "parent_mem", hex.EncodeToString(parentMem))
-						} else {
-							fields = append(fields, "parent_mem", "miss-or-no-parent")
-						}
-						fields = append(fields, "mdbx", hex.EncodeToString(mdbx))
-					}
-					log.Warn("[branch-cache] divergence", fields...)
-				}
-			}
-			return data, nil
-		}
-	}
 	data, _, err := hph.ctx.Branch(key)
 	if err != nil {
 		return nil, err
-	}
-	if hph.branchCache != nil && len(data) > 0 {
-		hph.branchCache.Put(key, data, "L3-fallback-read")
 	}
 	return data, nil
 }

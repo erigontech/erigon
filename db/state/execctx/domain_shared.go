@@ -121,6 +121,14 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
+
+	// branchCache is the aggregator-scope commitment-branch cache. It sits
+	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
+	// both miss, before the aggTx files/MDBX read), so writers' in-flight
+	// bytes always mask the cache and cross-SD pollution is impossible.
+	// May be nil for test setups whose AggTx doesn't implement
+	// commitment.BranchCacheProvider.
+	branchCache *commitment.BranchCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -153,6 +161,7 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
 		branchCache = p.BranchCache()
 	}
+	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -512,7 +521,17 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	return sd.mem.Flush(ctx, tx)
+	if err := sd.mem.Flush(ctx, tx); err != nil {
+		return err
+	}
+	// Cache mirrors MDBX-flushed bytes; clear after flush so cache cannot
+	// hold pre-flush bytes for keys whose MDBX value just changed. Refills
+	// lazily on next read. PR2 will switch to per-key invalidation using
+	// the just-flushed CommitmentDomain diff.
+	if sd.branchCache != nil {
+		sd.branchCache.Clear()
+	}
+	return nil
 }
 
 // TemporalDomain satisfaction
@@ -581,6 +600,17 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// branchCache sits between sd.mem/parent.mem and the aggTx files for
+	// CommitmentDomain only. It mirrors MDBX-flushed bytes; writers' fresh
+	// bytes are held in sd.mem above, so a cache hit here is always
+	// equivalent to reading from MDBX. Cleared by sd.Flush so a new MDBX
+	// state never coexists with stale cache entries.
+	if domain == kv.CommitmentDomain && sd.branchCache != nil {
+		if cv, cstep, ok := sd.branchCache.Get(k); ok {
+			return cv, kv.Step(cstep), nil
+		}
+	}
+
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 	} else {
@@ -593,6 +623,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
+	}
+	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
+		sd.branchCache.Put(k, v, uint64(step), "sd.GetLatest")
 	}
 
 	return v, step, nil
