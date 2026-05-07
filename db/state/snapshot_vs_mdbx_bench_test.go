@@ -598,6 +598,113 @@ func BenchmarkSnapVsMDBX_H0_Accounts(b *testing.B) {
 	runH0(b, openSnapBench(b, kv.AccountsDomain))
 }
 
+// runHGetAsOf measures HistorySeek-via-GetAsOf cost on file-resident
+// keys. The motivation (per H0 finding): `getLatestFromFiles` is fast
+// (~30 ns isolated); the bloat-workload pprof showed real file-read
+// pressure that this can't account for. The calculator's
+// HistoryStateReader.Read calls tx.GetAsOf, which goes through
+// HistorySeek and walks .ef history files — a different code path
+// than getLatestFromFiles.
+//
+// Sub-benches:
+//
+//   - GetLatest_baseline: tx.GetLatest on file-resident keys; mirrors
+//     H0's File_path so we can confirm the same setup against a fresh
+//     comparator.
+//
+//   - GetAsOf_recent: tx.GetAsOf at asOfTxNum = endTxNum - 1. Most
+//     keys won't have a history record post-asOf, so HistorySeek
+//     short-circuits to the latest path. Lower bound on GetAsOf cost.
+//
+//   - GetAsOf_mid: tx.GetAsOf at asOfTxNum = endTxNum / 2. Forces
+//     the .ef walk to seek through more history. This is the cost
+//     shape the calculator pays when reading historic state.
+//
+//   - GetAsOf_zero: tx.GetAsOf at asOfTxNum = HistoryStartFrom() + 1
+//     (just past the visible window start). Maximally adversarial —
+//     full .ef walk depth. The calculator's old asOfReader.txNum=0
+//     bug (PR #21010) hit this path when the window started past 0.
+//
+// All sub-benches use the same fileKeys set so per-key cost is
+// directly comparable across the four.
+func runHGetAsOf(b *testing.B, setup *snapBenchSetup) {
+	b.Helper()
+	if skipIfEmpty(b, "H_GetAsOf", setup.fileKeys) {
+		return
+	}
+
+	// Snapshot the visible-history window so all four sub-benches use
+	// the same anchors and so we report them in the bench log. We
+	// don't probe historyStartFrom from here (no public accessor on
+	// AggregatorRoTx for per-domain history range); instead use simple
+	// fixed fractions of endTxNum. Adjust asOfFloor=1 to avoid
+	// hitting txNum=0 which can error on snapshot-loaded chains
+	// (PR #21010 was that bug; we don't want H_GetAsOf to trip on it).
+	endTxNum := setup.aggTx.EndTxNumNoCommitment()
+	asOfRecent := endTxNum
+	if endTxNum > 0 {
+		asOfRecent = endTxNum - 1
+	}
+	asOfMid := endTxNum / 2
+	asOfFloor := uint64(1)
+	b.Logf("H_GetAsOf anchors: endTxNum=%d -> asOfRecent=%d asOfMid=%d asOfFloor=%d",
+		endTxNum, asOfRecent, asOfMid, asOfFloor)
+
+	// Two warmup passes so the OS page cache holds the .ef files we
+	// care about. Touch each anchor txNum so the relevant history
+	// segments are mmap'd in.
+	for _, asOf := range []uint64{asOfRecent, asOfMid, asOfFloor} {
+		for _, k := range setup.fileKeys {
+			_, _, _ = setup.tx.GetAsOf(setup.domain, k, asOf)
+		}
+		for _, k := range setup.fileKeys {
+			_, _, _ = setup.tx.GetAsOf(setup.domain, k, asOf)
+		}
+	}
+
+	b.Run("GetLatest_baseline", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _ = setup.tx.GetLatest(setup.domain, setup.fileKeys[i%len(setup.fileKeys)])
+		}
+	})
+
+	b.Run("GetAsOf_recent", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _ = setup.tx.GetAsOf(setup.domain, setup.fileKeys[i%len(setup.fileKeys)], asOfRecent)
+		}
+	})
+
+	b.Run("GetAsOf_mid", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _ = setup.tx.GetAsOf(setup.domain, setup.fileKeys[i%len(setup.fileKeys)], asOfMid)
+		}
+	})
+
+	b.Run("GetAsOf_floor", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_, _, _ = setup.tx.GetAsOf(setup.domain, setup.fileKeys[i%len(setup.fileKeys)], asOfFloor)
+		}
+	})
+}
+
+// BenchmarkSnapVsMDBX_HGetAsOf_Accounts measures HistorySeek cost on
+// real file-resident keys via tx.GetAsOf. Confirms the H0 finding
+// that the production bloat-workload bottleneck is in .ef history
+// walking, not .kv latest-state reads.
+func BenchmarkSnapVsMDBX_HGetAsOf_Accounts(b *testing.B) {
+	runHGetAsOf(b, openSnapBench(b, kv.AccountsDomain))
+}
+
+// BenchmarkSnapVsMDBX_HGetAsOf_Storage — same for StorageDomain.
+// Storage tends to dominate in the bloat workload.
+func BenchmarkSnapVsMDBX_HGetAsOf_Storage(b *testing.B) {
+	runHGetAsOf(b, openSnapBench(b, kv.StorageDomain))
+}
+
 // BenchmarkSnapVsMDBX_H0_Storage — same harness for StorageDomain.
 // Storage dominates file-read traffic on bloat workloads (per
 // runs-step9-cache-behind-sd memory), so getting the gap for both
