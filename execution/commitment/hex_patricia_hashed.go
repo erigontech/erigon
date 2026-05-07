@@ -3117,6 +3117,18 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 						"cached", hex.EncodeToString(data),
 						"canonical", hex.EncodeToString(canonical),
 					}
+					// Origin metadata captured at cache.Put time —
+					// identifies which write site produced the stale
+					// bytes (CollectUpdate vs L3-fallback-read), with
+					// a monotonic write-seq + unix-nanos timestamp so
+					// we can correlate against the timeline of FCU /
+					// build / step events.
+					if _, origin, seq, tns, ok := hph.branchCache.GetWithOrigin(key); ok {
+						fields = append(fields,
+							"cache_origin", origin,
+							"cache_seq", seq,
+							"cache_t_ns", tns)
+					}
 					// State-layer probe: sample sd.mem, parent.mem, and
 					// tx-direct (MDBX) for the same key so the log line
 					// shows which layer holds bytes matching the cache
@@ -3149,7 +3161,7 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 		return nil, err
 	}
 	if hph.branchCache != nil && len(data) > 0 {
-		hph.branchCache.Put(key, data)
+		hph.branchCache.Put(key, data, "L3-fallback-read")
 	}
 	return data, nil
 }

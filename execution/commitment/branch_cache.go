@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/maphash"
 )
@@ -146,6 +147,12 @@ type BranchCache struct {
 	// load-bearing signal that the cache lifecycle is broken before any
 	// trie root mismatch surfaces downstream.
 	verifyDivergences atomic.Uint64
+
+	// writeSeq is incremented on every Put so each entry carries a
+	// monotonic ordering tag — divergence-detection uses this with the
+	// origin label and timestamp to identify which write produced the
+	// stale bytes.
+	writeSeq atomic.Uint64
 }
 
 type branchCacheEntry struct {
@@ -166,6 +173,15 @@ type branchCacheEntry struct {
 	// entry was populated; treat as stale until cleared." Same semantics
 	// as branchEntry.dirty in WarmupCache (carried from step 4).
 	dirty atomic.Bool
+
+	// origin diagnostics — captured at Put time so divergence-detection
+	// can identify which write produced the (now-disagreeing) bytes.
+	// origin is a short label of the write site (e.g. "CollectUpdate",
+	// "L3-fallback-read"); writeSeq is a monotonic counter per
+	// BranchCache instance; writeTimeNanos is unix-nanos at write time.
+	origin         string
+	writeSeq       uint64
+	writeTimeNanos int64
 }
 
 // DefaultBranchCacheTailCapacity is the LRU tail size used when no
@@ -284,11 +300,17 @@ func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell,
 // Put stores branch data in the cache, replacing any existing entry
 // (clearing its dirty flag in the process — the new entry is fresh).
 // Always copies the input data so the cache owns it independently of
-// caller buffer lifetime.
-func (c *BranchCache) Put(prefix []byte, data []byte) {
+// caller buffer lifetime. origin is a short label of the write site
+// captured for divergence-detection diagnostics.
+func (c *BranchCache) Put(prefix []byte, data []byte, origin string) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
-	c.store(prefix, &branchCacheEntry{data: dataCopy})
+	c.store(prefix, &branchCacheEntry{
+		data:           dataCopy,
+		origin:         origin,
+		writeSeq:       c.writeSeq.Add(1),
+		writeTimeNanos: time.Now().UnixNano(),
+	})
 }
 
 // PutIfClean stores branch data only if no existing entry is marked dirty.
@@ -298,12 +320,34 @@ func (c *BranchCache) Put(prefix []byte, data []byte) {
 //
 // Same semantics as WarmupCache.PutBranchIfClean — see that doc for the
 // race-it-protects-against narrative.
-func (c *BranchCache) PutIfClean(prefix []byte, data []byte) bool {
+func (c *BranchCache) PutIfClean(prefix []byte, data []byte, origin string) bool {
 	if existing, ok := c.lookup(prefix); ok && existing.dirty.Load() {
 		return false
 	}
-	c.Put(prefix, data)
+	c.Put(prefix, data, origin)
 	return true
+}
+
+// GetWithOrigin returns the cached bytes plus the diagnostic origin
+// metadata captured when the entry was put. ok=false on miss. Used by
+// the divergence-detection probe to identify which write produced the
+// stale bytes. Does not bump hit/miss counters or affect LRU recency
+// (uses a non-counting peek so it can be called alongside Get without
+// double-counting).
+func (c *BranchCache) GetWithOrigin(prefix []byte) (data []byte, origin string, writeSeq uint64, writeTimeNanos int64, ok bool) {
+	var entry *branchCacheEntry
+	if isRootPrefix(prefix) {
+		entry = c.root.Load()
+	} else {
+		entry, ok = c.tail.Get(prefix)
+		if !ok {
+			return nil, "", 0, 0, false
+		}
+	}
+	if entry == nil {
+		return nil, "", 0, 0, false
+	}
+	return entry.data, entry.origin, entry.writeSeq, entry.writeTimeNanos, true
 }
 
 // MarkDirty flags the entry at prefix as stale-until-cleared. Subsequent

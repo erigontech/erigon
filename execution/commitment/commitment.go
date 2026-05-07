@@ -633,7 +633,7 @@ func (be *BranchEncoder) CollectUpdate(
 	// (the new entry is born clean). Single writer per prefix per fold
 	// invariant means no concurrent Put races on this key.
 	if be.branchCache != nil {
-		be.branchCache.Put(prefixCopy, updateCopy)
+		be.branchCache.Put(prefixCopy, updateCopy, "CollectUpdate")
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
