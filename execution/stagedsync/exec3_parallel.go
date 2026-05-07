@@ -676,35 +676,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
-	defer func() {
-		// Close channels AFTER the exec loop finishes processing all
-		// blocks. This ensures all blockResults reach the apply loop
-		// and calculator before channels close. executeBlocks does NOT
-		// close channels — it returns from the errgroup after loading
-		// blocks, but the exec loop keeps processing.
-		safeClose := func(ch chan applyResult) {
-			defer func() {
-				// "close of closed channel" panics here are benign — it just means the
-				// channel was already closed by another shutdown path. Recover only that
-				// specific panic and re-raise anything else so real bugs still surface.
-				if rec := recover(); rec != nil {
-					if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
-						return
-					}
-					panic(rec)
-				}
-			}()
-			close(ch)
-		}
-		if pe.commitResultsCh != nil {
-			safeClose(pe.commitResultsCh)
-			pe.commitResultsCh = nil
-		}
-		if pe.applyResultsCh != nil {
-			safeClose(pe.applyResultsCh)
-			pe.applyResultsCh = nil
-		}
-	}()
+	defer pe.closeApplyChannels()
 	defer func() {
 		// Close the exec loop's own RO tx — prevents leak across batches.
 		if pe.applyTx != nil {
@@ -889,35 +861,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// We are inside the `blockResult != nil` branch, so at least one
 				// complete (non-partial) block has been applied in this batch.
 				// That is enough to safely trigger a batch commit on size.
-				if sizeEst > batchLimit {
-					pe.triggerBatchCommitment(ctx)
-					return nil
-				}
-
-				if blockResult.BlockNum >= pe.maxBlockNum {
+				switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
+				case execLoopExitMaxReached:
 					pe.reachedMaxBlock.Store(true)
 					pe.triggerBatchCommitment(ctx)
 					return nil
-				}
-
-				// executeBlocks marks the final dispatched block with Exhausted
-				// when the per-cycle block limit is reached (on the initial cycle
-				// the limit only kicks in after crossing a step boundary AND when
-				// commitments aren't being discarded — see exec3.go:675; later
-				// cycles enforce it unconditionally). Once that block's result
-				// has been applied,
-				// no further execRequests will arrive — executeBlocks's loop
-				// exited via `break`. Without honoring this signal here, the
-				// exec loop parks forever on its main select waiting for work
-				// the dispatcher will never produce. Closing channels via the
-				// deferred close lets the apply loop return ErrLoopExhausted
-				// so the stage loop resumes from blockResult.BlockNum+1.
-				if blockResult.Exhausted != nil {
-					pe.triggerBatchCommitment(ctx)
-					return nil
-				}
-
-				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
+				case execLoopExitSizeLimit, execLoopExitExhausted, execLoopExitStopAfter:
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
@@ -1071,6 +1020,104 @@ func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) [
 		}
 	}
 	return missing
+}
+
+// execLoopExitDecision is the result of evaluating the exec-loop's
+// per-blockResult exit conditions. Values are ordered by precedence:
+// later conditions only matter if no earlier one fired.
+type execLoopExitDecision int
+
+const (
+	// execLoopContinue: keep processing — no exit condition met.
+	execLoopContinue execLoopExitDecision = iota
+	// execLoopExitSizeLimit: rs.SizeEstimate*Commitment crossed the
+	// configured batch budget; the partial-batch flush path runs.
+	execLoopExitSizeLimit
+	// execLoopExitMaxReached: blockResult.BlockNum >= maxBlockNum;
+	// the caller flips reachedMaxBlock so the apply loop returns
+	// nil (clean batch end) rather than ErrLoopExhausted.
+	execLoopExitMaxReached
+	// execLoopExitExhausted: executeBlocks dispatched its final
+	// blockResult with .Exhausted set (per-cycle block limit hit).
+	// Without honoring this the exec loop parks forever waiting
+	// for work the dispatcher will never produce.
+	execLoopExitExhausted
+	// execLoopExitStopAfter: dbg.StopAfterBlock crossed (debug only).
+	execLoopExitStopAfter
+)
+
+// execLoopShouldExit evaluates the exec-loop's per-blockResult exit
+// decision in priority order. Pure function so the precedence is
+// unit-testable; the production code at exec3_parallel.go around line
+// 864 calls this and dispatches based on the returned decision.
+//
+// Priority order (matches production):
+//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
+//  2. blockResult.BlockNum >= max  (clean end — flip reachedMaxBlock)
+//  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
+//  4. dbg.StopAfterBlock crossed   (debug-only halt)
+//  5. otherwise execLoopContinue   (schedule next block)
+//
+// Reordering any of these silently changes which exit branch wins when
+// two conditions overlap (e.g. final block of a cycle that also crosses
+// the size limit), which is why the test pins the exact precedence.
+// See TestExecLoopShouldExitPriority.
+func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
+	if sizeEst > batchLimit {
+		return execLoopExitSizeLimit
+	}
+	if blockResult.BlockNum >= maxBlockNum {
+		return execLoopExitMaxReached
+	}
+	if blockResult.Exhausted != nil {
+		return execLoopExitExhausted
+	}
+	if stopAfterBlock > 0 && blockResult.BlockNum >= stopAfterBlock {
+		return execLoopExitStopAfter
+	}
+	return execLoopContinue
+}
+
+// closeApplyChannels closes the apply-loop-bound channels in the order
+// the calculator and apply loop require: commitResults FIRST so the
+// calculator drains and closes rootResults, then applyResults so the
+// apply loop sees its channel close after the calculator is done. The
+// inverse order would let the apply loop exit while the calculator is
+// still publishing — the trailing commitment write would land on a
+// closed channel and panic.
+//
+// "close of closed channel" panics inside safeClose are benign — it
+// just means the channel was already closed by another shutdown path.
+// Recover only that specific panic and re-raise anything else so real
+// bugs still surface.
+//
+// Returns the names of the channels closed in the order they were
+// closed. The production call site discards this (deferred-call
+// return values are ignored); tests use it to deterministically
+// verify the close order without racing on observer-goroutine
+// wakeups. See TestApplyLoopChannelCloseOrder.
+func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
+	safeClose := func(ch chan applyResult, name string) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
+					return
+				}
+				panic(rec)
+			}
+		}()
+		close(ch)
+		closedOrder = append(closedOrder, name)
+	}
+	if pe.commitResultsCh != nil {
+		safeClose(pe.commitResultsCh, "commitResults")
+		pe.commitResultsCh = nil
+	}
+	if pe.applyResultsCh != nil {
+		safeClose(pe.applyResultsCh, "applyResults")
+		pe.applyResultsCh = nil
+	}
+	return
 }
 
 // execLoopExitCheck enforces the completeness invariant for the exec
