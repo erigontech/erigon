@@ -40,7 +40,7 @@ const minStepsForReferencing = 99999
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
 func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
-	return ((to-from)/stepSize)%minStepsForReferencing == 0
+	return (to-from)/stepSize >= minStepsForReferencing
 }
 
 // Values can use key referencing in this range?
