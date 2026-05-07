@@ -231,7 +231,6 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // checkError checks if the error returned by the state transition matches any expected error.
-// Matches geth's implementation in tests/state_test_util.go.
 func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 	expectedError := t.Json.Post[subtest.Fork][subtest.Index].ExpectException
 	if err == nil && expectedError == "" {
