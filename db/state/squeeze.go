@@ -987,7 +987,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
-			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
 			if concurrent {
 				domains.EnableParaTrieDB(rwDb)
 			}
