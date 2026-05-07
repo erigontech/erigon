@@ -1,231 +1,49 @@
 # Introduction
 URL: https://docs.erigon.tech/
 
-Erigon Client Documentation
-  An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.
+An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.
 
-  
-    
-  
-  Get Started
-  Hardware requirements, installation options, and first-run guides to get your node online fast.
+## Sections
 
-  
-    
-  
-  Easy Nodes
-  One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
-
-  
-    
-    
-  
-  Fundamentals
-  Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
-
-  
-    
-    
-    
-    
-  
-  Modules
-  Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
-
-  
-    
-    
-    
-    
-    
-  
-  Staking
-  Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
-
-  
-    
-    
-  
-  Interacting with Erigon
-  JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
-
-  
-    
-    
-  
-  
-    Why Erigon?
-    Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
+- [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Fundamentals](https://docs.erigon.tech/fundamentals): Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
+- [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
+- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+- [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.
 
 ---
 
 # Get Started
 URL: https://docs.erigon.tech/get-started
 
-Get Started
-  Everything you need to go from zero to a running Erigon node — requirements, installation, and guided setups.
+Everything you need to go from zero to a running Erigon node — requirements, installation, and guided setups.
 
-  
-    
-  
-  Why Erigon?
-  Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
+## Sections
 
-  
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-  
-  Hardware Requirements
-  Minimum and recommended specs for mainnet, testnets, and archive mode.
-
-  
-    
-    
-    
-  
-  Installation
-  Binary releases, building from source, Docker images, and upgrade instructions.
-
-  
-    
-  
-  Easy Nodes
-  One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
-
-  
-    
-    
-    
-    
-  
-  Migrating from Geth
-  Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
-
-  
-    
-    
-  
-  Interacting with Erigon
-  JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
+- [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
+- [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for mainnet, testnets, and archive mode.
+- [Installation](https://docs.erigon.tech/get-started/installation): Binary releases, building from source, Docker images, and upgrade instructions.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
+- [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.
 
 ---
 
 # Why using Erigon?
 URL: https://docs.erigon.tech/get-started/why-using-erigon
 
+## Sections
 
-Erigon is an Ethereum execution client focused on performance, low disk usage, and modular architecture.
-
-A core benefit of Erigon is its **reduced disk footprint** across all available sync modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
-
-## Key Architectural & Performance Advantages
-
-Erigon's architecture provides measurable improvements in cost, performance, and reliability.
-
-  
-    
-  
-  Integrated Consensus Layer (Caplin)
-  Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
-
-  
-    
-    
-    
-  
-  State Storage (Flat DB)
-  Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
-
-  
-    
-    
-  
-  Immutable, Decentralised Data
-  Historical data lives in immutable files distributed via BitTorrent — up to 10× cheaper to backup, repair, and distribute. No double-disk usage, no complex serialisation.
-
-  
-    
-    
-  
-  Staged Sync
-  Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
-
-  
-    
-  
-  Predictable RPC Performance
-  No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
-
-  
-    
-    
-  
-  Modularity
-  Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
-
-  
-    
-  
-  OtterSync
-  Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
-
-  
-    
-    
-    
-    
-    
-  
-  Flexible Pruning
-  --prune.mode=minimal gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.
-
----
-
-## Benefits by Audience
-
-  
-    
-    
-    
-    
-  
-  RPC Providers & Large Stakers
-  Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
-
-  
-    
-    
-  
-  Home Users & Solo Stakers
-  Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
-
-  
-    
-    
-  
-  Developers
-  Full trace_ namespace, historical eth_getProof, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.
-
----
-
-## AI-Native Node Access (MCP)
-
-Erigon ships a built-in **[Model Context Protocol (MCP) server](../fundamentals/mcp)**, enabled by default on `127.0.0.1:8553`. Connect any MCP-compatible AI assistant — Claude Code, Claude Desktop, or OpenAI Codex — directly to your node and query it in plain English, with zero integration overhead.
-
-The interface is **read-only** and localhost-bound — no risk of unintended state changes. For developers this means instant on-chain lookups during development, natural-language log triage, and a complete RPC surface accessible without writing a single line of code.
-
-```bash
-# Register with Claude Code in one command
-claude mcp add --transport sse erigon http://127.0.0.1:8553/sse
-```
+- [Integrated Consensus Layer (Caplin)](../fundamentals/caplin): Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
+- [State Storage (Flat DB)](../fundamentals/optimizing-storage): Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
+- [Immutable, Decentralised Data](../fundamentals/modules/downloader): Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
+- [Predictable RPC Performance](../fundamentals/modules/rpc-daemon): No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
+- [Modularity](../fundamentals/modules/): Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
+- [OtterSync](../fundamentals/sync-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
+- [Flexible Pruning](../fundamentals/optimizing-storage): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
+- [Home Users & Solo Stakers](../staking/): Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
 
 ---
 
@@ -412,6 +230,18 @@ See [Basic Usage](../fundamentals/basic-usage) and [Configuring Erigon](../funda
 # Installation
 URL: https://docs.erigon.tech/get-started/installation
 
+const el = document.getElementById(id);
+  if (!el) return;
+  const scroll = () => el.scrollIntoView();
+  if (!el.open) {
+    el.addEventListener('toggle', scroll, );
+    el.open = true;
+  } else {
+    scroll();
+  }
+};
+
+# Installation
 
 To install Erigon, begin by choosing an installation method suited to your operating system and technical preference. Options range from the simplest to the most complex, including pre-built images, containers, or source compilation.
 
@@ -500,17 +330,17 @@ Pre-built Binaries (Linux Only)
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v{ERIGON_VERSION}) or whichever version you prefer.
 
 Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon__amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon__arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v_linux_amd64.tar.gz |
-| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v_linux_amd64v2.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_{ERIGON_VERSION}_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_{ERIGON_VERSION}_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64.tar.gz |
+| 64-bit Intel/AMDv2 | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_amd64v2.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v{ERIGON_VERSION}_linux_arm64.tar.gz |
 
 Note that the Release Page Assets table contains also the **checksum** for each file and a checksum file.
 
@@ -852,26 +682,6 @@ Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-us
 
 ---
 
-# Easy Nodes
-URL: https://docs.erigon.tech/get-started/easy-nodes
-
-Easy Nodes
-  Guided setup for running a complete node with sensible defaults — pick your network and follow along.
-
-  
-  Ethereum Node
-  Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
-
-  
-  Gnosis Chain Node
-  Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
-
-  
-  Polygon Node
-  Step-by-step guide to running an Erigon node on the Polygon PoS network.
-
----
-
 # Upgrading from a previous version
 URL: https://docs.erigon.tech/get-started/installation/upgrading
 
@@ -951,6 +761,19 @@ To upgrade Erigon to a newer version when you've originally installed it via Git
 
 ---
 
+# Easy Nodes
+URL: https://docs.erigon.tech/get-started/easy-nodes
+
+Guided setup for running a complete node with sensible defaults — pick your network and follow along.
+
+## Sections
+
+- [Ethereum Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
+- [Gnosis Chain Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
+- [Polygon Node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
+
+---
+
 # How to run a Polygon node
 URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node
 
@@ -1018,8 +841,8 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 ## Flag explanation
 
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
-  * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
+* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technology` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
+  * to use Amoy testnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
@@ -1060,7 +883,7 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=mainnet
-      - --http.addr="0.0.0.0"
+      - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
@@ -1092,18 +915,72 @@ docker compose up
 
 ## Flag explanation
 
-* `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
+* `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
+When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
 :::
 
 Additional flags can be added to [configure](/fundamentals/configuring-erigon/) Erigon with several options.
+
+---
+
+# Ethereum with an external CL
+URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl
+
+
+You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with Erigon by including the `--externalcl` flag. This integration enables direct access to the Ethereum blockchain, allowing you to manage your keys for staking ETH and block production.
+
+## Erigon with Prysm as the external CL
+
+1.  Start Erigon adding the `--externalcl` flag:
+
+    ```bash
+    erigon --externalcl
+    ```
+
+    If your Consensus Layer (CL) client is on a different device, add the following flags:
+
+    * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
+    * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
+2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
+
+    Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
+3. To communicate with Erigon, the `--execution-endpoint` must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
+4.  Prysm must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
+
+    ```bash
+    ./prysm.sh beacon-chain \
+    --execution-endpoint http://localhost:8551 \
+    --mainnet --jwt-secret=<your-datadir>/jwt.hex \
+    --checkpoint-sync-url=https://beaconstate.info \
+    --genesis-beacon-api-url=https://beaconstate.info
+    ```
+
+1.  Start Erigon adding the `--externalcl` flag:
+
+    ```bash
+    ./build/bin/erigon --externalcl
+    ```
+2. Install and run Lighthouse by following the official guide: [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html)
+3. Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
+4. To communicate with Erigon, the `--execution-endpoint` must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
+5.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
+
+    ```bash
+    lighthouse bn \
+    --network mainnet \
+    --execution-endpoint http://localhost:8551 \
+    --execution-jwt <your-datadir>/jwt.hex \
+    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
+    ```
+
+Check Erigon and your chosen CL logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
 
 ---
 
@@ -1254,126 +1131,21 @@ Check the Erigon and Lightouse logs to make sure that the EL and CL are communic
 
 ---
 
-# Ethereum with an external CL
-URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl
-
-
-You can use **Prysm**, **Lighthouse**, or any other Consensus Layer client with Erigon by including the `--externalcl` flag. This integration enables direct access to the Ethereum blockchain, allowing you to manage your keys for staking ETH and block production.
-
-## Erigon with Prysm as the external CL
-
-1.  Start Erigon adding the `--externalcl` flag:
-
-    ```bash
-    erigon --externalcl
-    ```
-
-    If your Consensus Layer (CL) client is on a different device, add the following flags:
-
-    * `--authrpc.addr 0.0.0.0`, since the Engine API listens on localhost by default;
-    * `--authrpc.vhosts <CL_host>` where \ is the source host or the appropriate hostname that your CL client is using.
-2.  Install and run **Prysm** by following the official guide: [https://docs.prylabs.network/docs/install/install-with-script](https://docs.prylabs.network/docs/install/install-with-script).
-
-    Prysm must fully synchronize before Erigon can start syncing, since Erigon requires an existing target head to sync to. The quickest way to get Prysm synced is to use a public checkpoint synchronization endpoint from the list at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
-3. To communicate with Erigon, the `--execution-endpoint` must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
-4.  Prysm must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
-
-    ```bash
-    ./prysm.sh beacon-chain \
-    --execution-endpoint http://localhost:8551 \
-    --mainnet --jwt-secret=<your-datadir>/jwt.hex \
-    --checkpoint-sync-url=https://beaconstate.info \
-    --genesis-beacon-api-url=https://beaconstate.info
-    ```
-
-1.  Start Erigon adding the `--externalcl` flag:
-
-    ```bash
-    ./build/bin/erigon --externalcl
-    ```
-2. Install and run Lighthouse by following the official guide: [https://lighthouse-book.sigmaprime.io/installation.html](https://lighthouse-book.sigmaprime.io/installation.html)
-3. Because Erigon needs a target head in order to sync, Lighthouse must be synced before Erigon can synchronize. The fastest way to synchronize Lighthouse is to use one of the many public checkpoint synchronization endpoints at [https://eth-clients.github.io/checkpoint-sync-endpoints](https://eth-clients.github.io/checkpoint-sync-endpoints).
-4. To communicate with Erigon, the `--execution-endpoint` must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
-5.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt) automatically created by Erigon in the `--datadir` directory.
-
-    ```bash
-    lighthouse bn \
-    --network mainnet \
-    --execution-endpoint http://localhost:8551 \
-    --execution-jwt <your-datadir>/jwt.hex \
-    --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
-    ```
-
-Check Erigon and your chosen CL logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
-
----
-
 # Fundamentals
 URL: https://docs.erigon.tech/fundamentals
 
-Fundamentals
-  Core concepts and day-to-day operations for running a healthy Erigon node.
+Core concepts and day-to-day operations for running a healthy Erigon node.
 
-  
-    
-    
-  
-  Basic Usage
-  Command-line flags, common arguments, and first steps running the Erigon binary.
+## Sections
 
-  
-    
-    
-    
-  
-  Sync Modes
-  Full, minimal, and archive sync explained — choose the right mode for your use case.
-
-  
-    
-    
-  
-  Configuration
-  Full CLI flag reference, config file format, and per-component tuning options.
-
-  
-    
-    
-    
-  
-  Supported Networks
-  All chains and testnets supported by Erigon, with network-specific flags and notes.
-
-  
-    
-    
-    
-  
-  Optimizing Storage
-  Pruning, snapshots, and techniques to minimize disk footprint.
-
-  
-    
-    
-    
-  
-  Docker Compose
-  Run Erigon and all its modules together with Docker Compose.
-
-  
-    
-  
-  Security
-  Firewall rules, API exposure best practices, and hardening recommendations.
-
-  
-    
-    
-    
-    
-  
-  Modules
-  Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
+- [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
+- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
+- [Configuration](https://docs.erigon.tech/fundamentals/configuring-erigon): Full CLI flag reference, config file format, and per-component tuning options.
+- [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): All chains and testnets supported by Erigon, with network-specific flags and notes.
+- [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
+- [Docker Compose](https://docs.erigon.tech/fundamentals/docker-compose): Run Erigon and all its modules together with Docker Compose.
+- [Security](https://docs.erigon.tech/fundamentals/security): Firewall rules, API exposure best practices, and hardening recommendations.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable setups.
 
 ---
 
@@ -1528,7 +1300,7 @@ This will execute the clean target in the Makefile, which cleans the `go cache`,
 URL: https://docs.erigon.tech/fundamentals/sync-modes
 
 
-Erigon 3 supports three prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -2301,7 +2073,7 @@ If using network-attached storage, apply these optimizations:
 
 ```bash
 # Reduce disk latency impact
-
+export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
 
 # For Polygon networks
@@ -3509,65 +3281,27 @@ When running Erigon in Docker, you can configure user permissions and data direc
 **Basic Performance Tuning:**
 
 ```bash
-
+export MDBX_LOCK_IN_RAM=true
+export SNAPSHOT_MADV_RND=false
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Memory Debugging:**
 
 ```bash
-
+export SAVE_HEAP_PROFILE=true
+export HEAP_PROFILE_THRESHOLD=45
 ./build/bin/erigon --datadir=/path/to/data
 ```
 
 **Docker Deployment:**
 
 ```bash
-
+export DOCKER_UID=$(id -u)
+export DOCKER_GID=$(id -g)
+export XDG_DATA_HOME=/preferred/data/folder
 make docker-compose
 ```
-
----
-
-# Modules
-URL: https://docs.erigon.tech/fundamentals/modules
-
-Modules
-  Erigon's internal components can run as separate processes for scalability, security, or custom deployments. Only split them when you have a clear reason to.
-
-  
-    
-    
-    
-  
-  RPC Daemon
-  Serve JSON-RPC requests as a separate, remoteable process — the most battle-tested external component.
-
-  
-    
-    
-    
-    
-    
-    
-  
-  TxPool
-  Manage the pending transaction pool as a standalone service, decoupled from the main node process.
-
-  
-    
-    
-  
-  Sentry
-  Erigon's network-facing peer-to-peer communication layer, isolatable for security or multi-node setups.
-
-  
-    
-    
-    
-  
-  Downloader
-  Fetch and verify Erigon snapshots from the BitTorrent network — handles historical data retrieval.
 
 ---
 
@@ -3672,6 +3406,20 @@ Useful when:
 * running behind NAT
 * no UPnP is available
 * external IP cannot be configured manually
+
+---
+
+# Modules
+URL: https://docs.erigon.tech/fundamentals/modules
+
+Erigon's internal components can run as separate processes for scalability, security, or custom deployments. Only split them when you have a clear reason to.
+
+## Sections
+
+- [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon): Serve JSON-RPC requests as a separate, remoteable process — the most battle-tested external component.
+- [TxPool](https://docs.erigon.tech/fundamentals/modules/txpool): Manage the pending transaction pool as a standalone service, decoupled from the main node process.
+- [Sentry](https://docs.erigon.tech/fundamentals/modules/sentry): Erigon's network-facing peer-to-peer communication layer, isolatable for security or multi-node setups.
+- [Downloader](https://docs.erigon.tech/fundamentals/modules/downloader): Fetch and verify Erigon snapshots from the BitTorrent network — handles historical data retrieval.
 
 ---
 
@@ -6963,26 +6711,13 @@ curl -X POST http://localhost:8545/graphql \
 # Staking
 URL: https://docs.erigon.tech/staking
 
-Staking
-  Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.
+Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.
 
-  
-    
-    
-  
-  Caplin (Built-in CL)
-  Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.
+## Sections
 
-  
-    
-    
-  
-  External Consensus Client
-  Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.
-
-  
-  Shutter Network
-  Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.
+- [Caplin (Built-in CL)](https://docs.erigon.tech/staking/caplin): Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.
+- [External Consensus Client](https://docs.erigon.tech/staking/external-consensus-client-as-validator): Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.
+- [Shutter Network](https://docs.erigon.tech/staking/shutter-network): Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.
 
 ---
 
@@ -7070,7 +6805,7 @@ lighthouse account validator import --directory <path_to_validator_keys>
 URL: https://docs.erigon.tech/staking/external-consensus-client-as-validator
 
 
-To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighhouse and Prysm to run along with Erigon:
+To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighthouse and Prysm to run along with Erigon:
 
 * [Ethereum](../get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl)
 * [Gnosis Chain](../get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl)
@@ -7100,7 +6835,7 @@ erigon \
   --externalcl \
   --datadir=/data/erigon \
   --chain=sepolia \
-  --authrpc.jwtsecret=/jwt
+  --authrpc.jwtsecret=/jwt \
   --authrpc.addr=0.0.0.0 \
   --http \
   --http.addr=0.0.0.0 \
@@ -7149,7 +6884,7 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1.  **Set Up Your Validator**
 
-    Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+    Deposit your stake and register your validator on Gnosis Chain by following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 2.  **Register as a Shutterized Validator**
 
     Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
@@ -7195,35 +6930,13 @@ Bootstrap nodes are used to help new nodes discover other nodes in the network. 
 # About
 URL: https://docs.erigon.tech/about
 
-About
-  Learn about the project, how to get involved, and the license terms.
+Learn about the project, how to get involved, and the license terms.
 
-  
-    
-    
-    
-    
-  
-  Contributing
-  How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project.
+## Sections
 
-  
-    
-    
-    
-  
-  Disclaimer
-  Important notices about software maturity, stability expectations, and intended use.
-
-  
-    
-    
-    
-    
-    
-  
-  License
-  Erigon's open-source licensing terms and third-party attribution.
+- [Contributing](https://docs.erigon.tech/about/contributing): How to contribute code, report bugs, write docs, and submit pull requests to the Erigon project.
+- [Disclaimer](https://docs.erigon.tech/about/disclaimer): Important notices about software maturity, stability expectations, and intended use.
+- [License](https://docs.erigon.tech/about/license): Erigon's open-source licensing terms and third-party attribution.
 
 ---
 
@@ -7242,7 +6955,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
    git clone https://github.com/<your-username>/erigon.git
    cd erigon
    ```
-2. Build the project (requires Go 1.24+ and a C++ compiler):
+2. Build the project (requires Go 1.25+ and a C++ compiler):
    ```bash
    make erigon
    ```
@@ -7326,52 +7039,16 @@ The Erigon team does not take any responsibility for losses or damages occurred 
 # Help Center
 URL: https://docs.erigon.tech/help-center
 
-Help Center
-  Everything you need to run Erigon smoothly — from quick answers to deep diagnostics.
+Everything you need to run Erigon smoothly — from quick answers to deep diagnostics.
 
-  
-    
-    
-    
-  
-  FAQ
-  Answers to the most common questions about installing, syncing, and operating Erigon.
+## Sections
 
-  
-    
-  
-  Troubleshooting
-  Step-by-step diagnostic guides for the most frequent runtime and sync issues.
-
-  
-    
-    
-    
-  
-  Known Issues
-  Current confirmed bugs, limitations, and active workarounds for this release.
-
-  
-    
-    
-  
-  Best Practices
-  Recommended configurations, operational patterns, and tips for stable long-running nodes.
-
-  
-    
-    
-    
-  
-  Common Errors & Solutions
-  Error messages decoded — causes explained and actionable fixes provided.
-
-  
-    
-    
-  
-  Glossary
-  Definitions of Erigon-specific and Ethereum ecosystem terminology used throughout the docs.
+- [FAQ](https://docs.erigon.tech/help-center/frequently-asked-questions-faqs): Answers to the most common questions about installing, syncing, and operating Erigon.
+- [Troubleshooting](https://docs.erigon.tech/help-center/troubleshooting): Step-by-step diagnostic guides for the most frequent runtime and sync issues.
+- [Known Issues](https://docs.erigon.tech/help-center/known-issues): Current confirmed bugs, limitations, and active workarounds for this release.
+- [Best Practices](https://docs.erigon.tech/help-center/best-practices): Recommended configurations, operational patterns, and tips for stable long-running nodes.
+- [Common Errors & Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions): Error messages decoded — causes explained and actionable fixes provided.
+- [Glossary](https://docs.erigon.tech/help-center/glossary-of-key-terms): Definitions of Erigon-specific and Ethereum ecosystem terminology used throughout the docs.
 
 ---
 
@@ -7621,7 +7298,7 @@ vmtouch -vldt /your/datadir/snapshots/domain
 **Reduce random-read pressure on cloud / NAS storage** — disable the random-access hint for snapshot files:
 
 ```bash
-
+export ERIGON_SNAPSHOT_MADV_RND=false
 ```
 
 **Reduce database fragmentation** — set a larger page size at first sync (cannot be changed afterwards):
