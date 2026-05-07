@@ -189,6 +189,7 @@ var snapshotCommand = cli.Command{
 			Usage: "create snapshots from the specified block number",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
+				&utils.ErigondbDomainStepsInFrozenFileFlag,
 			}),
 		},
 		{
@@ -3192,6 +3193,27 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer br.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
+	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
+		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
+		var v uint64
+		if strings.EqualFold(s, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, perr := strconv.ParseUint(s, 10, 64)
+			if perr != nil || parsed == 0 {
+				return fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
+					utils.ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			v = parsed
+		}
+		stepsStr := "Inf"
+		if v != config3.UnboundedDomainMerge {
+			stepsStr = fmt.Sprintf("%d", v)
+		}
+		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+		agg.SetErigondbDomainStepsInFrozenFile(v)
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
@@ -3285,6 +3307,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			return err
 		}
 	}
+
+	logger.Info("waiting for background build/merge to drain")
+	agg.WaitForFiles()
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
