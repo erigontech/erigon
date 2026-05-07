@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -3089,12 +3090,35 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 				canonical, _, err := hph.ctx.Branch(key)
 				if err == nil && !bytes.Equal(data, canonical) {
 					hph.branchCache.RecordDivergence()
-					log.Warn("[branch-cache] divergence",
+					fields := []any{
 						"prefix", hex.EncodeToString(key),
 						"cached_len", len(data),
 						"canonical_len", len(canonical),
 						"cached", hex.EncodeToString(data),
-						"canonical", hex.EncodeToString(canonical))
+						"canonical", hex.EncodeToString(canonical),
+					}
+					// State-layer probe: sample sd.mem, parent.mem, and
+					// tx-direct (MDBX) for the same key so the log line
+					// shows which layer holds bytes matching the cache
+					// vs ctx.Branch. Decision matrix in
+					// agentspecs/branch-cache-divergence-probe.md.
+					if probe, ok := hph.ctx.(interface {
+						ProbeStateLayers(kv.Domain, []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
+					}); ok {
+						mem, parentMem, mdbx, memOk, parentOk := probe.ProbeStateLayers(kv.CommitmentDomain, key)
+						if memOk {
+							fields = append(fields, "sd_mem", hex.EncodeToString(mem))
+						} else {
+							fields = append(fields, "sd_mem", "miss")
+						}
+						if parentOk {
+							fields = append(fields, "parent_mem", hex.EncodeToString(parentMem))
+						} else {
+							fields = append(fields, "parent_mem", "miss-or-no-parent")
+						}
+						fields = append(fields, "mdbx", hex.EncodeToString(mdbx))
+					}
+					log.Warn("[branch-cache] divergence", fields...)
 				}
 			}
 			return data, nil

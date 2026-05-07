@@ -580,6 +580,31 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 	return sd.stateCache
 }
 
+// ProbeReadLayers samples each independent state layer (this SD's mem,
+// the parent SD's mem, and direct MDBX via tx.GetLatest) and returns
+// the bytes from each. Read-only, intended for divergence-detection
+// diagnostics — pinpoints which layer holds bytes that disagree with
+// the BranchCache when verifyBranchCache is on. Bytes are copied so
+// the caller can hold them past tx lifetime.
+func (sd *SharedDomains) ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
+	if v, _, ok := sd.mem.GetLatest(domain, key); ok {
+		memOk = true
+		mem = append([]byte(nil), v...)
+	}
+	if sd.parent != nil {
+		if v, _, ok := sd.parent.mem.GetLatest(domain, key); ok {
+			parentOk = true
+			parentMem = append([]byte(nil), v...)
+		}
+	}
+	if tx != nil {
+		if v, _, err := tx.GetLatest(domain, key); err == nil {
+			mdbx = append([]byte(nil), v...)
+		}
+	}
+	return
+}
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	// When the commitment calculator goroutine owns the Updates buffer,
 	// skip ClearRam on the commitment context to avoid concurrent btree access.
