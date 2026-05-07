@@ -25,6 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -36,15 +38,22 @@ func TestSendRawTransactionSync(t *testing.T) {
 		t.Skip("too slow for testing.Short")
 	}
 
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	assert := require.New(t)
-	eat := engineapitester.DefaultEngineApiTester(t)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 
 	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)
 
 	// Subscribe to pending transactions to see the arrival of the transaction at the mempool
 	newPendingTxsCh := make(chan string)
-	newPendingSubscription, err := eat.RpcApiClient.Subscribe(t.Context(), "eth_newPendingTransactions", newPendingTxsCh)
+	newPendingSubscription, err := eat.RpcApiClient.Subscribe(ctx, "eth_newPendingTransactions", newPendingTxsCh)
 	assert.NoError(err)
 	defer newPendingSubscription.Unsubscribe()
 
@@ -71,11 +80,11 @@ func TestSendRawTransactionSync(t *testing.T) {
 	}
 
 	// Build up a new canonical block including the transaction
-	clPayload, err := eat.MockCl.BuildCanonicalBlock(t.Context())
+	clPayload, err := eat.MockCl.BuildCanonicalBlock(ctx)
 	assert.NoError(err)
-	err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(t.Context(), clPayload.ExecutionPayload, tx.Hash())
+	err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, tx.Hash())
 	assert.NoError(err)
-	_, err = eat.MockCl.InsertNewPayload(t.Context(), clPayload)
+	_, err = eat.MockCl.InsertNewPayload(ctx, clPayload)
 	assert.NoError(err)
 
 	// Wait for eth_sendRawTransactionSync to return and the expected receipt to show up
@@ -90,8 +99,15 @@ func TestSendRawTransactionSyncTimeout(t *testing.T) {
 		t.Skip("too slow for testing.Short")
 	}
 
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	assert := require.New(t)
-	eat := engineapitester.DefaultEngineApiTester(t)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 
 	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)

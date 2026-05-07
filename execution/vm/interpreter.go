@@ -485,10 +485,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				}
 				return nil, callContext.Gas(), err
 			}
-			cost += dynamicCost.Regular // for tracing
-			callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
-			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
-				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+			if anyTrace {
+				cost += dynamicCost.Regular
+				callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+				}
 			}
 			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
 			// gas charge triggers an out-of-gas error, the state gas charge is
