@@ -16,7 +16,7 @@ import (
 )
 
 // IsBuilderIndex returns true if the given validator index is actually a builder index.
-// Builder indices have the most significant bit (bit 63) set.
+// Builder indices have the BUILDER_INDEX_FLAG bit (bit 40) set.
 func IsBuilderIndex(validatorIndex uint64) bool {
 	return (validatorIndex & clparams.BuilderIndexFlag) != 0
 }
