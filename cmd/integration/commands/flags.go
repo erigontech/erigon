@@ -48,11 +48,12 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode    bool
-	clearCommitment bool
-	resume          bool
-	noHistory       bool
-	syncCfg         = ethconfig.Defaults.Sync
+	chainTipMode                    bool
+	clearCommitment                 bool
+	resume                          bool
+	noHistory                       bool
+	erigondbDomainStepsInFrozenFile string
+	syncCfg                         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -201,6 +202,12 @@ func withOutputCsvFile(cmd *cobra.Command) {
 
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+
+func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&erigondbDomainStepsInFrozenFile,
+		utils.ErigondbDomainStepsInFrozenFileFlag.Name, "",
+		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
 // withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
