@@ -81,8 +81,7 @@ func benchBuild(b *testing.B, sharded bool, n int) {
 		b.StopTimer()
 		dir := b.TempDir()
 		fp := filepath.Join(dir, "f")
-		runtime.GC()
-		runtime.GC()
+		runtime.GC() // stable heap baseline before the sampler starts
 		sampler := startPeakSampler(500 * time.Microsecond)
 		b.StartTimer()
 
