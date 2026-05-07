@@ -32,6 +32,7 @@ concurrency:
 permissions:
   actions: write
   contents: read
+  pull-requests: read
 
 jobs:
   # Fast path: detect whether any non-docs files changed.
@@ -69,7 +70,7 @@ jobs:
           fi
 
   lint:
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code != 'false'
+    if: needs.changes.outputs.code != 'false'
     needs: [changes]
     uses: ./.github/workflows/lint.yml
     secrets: inherit
