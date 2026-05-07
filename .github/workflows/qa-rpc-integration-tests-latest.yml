@@ -263,7 +263,7 @@ jobs:
             --repo erigon \
             --commit $(git rev-parse HEAD) \
             --branch ${{ github.ref_name }} \
-            --test_name rpc-integration-tests-latest \
+            --test_name rpc-integration-tests-latest${{ matrix.exec_mode == 'parallel' && '-parallel' || '' }} \
             --chain $CHAIN \
             --runner ${{ runner.name }} \
             --db_version $db_version \
