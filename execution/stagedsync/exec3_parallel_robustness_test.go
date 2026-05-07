@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
 
@@ -440,296 +441,322 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	})
 }
 
-// TestApplyLoopChannelCloseOrder exercises the documented invariant
-// that the exec loop closes commitResults BEFORE applyResults on
-// shutdown. The calculator drains commitResults and signals the apply
-// loop via rootResults; if applyResults closes first, the apply loop
-// can race with the calculator's final commitment write.
+// TestApplyLoopChannelCloseOrder exercises the production
+// closeApplyChannels helper to pin the documented close-order
+// invariant: commitResults BEFORE applyResults. The calculator drains
+// commitResults and signals the apply loop via rootResults; if
+// applyResults closes first, the apply loop can race with the
+// calculator's final commitment write.
 //
-// The exec loop's deferred close in execLoop() does the right thing
-// (commitResults first), but the close ordering is load-bearing —
-// changing it silently corrupts the shutdown sequence. This test
-// captures the shape of the deferred close to pin the order down.
+// The test creates a parallelExecutor with mock channels, calls the
+// production helper, and asserts the order via close-detection on each
+// channel. Reordering the closes inside closeApplyChannels — or
+// dropping the helper and inlining a wrong order back into execLoop —
+// surfaces here.
 func TestApplyLoopChannelCloseOrder(t *testing.T) {
-	commitResults := make(chan struct{})
-	applyResults := make(chan struct{})
-
-	closeOrder := make(chan string, 2)
-
-	// Mimic execLoop's deferred close: commitResults first, then
-	// applyResults.
-	closeBoth := func() {
-		close(commitResults)
-		closeOrder <- "commitResults"
-		close(applyResults)
-		closeOrder <- "applyResults"
+	commit := make(chan applyResult)
+	apply := make(chan applyResult)
+	pe := &parallelExecutor{
+		commitResultsCh: commit,
+		applyResultsCh:  apply,
 	}
 
-	go closeBoth()
-
-	first := <-closeOrder
-	second := <-closeOrder
-
-	if first != "commitResults" {
-		t.Fatalf("commitResults must close first; got close order [%s, %s]", first, second)
+	// closeApplyChannels' return value records the close sequence
+	// inline as each close() succeeds — no goroutine wakeup races.
+	order := pe.closeApplyChannels()
+	if len(order) != 2 {
+		t.Fatalf("closeApplyChannels must close 2 channels, got order=%v", order)
 	}
-	if second != "applyResults" {
-		t.Fatalf("applyResults must close second; got close order [%s, %s]", first, second)
+	if order[0] != "commitResults" || order[1] != "applyResults" {
+		t.Fatalf("close order must be [commitResults, applyResults]; got %v", order)
 	}
 
-	// Sanity: both channels actually closed.
-	if _, ok := <-commitResults; ok {
-		t.Fatal("commitResults not actually closed")
+	// Sanity: both channels are actually closed (read returns ok=false).
+	if _, ok := <-commit; ok {
+		t.Error("commit channel not actually closed")
 	}
-	if _, ok := <-applyResults; ok {
-		t.Fatal("applyResults not actually closed")
+	if _, ok := <-apply; ok {
+		t.Error("apply channel not actually closed")
+	}
+
+	// pe.commitResultsCh and pe.applyResultsCh must be nil-ed by the
+	// helper so subsequent calls are no-ops rather than double-closes.
+	if pe.commitResultsCh != nil {
+		t.Error("closeApplyChannels must nil commitResultsCh after closing")
+	}
+	if pe.applyResultsCh != nil {
+		t.Error("closeApplyChannels must nil applyResultsCh after closing")
+	}
+
+	// Calling the helper again with already-nil fields must be a no-op,
+	// not a panic, and the returned order must be empty.
+	if order := pe.closeApplyChannels(); len(order) != 0 {
+		t.Errorf("closeApplyChannels on already-nil channels must return empty order, got %v", order)
 	}
 }
 
-// TestExecLoopHonorsBlockResultExhausted is the orchestration counterpart
-// to TestApplyLoopPartialBatchReturnsErrLoopExhausted: the apply-loop
-// side gets the "exhausted" surface right (return ErrLoopExhausted, no
-// false-positive missing-block flag), but only if the exec-loop actually
-// closes the apply channels in the partial-batch case. executeBlocks
-// signals partial-batch completion by setting blockResult.Exhausted on
-// the final dispatched block then exiting its goroutine — without
-// closing pe.execRequests, without cancelling ctx. If the exec loop
-// doesn't react to that signal, it parks on its main select forever
-// (no more dispatched requests, no more rws.ResultCh activity, no
-// ctx.Done) and the apply loop never gets the channel-close signal it
-// needs to return ErrLoopExhausted. Symptom in production: chiado
+// TestCloseApplyChannelsDoubleCloseRecovers ensures the safety-net
+// recover in closeApplyChannels actually catches the
+// "close of closed channel" panic when, e.g., a parallel shutdown path
+// closes the channels before the deferred close fires. After the
+// recover, the closed-order slice should NOT include the channel name
+// (since the close() didn't succeed) but the field should still be
+// nilled so subsequent calls are clean no-ops.
+func TestCloseApplyChannelsDoubleCloseRecovers(t *testing.T) {
+	pe := &parallelExecutor{
+		commitResultsCh: make(chan applyResult),
+		applyResultsCh:  make(chan applyResult),
+	}
+	close(pe.commitResultsCh) // pre-closed by the racing path
+	close(pe.applyResultsCh)
+
+	// Must not panic — the helper's recover catches "close of closed channel".
+	order := pe.closeApplyChannels()
+	if len(order) != 0 {
+		t.Errorf("closeApplyChannels on already-closed channels must NOT count them as freshly closed; got order=%v", order)
+	}
+	if pe.commitResultsCh != nil || pe.applyResultsCh != nil {
+		t.Fatal("closeApplyChannels must nil the fields even on double-close")
+	}
+}
+
+// TestExecLoopShouldExitPriority exercises the production
+// execLoopShouldExit helper directly. Each case pins one branch's
+// precedence; reordering the production helper or dropping a branch
+// makes the corresponding case fail. This replaces the earlier
+// model-based decision-tree test that could drift from production.
+//
+// Production background: executeBlocks marks the final dispatched
+// block with Exhausted when the per-cycle block limit is reached, then
+// exits — without closing pe.execRequests, without cancelling ctx. If
+// execLoopShouldExit doesn't honor that signal the exec loop parks on
+// its main select forever waiting for work the dispatcher will never
+// produce. Symptom in production: chiado
 // `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
 // exec from block 0 silently hangs at the first step boundary
-// (block 150662 in chiado's case) — a hang masking a wrong-trie-root
-// failure that issue erigon#20711 originally reported as the visible
-// symptom.
-//
-// We can't reach into the real execLoop without spinning up the full
-// parallel executor + workers + calculator (the same constraint
-// TestApplyLoopPartialBatchReturnsErrLoopExhausted documents). Instead
-// the test runs TWO models of the exec loop's blockResult-handling
-// decision tree against an identical channel-orchestration setup:
-//   - "with fix" (post-fix): mirrors the production precedence
-//     including the Exhausted check — must return cleanly.
-//   - "without fix" (pre-fix): same precedence WITHOUT the Exhausted
-//     check — must hang past the timeout, proving the orchestration
-//     scaffolding genuinely surfaces the bug rather than passing
-//     vacuously.
-//
-// This also locks in the precedence ordering: the Exhausted check
-// must fire after maxBlockNum (otherwise the final-block-of-cycle
-// case where both flags happen to be set would mis-flag as "more
-// work pending") and before StopAfterBlock (which is debug-only).
-func TestExecLoopHonorsBlockResultExhausted(t *testing.T) {
+// (block 150662 in chiado's case) — a hang masking the wrong-trie-root
+// failure that issue erigon#20711 reported as the visible symptom.
+func TestExecLoopShouldExitPriority(t *testing.T) {
 	const (
-		dispatched   = 5  // dispatcher emits this many blockResults
-		maxBlockNum  = 99 // far above dispatched — partial batch
 		batchLimit   = uint64(1 << 30)
-		fakeSizeEst  = uint64(1024) // < batchLimit, so sizeEst path doesn't fire
-		stopAfterBlk = uint64(0)    // disabled
+		smallSizeEst = uint64(1024) // < batchLimit
+		bigSizeEst   = uint64(1<<30) + 1
 	)
 
-	type result struct {
-		exitErr      error
-		triggerCount int
-		hung         bool
+	exhaustedSignal := &ErrLoopExhausted{From: 1, To: 5, Reason: "test"}
+
+	cases := []struct {
+		name           string
+		blockNum       uint64
+		exhausted      *ErrLoopExhausted
+		sizeEst        uint64
+		maxBlockNum    uint64
+		stopAfterBlock uint64
+		want           execLoopExitDecision
+	}{
+		{
+			// No exit condition met — keep processing.
+			name: "continue", blockNum: 5, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopContinue,
+		},
+		{
+			// Size limit alone — fires regardless of other state.
+			name:     "size limit fires before maxBlockNum",
+			blockNum: 5, sizeEst: bigSizeEst, maxBlockNum: 99,
+			want: execLoopExitSizeLimit,
+		},
+		{
+			// maxBlockNum alone — flag for clean batch end.
+			name:     "maxBlockNum reached",
+			blockNum: 99, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitMaxReached,
+		},
+		{
+			// Final dispatched block carries Exhausted — partial batch.
+			name:     "Exhausted on partial batch",
+			blockNum: 5, exhausted: exhaustedSignal, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitExhausted,
+		},
+		{
+			// dbg.StopAfterBlock crossed — debug halt.
+			name:     "stopAfterBlock crossed",
+			blockNum: 7, sizeEst: smallSizeEst, maxBlockNum: 99, stopAfterBlock: 5,
+			want: execLoopExitStopAfter,
+		},
+		{
+			// stopAfterBlock=0 means disabled — must NOT fire.
+			name:     "stopAfterBlock=0 disabled",
+			blockNum: 7, sizeEst: smallSizeEst, maxBlockNum: 99, stopAfterBlock: 0,
+			want: execLoopContinue,
+		},
+		// Precedence: when MULTIPLE conditions overlap, only the
+		// highest-priority one wins. Reordering the helper would flip
+		// these cases.
+		{
+			// Final block of a cycle that ALSO reaches maxBlockNum.
+			// maxBlockNum must win (clean nil return) — Exhausted
+			// would mis-flag the batch as "more work pending".
+			name:     "precedence: maxBlockNum beats Exhausted",
+			blockNum: 99, exhausted: exhaustedSignal, sizeEst: smallSizeEst, maxBlockNum: 99,
+			want: execLoopExitMaxReached,
+		},
+		{
+			// Size limit at the same block that also reached max.
+			// Size limit wins — most urgent (sd.mem is over budget).
+			name:     "precedence: sizeLimit beats maxBlockNum",
+			blockNum: 99, sizeEst: bigSizeEst, maxBlockNum: 99,
+			want: execLoopExitSizeLimit,
+		},
+		{
+			// Exhausted set together with stopAfterBlock crossed.
+			// Exhausted wins — production stops the partial batch
+			// rather than masking it with the debug halt.
+			name:     "precedence: Exhausted beats stopAfterBlock",
+			blockNum: 7, exhausted: exhaustedSignal, sizeEst: smallSizeEst,
+			maxBlockNum: 99, stopAfterBlock: 5,
+			want: execLoopExitExhausted,
+		},
 	}
 
-	// runModel runs `dispatched` blockResults through `model`, with the
-	// last carrying Exhausted. Returns whether `model` exited cleanly,
-	// and how many times the trigger-equivalent fired.
-	runModel := func(model func(br *blockResult, trigger func()) (done bool)) result {
-		br := make(chan *blockResult, dispatched)
-
-		// Dispatcher mirrors executeBlocks's partial-batch exit: send,
-		// return — do NOT close the channel (the production exec loop
-		// owns close ordering).
-		go func() {
-			for i := uint64(1); i <= dispatched; i++ {
-				r := &blockResult{BlockNum: i}
-				if i == dispatched {
-					r.Exhausted = &ErrLoopExhausted{From: 1, To: i, Reason: "block limit reached"}
-				}
-				br <- r
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			br := &blockResult{BlockNum: tc.blockNum, Exhausted: tc.exhausted}
+			got := execLoopShouldExit(br, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
+			if got != tc.want {
+				t.Fatalf("execLoopShouldExit got %v, want %v", got, tc.want)
 			}
-		}()
-
-		var triggerCount int
-		trigger := func() { triggerCount++ }
-		exited := make(chan error, 1)
-		// Inner ctx lets the goroutine cooperate with the outer timeout
-		// without leaking when the model hangs on <-br. We translate
-		// "exited via ctx" to result.hung — that is the hang signal.
-		// 300ms is plenty for the in-memory channel + closure dispatch
-		// loop to either complete or genuinely block; the outer 500ms
-		// safety net catches the case where the model doesn't even
-		// respect ctx (which would itself be a different bug).
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		defer cancel()
-
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					exited <- ctx.Err()
-					return
-				case b := <-br:
-					if model(b, trigger) {
-						exited <- nil
-						return
-					}
-				}
-			}
-		}()
-
-		select {
-		case err := <-exited:
-			if errors.Is(err, context.DeadlineExceeded) {
-				// Model couldn't make progress — only escape was the
-				// inner ctx timeout. That's the hang signal.
-				return result{hung: true, triggerCount: triggerCount}
-			}
-			return result{exitErr: err, triggerCount: triggerCount}
-		case <-time.After(500 * time.Millisecond):
-			// Outer safety net — model didn't even respect ctx. Still a
-			// hang, just a different shape.
-			return result{hung: true, triggerCount: triggerCount}
-		}
+		})
 	}
-
-	// Production decision tree, mirroring exec3_parallel.go's
-	//   if blockResult != nil { ... } block:
-	//     1. sizeEst > batchLimit → trigger + return
-	//     2. blockResult.BlockNum >= maxBlockNum → reachedMaxBlock + trigger + return
-	//     3. blockResult.Exhausted != nil → trigger + return
-	//     4. dbg.StopAfterBlock → trigger + return
-	//     5. fall through to next-block scheduling.
-	withFix := func(b *blockResult, trigger func()) (done bool) {
-		if fakeSizeEst > batchLimit {
-			trigger()
-			return true
-		}
-		if b.BlockNum >= maxBlockNum {
-			trigger()
-			return true
-		}
-		if b.Exhausted != nil {
-			trigger()
-			return true
-		}
-		if stopAfterBlk > 0 && b.BlockNum >= stopAfterBlk {
-			trigger()
-			return true
-		}
-		return false
-	}
-
-	// Pre-fix decision tree: same as withFix but missing the Exhausted
-	// branch — i.e. the production code as it stood when issue #20711
-	// was first reported.
-	withoutFix := func(b *blockResult, trigger func()) (done bool) {
-		if fakeSizeEst > batchLimit {
-			trigger()
-			return true
-		}
-		if b.BlockNum >= maxBlockNum {
-			trigger()
-			return true
-		}
-		if stopAfterBlk > 0 && b.BlockNum >= stopAfterBlk {
-			trigger()
-			return true
-		}
-		return false
-	}
-
-	t.Run("with fix — exec loop returns cleanly on Exhausted", func(t *testing.T) {
-		r := runModel(withFix)
-		if r.hung {
-			t.Fatal("post-fix model hung past timeout — fix is not effective")
-		}
-		if r.exitErr != nil {
-			t.Fatalf("post-fix model exited with %v, want nil", r.exitErr)
-		}
-		if r.triggerCount != 1 {
-			t.Fatalf("post-fix model: triggerBatchCommitment-equivalent must fire exactly once on Exhausted, got %d", r.triggerCount)
-		}
-	})
-
-	t.Run("without fix — exec loop hangs (regression guard)", func(t *testing.T) {
-		r := runModel(withoutFix)
-		if !r.hung {
-			t.Fatalf("pre-fix model did not hang as expected — orchestration scaffolding is wrong; result=%+v", r)
-		}
-		if r.triggerCount != 0 {
-			t.Fatalf("pre-fix model fired trigger %d times — should be 0 because no exit branch matches", r.triggerCount)
-		}
-	})
 }
 
-// TestExecLoopExhaustedOnlySetOnFinalBlock is a guard against future
-// regressions in the dispatcher: blockResult.Exhausted being set on a
-// non-final block would cause the exec loop to drop later blocks that
-// have already been queued. Locks down the precedence: among blocks in
-// flight, only the trailing dispatched block's Exhausted is honored —
-// any earlier Exhausted signal would short-circuit the batch and lose
-// already-scheduled work. This test pins the convention to exec3.go's
-// `if exhausted != nil { break }` after dispatch: the break ensures
-// no later blockResult is produced once Exhausted is set on a
-// dispatched request.
-func TestExecLoopExhaustedOnlySetOnFinalBlock(t *testing.T) {
-	// Simulate executeBlocks' loop: it sets exhausted, dispatches the
-	// blockResult containing it, and breaks out — no further blocks.
-	// Verify the convention: count(Exhausted != nil) == 1 always, and
-	// it's always the last blockResult.
-	type dispatched struct {
-		num       uint64
-		exhausted bool
+// TestShouldMarkExhaustedAtBlock exercises the production
+// shouldMarkExhaustedAtBlock helper directly. The helper is the gate
+// that decides whether executeBlocks stamps a dispatched block with
+// Exhausted; misjudging this either causes the exec loop to park
+// forever (Exhausted not set when it should be) or trims a batch
+// short (set when it shouldn't be).
+//
+// The "only-set-on-final-block" structural property — that
+// executeBlocks runs `if exhausted != nil { break }` immediately
+// after stamping, so no later block is dispatched in the same cycle —
+// is enforced by the explicit `break` at exec3.go's call site rather
+// than by the helper itself; that's a single line of code that can be
+// reasoned about by inspection. This test focuses on the helper's
+// own decision matrix.
+func TestShouldMarkExhaustedAtBlock(t *testing.T) {
+	cases := []struct {
+		name                                             string
+		initialCycle                                     bool
+		lastExecutedStep, lastFrozenStep                 kv.Step
+		discardCommitment                                bool
+		blockLimit, blockNum, startBlockNum, maxBlockNum uint64
+		want                                             bool
+	}{
+		{
+			// Later cycle, blockLimit reached mid-batch — must mark.
+			name:          "later cycle, limit reached",
+			blockLimit:    10,
+			blockNum:      100,
+			startBlockNum: 91, // span = 10 == limit
+			maxBlockNum:   200,
+			want:          true,
+		},
+		{
+			// Later cycle, but landed exactly on maxBlockNum — must NOT
+			// mark (the goal block triggers reachedMaxBlock instead).
+			name:          "later cycle, hit maxBlockNum exactly",
+			blockLimit:    10,
+			blockNum:      100,
+			startBlockNum: 91,
+			maxBlockNum:   100,
+			want:          false,
+		},
+		{
+			// blockLimit == 0 means "no per-cycle limit" — must NOT mark
+			// regardless of how far we've progressed.
+			name:          "blockLimit=0 disabled",
+			blockLimit:    0,
+			blockNum:      100,
+			startBlockNum: 1,
+			maxBlockNum:   200,
+			want:          false,
+		},
+		{
+			// Later cycle, span < limit — keep going.
+			name:          "later cycle, span below limit",
+			blockLimit:    10,
+			blockNum:      95,
+			startBlockNum: 91, // span = 5 < 10
+			maxBlockNum:   200,
+			want:          false,
+		},
+		{
+			// Initial cycle, no frozen progress yet — gate closed.
+			name:             "initial cycle, no step progress",
+			initialCycle:     true,
+			lastExecutedStep: 0,
+			lastFrozenStep:   0,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             false,
+		},
+		{
+			// Initial cycle, lastExecutedStep > lastFrozenStep AND not
+			// DiscardCommitment — gate open, limit reached.
+			name:             "initial cycle, step progressed, limit reached",
+			initialCycle:     true,
+			lastExecutedStep: 5,
+			lastFrozenStep:   3,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             true,
+		},
+		{
+			// Initial cycle, step progressed but DiscardCommitment is
+			// on — gate stays closed (a partial-batch flush would lose
+			// the in-memory commitment).
+			name:              "initial cycle, DiscardCommitment masks step progress",
+			initialCycle:      true,
+			lastExecutedStep:  5,
+			lastFrozenStep:    3,
+			discardCommitment: true,
+			blockLimit:        10,
+			blockNum:          100,
+			startBlockNum:     91,
+			maxBlockNum:       200,
+			want:              false,
+		},
+		{
+			// Initial cycle, lastExecutedStep == lastFrozenStep — no
+			// new committable step yet, gate closed.
+			name:             "initial cycle, step not advanced past frozen",
+			initialCycle:     true,
+			lastExecutedStep: 3,
+			lastFrozenStep:   3,
+			blockLimit:       10,
+			blockNum:         100,
+			startBlockNum:    91,
+			maxBlockNum:      200,
+			want:             false,
+		},
 	}
-	dispatch := func(blocks []dispatched) error {
-		var prevExhausted bool
-		for _, b := range blocks {
-			if prevExhausted {
-				return errors.New("dispatched a block after Exhausted was set — exec loop would drop it")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldMarkExhaustedAtBlock(
+				tc.initialCycle, tc.lastExecutedStep, tc.lastFrozenStep,
+				tc.discardCommitment,
+				tc.blockLimit, tc.blockNum, tc.startBlockNum, tc.maxBlockNum,
+			)
+			if got != tc.want {
+				t.Fatalf("shouldMarkExhaustedAtBlock got %v, want %v", got, tc.want)
 			}
-			if b.exhausted {
-				prevExhausted = true
-			}
-		}
-		return nil
+		})
 	}
-
-	t.Run("Exhausted only on last block — valid", func(t *testing.T) {
-		err := dispatch([]dispatched{
-			{num: 1, exhausted: false},
-			{num: 2, exhausted: false},
-			{num: 3, exhausted: true},
-		})
-		if err != nil {
-			t.Fatalf("valid case rejected: %v", err)
-		}
-	})
-
-	t.Run("no Exhausted — valid (full-batch path)", func(t *testing.T) {
-		err := dispatch([]dispatched{
-			{num: 1, exhausted: false},
-			{num: 2, exhausted: false},
-		})
-		if err != nil {
-			t.Fatalf("valid case rejected: %v", err)
-		}
-	})
-
-	t.Run("Exhausted mid-stream — invalid (regression guard)", func(t *testing.T) {
-		err := dispatch([]dispatched{
-			{num: 1, exhausted: false},
-			{num: 2, exhausted: true},
-			{num: 3, exhausted: false},
-		})
-		if err == nil {
-			t.Fatal("dispatch convention violated: blockResult emitted after Exhausted")
-		}
-	})
 }
 
 // sameSet compares two slices ignoring order. Used because
