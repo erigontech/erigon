@@ -70,7 +70,7 @@ jobs:
       - name: Prepare update branch
         run: |
           BRANCH="docs/auto/disk-sizes"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
             git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
           else
@@ -136,12 +136,12 @@ jobs:
           EXISTING=$(gh pr list --head $BRANCH --state open --json number --jq '.[0].number' 2>/dev/null)
 
           if [ -z "$EXISTING" ]; then
-              gh pr create \
-                --draft \
-                --head "$BRANCH" \
-                --base "${BASE_BRANCH}" \
-                --title "docs: auto-update disk size measurements ($TODAY)" \
-                --body "$(cat <<'EOF'
+            gh pr create \
+              --draft \
+              --head "$BRANCH" \
+              --base "${BASE_BRANCH}" \
+              --title "docs: auto-update disk size measurements ($TODAY)" \
+              --body "$(cat <<'EOF'
                 ## Automated disk size update
 
                 Opened automatically by the **Docs - Update disk sizes** CI workflow after a successful sync-from-scratch run.
