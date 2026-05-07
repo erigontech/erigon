@@ -70,8 +70,8 @@ jobs:
       - name: Prepare update branch
         run: |
           BRANCH="docs/auto/disk-sizes"
-          git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
-          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; then
+            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
             git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
           else
             git checkout -B "$BRANCH"
