@@ -31,8 +31,8 @@ func TestBranchCache_RootPinning(t *testing.T) {
 
 	rootKey := []byte{0x00} // compact-encoded empty nibble path = root branch
 	deepKey := []byte{0x12, 0x34, 0x56}
-	c.Put(rootKey, []byte("root-data"))
-	c.Put(deepKey, []byte("deep-data"))
+	c.Put(rootKey, []byte("root-data"), "test")
+	c.Put(deepKey, []byte("deep-data"), "test")
 
 	// Root reads should increment rootHits, not tailHits
 	got, ok := c.Get(rootKey)
@@ -55,11 +55,11 @@ func TestBranchCache_RootPinning(t *testing.T) {
 func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	c := NewBranchCache(10) // very small tail
 	rootKey := []byte{0x00}
-	c.Put(rootKey, []byte("ROOT-PERSISTS"))
+	c.Put(rootKey, []byte("ROOT-PERSISTS"), "test")
 
 	// Stuff the tail well past capacity
 	for i := 0; i < 100; i++ {
-		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)})
+		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, "test")
 	}
 
 	// Root must still be there
@@ -78,20 +78,20 @@ func TestBranchCache_DirtyFlag(t *testing.T) {
 	c := NewBranchCache(100)
 	key := []byte{0x12, 0x34}
 
-	require.True(t, c.PutIfClean(key, []byte("v1")))
+	require.True(t, c.PutIfClean(key, []byte("v1"), "test"))
 	c.MarkDirty(key)
 
-	require.False(t, c.PutIfClean(key, []byte("v2")), "PutIfClean must refuse dirty entry")
+	require.False(t, c.PutIfClean(key, []byte("v2"), "test"), "PutIfClean must refuse dirty entry")
 	got, _ := c.Get(key)
 	require.Equal(t, []byte("v1"), got, "dirty entry's data preserved")
 
 	// Unconditional Put replaces
-	c.Put(key, []byte("v3"))
+	c.Put(key, []byte("v3"), "test")
 	got, _ = c.Get(key)
 	require.Equal(t, []byte("v3"), got)
 
 	// New entry is clean
-	require.True(t, c.PutIfClean(key, []byte("v4")))
+	require.True(t, c.PutIfClean(key, []byte("v4"), "test"))
 }
 
 // TestBranchCache_GetDecoded verifies the lazy-decode read path for a
@@ -106,7 +106,7 @@ func TestBranchCache_GetDecoded(t *testing.T) {
 	require.NoError(t, err)
 
 	prefix := []byte{0x12, 0x34}
-	c.Put(prefix, enc)
+	c.Put(prefix, enc, "test")
 
 	// First decoded-read decodes lazily
 	bitmap, cells, ok := c.GetDecoded(prefix)
@@ -130,8 +130,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 	c := NewBranchCache(100)
 	rootKey := []byte{0x00}
 	deepKey := []byte{0x12, 0x34}
-	c.Put(rootKey, []byte("r"))
-	c.Put(deepKey, []byte("d"))
+	c.Put(rootKey, []byte("r"), "test")
+	c.Put(deepKey, []byte("d"), "test")
 
 	c.Invalidate(rootKey)
 	_, ok := c.Get(rootKey)
@@ -145,8 +145,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 // TestBranchCache_Clear empties everything and resets stats.
 func TestBranchCache_Clear(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("r"))
-	c.Put([]byte{0x12}, []byte("d"))
+	c.Put([]byte{0x00}, []byte("r"), "test")
+	c.Put([]byte{0x12}, []byte("d"), "test")
 	c.Get([]byte{0x00})
 	c.Get([]byte{0x12})
 
@@ -166,8 +166,8 @@ func TestBranchCache_Clear(t *testing.T) {
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("rrr"))
-	c.Put([]byte{0x12, 0x34}, []byte("ddd"))
+	c.Put([]byte{0x00}, []byte("rrr"), "test")
+	c.Put([]byte{0x12, 0x34}, []byte("ddd"), "test")
 	c.Get([]byte{0x00})
 	c.Get([]byte{0x12, 0x34})
 	c.Get([]byte{0xff}) // tail miss
