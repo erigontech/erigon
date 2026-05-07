@@ -348,10 +348,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// its tx-results arrived but the trailing blockResult never did
 					// — exactly the silent-failure mode this catches.
 					//
-					// Also flag the case where maxBlockNum was never reached at all
-					// (no blockResult for it) but the channel closed cleanly: that
-					// means the exec loop signaled "done" without delivering the
-					// final block.
+					// Not reaching maxBlockNum is a normal partial-batch state: when
+					// the exec loop hits its size budget mid-batch it returns nil with
+					// reachedMaxBlock=false, the apply loop drops out via the
+					// ErrLoopExhausted return below, and the stage loop resumes from
+					// lastBlockResult+1 in a follow-up call. Each block still executes
+					// exactly once across the two batches, so we deliberately do NOT
+					// flag maxBlockNum-not-applied here.
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
@@ -898,9 +901,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				// executeBlocks marks the final dispatched block with Exhausted
-				// when the per-cycle block limit is reached (initialCycle gates
-				// it on crossing a step boundary; later cycles enforce it
-				// unconditionally). Once that block's result has been applied,
+				// when the per-cycle block limit is reached (on the initial cycle
+				// the limit only kicks in after crossing a step boundary AND when
+				// commitments aren't being discarded — see exec3.go:675; later
+				// cycles enforce it unconditionally). Once that block's result
+				// has been applied,
 				// no further execRequests will arrive — executeBlocks's loop
 				// exited via `break`. Without honoring this signal here, the
 				// exec loop parks forever on its main select waiting for work

@@ -358,6 +358,14 @@ func TestExecLoopExitCheckConcurrentReads(t *testing.T) {
 // into an InvalidBlock error. This test locks in the corrected
 // behavior: completeness check sees no missing → exhausted → stage
 // loop continues — no re-execution.
+//
+// IMPORTANT: this test models the apply-loop's exit-branch decision
+// rather than driving the production apply loop end-to-end (which would
+// require full parallel-executor + workers + calculator setup). The
+// `run` closure is a hand-coded mirror of the production sequence in
+// exec3_parallel.go around line 355: applyLoopMissingBlocks → reachedMaxBlock
+// check → ErrLoopExhausted. If those production lines change, this
+// closure must be updated in lock-step or the test will pass vacuously.
 func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	// Simulate the apply loop's exit-branch decision sequence.
 	// (We cannot run the full apply loop in a unit test — requires the
@@ -365,30 +373,29 @@ func TestApplyLoopPartialBatchReturnsErrLoopExhausted(t *testing.T) {
 	// test covers the same decision tree that exec3_parallel.go runs
 	// after the applyResults channel closes.)
 	type result struct {
-		err          error
-		isExhausted  bool
-		isInvalid    bool
-		isOK         bool
-		errSubstring string
+		err         error
+		isExhausted bool
+		isInvalid   bool
+		isOK        bool
 	}
 
 	run := func(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, lastBlockResult, maxBlockNum, startBlockNum uint64) result {
 		// The decision tree (mirroring exec3_parallel.go's
-		// applyResults-close branch in execErr's anonymous func):
+		// applyResults-close branch in execErr's anonymous func around
+		// line 355 — keep these branches in sync with the production
+		// sequence):
 		if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 			return result{
-				err:          errors.New("invalid block: missing blocks"),
-				isInvalid:    true,
-				errSubstring: "invalid block",
+				err:       errors.New("invalid block: missing blocks"),
+				isInvalid: true,
 			}
 		}
 		if reachedMaxBlock {
 			return result{isOK: true}
 		}
 		return result{
-			err:          &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"},
-			isExhausted:  true,
-			errSubstring: "exhausted",
+			err:         &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult, Reason: "block batch is full"},
+			isExhausted: true,
 		}
 	}
 
@@ -553,7 +560,11 @@ func TestExecLoopHonorsBlockResultExhausted(t *testing.T) {
 		// Inner ctx lets the goroutine cooperate with the outer timeout
 		// without leaking when the model hangs on <-br. We translate
 		// "exited via ctx" to result.hung — that is the hang signal.
-		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		// 300ms is plenty for the in-memory channel + closure dispatch
+		// loop to either complete or genuinely block; the outer 500ms
+		// safety net catches the case where the model doesn't even
+		// respect ctx (which would itself be a different bug).
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 		defer cancel()
 
 		go func() {
@@ -579,7 +590,7 @@ func TestExecLoopHonorsBlockResultExhausted(t *testing.T) {
 				return result{hung: true, triggerCount: triggerCount}
 			}
 			return result{exitErr: err, triggerCount: triggerCount}
-		case <-time.After(2 * time.Second):
+		case <-time.After(500 * time.Millisecond):
 			// Outer safety net — model didn't even respect ctx. Still a
 			// hang, just a different shape.
 			return result{hung: true, triggerCount: triggerCount}
