@@ -1354,16 +1354,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 	}
 
+	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
+	// last write in an older .kv is still found (walkback bounded by maxTxNum).
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		// Walkback semantics: walk newest→oldest, return first match. With a non-zero
-		// maxTxNum we only skip files that start strictly after maxTxNum (entirely
-		// post-limit). Files at-or-before the limit — including the file containing
-		// maxTxNum and all earlier files — are searched, so a key whose latest write
-		// is in an older .kv (e.g. last modified at step 30 when querying at step
-		// 192) is still found. Earlier behaviour also skipped files ending before
-		// maxTxNum, which broke walkback and silently returned nil for keys not in
-		// the boundary file (commitment branches and state values that live in older
-		// frozen .kv files).
 		if maxTxNum != math.MaxUint64 && dt.files[i].startTxNum > maxTxNum {
 			continue
 		}
