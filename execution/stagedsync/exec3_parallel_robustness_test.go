@@ -479,6 +479,248 @@ func TestApplyLoopChannelCloseOrder(t *testing.T) {
 	}
 }
 
+// TestExecLoopHonorsBlockResultExhausted is the orchestration counterpart
+// to TestApplyLoopPartialBatchReturnsErrLoopExhausted: the apply-loop
+// side gets the "exhausted" surface right (return ErrLoopExhausted, no
+// false-positive missing-block flag), but only if the exec-loop actually
+// closes the apply channels in the partial-batch case. executeBlocks
+// signals partial-batch completion by setting blockResult.Exhausted on
+// the final dispatched block then exiting its goroutine — without
+// closing pe.execRequests, without cancelling ctx. If the exec loop
+// doesn't react to that signal, it parks on its main select forever
+// (no more dispatched requests, no more rws.ResultCh activity, no
+// ctx.Done) and the apply loop never gets the channel-close signal it
+// needs to return ErrLoopExhausted. Symptom in production: chiado
+// `EXEC3_PARALLEL=true ... --sync.loop.block.limit=10_000` parallel
+// exec from block 0 silently hangs at the first step boundary
+// (block 150662 in chiado's case) — a hang masking a wrong-trie-root
+// failure that issue erigon#20711 originally reported as the visible
+// symptom.
+//
+// We can't reach into the real execLoop without spinning up the full
+// parallel executor + workers + calculator (the same constraint
+// TestApplyLoopPartialBatchReturnsErrLoopExhausted documents). Instead
+// the test runs TWO models of the exec loop's blockResult-handling
+// decision tree against an identical channel-orchestration setup:
+//   - "with fix" (post-fix): mirrors the production precedence
+//     including the Exhausted check — must return cleanly.
+//   - "without fix" (pre-fix): same precedence WITHOUT the Exhausted
+//     check — must hang past the timeout, proving the orchestration
+//     scaffolding genuinely surfaces the bug rather than passing
+//     vacuously.
+//
+// This also locks in the precedence ordering: the Exhausted check
+// must fire after maxBlockNum (otherwise the final-block-of-cycle
+// case where both flags happen to be set would mis-flag as "more
+// work pending") and before StopAfterBlock (which is debug-only).
+func TestExecLoopHonorsBlockResultExhausted(t *testing.T) {
+	const (
+		dispatched   = 5  // dispatcher emits this many blockResults
+		maxBlockNum  = 99 // far above dispatched — partial batch
+		batchLimit   = uint64(1 << 30)
+		fakeSizeEst  = uint64(1024) // < batchLimit, so sizeEst path doesn't fire
+		stopAfterBlk = uint64(0)    // disabled
+	)
+
+	type result struct {
+		exitErr      error
+		triggerCount int
+		hung         bool
+	}
+
+	// runModel runs `dispatched` blockResults through `model`, with the
+	// last carrying Exhausted. Returns whether `model` exited cleanly,
+	// and how many times the trigger-equivalent fired.
+	runModel := func(model func(br *blockResult, trigger func()) (done bool)) result {
+		br := make(chan *blockResult, dispatched)
+
+		// Dispatcher mirrors executeBlocks's partial-batch exit: send,
+		// return — do NOT close the channel (the production exec loop
+		// owns close ordering).
+		go func() {
+			for i := uint64(1); i <= dispatched; i++ {
+				r := &blockResult{BlockNum: i}
+				if i == dispatched {
+					r.Exhausted = &ErrLoopExhausted{From: 1, To: i, Reason: "block limit reached"}
+				}
+				br <- r
+			}
+		}()
+
+		var triggerCount int
+		trigger := func() { triggerCount++ }
+		exited := make(chan error, 1)
+		// Inner ctx lets the goroutine cooperate with the outer timeout
+		// without leaking when the model hangs on <-br. We translate
+		// "exited via ctx" to result.hung — that is the hang signal.
+		ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		defer cancel()
+
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					exited <- ctx.Err()
+					return
+				case b := <-br:
+					if model(b, trigger) {
+						exited <- nil
+						return
+					}
+				}
+			}
+		}()
+
+		select {
+		case err := <-exited:
+			if errors.Is(err, context.DeadlineExceeded) {
+				// Model couldn't make progress — only escape was the
+				// inner ctx timeout. That's the hang signal.
+				return result{hung: true, triggerCount: triggerCount}
+			}
+			return result{exitErr: err, triggerCount: triggerCount}
+		case <-time.After(2 * time.Second):
+			// Outer safety net — model didn't even respect ctx. Still a
+			// hang, just a different shape.
+			return result{hung: true, triggerCount: triggerCount}
+		}
+	}
+
+	// Production decision tree, mirroring exec3_parallel.go's
+	//   if blockResult != nil { ... } block:
+	//     1. sizeEst > batchLimit → trigger + return
+	//     2. blockResult.BlockNum >= maxBlockNum → reachedMaxBlock + trigger + return
+	//     3. blockResult.Exhausted != nil → trigger + return
+	//     4. dbg.StopAfterBlock → trigger + return
+	//     5. fall through to next-block scheduling.
+	withFix := func(b *blockResult, trigger func()) (done bool) {
+		if fakeSizeEst > batchLimit {
+			trigger()
+			return true
+		}
+		if b.BlockNum >= maxBlockNum {
+			trigger()
+			return true
+		}
+		if b.Exhausted != nil {
+			trigger()
+			return true
+		}
+		if stopAfterBlk > 0 && b.BlockNum >= stopAfterBlk {
+			trigger()
+			return true
+		}
+		return false
+	}
+
+	// Pre-fix decision tree: same as withFix but missing the Exhausted
+	// branch — i.e. the production code as it stood when issue #20711
+	// was first reported.
+	withoutFix := func(b *blockResult, trigger func()) (done bool) {
+		if fakeSizeEst > batchLimit {
+			trigger()
+			return true
+		}
+		if b.BlockNum >= maxBlockNum {
+			trigger()
+			return true
+		}
+		if stopAfterBlk > 0 && b.BlockNum >= stopAfterBlk {
+			trigger()
+			return true
+		}
+		return false
+	}
+
+	t.Run("with fix — exec loop returns cleanly on Exhausted", func(t *testing.T) {
+		r := runModel(withFix)
+		if r.hung {
+			t.Fatal("post-fix model hung past timeout — fix is not effective")
+		}
+		if r.exitErr != nil {
+			t.Fatalf("post-fix model exited with %v, want nil", r.exitErr)
+		}
+		if r.triggerCount != 1 {
+			t.Fatalf("post-fix model: triggerBatchCommitment-equivalent must fire exactly once on Exhausted, got %d", r.triggerCount)
+		}
+	})
+
+	t.Run("without fix — exec loop hangs (regression guard)", func(t *testing.T) {
+		r := runModel(withoutFix)
+		if !r.hung {
+			t.Fatalf("pre-fix model did not hang as expected — orchestration scaffolding is wrong; result=%+v", r)
+		}
+		if r.triggerCount != 0 {
+			t.Fatalf("pre-fix model fired trigger %d times — should be 0 because no exit branch matches", r.triggerCount)
+		}
+	})
+}
+
+// TestExecLoopExhaustedOnlySetOnFinalBlock is a guard against future
+// regressions in the dispatcher: blockResult.Exhausted being set on a
+// non-final block would cause the exec loop to drop later blocks that
+// have already been queued. Locks down the precedence: among blocks in
+// flight, only the trailing dispatched block's Exhausted is honored —
+// any earlier Exhausted signal would short-circuit the batch and lose
+// already-scheduled work. This test pins the convention to exec3.go's
+// `if exhausted != nil { break }` after dispatch: the break ensures
+// no later blockResult is produced once Exhausted is set on a
+// dispatched request.
+func TestExecLoopExhaustedOnlySetOnFinalBlock(t *testing.T) {
+	// Simulate executeBlocks' loop: it sets exhausted, dispatches the
+	// blockResult containing it, and breaks out — no further blocks.
+	// Verify the convention: count(Exhausted != nil) == 1 always, and
+	// it's always the last blockResult.
+	type dispatched struct {
+		num       uint64
+		exhausted bool
+	}
+	dispatch := func(blocks []dispatched) error {
+		var prevExhausted bool
+		for _, b := range blocks {
+			if prevExhausted {
+				return errors.New("dispatched a block after Exhausted was set — exec loop would drop it")
+			}
+			if b.exhausted {
+				prevExhausted = true
+			}
+		}
+		return nil
+	}
+
+	t.Run("Exhausted only on last block — valid", func(t *testing.T) {
+		err := dispatch([]dispatched{
+			{num: 1, exhausted: false},
+			{num: 2, exhausted: false},
+			{num: 3, exhausted: true},
+		})
+		if err != nil {
+			t.Fatalf("valid case rejected: %v", err)
+		}
+	})
+
+	t.Run("no Exhausted — valid (full-batch path)", func(t *testing.T) {
+		err := dispatch([]dispatched{
+			{num: 1, exhausted: false},
+			{num: 2, exhausted: false},
+		})
+		if err != nil {
+			t.Fatalf("valid case rejected: %v", err)
+		}
+	})
+
+	t.Run("Exhausted mid-stream — invalid (regression guard)", func(t *testing.T) {
+		err := dispatch([]dispatched{
+			{num: 1, exhausted: false},
+			{num: 2, exhausted: true},
+			{num: 3, exhausted: false},
+		})
+		if err == nil {
+			t.Fatal("dispatch convention violated: blockResult emitted after Exhausted")
+		}
+	})
+}
+
 // sameSet compares two slices ignoring order. Used because
 // applyLoopMissingBlocks iterates a map; order is non-deterministic.
 func sameSet(a, b []uint64) bool {

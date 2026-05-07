@@ -897,6 +897,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					return nil
 				}
 
+				// executeBlocks marks the final dispatched block with Exhausted
+				// when the per-cycle block limit is reached (initialCycle gates
+				// it on crossing a step boundary; later cycles enforce it
+				// unconditionally). Once that block's result has been applied,
+				// no further execRequests will arrive — executeBlocks's loop
+				// exited via `break`. Without honoring this signal here, the
+				// exec loop parks forever on its main select waiting for work
+				// the dispatcher will never produce. Closing channels via the
+				// deferred close lets the apply loop return ErrLoopExhausted
+				// so the stage loop resumes from blockResult.BlockNum+1.
+				if blockResult.Exhausted != nil {
+					pe.triggerBatchCommitment(ctx)
+					return nil
+				}
+
 				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
 					pe.triggerBatchCommitment(ctx)
 					return nil
