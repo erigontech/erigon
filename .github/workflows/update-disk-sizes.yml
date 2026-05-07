@@ -1,0 +1,151 @@
+name: Docs - Update disk sizes
+
+# Triggers after a successful sync-from-scratch run (full or minimal node).
+# Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
+# and opens (or updates) a draft PR against main.
+on:
+  workflow_run:
+    workflows:
+      - "QA - Sync from scratch"
+      - "QA - Sync from scratch (minimal node)"
+    types:
+      - completed
+    branches:
+      - release/3.*
+      - main
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Workflow run ID to pull disk-usage artifacts from"
+        required: true
+      prune_mode:
+        description: "Prune mode measured in that run"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - full
+          - minimal
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  update-disk-sizes:
+    # For workflow_run: only proceed on success.
+    # For workflow_dispatch: always proceed.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Determine prune mode and source run ID
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "PRUNE_MODE=${{ github.event.inputs.prune_mode }}" >> $GITHUB_ENV
+            echo "SOURCE_RUN_ID=${{ github.event.inputs.run_id }}" >> $GITHUB_ENV
+          elif [[ "${{ github.event.workflow_run.name }}" == *"minimal"* ]]; then
+            echo "PRUNE_MODE=minimal" >> $GITHUB_ENV
+            echo "SOURCE_RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          else
+            echo "PRUNE_MODE=full" >> $GITHUB_ENV
+            echo "SOURCE_RUN_ID=${{ github.event.workflow_run.id }}" >> $GITHUB_ENV
+          fi
+
+      - name: Download disk usage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pattern: disk-usage-*
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -lh ./artifacts/ 2>/dev/null || echo "No artifacts found"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Update disk-sizes.json
+        run: |
+          python3 docs/site/scripts/update-disk-sizes.py \
+            ./artifacts \
+            docs/site/src/data/disk-sizes.json \
+            ${{ env.PRUNE_MODE }}
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet docs/site/src/data/disk-sizes.json; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes to disk-sizes.json"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            git diff docs/site/src/data/disk-sizes.json
+          fi
+
+      - name: Configure git
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push to update branch
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          BRANCH="docs/auto/disk-sizes"
+          git fetch origin $BRANCH 2>/dev/null || true
+          git checkout -B $BRANCH
+          git add docs/site/src/data/disk-sizes.json
+          git commit -m "chore(docs): auto-update measured disk sizes [$(date +%Y-%m-%d)]"
+          git push --force origin $BRANCH
+
+      - name: Create or update draft PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="docs/auto/disk-sizes"
+          TODAY=$(date +%Y-%m-%d)
+          EXISTING=$(gh pr list --head $BRANCH --state open --json number --jq '.[0].number' 2>/dev/null)
+
+          if [ -z "$EXISTING" ]; then
+            gh pr create \
+              --draft \
+              --head "$BRANCH" \
+              --base main \
+              --title "docs: auto-update disk size measurements ($TODAY)" \
+              --body "$(cat <<'EOF'
+## Automated disk size update
+
+Opened automatically by the **Docs - Update disk sizes** CI workflow after a successful sync-from-scratch run.
+
+### What changed
+`docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. The hardware requirements page consumes this file directly, so merging this PR is all that's needed.
+
+### What this does NOT update
+- **Archive** mode: requires manual measurement from always-on snapshot machines.
+- **Recommended disk size** column: intentionally static (should remain a comfortable buffer above current usage).
+
+### Before merging
+- Values should show gradual growth vs. the previous entry — a sudden drop or doubling is suspect.
+- If both `full` and `minimal` runs completed today, both sets of chains are included (the branch is force-pushed by each run).
+
+🤖 Auto-generated by [update-disk-sizes.yml](/.github/workflows/update-disk-sizes.yml)
+EOF
+)"
+            echo "Created new draft PR for branch $BRANCH"
+          else
+            echo "PR #$EXISTING already open for branch $BRANCH — branch updated via force-push"
+          fi
