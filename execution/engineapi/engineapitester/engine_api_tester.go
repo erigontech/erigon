@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -268,6 +269,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
+		// Cap MDBX MapSize for chaindata/consensus DBs. The default is 2 TB
+		// per env, and each running tester reserves that virtual range from
+		// the process's ~128 TB user-space pool. Many testers in one process
+		// (the engine-x runner) would otherwise hit the address-space ceiling
+		// long before we run out of physical RAM. 1 GB is plenty for a
+		// short-lived per-test chaindata DB.
+		MdbxDBSizeLimit: 1 * datasize.GB,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
