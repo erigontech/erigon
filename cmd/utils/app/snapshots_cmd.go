@@ -68,7 +68,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -3224,6 +3223,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
+	blockReader, _ := br.IO()
+	agg.SetFrozenBlocksProvider(blockReader)
+
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -3243,8 +3245,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}); err != nil {
 		return err
 	}
-
-	blockReader, _ := br.IO()
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
 	if chainConfig.Bor != nil {
@@ -3294,15 +3294,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
 		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
-		if err != nil {
-			return err
-		}
-		maxCollatable, err := services.MaxCollatableTxNum(ctx, tx, blockReader)
-		if err != nil {
-			return err
-		}
-		lastTxNum = min(lastTxNum, maxCollatable)
-		return nil
+		return err
 	}); err != nil {
 		return err
 	}
