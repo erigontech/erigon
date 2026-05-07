@@ -283,7 +283,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    sdc.trieWarmup,
 			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
-			NumWorkers: 16,
+			NumWorkers: dbg.TipTrieWarmupers,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
 		}
