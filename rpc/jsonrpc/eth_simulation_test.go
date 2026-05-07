@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -23,6 +25,27 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+type simulateV1TestService struct{}
+
+func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
+	return SimulationResult{
+		{
+			"calls": []CallResult{
+				{
+					ReturnData: "0x",
+					GasUsed:    hexutil.Uint64(0x5208),
+					MaxUsedGas: hexutil.Uint64(0x5300),
+					Status:     hexutil.Uint64(types.ReceiptStatusSuccessful),
+				},
+			},
+		},
+	}, nil
+}
+
+type simulateV1ClientBlockResult struct {
+	Calls []CallResult `json:"calls"`
+}
 
 // ─── sanitizeSimulatedBlocks tests ────────────────────────────────────────────
 
@@ -544,6 +567,63 @@ func TestSimulationRequestTypes(t *testing.T) {
 	assert.Len(t, req.BlockStateCalls[0].Calls, 1)
 	assert.True(t, req.TraceTransfers)
 	assert.True(t, req.ReturnFullTransactions)
+}
+
+func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	value := (*hexutil.Big)(big.NewInt(100))
+	gas := hexutil.Uint64(100000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{
+				Calls: []ethapi.CallArgs{
+					{
+						From:  &from,
+						To:    &to,
+						Value: value,
+						Gas:   &gas,
+					},
+				},
+			},
+		},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls, ok := result[0]["calls"].([]CallResult)
+	require.True(t, ok, "expected typed call results")
+	require.Len(t, calls, 1)
+
+	call := calls[0]
+	assert.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(call.Status))
+	assert.Nil(t, call.Error)
+	assert.NotZero(t, uint64(call.MaxUsedGas))
+	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
+func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("eth", simulateV1TestService{}))
+
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(client.Close)
+
+	var result []simulateV1ClientBlockResult
+	err := client.CallContext(context.Background(), &result, "eth_simulateV1", SimulationRequest{}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.Len(t, result[0].Calls, 1)
+
+	call := result[0].Calls[0]
+	assert.Equal(t, uint64(0x5208), uint64(call.GasUsed))
+	assert.Equal(t, uint64(0x5300), uint64(call.MaxUsedGas))
+	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
 }
 
 // ─── simulatedCanonicalReader tests ──────────────────────────────────────────

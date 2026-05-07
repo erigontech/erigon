@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/erigontech/erigon"
@@ -46,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -1021,43 +1022,97 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	}
 }
 
-func TestSimulatedBackend_CallContractDefaultGasRespectsOsakaCap(t *testing.T) {
+func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
-	contractAddr := common.HexToAddress("0x1000000000000000000000000000000000000001")
-	var osakaConfig chain.Config
-	require.NoError(t, copier.Copy(&osakaConfig, chain.TestChainBerlinConfig))
-	osakaConfig.OsakaTime = common.NewUint64(0)
-	sim := NewSimulatedBackendWithConfig(t, types.GenesisAlloc{
-		testAddr:     {Balance: big.NewInt(common.Ether)},
-		contractAddr: {Balance: big.NewInt(0), Code: common.FromHex(deployedCode)},
-	}, &osakaConfig, params.MaxTxnGasLimit+1_000_000)
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{testAddr: {Balance: big.NewInt(common.Ether)}},
+		chain.TestChainOsakaConfig,
+		50000000,
+	)
 	bgCtx := context.Background()
 
-	require.True(t, sim.m.ChainConfig.IsOsaka(sim.pendingBlock.Time()))
-
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
+	require.NoError(t, err)
+
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	require.NoError(t, err)
+	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
+	contractAuth.GasLimit = params.MaxTxnGasLimit
+
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
 	require.NoError(t, err)
 
 	input, err := parsed.Pack("receive", []byte("X"))
 	require.NoError(t, err)
 
-	res, err := sim.PendingCallContract(bgCtx, ethereum.CallMsg{
+	call := ethereum.CallMsg{
 		From: testAddr,
-		To:   &contractAddr,
+		To:   &addr,
 		Data: input,
-	})
+	}
+
+	res, err := sim.PendingCallContract(bgCtx, call)
 	require.NoError(t, err)
 	require.Equal(t, expectedReturn, res)
 
 	sim.Commit()
 
-	res, err = sim.CallContract(bgCtx, ethereum.CallMsg{
-		From: testAddr,
-		To:   &contractAddr,
-		Data: input,
-	}, nil)
+	res, err = sim.CallContract(bgCtx, call, nil)
 	require.NoError(t, err)
 	require.Equal(t, expectedReturn, res)
+}
+
+func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{testAddr: {Balance: big.NewInt(common.Ether)}},
+		chain.AllProtocolChanges,
+		50000000,
+	)
+	bgCtx := context.Background()
+
+	const sstoresPerCall = 448
+
+	runtime := program.New()
+	for i := 0; i < sstoresPerCall; i++ {
+		runtime.Sstore(i, 1)
+	}
+	runtime.Op(vm.STOP)
+
+	constructor := program.New().ReturnViaCodeCopy(runtime.Bytes()).Bytes()
+
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	require.NoError(t, err)
+	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
+	contractAuth.GasLimit = 5_000_000
+
+	addr, _, _, err := bind.DeployContract(contractAuth, abi.ABI{}, constructor, sim)
+	require.NoError(t, err)
+
+	call := ethereum.CallMsg{
+		From: testAddr,
+		To:   &addr,
+	}
+	cappedCall := call
+	cappedCall.Gas = params.MaxTxnGasLimit
+
+	_, err = sim.PendingCallContract(bgCtx, cappedCall)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	res, err := sim.PendingCallContract(bgCtx, call)
+	require.NoError(t, err)
+	require.Empty(t, res)
+
+	sim.Commit()
+
+	_, err = sim.CallContract(bgCtx, cappedCall, nil)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	res, err = sim.CallContract(bgCtx, call, nil)
+	require.NoError(t, err)
+	require.Empty(t, res)
 }
 
 // This test is based on the following contract:

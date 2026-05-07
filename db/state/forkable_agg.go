@@ -156,6 +156,15 @@ func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
 
+	// Mirror the gate in Aggregator.buildFilesInBackground / Eth.startBackgroundMergeLoop
+	// so --exec.no-background-maintenance also suppresses forkable (BlockAccessLists,
+	// receipts, etc.) build+merge — otherwise focused-perf-test runs still see noise
+	// from this goroutine.
+	if dbg.NoBackgroundMaintenance() {
+		close(fin)
+		return fin
+	}
+
 	if ok := r.buildingFiles.CompareAndSwap(false, true); !ok {
 		r.logger.Debug("[fork_agg] BuildFilesInBackground disabled or already in progress. Skipping...")
 		close(fin)
