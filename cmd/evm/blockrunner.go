@@ -196,7 +196,7 @@ func runBlockTest(ctx *cli.Context, fname string) ([]testResult, error) {
 
 	var tests map[string]*testutil.BlockTest
 	if err = json.Unmarshal(src, &tests); err != nil {
-		return nil, nil // Skip non-fixture JSON files
+		return nil, err
 	}
 
 	re, err := regexp.Compile(ctx.String(RunFlag.Name))

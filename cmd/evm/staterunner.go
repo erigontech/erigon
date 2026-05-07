@@ -182,7 +182,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	}
 	var stateTests map[string]testutil.StateTest
 	if err = json.Unmarshal(src, &stateTests); err != nil {
-		return nil, nil // Skip non-fixture JSON files
+		return nil, err
 	}
 
 	re, err := regexp.Compile(ctx.String(RunFlag.Name))
