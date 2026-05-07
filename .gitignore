@@ -25,6 +25,9 @@ docs/readthedocs/build
 .project
 .settings
 
+# Lazy-downloaded test fixture tarballs (see Makefile target test-fixtures)
+/test-fixtures-cache/
+
 # Used by mdbx Makefile
 /ethdb/mdbx/dist/CMakeFiles/*
 /ethdb/mdbx/dist/CMakeCache*

@@ -18,6 +18,7 @@ package spectest
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -26,8 +27,10 @@ import (
 	"github.com/erigontech/erigon/cl/transition"
 )
 
+var mainnetDir = filepath.Join("..", "..", "test-fixtures-cache", "cl_mainnet", "tests")
+
 func Test(t *testing.T) {
 	caplinConfig := clparams.CaplinConfig{}
 	clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
-	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS("./tests"))
+	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
 }
