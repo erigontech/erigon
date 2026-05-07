@@ -366,6 +366,9 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		},
 	)
 	if err != nil {
+		if expectFailure {
+			return nil
+		}
 		return err
 	}
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
@@ -432,14 +435,17 @@ type EngineXTestNewPayload struct {
 	FcuVersion        string            `json:"forkchoiceUpdatedVersion"`
 	// ValidationError is the expected validation error name (e.g.
 	// "BlockException.INCORRECT_BLOCK_FORMAT") for negative tests. When set,
-	// a non-Valid payload status counts as success; a Valid status is a
-	// failure. Transport-level errors from the engine API call always
-	// propagate as test failures.
+	// the payload is expected to be rejected: either a non-Valid payload
+	// status or any error returned by the engine API call counts as
+	// success. A Valid status is a failure. Strict code/message matching is
+	// intentionally skipped — EEST fixtures may be rejected at the JSON-RPC
+	// parameter-validation step or by the payload validator depending on
+	// implementation, and both forms are spec-permitted.
 	ValidationError string `json:"validationError,omitempty"`
 	// ErrorCode is the expected JSON-RPC error code (encoded as a string in
 	// the EEST fixtures, e.g. "-32602") for malformed-payload tests. Treated
-	// the same as ValidationError: a non-Valid status counts as success.
-	// Strict code/message matching is intentionally skipped.
+	// the same as ValidationError: any non-Valid status or RPC-level error
+	// counts as success.
 	ErrorCode string `json:"errorCode,omitempty"`
 }
 
