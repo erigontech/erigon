@@ -4,8 +4,6 @@
 > modularity, and minimal disk footprint. It features an integrated consensus layer
 > (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.
 
-## Erigon Docs
-
 - [Introduction](https://docs.erigon.tech/): Official documentation for Erigon — the efficient, modular Ethereum execution client. Get started, explore the JSON-RPC API, and learn how to run a full or archive node.
 
 ## Get Started
@@ -15,13 +13,13 @@
 - [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode.
 - [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
 - [Installation](https://docs.erigon.tech/get-started/installation): Install Erigon from pre-built binaries, Docker, or source — step-by-step guides for Linux, macOS, and Windows.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): Easy Nodes — one-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
 - [Upgrading from a previous version](https://docs.erigon.tech/get-started/installation/upgrading): Upgrade from a previous version of Erigon without losing chain data or your configuration.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): Easy Nodes — one-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
 - [How to run a Polygon node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-polygon-node): Step-by-step guide to running an Erigon node on the Polygon PoS network.
 - [How to run an Ethereum node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node): Run a full Ethereum mainnet node using Caplin (built-in consensus layer) or connect an external CL client.
+- [Ethereum with an external CL](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl): Connect Lighthouse, Prysm, or another consensus client to Erigon for a full Ethereum node.
 - [How to run a Gnosis Chain node](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node): Run a full Gnosis Chain node with Erigon's embedded consensus layer or an external CL client.
 - [Gnosis Chain with an external CL](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl): Connect an external consensus layer client to Erigon for a Gnosis Chain full or validator node.
-- [Ethereum with an external CL](https://docs.erigon.tech/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl): Connect Lighthouse, Prysm, or another consensus client to Erigon for a full Ethereum node.
 
 ## Fundamentals
 
@@ -45,8 +43,8 @@
 - [Otterscan](https://docs.erigon.tech/fundamentals/otterscan): Integrating Otterscan, the lightweight block explorer built for Erigon.
 - [web3 Wallet](https://docs.erigon.tech/fundamentals/web3-wallet): Connecting MetaMask and other web3 wallets to a local Erigon node.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
-- [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.
 - [NAT](https://docs.erigon.tech/fundamentals/configuring-erigon/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
+- [Modules](https://docs.erigon.tech/fundamentals/modules): Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool.
 - [RPC Daemon](https://docs.erigon.tech/fundamentals/modules/rpc-daemon): The RPCdaemon module: serving JSON-RPC requests as a separate, remoteable process.
 - [TxPool](https://docs.erigon.tech/fundamentals/modules/txpool): The txpool module: managing the pending transaction pool as a standalone service.
 - [Sentry](https://docs.erigon.tech/fundamentals/modules/sentry): The sentry module: Erigon's network-facing peer-to-peer communication layer.
