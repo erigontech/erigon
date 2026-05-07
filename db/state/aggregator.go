@@ -243,6 +243,14 @@ func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
 func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile }
 func (a *Aggregator) Logger() log.Logger        { return a.logger }
 
+// SetErigondbDomainStepsInFrozenFile applies a domain-only merge cap override at runtime.
+// Intended for one-shot tools (e.g. `erigon seg retire`) that construct the aggregator
+// via openAgg and need to override the cap after construction. Must be called before any
+// merge work begins.
+func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
+	a.erigondbDomainStepsInFrozenFile = steps
+}
+
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
 }
