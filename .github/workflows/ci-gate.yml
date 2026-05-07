@@ -57,7 +57,10 @@ jobs:
             exit 0
           fi
           files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --paginate --jq '.[].filename')
+            --paginate --jq '.[].filename') \
+            || { echo "Failed to fetch PR files from GitHub API"; exit 1; }
+          # "code" = any file outside: docs/*, root-level llms*.txt, root-level *.md
+          # (nested *.md like execution/README.md still counts as a code change)
           if echo "$files" | grep -qvE '^(docs/|llms[^/]*\.txt$|[^/]*\.md$)'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
