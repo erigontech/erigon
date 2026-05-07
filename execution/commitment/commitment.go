@@ -632,9 +632,9 @@ func (be *BranchEncoder) CollectUpdate(
 	// fresh canonical bytes — clears the dirty flag in the process
 	// (the new entry is born clean). Single writer per prefix per fold
 	// invariant means no concurrent Put races on this key.
-	if be.branchCache != nil {
-		be.branchCache.Put(prefixCopy, updateCopy, "CollectUpdate")
-	}
+	// Cache is populated by sd.GetLatest on MDBX reads; CollectUpdate writes
+	// only to sd.mem (via ctx.PutBranch above). Pre-flush invalidation isn't
+	// needed because sd.mem masks the cache for any prefix the writer touched.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
