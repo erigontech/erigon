@@ -1,6 +1,7 @@
 package fusefilter
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -23,6 +24,12 @@ import (
 // comparison of peak heap / wall time / file size and verifies every input
 // key is present in both readers.
 //
+// Hashes are streamed, never materialised into a Go slice — the same shape
+// recsplit uses in production (one key at a time → AddHash → off-heap mmap
+// temp file). This is the only way the tool can run on the 85 GB .kv that
+// originally caused issue #20560: a 3 B-key uint64 slice would itself need
+// 24 GB of heap and OOM the harness before Build even starts.
+//
 // Modes (auto-detected by file extension, override with FUSEFILTER_INPUT_MODE):
 //
 //   - kv  : seg-compressed file with alternating key/value words (.kv, .v, .seg).
@@ -34,10 +41,13 @@ import (
 //
 // Skips when FUSEFILTER_INPUT is empty, so it never runs in CI.
 //
+// Set FUSEFILTER_SKIP_PARITY=1 to skip the third (parity) stream pass on huge
+// files where the extra disk read is expensive.
+//
 // Example:
 //
 //	FUSEFILTER_INPUT=/snapshots/v2.0-storage.7488-7496.kv \
-//	    go test -run=TestIndexFromFile -v -count=1 -timeout=4h \
+//	    go test -run=TestIndexFromFile -v -count=1 -timeout=8h \
 //	    ./db/datastruct/fusefilter/
 func TestIndexFromFile(t *testing.T) {
 	path := os.Getenv("FUSEFILTER_INPUT")
@@ -54,93 +64,122 @@ func TestIndexFromFile(t *testing.T) {
 		}
 	}
 
-	hashes, err := loadHashes(t, path, mode)
+	stream, err := streamerFor(path, mode)
 	if err != nil {
-		t.Fatalf("loadHashes: %v", err)
-	}
-	t.Logf("loaded %d keys from %s (mode=%s)", len(hashes), path, mode)
-	if len(hashes) == 0 {
-		t.Skip("file produced 0 keys")
+		t.Fatalf("streamerFor: %v", err)
 	}
 
 	outDir := t.TempDir()
 	plainPath := filepath.Join(outDir, "plain.efi")
 	shardPath := filepath.Join(outDir, "sharded.efi")
 
-	plain := runBuild(t, "plain", hashes, plainPath, false)
-	shard := runBuild(t, "sharded", hashes, shardPath, true)
+	plain := runBuild(t, "plain", stream, plainPath, false)
+	shard := runBuild(t, "sharded", stream, shardPath, true)
+
+	if plain.keyCount != shard.keyCount {
+		t.Fatalf("stream key count drift: plain=%d sharded=%d", plain.keyCount, shard.keyCount)
+	}
 
 	t.Logf("")
-	t.Logf("=== summary (n=%d) ===", len(hashes))
+	t.Logf("=== summary (n=%d) ===", plain.keyCount)
 	t.Logf("                 plain          sharded        delta")
 	t.Logf("peak_heap   %12.1f MB %12.1f MB  %+6.1f%%", mb(plain.peakHeap), mb(shard.peakHeap), pct(plain.peakHeap, shard.peakHeap))
 	t.Logf("file_size   %12.1f MB %12.1f MB  %+6.1f%%", mb(plain.fileSize), mb(shard.fileSize), pct(plain.fileSize, shard.fileSize))
-	t.Logf("wall_time   %12s    %12s     %+6.1f%%", plain.wall, shard.wall, pctDur(plain.wall, shard.wall))
-	t.Logf("ratios      peak %.2fx  size %.2fx  time %.2fx",
+	t.Logf("build_time  %12s    %12s     %+6.1f%%", plain.buildWall, shard.buildWall, pctDur(plain.buildWall, shard.buildWall))
+	t.Logf("ingest_time %12s    %12s", plain.ingestWall, shard.ingestWall)
+	t.Logf("ratios      peak %.2fx (plain/sharded)  size %.2fx (sharded/plain)  build_time %.2fx",
 		float64(plain.peakHeap)/float64(shard.peakHeap),
 		float64(shard.fileSize)/float64(plain.fileSize),
-		float64(shard.wall)/float64(plain.wall))
+		float64(shard.buildWall)/float64(plain.buildWall))
 
-	verifyParity(t, hashes, plainPath, shardPath)
-	measureFP(t, hashes, shardPath)
+	if os.Getenv("FUSEFILTER_SKIP_PARITY") != "" {
+		t.Logf("parity check skipped (FUSEFILTER_SKIP_PARITY set)")
+	} else {
+		verifyParity(t, stream, plainPath, shardPath)
+	}
+	measureFP(t, shardPath)
 }
 
 type buildResult struct {
-	peakHeap uint64
-	fileSize uint64
-	wall     time.Duration
+	keyCount   int
+	peakHeap   uint64
+	fileSize   uint64
+	ingestWall time.Duration
+	buildWall  time.Duration
 }
 
-func runBuild(t *testing.T, label string, hashes []uint64, outPath string, sharded bool) buildResult {
+// runBuild streams the input through AddHash, then drops the streamer, runs a
+// GC to clear any source-side state, and only THEN starts the peak sampler
+// and the wall-clock timer for Build(). This isolates the Go-heap pressure
+// inside Build (the actual OOM site) from key-iteration overhead.
+func runBuild(t *testing.T, label string, stream streamer, outPath string, sharded bool) buildResult {
 	t.Helper()
-	runtime.GC()
-	sampler := startPeakSampler(500 * time.Microsecond)
-	start := time.Now()
 
+	type writerLike interface {
+		AddHash(uint64) error
+		DisableFsync()
+	}
+	var (
+		w     writerLike
+		build func() error
+		close func()
+	)
 	if sharded {
-		w, err := NewWriterSharded(outPath)
+		ww, err := NewWriterSharded(outPath)
 		if err != nil {
 			t.Fatalf("%s: NewWriterSharded: %v", label, err)
 		}
-		w.DisableFsync()
-		for _, h := range hashes {
-			if err := w.AddHash(h); err != nil {
-				t.Fatalf("%s: AddHash: %v", label, err)
-			}
-		}
-		if err := w.Build(); err != nil {
-			t.Fatalf("%s: Build: %v", label, err)
-		}
-		w.Close()
+		w = ww
+		build = ww.Build
+		close = ww.Close
 	} else {
-		w, err := NewWriter(outPath)
+		ww, err := NewWriter(outPath)
 		if err != nil {
 			t.Fatalf("%s: NewWriter: %v", label, err)
 		}
-		w.DisableFsync()
-		for _, h := range hashes {
-			if err := w.AddHash(h); err != nil {
-				t.Fatalf("%s: AddHash: %v", label, err)
-			}
-		}
-		if err := w.Build(); err != nil {
-			t.Fatalf("%s: Build: %v", label, err)
-		}
-		w.Close()
+		w = ww
+		build = ww.Build
+		close = ww.Close
+	}
+	w.DisableFsync()
+
+	ingestStart := time.Now()
+	count, err := stream.each(func(h uint64) error { return w.AddHash(h) })
+	ingestWall := time.Since(ingestStart)
+	if err != nil {
+		t.Fatalf("%s: ingest: %v", label, err)
 	}
 
-	wall := time.Since(start)
+	// Drop any per-stream buffers and let the GC run BEFORE we start measuring
+	// Build. Anything still on the heap at this point is part of the writer's
+	// own state — exactly what the OOM-prone path holds onto.
+	runtime.GC()
+	sampler := startPeakSampler(500 * time.Microsecond)
+	buildStart := time.Now()
+	if err := build(); err != nil {
+		sampler.Stop()
+		t.Fatalf("%s: Build: %v", label, err)
+	}
+	buildWall := time.Since(buildStart)
 	peak := sampler.Stop()
+	close()
 
 	st, err := os.Stat(outPath)
 	if err != nil {
 		t.Fatalf("%s: stat: %v", label, err)
 	}
-	t.Logf("%-7s built: peak=%.1f MB time=%s size=%.1f MB", label, mb(peak), wall, mb(uint64(st.Size())))
-	return buildResult{peakHeap: peak, fileSize: uint64(st.Size()), wall: wall}
+	t.Logf("%-7s  ingest=%s  build=%s  peak=%.1f MB  size=%.1f MB  keys=%d",
+		label, ingestWall, buildWall, mb(peak), mb(uint64(st.Size())), count)
+	return buildResult{
+		keyCount:   count,
+		peakHeap:   peak,
+		fileSize:   uint64(st.Size()),
+		ingestWall: ingestWall,
+		buildWall:  buildWall,
+	}
 }
 
-func verifyParity(t *testing.T, hashes []uint64, plainPath, shardPath string) {
+func verifyParity(t *testing.T, stream streamer, plainPath, shardPath string) {
 	t.Helper()
 	plain, err := NewReader(plainPath)
 	if err != nil {
@@ -154,24 +193,31 @@ func verifyParity(t *testing.T, hashes []uint64, plainPath, shardPath string) {
 	defer shard.Close()
 
 	missingPlain, missingShard := 0, 0
-	for _, h := range hashes {
+	count, err := stream.each(func(h uint64) error {
 		if !plain.ContainsHash(h) {
 			missingPlain++
 		}
 		if !shard.ContainsHash(h) {
 			missingShard++
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("parity stream: %v", err)
 	}
 	if missingPlain != 0 || missingShard != 0 {
 		t.Fatalf("missing keys: plain=%d sharded=%d (must be 0 — fuse filter has 0%% false-negative rate)", missingPlain, missingShard)
 	}
-	t.Logf("parity ok: all %d input hashes present in both readers", len(hashes))
+	t.Logf("parity ok: all %d input hashes present in both readers", count)
 }
 
-// measureFP samples false-positive rate of the sharded reader by probing
-// random uint64s that are NOT in the input set. Uses a small bloom-style
-// presence map; cap at 200k probes to keep this fast on huge inputs.
-func measureFP(t *testing.T, hashes []uint64, shardPath string) {
+// measureFP samples the false-positive rate of the sharded reader by probing
+// random uint64s. We deliberately do NOT build a presence map of input keys
+// (that would defeat the streaming design at scale): on any realistic input
+// size N, the chance a random uint64 collides with a known key is N/2^64 —
+// negligible (3 B keys → ~1.6e-10), so collisions with the input set vanish
+// into the FP-rate noise.
+func measureFP(t *testing.T, shardPath string) {
 	t.Helper()
 	r, err := NewReaderSharded(shardPath)
 	if err != nil {
@@ -179,93 +225,95 @@ func measureFP(t *testing.T, hashes []uint64, shardPath string) {
 	}
 	defer r.Close()
 
-	present := make(map[uint64]struct{}, len(hashes))
-	for _, h := range hashes {
-		present[h] = struct{}{}
-	}
-
 	rng := rand.New(rand.NewPCG(7, 11))
 	const probes = 200_000
 	fp := 0
-	tries := 0
 	for i := 0; i < probes; i++ {
-		var k uint64
-		for {
-			k = rng.Uint64()
-			tries++
-			if _, ok := present[k]; !ok {
-				break
-			}
-		}
-		if r.ContainsHash(k) {
+		if r.ContainsHash(rng.Uint64()) {
 			fp++
 		}
 	}
 	t.Logf("sharded false-positive rate: %d/%d = %.4f%% (xorfilter[uint8] target ~0.39%%)", fp, probes, float64(fp)/float64(probes)*100)
 }
 
-// loadHashes reads all hashes from path according to mode.
-func loadHashes(t *testing.T, path, mode string) ([]uint64, error) {
-	t.Helper()
+// streamer is a re-runnable hash producer. Calling each() walks the underlying
+// file from the start and invokes fn for every hash; it can be called multiple
+// times (each call re-opens the file) so plain build, sharded build and parity
+// check each get a fresh pass.
+type streamer interface {
+	each(fn func(uint64) error) (int, error)
+}
+
+func streamerFor(path, mode string) (streamer, error) {
 	switch mode {
 	case "kv":
-		return loadKV(path)
+		return &kvStreamer{path: path}, nil
 	case "raw":
-		return loadRaw(path)
+		return &rawStreamer{path: path}, nil
 	default:
 		return nil, fmt.Errorf("unknown FUSEFILTER_INPUT_MODE=%q (want kv or raw)", mode)
 	}
 }
 
-func loadKV(path string) ([]uint64, error) {
-	d, err := seg.NewDecompressor(path)
+type kvStreamer struct{ path string }
+
+func (s *kvStreamer) each(fn func(uint64) error) (int, error) {
+	d, err := seg.NewDecompressor(s.path)
 	if err != nil {
-		return nil, fmt.Errorf("seg.NewDecompressor: %w", err)
+		return 0, fmt.Errorf("seg.NewDecompressor: %w", err)
 	}
 	defer d.Close()
-
 	g := d.MakeGetter()
-	hashes := make([]uint64, 0, d.Count()/2)
-	var key []byte
+
 	const salt uint32 = 0
+	var key []byte
+	count := 0
 	keyTurn := true
 	for g.HasNext() {
 		key, _ = g.Next(key[:0])
 		if keyTurn {
 			hi, _ := murmur3.Sum128WithSeed(key, salt)
-			hashes = append(hashes, hi)
+			if err := fn(hi); err != nil {
+				return count, err
+			}
+			count++
 		}
 		keyTurn = !keyTurn
 	}
-	return hashes, nil
+	return count, nil
 }
 
-func loadRaw(path string) ([]uint64, error) {
-	f, err := os.Open(path)
+type rawStreamer struct{ path string }
+
+func (s *rawStreamer) each(fn func(uint64) error) (int, error) {
+	f, err := os.Open(s.path)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if st.Size()%8 != 0 {
-		return nil, fmt.Errorf("raw file size %d not a multiple of 8", st.Size())
+		return 0, fmt.Errorf("raw file size %d not a multiple of 8", st.Size())
 	}
-	hashes := make([]uint64, 0, st.Size()/8)
+	br := bufio.NewReaderSize(f, 1<<20)
 	var buf [8]byte
+	count := 0
 	for {
-		_, err := io.ReadFull(f, buf[:])
+		_, err := io.ReadFull(br, buf[:])
 		if errors.Is(err, io.EOF) {
-			break
+			return count, nil
 		}
 		if err != nil {
-			return nil, err
+			return count, err
 		}
-		hashes = append(hashes, binary.LittleEndian.Uint64(buf[:]))
+		if err := fn(binary.LittleEndian.Uint64(buf[:])); err != nil {
+			return count, err
+		}
+		count++
 	}
-	return hashes, nil
 }
 
 func mb(b uint64) float64 { return float64(b) / (1 << 20) }

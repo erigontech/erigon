@@ -137,6 +137,113 @@ func benchBuild(b *testing.B, sharded bool, n int) {
 	}
 }
 
+// benchBuildOnly isolates the Build() call from key generation and AddHash
+// ingestion, so peak_heap_mb reflects only what Build itself allocates on the
+// Go heap. The pre-generated `keys []uint64` slice (8 MB at n=1M) is dropped
+// before Build runs — otherwise it dominates peak_heap and hides the actual
+// builder cost we care about.
+func benchBuildOnly(b *testing.B, sharded bool, n int) {
+	b.Helper()
+
+	var totalFileBytes uint64
+	var totalPeakHeap uint64
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		dir := b.TempDir()
+		fp := filepath.Join(dir, "f")
+		keys := benchKeys(n, 1, 2)
+
+		// Ingest keys into the writer's off-heap temp file outside the timer/sampler.
+		var (
+			plainW *Writer
+			shardW *WriterSharded
+		)
+		if sharded {
+			w, err := NewWriterSharded(fp)
+			if err != nil {
+				b.Fatal(err)
+			}
+			w.DisableFsync()
+			for _, k := range keys {
+				if err := w.AddHash(k); err != nil {
+					b.Fatal(err)
+				}
+			}
+			shardW = w
+		} else {
+			w, err := NewWriter(fp)
+			if err != nil {
+				b.Fatal(err)
+			}
+			w.DisableFsync()
+			for _, k := range keys {
+				if err := w.AddHash(k); err != nil {
+					b.Fatal(err)
+				}
+			}
+			plainW = w
+		}
+
+		// Drop the input slice before Build so it doesn't pollute peak_heap.
+		keys = nil
+		_ = keys
+		runtime.GC()
+		sampler := startPeakSampler(500 * time.Microsecond)
+		b.StartTimer()
+
+		if sharded {
+			if err := shardW.Build(); err != nil {
+				b.Fatal(err)
+			}
+			shardW.Close()
+		} else {
+			if err := plainW.Build(); err != nil {
+				b.Fatal(err)
+			}
+			plainW.Close()
+		}
+
+		b.StopTimer()
+		peak := sampler.Stop()
+		totalPeakHeap += peak
+
+		st, err := os.Stat(fp)
+		if err != nil {
+			b.Fatal(err)
+		}
+		totalFileBytes += uint64(st.Size())
+		b.StartTimer()
+	}
+	b.StopTimer()
+
+	if b.N > 0 {
+		b.ReportMetric(float64(totalPeakHeap)/float64(b.N)/(1<<20), "peak_heap_mb")
+		b.ReportMetric(float64(totalFileBytes)/float64(b.N)/(1<<20), "file_size_mb")
+		b.ReportMetric(float64(n), "keys")
+	}
+}
+
+// BenchmarkBuildOnly is the apples-to-apples Build-phase comparison: input
+// keys are not on the Go heap when the timer/sampler runs. This is what you
+// want when reasoning about the OOM, since the OOM is inside Build, not
+// AddHash (AddHash writes to a mmap-backed temp file, off-heap).
+func BenchmarkBuildOnly(b *testing.B) {
+	for _, n := range []int{100_000, 1_000_000} {
+		for _, sharded := range []bool{false, true} {
+			label := "writer"
+			if sharded {
+				label = "sharded"
+			}
+			b.Run(label+"/n="+itoaUnderscored(n), func(b *testing.B) {
+				benchBuildOnly(b, sharded, n)
+			})
+		}
+	}
+}
+
 // Build benchmarks. Run a single size with `-bench=BenchmarkBuild/sharded=false/n=1000000`
 // or compare with `go test -bench=BenchmarkBuild -run=^$ -benchtime=3x`.
 //
