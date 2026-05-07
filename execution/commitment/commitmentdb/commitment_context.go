@@ -47,6 +47,12 @@ type sd interface {
 	StepSize() uint64
 	Trace() bool
 	CommitmentCapture() bool
+
+	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX)
+	// for one key. Used by the BranchCache divergence-detection probe
+	// to localise which state layer holds bytes that diverge from
+	// cache. Read-only.
+	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -213,6 +219,8 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
+		probeSd:  sdc.sharedDomains,
+		probeTx:  tx,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.Clone(tx)
@@ -813,6 +821,14 @@ type TrieContext struct {
 	trace          bool
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+
+	// probeSd / probeTx feed ProbeStateLayers — diagnostics-only fields
+	// populated when this TrieContext is constructed from a
+	// SharedDomainsCommitmentContext that has both a SharedDomains
+	// and a tx in scope. Both nil for read-only / test contexts where
+	// the probe is not available.
+	probeSd sd
+	probeTx kv.TemporalTx
 }
 
 // NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
@@ -823,6 +839,18 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
+}
+
+// ProbeStateLayers samples the underlying state layers for one key —
+// sd.mem, sd.parent.mem (if any), and tx-direct (MDBX) — for
+// divergence-detection diagnostics. Returns empty / not-ok when
+// constructed without a probe-capable SharedDomains (e.g.
+// NewTrieContextRo). Read-only.
+func (sdc *TrieContext) ProbeStateLayers(domain kv.Domain, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
+	if sdc.probeSd == nil {
+		return
+	}
+	return sdc.probeSd.ProbeReadLayers(domain, sdc.probeTx, key)
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
