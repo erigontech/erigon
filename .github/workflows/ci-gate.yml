@@ -108,7 +108,6 @@ jobs:
     if: needs.changes.outputs.docs_site == 'true'
     needs: [changes]
     uses: ./.github/workflows/docs-site-build.yml
-    secrets: inherit
 
   # Only meaningful for PRs: needs github.event.pull_request.base.sha.
   large-files:
