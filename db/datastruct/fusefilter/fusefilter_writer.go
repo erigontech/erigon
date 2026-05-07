@@ -271,6 +271,27 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 	all := castToArrU64(m[:sz])
 	slices.Sort(all) // ascending sort groups hashes by top byte = shard index
 
+	// Find the largest shard so MakeBinaryFuseBuilder preallocates buffers that
+	// fit every shard. Without this, sizing the builder to the average shard
+	// (len(all)/256) leaves xorfilter's reuseBuffer to grow buffers on the first
+	// above-average shard via `*buf = append((*buf)[:0], make([]T, size)...)`,
+	// which holds the old AND new buffers live until GC — doubling peak heap
+	// briefly. This prescan is one sequential walk over the just-sorted (and
+	// thus cache-warm) mmap, so it's essentially free.
+	var maxShardSize int
+	{
+		i := 0
+		for shard := range 256 {
+			start := i
+			for i < len(all) && all[i]>>56 == uint64(shard) {
+				i++
+			}
+			if sz := i - start; sz > maxShardSize {
+				maxShardSize = sz
+			}
+		}
+	}
+
 	const version1 uint8 = 1
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], uint32(w.features))
@@ -280,7 +301,7 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 	}
 	total := 4
 
-	builder := xorfilter.MakeBinaryFuseBuilder[uint8](len(all) / 256)
+	builder := xorfilter.MakeBinaryFuseBuilder[uint8](maxShardSize)
 	var sizeBuf [8]byte
 	i := 0
 	for shard := range 256 {
