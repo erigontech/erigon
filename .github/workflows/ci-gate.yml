@@ -58,7 +58,7 @@ jobs:
           fi
           files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
             --paginate --jq '.[].filename')
-          if echo "$files" | grep -qvE '^docs/'; then
+          if echo "$files" | grep -qvE '^(docs/|llms[^/]*\.txt$|[^/]*\.md$)'; then
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
