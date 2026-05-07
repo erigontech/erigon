@@ -987,10 +987,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
-			// Read state from .kv files visible at-or-before lastTxnumInShard-1 only:
-			// no GetLatest fallback (which would leak post-limit .kv values into the
-			// rebuild). With getLatestFromFiles' walkback fix, keys whose last write
-			// pre-dates the shard's start are still found in earlier .kv files.
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
 			if concurrent {
 				domains.EnableParaTrieDB(rwDb)
