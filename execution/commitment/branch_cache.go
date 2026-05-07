@@ -182,6 +182,13 @@ type branchCacheEntry struct {
 	origin         string
 	writeSeq       uint64
 	writeTimeNanos int64
+
+	// step is the on-disk file step the cached bytes came from. Returned
+	// by Get so callers (e.g. CheckDataAvailable) can validate against
+	// the latest visible step. 0 means "step not tracked" — fine for
+	// in-memory tests but real callers should always pass the step
+	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
+	step uint64
 }
 
 // DefaultBranchCacheTailCapacity is the LRU tail size used when no
@@ -251,14 +258,15 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
-// bytes (with the leading 2-byte touch-map prefix).
-func (c *BranchCache) Get(prefix []byte) ([]byte, bool) {
+// bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
+// step the bytes came from (0 if not tracked).
+func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	entry, ok := c.lookup(prefix)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))
-	return entry.data, true
+	return entry.data, entry.step, true
 }
 
 // GetDecoded retrieves the cached branch in decoded form. Lazy-decodes on
@@ -300,13 +308,15 @@ func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell,
 // Put stores branch data in the cache, replacing any existing entry
 // (clearing its dirty flag in the process — the new entry is fresh).
 // Always copies the input data so the cache owns it independently of
-// caller buffer lifetime. origin is a short label of the write site
+// caller buffer lifetime. step is the on-disk file step the bytes came
+// from (0 if not tracked); origin is a short label of the write site
 // captured for divergence-detection diagnostics.
-func (c *BranchCache) Put(prefix []byte, data []byte, origin string) {
+func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	c.store(prefix, &branchCacheEntry{
 		data:           dataCopy,
+		step:           step,
 		origin:         origin,
 		writeSeq:       c.writeSeq.Add(1),
 		writeTimeNanos: time.Now().UnixNano(),
@@ -320,11 +330,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, origin string) {
 //
 // Same semantics as WarmupCache.PutBranchIfClean — see that doc for the
 // race-it-protects-against narrative.
-func (c *BranchCache) PutIfClean(prefix []byte, data []byte, origin string) bool {
+func (c *BranchCache) PutIfClean(prefix []byte, data []byte, step uint64, origin string) bool {
 	if existing, ok := c.lookup(prefix); ok && existing.dirty.Load() {
 		return false
 	}
-	c.Put(prefix, data, origin)
+	c.Put(prefix, data, step, origin)
 	return true
 }
 
