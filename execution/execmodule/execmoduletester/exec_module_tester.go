@@ -159,29 +159,6 @@ func (emt *ExecModuleTester) Close() {
 	}
 }
 
-// CloseCLI is like Close but safe for CLI mode (tb==nil). It cancels the
-// background context, waits for goroutines to drain, and closes resources.
-// This prevents goroutine leaks when ExecModuleTester is used outside of
-// testing.T contexts (e.g. the evm enginetest command).
-func (emt *ExecModuleTester) CloseCLI() {
-	emt.cancel()
-	_ = emt.bgComponentsEg.Wait() // expect context.Canceled
-	if emt.Engine != nil {
-		emt.Engine.Close()
-	}
-	if emt.BlockSnapshots != nil {
-		emt.BlockSnapshots.Close()
-	}
-	if emt.DB != nil {
-		emt.DB.Close()
-	}
-	// In CLI mode (tb==nil), the temp dir is never cleaned up via tb.Cleanup.
-	// Remove it here to prevent disk space leaks.
-	if emt.tb == nil && emt.Dirs.DataDir != "" {
-		dir.RemoveAll(emt.Dirs.DataDir)
-	}
-}
-
 // Stream returns stream, waiting if necessary
 func (emt *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error) {
 	emt.StreamWg.Wait()
