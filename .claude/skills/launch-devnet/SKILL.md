@@ -40,14 +40,14 @@ Derive `DEVNET` from the URL hostname (strip `.ethpandaops.io`). For `https://ba
 Optionally use `WebFetch` on the landing page to confirm the network exists and to grab the spec-notes link. Then download config artefacts:
 
 ```bash
-mkdir -p $WORKDIR/testnet-config
-CFG=https://config.${DEVNET}.ethpandaops.io
-curl -fsSL ${CFG}/el/genesis.json    -o $WORKDIR/genesis.json
-curl -fsSL ${CFG}/cl/config.yaml     -o $WORKDIR/testnet-config/config.yaml
-curl -fsSL ${CFG}/cl/genesis.ssz     -o $WORKDIR/testnet-config/genesis.ssz
-curl -fsSL ${CFG}/api/v1/nodes/inventory -o $WORKDIR/inventory.json
-echo 0 > $WORKDIR/testnet-config/deploy_block.txt
-echo 0 > $WORKDIR/testnet-config/deposit_contract_block.txt
+mkdir -p "$WORKDIR/testnet-config"
+CFG="https://config.${DEVNET}.ethpandaops.io"
+curl -fsSL "${CFG}/el/genesis.json"        -o "$WORKDIR/genesis.json"
+curl -fsSL "${CFG}/cl/config.yaml"         -o "$WORKDIR/testnet-config/config.yaml"
+curl -fsSL "${CFG}/cl/genesis.ssz"         -o "$WORKDIR/testnet-config/genesis.ssz"
+curl -fsSL "${CFG}/api/v1/nodes/inventory" -o "$WORKDIR/inventory.json"
+echo 0 > "$WORKDIR/testnet-config/deploy_block.txt"
+echo 0 > "$WORKDIR/testnet-config/deposit_contract_block.txt"
 ```
 
 If any of those 404, the derived name is wrong or the network uses a non-standard layout — ask the user for the correct config base URL. **Do not silently substitute defaults or stub data.**
@@ -69,7 +69,7 @@ Parse `inventory.json` (`ethereum_pairs.<node>.{consensus,execution}`):
 - `execution.enode` (all entries) → EL bootnodes
 - `consensus.beacon_uri` and `execution.rpc_uri` → per-peer endpoints for cross-checking
 
-Write a single human-readable summary to `$WORKDIR/devnet-info.txt`: chain id, key fork timestamps, # of bootnodes, chosen CL image, port offset, plus the public RPC/beacon URLs. Print the summary to the user and stop for confirmation if anything looks off (wrong chain id, missing forks, no peers in inventory).
+Write a key/value summary to `$WORKDIR/devnet-info.txt` so other skills can parse fields programmatically (one `key: value` per line, no quoting). Required keys: `devnet`, `chain_id`, `port_offset`, `cl_client`, `cl_image`, `authrpc_port`, `http_port`, `ws_port`, `p2p_port`, `cl_http_port`, `cl_p2p_port`, `bootnode_count_el`, `bootnode_count_cl`, `public_rpc`, `public_beacon`. Add fork timestamps as additional `fork_<name>: <unix-ts>` lines. Print the summary to the user and stop for confirmation if anything looks off (wrong chain id, missing forks, no peers in inventory).
 
 ## Step 3 — Working directory layout
 
@@ -95,20 +95,25 @@ $WORKDIR/
 
 ## Step 4 — Port assignments
 
-Default offset is `+100` on top of erigon defaults (see [erigon-network-ports](../erigon-network-ports/SKILL.md) for the full list and CLI flags). Before generating scripts, check every candidate port:
+Default offset is `+100` on top of erigon defaults (see [erigon-network-ports](../erigon-network-ports/SKILL.md) for the full list and CLI flags). Before generating scripts, check every candidate port. Use `lsof` so the check works on macOS and Linux (`ss` is Linux-only):
 
 ```bash
-for p in <each chosen port>; do
-  ss -tlnp 2>/dev/null | awk -v P=":$p" '$4 ~ P {print P}'
+# TCP listeners
+for p in <each chosen TCP port>; do
+  lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && echo "TCP $p in use"
+done
+# UDP (devp2p discovery, torrent, CL QUIC)
+for p in <each chosen UDP port>; do
+  lsof -nP -iUDP:$p >/dev/null 2>&1 && echo "UDP $p in use"
 done
 ```
 
-If any port is already bound, bump the whole offset by +100 (try `+200`, `+300`, …) and re-check. Record the chosen offset in `devnet-info.txt`. Match the CL ports to the same offset family so the user only has one number to remember.
+If any port is already bound, bump the whole offset by +100 (try `+200`, `+300`, …) and re-check. Record the chosen offset in `devnet-info.txt` as `port_offset: <N>` so wrappers like `bal-devnet-ab-test` can read it. Match the CL ports to the same offset family so the user only has one number to remember.
 
 ## Step 5 — Initialize erigon datadir
 
 ```bash
-./build/bin/erigon init --datadir $WORKDIR/erigon-data $WORKDIR/genesis.json
+./build/bin/erigon init --datadir="$WORKDIR/erigon-data" "$WORKDIR/genesis.json"
 ```
 
 If `./build/bin/erigon` is missing, invoke `/erigon-build` first.
@@ -133,22 +138,39 @@ Optional env vars to set in the script body (only when the user asks for them):
 
 Do not bake in fork-specific or experimental flags unless the user requests them. The script should be a thin wrapper, not a config dump.
 
+End the script with `exec ./build/bin/erigon …` so the script's process is replaced by erigon. That way the PID captured at start time (Step 8) is the erigon PID and `stop.sh` can target it precisely instead of relying on `pkill -f` regex matching.
+
 ## Step 7 — Generate `start-cl.sh`
 
-The script runs the chosen CL client via Docker with `--network=host`. Lighthouse is the default — recipe:
+The script runs the chosen CL client via Docker with `--network=host`. The recipe below is **Lighthouse-specific** (the default); for other clients (lodestar, prysm, teku, nimbus) see the mapping note at the end of this step.
+
+Before baking the checkpoint-sync URL into the script, probe it — fresh devnets sometimes don't have `checkpoint-sync.<devnet>.ethpandaops.io` provisioned yet. If the probe fails, omit the `--checkpoint-sync-url` flag and lighthouse falls back to genesis sync:
 
 ```bash
-JWT=$WORKDIR/erigon-data/jwt.hex
-test -f "$JWT"   # MUST exist; start-erigon.sh creates it
+CHECKPOINT_URL="https://checkpoint-sync.${DEVNET}.ethpandaops.io"
+if curl -fsI --max-time 5 "$CHECKPOINT_URL" >/dev/null 2>&1; then
+  CHECKPOINT_FLAG="--checkpoint-sync-url=$CHECKPOINT_URL"
+else
+  CHECKPOINT_FLAG=""
+fi
+```
 
-docker pull <CL image from inventory>
-docker rm -f <DEVNET>-cl 2>/dev/null
+Recipe:
 
-docker run -d --name <DEVNET>-cl --network=host \
-  -v $WORKDIR/testnet-config:/config:ro \
-  -v $WORKDIR/cl-data:/data \
+```bash
+JWT="$WORKDIR/erigon-data/jwt.hex"
+[ -f "$JWT" ] || { echo "JWT $JWT missing — start erigon first"; exit 1; }
+
+CL_IMAGE="<CL image from inventory>"
+# Skip pull if the image is already cached (idempotent + offline-friendly)
+docker image inspect "$CL_IMAGE" >/dev/null 2>&1 || docker pull "$CL_IMAGE"
+docker rm -f "${DEVNET}-cl" 2>/dev/null || true
+
+docker run -d --name "${DEVNET}-cl" --network=host \
+  -v "$WORKDIR/testnet-config":/config:ro \
+  -v "$WORKDIR/cl-data":/data \
   -v "$JWT":/jwt.hex:ro \
-  <CL image from inventory> \
+  "$CL_IMAGE" \
   lighthouse bn \
     --testnet-dir=/config \
     --datadir=/data \
@@ -156,30 +178,55 @@ docker run -d --name <DEVNET>-cl --network=host \
     --execution-jwt=/jwt.hex \
     --boot-nodes="<comma-joined ENRs>" \
     --port=<CL P2P> --quic-port=<CL QUIC> \
-    --http --http-port=<CL HTTP> --http-address=0.0.0.0 \
+    --http --http-port=<CL HTTP> --http-address=127.0.0.1 \
     --metrics --metrics-port=<CL metrics> \
-    --checkpoint-sync-url=https://checkpoint-sync.${DEVNET}.ethpandaops.io \
+    $CHECKPOINT_FLAG \
     --disable-enr-auto-update \
     --suggested-fee-recipient=0x0000000000000000000000000000000000000000
 ```
 
-For non-lighthouse CLs, look up the client's CLI flags in the ethpandaops repo or the client's docs before generating the script. Don't guess flag names — different clients spell things differently (e.g. lodestar uses `beacon`, prysm uses `--datadir=/data`, teku uses TOML config). When unsure, ask the user.
+Notes on the recipe:
+
+- `--http-address=127.0.0.1` keeps the beacon API local; only widen to `0.0.0.0` if the user explicitly needs remote access.
+- The `[ -f "$JWT" ] || …` line **aborts** the script if `jwt.hex` is missing. Step 8's polling loop should make this guard a fast-path no-op, but it's the last line of defence against a CL trying to authenticate with a non-existent token.
+
+For non-lighthouse CLs, the binary name and flag spellings differ. A quick mapping for the common ones (verify against the client's docs before using):
+
+| Client     | Subcommand                        | datadir flag       | execution endpoint flag |
+| ---------- | --------------------------------- | ------------------ | ----------------------- |
+| lighthouse | `lighthouse bn`                   | `--datadir`        | `--execution-endpoint`  |
+| lodestar   | `node /usr/app/.../lodestar beacon` | `--dataDir`      | `--execution.urls`      |
+| prysm      | `beacon-chain --accept-terms-of-use` | `--datadir`     | `--execution-endpoint`  |
+| teku       | `teku`                            | `--data-base-path` | `--ee-endpoint`         |
+| nimbus     | `nimbus_beacon_node`              | `--data-dir`       | `--web3-url`            |
+
+Don't guess flag names — when unsure, ask the user or check the ethpandaops repo for the exact invocation.
 
 ## Step 8 — Start, in order
 
-Erigon must start first because it generates `jwt.hex`.
+Erigon must start first because it generates `jwt.hex`. Capture its PID for clean shutdown, then **poll** for `jwt.hex` and the authrpc port — do not rely on `sleep`. Only after both conditions are true is it safe to start the CL (otherwise the CL fails JWT auth on the first `newPayload` call).
 
 ```bash
-cd $WORKDIR && nohup bash start-erigon.sh > erigon-console.log 2>&1 &
-# Poll until both conditions are true (timeout ~60s):
-#   - $WORKDIR/erigon-data/jwt.hex exists
-#   - the authrpc port is bound by the erigon PID
-cd $WORKDIR && nohup bash start-cl.sh > cl-console.log 2>&1 &
+cd "$WORKDIR" && nohup bash start-erigon.sh > erigon-console.log 2>&1 &
+echo $! > "$WORKDIR/erigon.pid"
+
+AUTHRPC=<authrpc port>
+for i in $(seq 1 60); do
+  if [ -f "$WORKDIR/erigon-data/jwt.hex" ] \
+      && lsof -nP -iTCP:"$AUTHRPC" -sTCP:LISTEN >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+[ -f "$WORKDIR/erigon-data/jwt.hex" ] || { echo "jwt.hex not produced after 60s — check erigon-console.log"; exit 1; }
+lsof -nP -iTCP:"$AUTHRPC" -sTCP:LISTEN >/dev/null 2>&1 || { echo "authrpc port $AUTHRPC not bound after 60s"; exit 1; }
+
+cd "$WORKDIR" && nohup bash start-cl.sh > cl-console.log 2>&1 &
 ```
 
 Verify before moving on:
 - `tail -n 80 erigon-console.log` — no fatal errors, engine API listener up
-- `ss -tlnp | grep <authrpc port>` — bound by erigon
+- `lsof -nP -iTCP:<authrpc port> -sTCP:LISTEN` — bound by erigon
 - `tail -n 80 cl-console.log` — CL connected to engine API and starting checkpoint sync (or genesis sync if checkpoint endpoint is unavailable)
 
 ## Step 9 — Monitoring
@@ -188,20 +235,21 @@ Run these at intervals and report a single status line each pass:
 
 ```bash
 HTTP=<erigon http port>; CL=<cl http port>
+hex_to_int() { local h; h=$(jq -r '.result'); printf '%d\n' "$h"; }
 # Erigon head
 EH=$(curl -s http://localhost:$HTTP -X POST -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))')
+  | hex_to_int)
 # Network head from public RPC
-NH=$(curl -s https://rpc.${DEVNET}.ethpandaops.io -X POST -H 'Content-Type: application/json' \
+NH=$(curl -s "https://rpc.${DEVNET}.ethpandaops.io" -X POST -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-  | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))')
+  | hex_to_int)
 # Erigon peer count
 EP=$(curl -s http://localhost:$HTTP -X POST -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \
-  | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"],16))')
+  | hex_to_int)
 # CL sync
-CS=$(curl -s http://localhost:$CL/eth/v1/node/syncing)
+CS=$(curl -s http://localhost:$CL/eth/v1/node/syncing | jq -c '.data')
 echo "EL head=$EH (network=$NH, delta=$((NH-EH)))  EL peers=$EP  CL: $CS"
 ```
 
@@ -213,14 +261,27 @@ What to watch for:
 
 ## Step 10 — Stop and clean
 
-`stop.sh`:
-- `docker stop <DEVNET>-cl` (and `docker rm`)
-- `pkill -f "datadir.*$WORKDIR/erigon-data"`
+`stop.sh` — kill by PID (saved in Step 8) instead of `pkill -f`, which can match unintended processes when `$WORKDIR` contains regex metacharacters or is a substring of another datadir:
 
-`clean.sh`:
-- runs `stop.sh`
-- removes `erigon-data/{chaindata,snapshots,txpool,nodes,temp}` and `cl-data/*`
-- re-runs `erigon init`
+```bash
+docker stop "${DEVNET}-cl" 2>/dev/null || true
+docker rm   "${DEVNET}-cl" 2>/dev/null || true
+
+if [ -f "$WORKDIR/erigon.pid" ]; then
+  PID=$(cat "$WORKDIR/erigon.pid")
+  kill "$PID" 2>/dev/null || true
+  rm -f "$WORKDIR/erigon.pid"
+fi
+```
+
+`clean.sh` — replace the directories outright (so dotfiles like `.lock`/`.tmp` don't survive a `rm -rf cl-data/*`-style glob), then re-init erigon. Genesis and the testnet config are preserved so the network identity is unchanged:
+
+```bash
+bash "$WORKDIR/stop.sh"
+rm -rf "$WORKDIR/erigon-data" "$WORKDIR/cl-data"
+mkdir -p "$WORKDIR/erigon-data" "$WORKDIR/cl-data"
+./build/bin/erigon init --datadir="$WORKDIR/erigon-data" "$WORKDIR/genesis.json"
+```
 
 ## Investigating failures — finding the absolute truth
 
