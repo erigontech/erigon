@@ -471,6 +471,20 @@ type DomainIOMetrics struct {
 	// misses on the same prefix). Updated by UpdateFileReadsUnique;
 	// gated by dbg.KVReadLevelledMetrics same as FileReadCount.
 	UniqueFileReadCount int64
+	// UniqueLenBuckets is the byte-length distribution of distinct
+	// prefixes seen by UpdateFileReadsUnique. The compact-encoded
+	// commitment prefix carries depth-dependent length:
+	//   0 : 1 byte    (root / depth 0)
+	//   1 : 2-4 bytes
+	//   2 : 5-8 bytes
+	//   3 : 9-16 bytes
+	//   4 : 17-32 bytes
+	//   5 : 33-64 bytes
+	//   6 : 65+ bytes (out of range for storage paths)
+	// Used to investigate depth distribution of touched prefixes —
+	// e.g., are the 25K commitment reads mostly leaf-parents (deep)
+	// or trunk (shallow)?
+	UniqueLenBuckets [7]int64
 
 	// StateCache hit/miss tracks the SharedDomains.stateCache layer
 	// specifically (the per-execution Account/Storage/Code cache), distinct
@@ -568,6 +582,27 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 	}
 }
 
+// lenBucket maps a prefix byte-length to its UniqueLenBuckets index.
+// See DomainIOMetrics.UniqueLenBuckets for the bucket layout.
+func lenBucket(n int) int {
+	switch {
+	case n <= 1:
+		return 0
+	case n <= 4:
+		return 1
+	case n <= 8:
+		return 2
+	case n <= 16:
+		return 3
+	case n <= 32:
+		return 4
+	case n <= 64:
+		return 5
+	default:
+		return 6
+	}
+}
+
 // UpdateFileReadsUnique records a file read while also tracking whether
 // the prefix has been seen before for this domain. Same gate as
 // UpdateFileReads (dbg.KVReadLevelledMetrics); call this instead when
@@ -580,6 +615,7 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 	// without colliding.
 	domainKey := domain.String() + ":" + string(key)
 	_, alreadySeen := dm.seenFileReads.LoadOrStore(domainKey, struct{}{})
+	bucket := lenBucket(len(key))
 
 	dm.Lock()
 	defer dm.Unlock()
@@ -588,12 +624,14 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 	dm.FileReadDuration += readDuration
 	if !alreadySeen {
 		dm.UniqueFileReadCount++
+		dm.UniqueLenBuckets[bucket]++
 	}
 	if d, ok := dm.Domains[domain]; ok {
 		d.FileReadCount++
 		d.FileReadDuration += readDuration
 		if !alreadySeen {
 			d.UniqueFileReadCount++
+			d.UniqueLenBuckets[bucket]++
 		}
 	} else {
 		newD := &DomainIOMetrics{
@@ -602,6 +640,7 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 		}
 		if !alreadySeen {
 			newD.UniqueFileReadCount = 1
+			newD.UniqueLenBuckets[bucket] = 1
 		}
 		dm.Domains[domain] = newD
 	}
