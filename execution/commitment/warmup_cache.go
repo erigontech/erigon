@@ -68,6 +68,43 @@ type storageEntry struct {
 // WarmupCache stores pre-fetched data from the warmup phase to avoid
 // repeated DB reads during trie processing. Uses maphash.Map for efficient
 // byte slice key lookups without string allocations.
+//
+// Memory pooling strategy:
+//
+//  1. Don't add a sync.Pool of byte buffers between the read path and
+//     the cache. The read path already returns mmap-backed slices
+//     with zero allocation (seg.Getter.NextUncompressed for the
+//     CompressNone domains we cache); pooling Go-side buffers above
+//     us just adds a layer that gets copied into the cache and then
+//     GC'd. The cache copy IS the canonical allocation; there's
+//     nothing meaningful to pool on top of it.
+//
+//  2. The PutBranch / PutAccount / PutStorage copies exist for
+//     mmap-detachment, not for buffer reuse. Snapshot files can be
+//     unmapped under us during collation/squeeze; copying detaches
+//     the cache entry from that lifetime. If tempted to "skip the
+//     copy because the source is fresh anyway" — check whether the
+//     source is mmap-backed. For AccountsDomain / StorageDomain /
+//     CommitmentDomain values (CompressNone in state_schema.go) it
+//     is, and the copy is non-negotiable. For CodeDomain
+//     (CompressVals) the source is a freshly decompressed buffer and
+//     the copy is unnecessary; that's a separate narrow
+//     optimisation, don't generalise.
+//
+//  3. Don't shorten the cache lifetime to per-block "for safety."
+//     The structural win is the opposite: extend it across blocks so
+//     overlapping prefixes (root, contract trunks) get allocated
+//     once and reused. Today the cache is created per
+//     ComputeCommitment call (hex_patricia_hashed.go ~2780) and
+//     torn down at block end, so the same ~26 K branches on the
+//     SSTORE-bloat workload are re-fetched and re-allocated every
+//     block. Per-block lifetime is the dominant unmeasured cost; a
+//     single longer-lived cache gives you both lookup efficiency
+//     and memory efficiency by holding exactly one copy of each
+//     entry. Correctness for cross-block reuse needs an
+//     invalidation story for entries written this block — see the
+//     dirty-flag scaffolding (PutBranchIfClean / MarkBranchDirty)
+//     for the intended hook.
 type WarmupCache struct {
 	branches *maphash.Map[*branchEntry]
 	accounts *maphash.Map[*accountEntry]

@@ -120,7 +120,19 @@ var (
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.NumCPU()*8) //io-bound (not cpu-bound). it's ok to have `io-threads > cpus`
+	// The original default was NumCPU()*8 with the rationale "io-bound, more
+	// workers drive more concurrent I/O." Our measurements (cold-cgroup 6c
+	// vs unconstrained 12c on the SSTORE-bloat bench) show read_bytes
+	// nearly identical (1.28 GB vs 1.24 GB) regardless of worker count,
+	// and 76 % of TEST-block CPU sits in the warmer's recsplit/xorfilter/
+	// seg-decompress path. The hot path is CPU-bound, not I/O-bound; the
+	// "drives I/O" rationale isn't borne out. Oversubscribing past
+	// available cores adds scheduler/context-switch overhead and queue
+	// noise without throughput gain. The constraint is queue depth on the
+	// warmer's work channel (sized at numWorkers*64), not worker count.
+	// GOMAXPROCS respects cgroup CPU caps under Go 1.25+, so this scales
+	// correctly inside a constrained envelope.
+	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", runtime.GOMAXPROCS(0))
 )
 
 func ReadMemStats(m *runtime.MemStats) {
