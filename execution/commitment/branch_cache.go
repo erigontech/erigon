@@ -158,14 +158,24 @@ type BranchCache struct {
 	// access so no lock is needed for the hot read path.
 	root atomic.Pointer[branchCacheEntry]
 
+	// Pinned-prefix tier — explicit per-prefix pin via PinEntry. Used
+	// for hot-contract storage-trunk preload (the "storage root trunk
+	// cache for big accounts" path). Entries here NEVER evict — sized
+	// by the preload policy, not by an LRU. Writes to pinned prefixes
+	// (via Put/SD.Flush) update the entry in place rather than displace
+	// it, so cross-block correctness is maintained without losing the
+	// pin. Lookup checks this tier between root and tail.
+	pinned *maphash.Map[*branchCacheEntry]
+
 	// LRU tail — bounded entries, evicts oldest when full. maphash.LRU
 	// wraps hashicorp/golang-lru/v2 which is thread-safe internally.
 	tail *maphash.LRU[*branchCacheEntry]
 
 	// Stats — atomic counters surfaced via Stats().
-	rootHits, rootMisses atomic.Uint64
-	tailHits, tailMisses atomic.Uint64
-	bytesServed          atomic.Uint64
+	rootHits, rootMisses     atomic.Uint64
+	pinnedHits, pinnedMisses atomic.Uint64
+	tailHits, tailMisses     atomic.Uint64
+	bytesServed              atomic.Uint64
 
 	// Divergence counter — incremented by RecordDivergence when a caller
 	// detects that a cache-served value disagrees with the canonical
@@ -247,7 +257,10 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	if err != nil {
 		panic(fmt.Sprintf("BranchCache: NewLRU: %s", err))
 	}
-	return &BranchCache{tail: tail}
+	return &BranchCache{
+		tail:   tail,
+		pinned: maphash.NewMap[*branchCacheEntry](),
+	}
 }
 
 // isRootPrefix reports whether prefix targets the pinned root slot. The
@@ -268,6 +281,13 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		c.rootHits.Add(1)
 		return entry, true
 	}
+	// Check pinned tier before tail. Pinned entries never evict and
+	// are fed by PinEntry (preload) + Put updates that preserve pin.
+	if entry, ok := c.pinned.Get(prefix); ok {
+		c.pinnedHits.Add(1)
+		return entry, true
+	}
+	c.pinnedMisses.Add(1)
 	entry, ok := c.tail.Get(prefix)
 	if !ok {
 		c.tailMisses.Add(1)
@@ -282,7 +302,41 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
+	// If this prefix is pinned, update the pinned entry in place rather
+	// than route to the LRU tail. Keeps the pin alive across the
+	// SD.Flush invalidate+Put cycle that refreshes branch values every
+	// block — without this, every Put would silently lose the pin.
+	if _, ok := c.pinned.Get(prefix); ok {
+		c.pinned.Set(prefix, entry)
+		return
+	}
 	c.tail.Set(prefix, entry)
+}
+
+// PinEntry inserts or replaces a pinned cache entry for prefix. Pinned
+// entries are never evicted by the LRU and survive across blocks
+// (subject to Put updates from SD.Flush refreshing the bytes). Use for
+// eager preload of hot prefixes — e.g. the storage-trunk of big
+// contracts under PIN_CONTRACT_TRUNKS. Data is copied; safe to mutate
+// the input after the call.
+func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin string) {
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+	c.pinned.Set(prefix, &branchCacheEntry{
+		data:           dataCopy,
+		step:           step,
+		writeSeq:       c.writeSeq.Add(1),
+		origin:         origin,
+		writeTimeNanos: time.Now().UnixNano(),
+	})
+}
+
+// PinnedCount returns the number of currently pinned entries. Useful
+// for observability of the preload policy and eviction sanity (pinned
+// entries are never evicted; this counter is monotonic over a
+// PreloadContractTrunk run).
+func (c *BranchCache) PinnedCount() int {
+	return c.pinned.Len()
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
