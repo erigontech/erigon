@@ -361,6 +361,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// actually fetched the underlying value vs reused a
 					// memoized stateHash?"
 					load, skipped, reset, diskSto, diskAcc := commitment.SkipLoadResetCounters()
+					hasStoMiss := commitment.HasStorageMissCount()
 					// Per-domain file-read counts: lets us decompose the
 					// aggregate `files=N` from [domain reads] into Commitment
 					// (branch reads), Storage (value loads), Account, Code.
@@ -394,6 +395,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"reset", reset,
 						"disk_sto", diskSto,
 						"disk_acc", diskAcc,
+						"has_sto_miss", hasStoMiss,
 						"files_acc", aFiles,
 						"files_sto", sFiles,
 						"files_code", cFiles,

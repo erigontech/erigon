@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -340,7 +341,20 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
-	// Otherwise check in the DB
+	// Otherwise check in the DB. This is the EIP-684 CREATE collision
+	// fall-through: the in-memory checks above missed, so we ask the
+	// reader, which on the snapshot-backed storage layout means a
+	// kv.HasPrefix(StorageDomain, addr) walk through the .bt index.
+	// That index pages into RAM and is the dominant reason the storage
+	// .bt stays resident on the validation hot path. The cost equation
+	// changed when storage moved to snapshots; the call wasn't re-priced.
+	commitment.RecordHasStorageMiss()
+	if dbg.EnvBool("SKIP_EIP684_HASPREFIX", false) {
+		// CORRECTNESS-BROKEN. Bench scaffold only — quantifies the
+		// .bt-resident cost by short-circuiting the scan. With the gate
+		// on, two CREATEs to the same address will both succeed.
+		return false, nil
+	}
 	result, err := sdb.stateReader.HasStorage(addr)
 	return result, err
 }
