@@ -363,6 +363,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// All cumulative; deltas via successive lines.
 					var aFiles, sFiles, cFiles, mFiles int64
 					var aUniq, sUniq, cUniq, mUniq int64
+					var mLens [7]int64
 					if m := sdc.sharedDomains.Metrics(); m != nil {
 						m.RLock()
 						if d := m.Domains[kv.AccountsDomain]; d != nil {
@@ -380,9 +381,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						if d := m.Domains[kv.CommitmentDomain]; d != nil {
 							mFiles = d.FileReadCount
 							mUniq = d.UniqueFileReadCount
+							mLens = d.UniqueLenBuckets
 						}
 						m.RUnlock()
 					}
+					// commLens compact form: "1B:N0|2-4B:N1|5-8B:N2|9-16B:N3|17-32B:N4|33-64B:N5|>64B:N6"
+					commLens := fmt.Sprintf("1B:%d|2-4B:%d|5-8B:%d|9-16B:%d|17-32B:%d|33-64B:%d|>64B:%d",
+						mLens[0], mLens[1], mLens[2], mLens[3], mLens[4], mLens[5], mLens[6])
 					log.Info("[commitment][cache-fp]",
 						"block", blockNum,
 						"root", hex.EncodeToString(rootHash),
@@ -410,7 +415,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"uniq_acc", aUniq,
 						"uniq_sto", sUniq,
 						"uniq_code", cUniq,
-						"uniq_comm", mUniq)
+						"uniq_comm", mUniq,
+						"comm_lens", commLens)
 				}
 			}
 		}
