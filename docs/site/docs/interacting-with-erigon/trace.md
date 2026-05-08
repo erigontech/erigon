@@ -82,6 +82,112 @@ then it should look something like:
 * [trace\_get](#trace_get)
 * [trace\_transaction](#trace_transaction)
 
+## Response Fields Reference
+
+All `trace_*` methods return objects built from the same set of fields. Each method's "Returns" section below indicates which top-level shape it produces; the field semantics are defined once here.
+
+### Top-level shapes
+
+| Method | Top-level shape |
+| --- | --- |
+| `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_callMany` | `Array<Object>` — one per input call |
+| `trace_replayBlockTransactions` | `Array<Object>` — one per transaction; each entry adds `transactionHash` |
+| `trace_block`, `trace_filter`, `trace_transaction` | `Array<TraceEntry>` (flat list across all call frames) |
+| `trace_get` | `TraceEntry` (single call frame at the requested position) |
+
+### Top-level (ad-hoc tracing) fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
+| `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
+| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
+
+### TraceEntry fields
+
+A `TraceEntry` represents a single call frame (root call, internal call, contract creation, or self-destruct).
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
+| `error` | String | (Optional) Present instead of `result` when the call frame reverted, e.g. `"Reverted"`, `"Out of gas"`, `"Bad instruction"`. |
+| `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
+| `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward, only in `trace_block`). |
+| `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
+| `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
+| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
+| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. Absent for `"reward"` entries. |
+
+### Action variants
+
+The `action` object's shape depends on `type`:
+
+**`type: "call"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `callType` | String | `"call"`, `"callcode"`, `"delegatecall"`, or `"staticcall"`. |
+| `from` | DATA, 20 BYTES | Sender address. |
+| `to` | DATA, 20 BYTES | Recipient address. |
+| `value` | QUANTITY | Wei value transferred. |
+| `gas` | QUANTITY | Gas provided to this call frame. |
+| `input` | DATA | Call data (selector + arguments). |
+
+**`type: "create"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `from` | DATA, 20 BYTES | Address that initiated the creation. |
+| `value` | QUANTITY | Wei value sent to the new contract. |
+| `gas` | QUANTITY | Gas provided to the creation. |
+| `init` | DATA | Init bytecode (constructor + runtime). |
+
+**`type: "suicide"`** (self-destruct)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | DATA, 20 BYTES | Address of the self-destructing contract. |
+| `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
+| `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
+
+**`type: "reward"`** (block/uncle reward, `trace_block` only)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `author` | DATA, 20 BYTES | Address receiving the reward (miner / uncle author). |
+| `value` | QUANTITY | Wei amount of the reward. |
+| `rewardType` | String | `"block"` or `"uncle"`. |
+
+### Result variants
+
+The `result` object's shape depends on `type`:
+
+**`type: "call"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `gasUsed` | QUANTITY | Gas consumed by this call frame (excluding subcalls' charges). |
+| `output` | DATA | Return data of this call frame (`0x` if no data was returned). |
+
+**`type: "create"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `gasUsed` | QUANTITY | Gas consumed by the creation. |
+| `code` | DATA | Deployed runtime bytecode of the new contract. |
+| `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
+
+**`type: "suicide"` and `type: "reward"`**
+
+`result` is `null` — these actions have no return value.
+
+***
+
 ## JSON-RPC API Reference
 
 ### trace\_call
@@ -96,7 +202,7 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Returns
 
-* `Array` - Block traces
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
@@ -168,7 +274,7 @@ params: [
 
 #### Returns
 
-* `Array` - Array of the given transactions' traces
+`Array<Object>` — one entry per input call, each shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -255,7 +361,7 @@ params: [
 
 #### Returns
 
-* `Object` - Block traces.
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -310,7 +416,7 @@ params: [
 
 #### Returns
 
-* `Array` - Block transactions traces.
+`Array<Object>` — one entry per transaction in the block. Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -369,7 +475,7 @@ params: [
 
 #### Returns
 
-* `Object` - Block traces.
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -422,7 +528,7 @@ params: [
 
 #### Returns
 
-* `Array` - Block traces.
+`Array<TraceEntry>` — flat list of all call frames in the block, including any `"reward"` entries for block/uncle rewards. Each entry includes block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -496,7 +602,7 @@ params: [{
 
 #### Returns
 
-* `Array` - Traces matching given filter
+`Array<TraceEntry>` — flat list of call frames that match the filter, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`) on each entry. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -560,7 +666,7 @@ params: [
 
 #### Returns
 
-* `Object` - Trace object
+A single `TraceEntry` corresponding to the call frame at the requested position, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -620,7 +726,7 @@ params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
 
 #### Returns
 
-* `Array` - Traces of given transaction
+`Array<TraceEntry>` — flat list of all call frames in the transaction, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`) on each entry. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 

@@ -102,6 +102,39 @@ Additional flags can be added to configure the node with several options.
 
 - [configuring-erigon](configuring-erigon/)
 
+## How do I know it's syncing?
+
+Once your node is running, there are two ways to confirm it is making progress and to see exactly which stage of the initial sync it is in.
+
+### 1. Read the live log line
+
+Erigon's logs are organized by [staged sync](logs#staged-synchronization-architecture). Every log line emitted by the sync engine is prefixed with the current stage and its position in the pipeline. For example:
+
+```
+INFO[02-20|15:00:00.123] [3/12 Bodies] Downloading block bodies   block=18234567 ...
+```
+
+The prefix `[3/12 Bodies]` means: *"stage 3 of 12, currently in the Bodies stage"*. As stages complete, the prefix advances (`[4/12 Senders]`, `[5/12 Execution]`, …) until you reach `[12/12 Finish]`, at which point the node is at the chain tip.
+
+The full ordered stage list is in [Logs → Stage Definitions](logs#stage-definitions).
+
+### 2. Query the JSON-RPC
+
+If the RPC daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
+  http://localhost:8545
+```
+
+* While syncing, the result is an object containing `startingBlock`, `currentBlock`, and `highestBlock` (all hex). Subtract `currentBlock` from `highestBlock` to see how many blocks remain.
+* Once fully synced, the result is simply `false`.
+
+:::tip
+For a quick reference on monitoring sync progress (including using AI assistants via MCP), see the [Frequently Asked Questions](/help-center/frequently-asked-questions-faqs).
+:::
+
 ## Help
 
 To learn about the available commands, open your terminal in your Erigon 3 installation directory and run:
