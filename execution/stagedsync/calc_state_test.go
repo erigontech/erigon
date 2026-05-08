@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -46,24 +47,27 @@ func newTestUpdates() *commitment.Updates {
 }
 
 // TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate is
-// DEFENSIVE coverage for the first branch of FlushToUpdates' switch:
-// when acc.Deleted is true AND Incarnation>0 AND all-zero fields, emit
-// a zero-account UPDATE rather than a DeleteUpdate.
+// DEFENSIVE-ONLY coverage for the first branch of FlushToUpdates'
+// switch: acc.Deleted=true AND Incarnation>0 AND all-zero fields →
+// zero-account UPDATE (not DeleteUpdate).
 //
-// Note: under the *current* normalizeWriteSet + ApplyWrites semantics
-// this state is unreachable from a real LightCollector writeset —
-// see TestSDOfPreExistingContract_FullPipeline below, which drives
-// the full pipeline end-to-end and shows that completion entries for
-// Balance/Nonce/CodeHash always arrive after SelfDestructPath and
-// reset acc.Deleted=false. The actual mechanism that fixes the hive
-// chain.rlp block 2 (4055cae5) regression is the default branch
-// emitting the pre-block field values via the completion-loop path,
-// not this zero-account branch.
+// Reachability: this branch is currently UNREACHABLE from real
+// production writesets. The realistic-pipeline test
+// TestSDOfPreExistingContract_FullPipeline below drives the full
+// IBS.Selfdestruct → blockIO.WriteSet → normalizeWriteSet →
+// ApplyWrites → FlushToUpdates flow and shows that the BalancePath=0
+// write IBS emits via versionWritten arrives in ApplyWrites after
+// SelfDestructPath and resets acc.Deleted=false — meaning the
+// SD-of-pre-existing-contract case lands in the default branch with
+// {Balance=0, Nonce=preBlock, CodeHash=preBlock}, not in the
+// zero-account branch.
 //
-// The test populates cs.accounts directly to cover the FlushToUpdates
-// branch in isolation against future ApplyWrites/normalizeWriteSet
-// changes (e.g. a refactor that drops the completion loop or stops
-// resetting Deleted on subsequent field writes).
+// This test populates cs.accounts directly to keep the branch
+// covered against future ApplyWrites/normalizeWriteSet refactors
+// (e.g. dropping IBS' BalancePath=0 emit, or changing the order of
+// writes such that BalancePath no longer clears Deleted) — at which
+// point this branch could become reachable and this test would
+// become a load-bearing assertion rather than defensive coverage.
 func TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
@@ -288,41 +292,40 @@ func (r *preBlockReader) Trace() bool                                           
 func (r *preBlockReader) TracePrefix() string                                     { return "" }
 
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
-// end-to-end for the SD-of-pre-existing-contract case that motivated this
-// PR (hive chain.rlp block 2 `0x4055cae5`):
+// end-to-end for an SD-of-pre-existing-contract scenario:
 //
-//	LightCollector.DeleteAccount(addr, original)
-//	  → normalizeWriteSet(writes, vm, txIndex, incarnation, stateReader)
+//	IBS.Selfdestruct (intra_block_state.go ~1430) emits via versionWritten:
+//	    IncarnationPath = original.Incarnation
+//	    SelfDestructPath = true
+//	    BalancePath = 0
+//	    StoragePath[k] = 0  for each k in stateObject.dirtyStorage
+//	  → those land in blockIO.WriteSet → rawWrites
+//	  → normalizeWriteSet(rawWrites, vm, txIndex, incarnation, stateReader)
 //	  → calcState.ApplyWrites(normalized)
 //	  → calcState.FlushToUpdates(updates)
 //
-// This addresses the reviewer concern that the FlushToUpdates unit tests
-// populate cs.accounts directly, bypassing the production flow where
-// normalizeWriteSet's completion loop appends BalancePath/NoncePath/
-// CodeHashPath entries (read from stateReader) AFTER SelfDestructPath. In
-// ApplyWrites those completion writes call `acc.Deleted = false`, which
-// would normally route the SD into the regular UPDATE branch.
+// This test populates `vm` with the same versionWritten emits IBS.Selfdestruct
+// publishes in production (concern #1 from yperbasis review on PR #21032 —
+// the prior version of this test had an empty vm and so the completion
+// loop's vm.Read fallback never fired, masking the actual production flow).
 //
-// What this test verifies:
-//  1. The end-state in cs.accounts has acc.Deleted=false (because
-//     completion entries for Balance/Nonce/CodeHash arrived after
-//     SelfDestructPath).
-//  2. The completion fills in PRE-block values (X/Y/Z), not zeros.
-//  3. FlushToUpdates therefore emits a regular UPDATE with the pre-block
-//     X/Y/Z values, NOT a zero-account UPDATE.
+// What it locks in:
+//  1. normalizeWriteSet's completion loop reads BalancePath/NoncePath/
+//     CodeHashPath from vm.Read first (where IBS already wrote BalancePath=0)
+//     then stateReader. So in production the trie sees BalancePath=0,
+//     NOT preBlockBalance.
+//  2. calcState.ApplyWrites ends with acc.Deleted=false (because BalancePath=0
+//     write fires acc.Deleted=false in the ApplyWrites BalancePath case),
+//     acc.Balance=0, acc.Nonce=preBlock, acc.CodeHash=preBlock,
+//     acc.Incarnation=preBlock.
+//  3. FlushToUpdates default branch fires; the leaf survives with
+//     {Balance=0, Nonce=preBlockNonce, CodeHash=preBlockCodeHash} —
+//     matching what serial would write through the same path.
 //
-// This is the reviewer's read of the pipeline. If this matches what
-// serial does for SD-of-pre-existing-contract via DomainPut/DomainDel,
-// the trie root matches without the zero-account UPDATE branch ever
-// firing — meaning that branch is defensive and the unit test
-// `TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate`
-// covers a state production never reaches.
-//
-// The test currently asserts what the production flow produces. If a
-// future change to normalizeWriteSet (e.g. dropping the completion loop)
-// makes the zero-account branch reachable, that test catches the new
-// flow; if not, the defensive coverage still guards FlushToUpdates'
-// switch in isolation.
+// The "Deleted && Incarnation>0 && isAllZero" branch in FlushToUpdates is
+// therefore confirmed unreachable from real production writesets; it's
+// defensive coverage (see docstring on
+// TestFlushToUpdates_DeletedWithIncarnation_EmitsZeroAccountUpdate).
 func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
 
@@ -338,95 +341,185 @@ func TestSDOfPreExistingContract_FullPipeline(t *testing.T) {
 		Incarnation: preBlockIncarnation,
 	}
 
-	// Step 1: simulate LightCollector.DeleteAccount producing the raw
-	// writeset for an SD'd pre-existing contract (matches the production
-	// emit sequence in execution/state/rw_v3.go's LightCollector).
+	// Build the raw writeset that IBS.Selfdestruct produces in production
+	// (intra_block_state.go around line 1430). LightCollector.DeleteAccount
+	// also runs, but its CollectorWrites output is NOT the source for
+	// rawWrites — exec3_parallel.go:2478 reads be.blockIO.WriteSet, which
+	// is fed by versionWritten. So these are the writes the calc actually
+	// sees.
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
 	rawWrites := state.VersionedWrites{
-		&state.VersionedWrite{
-			Address: addr,
-			Path:    state.SelfDestructPath,
-			Val:     true,
-			Version: state.Version{TxIndex: 0, Incarnation: 0},
-		},
-		&state.VersionedWrite{
-			Address: addr,
-			Path:    state.IncarnationPath,
-			Val:     original.Incarnation,
-			Version: state.Version{TxIndex: 0, Incarnation: 0},
-		},
+		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
 	}
 
-	// Step 2: drive through normalizeWriteSet with a stateReader that
-	// returns the pre-block account.
+	// Populate vm with the same writes — IBS.Selfdestruct calls versionWritten
+	// which goes through the version map, so by the time normalizeWriteSet's
+	// completion loop runs, vm.Read sees these values.
 	vm := state.NewVersionMap(nil)
+	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
+	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
+	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+
 	stateReader := &preBlockReader{addr: addr, acc: original}
 	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
 
-	// Sanity: normalizeWriteSet should append completion entries for the
-	// missing Balance/Nonce/CodeHash with pre-block values from the
-	// stateReader.
+	// Sanity: completion loop should fill the missing NoncePath / CodeHashPath
+	// from stateReader (vm has nothing for those), and BalancePath should
+	// remain 0 (vm has the IBS-written zero value).
 	pathSeen := map[state.AccountPath]any{}
 	for _, w := range normalized {
-		if w.Path == state.BalancePath || w.Path == state.NoncePath ||
-			w.Path == state.CodeHashPath || w.Path == state.IncarnationPath ||
-			w.Path == state.SelfDestructPath {
+		switch w.Path {
+		case state.BalancePath, state.NoncePath, state.CodeHashPath, state.IncarnationPath, state.SelfDestructPath:
 			pathSeen[w.Path] = w.Val
 		}
 	}
-	require.Contains(t, pathSeen, state.SelfDestructPath, "SelfDestructPath must survive normalizeWriteSet")
-	require.Contains(t, pathSeen, state.IncarnationPath, "IncarnationPath must survive normalizeWriteSet")
-	require.Contains(t, pathSeen, state.BalancePath, "completion loop must add BalancePath")
-	require.Contains(t, pathSeen, state.NoncePath, "completion loop must add NoncePath")
-	require.Contains(t, pathSeen, state.CodeHashPath, "completion loop must add CodeHashPath")
-
-	// The completion loop reads via vm.Read first (which has nothing for
-	// Balance/Nonce/Code on a fresh DeleteAccount) then falls back to
-	// stateReader. Confirm the values match the pre-block account.
-	assert.Equal(t, preBlockBalance, pathSeen[state.BalancePath].(uint256.Int))
+	require.Contains(t, pathSeen, state.SelfDestructPath)
+	require.Contains(t, pathSeen, state.IncarnationPath)
+	require.Contains(t, pathSeen, state.BalancePath)
+	require.Contains(t, pathSeen, state.NoncePath)
+	require.Contains(t, pathSeen, state.CodeHashPath)
+	assert.Equal(t, uint256.Int{}, pathSeen[state.BalancePath].(uint256.Int),
+		"BalancePath must be 0 (vm.Read of IBS.Selfdestruct's versionWritten BalancePath=0), NOT preBlockBalance from stateReader fallback")
 	assert.Equal(t, preBlockNonce, pathSeen[state.NoncePath].(uint64))
 	assert.Equal(t, preBlockCodeHash, pathSeen[state.CodeHashPath].(accounts.CodeHash))
 
-	// Step 3: drive normalized writeset through calcState.ApplyWrites.
+	// Drive ApplyWrites + FlushToUpdates.
 	cs := newTestCalcState()
 	cs.ApplyWrites(normalized)
 
 	acc, ok := cs.accounts[addr]
-	require.True(t, ok, "calcState must have an entry for the SD'd address")
-
-	// Step 4: assert what calcState ends up with after the production
-	// pipeline. The completion BalancePath/NoncePath/CodeHashPath writes
-	// arrive after SelfDestructPath and reset acc.Deleted to false — see
-	// ApplyWrites' BalancePath case `acc.Deleted = false`.
+	require.True(t, ok)
 	assert.False(t, acc.Deleted,
-		"completion BalancePath/NoncePath/CodeHashPath writes after SelfDestructPath reset Deleted=false; the Deleted+Incarnation>0 branch in FlushToUpdates is therefore unreachable from real LightCollector writesets through the production pipeline")
-	assert.Equal(t, preBlockBalance, acc.Balance,
-		"acc.Balance reflects the pre-block value populated via stateReader")
-	assert.Equal(t, preBlockNonce, acc.Nonce,
-		"acc.Nonce reflects the pre-block value populated via stateReader")
-	assert.Equal(t, [32]byte(preBlockCodeHash.Value()), acc.CodeHash,
-		"acc.CodeHash reflects the pre-block value populated via stateReader")
-	assert.Equal(t, preBlockIncarnation, acc.Incarnation,
-		"acc.Incarnation reflects the LightCollector-emitted IncarnationPath")
+		"BalancePath=0 (and Nonce/CodeHash) written after SelfDestructPath reset Deleted=false")
+	assert.Equal(t, uint256.Int{}, acc.Balance,
+		"acc.Balance is 0 (post-SD value, not preBlockBalance)")
+	assert.Equal(t, preBlockNonce, acc.Nonce)
+	assert.Equal(t, [32]byte(preBlockCodeHash.Value()), acc.CodeHash)
+	assert.Equal(t, preBlockIncarnation, acc.Incarnation)
 
-	// Step 5: drive FlushToUpdates and inspect the emitted commitment.Update.
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
-	keyVal := addr.Value()
-	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
+	got := lookupKeyUpdate(t, updates, string(addr.Value().Bytes()))
 
-	// The default branch fires (acc.Deleted=false), emitting the
-	// pre-block balance/nonce/codeHash. This is what serial's DomainPut
-	// would write after the same SD: the leaf survives, encoded with the
-	// pre-block field values; commitment.Update has no Incarnation field,
-	// so the trie's leaf-hash inputs match between serial and parallel.
+	// Default branch fires (acc.Deleted=false). Trie sees a leaf with
+	// {Balance=0, Nonce=preBlockNonce, CodeHash=preBlockCodeHash}.
 	assert.Equal(t,
 		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
 		got.Flags,
-		"production pipeline ends in the default FlushToUpdates branch (regular UPDATE)")
-	assert.Equal(t, preBlockBalance, got.Balance,
-		"trie sees pre-block balance — leaf survives without incarnation in commitment.Update")
-	assert.Equal(t, preBlockNonce, got.Nonce)
-	assert.Equal(t, common.Hash(preBlockCodeHash.Value()), got.CodeHash)
+		"production pipeline ends in the default FlushToUpdates branch")
+	assert.True(t, got.Balance.IsZero(),
+		"trie sees Balance=0 — IBS.Selfdestruct wrote it explicitly via versionWritten")
+	assert.Equal(t, preBlockNonce, got.Nonce,
+		"trie sees pre-block nonce (no NoncePath emit from IBS, completion-loop-from-stateReader fallback)")
+	assert.Equal(t, common.Hash(preBlockCodeHash.Value()), got.CodeHash,
+		"trie sees pre-block codeHash (same fallback as Nonce)")
+}
+
+// TestSDStorageCascade_EmitsPerSlotDeletes locks in the load-bearing
+// invariant documented at calc_state.go's SelfDestructPath case in
+// ApplyWrites: when an SD'd account had storage slots recorded in the
+// version map, normalizeWriteSet's `vm.StorageKeys(addr)` loop appends
+// StoragePath=0 entries AFTER the SelfDestructPath entry. Those zeros
+// arrive in ApplyWrites after SelfDestructPath, overwrite the pre-SD
+// values that ApplyWrites' SelfDestructPath case left in cs.storageState
+// (it only marks them dirty), and FlushToUpdates emits DeleteUpdate per
+// slot.
+//
+// This addresses concern #6 from the PR review: prior to this test,
+// the storage cascade was only exercised by the eest_devnet end-to-end
+// suite. If someone in the future drops the vm.StorageKeys loop from
+// normalizeWriteSet (or changes ApplyWrites' SelfDestructPath case to
+// pre-zero the storage values), this test catches it as a unit-level
+// regression: the slots would emit StorageUpdate(pre-SD value) rather
+// than DeleteUpdate, and the trie would see leaked pre-SD slot values.
+func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
+	slot1 := accounts.InternKey(common.Hash{0x01})
+	slot2 := accounts.InternKey(common.Hash{0x02})
+	preSDValue1 := *uint256.NewInt(0xaaaa)
+	preSDValue2 := *uint256.NewInt(0xbbbb)
+
+	original := &accounts.Account{
+		Balance:     *uint256.NewInt(1),
+		Nonce:       1,
+		Incarnation: 5,
+	}
+
+	// Pre-load cs.storageState with the pre-SD slot values, simulating
+	// IBS having read those slots earlier in the block. ApplyWrites'
+	// SelfDestructPath case marks them dirty without zeroing — so the
+	// load-bearing question is whether normalizeWriteSet appends the
+	// StoragePath=0 entries needed to overwrite these values.
+	cs := newTestCalcState()
+	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{
+		slot1: preSDValue1,
+		slot2: preSDValue2,
+	}
+
+	// Populate vm with StoragePath entries for both slots (this is what
+	// IBS' versionWritten does when EVM SLOAD/SSTORE touches a slot).
+	// Without these, vm.StorageKeys(addr) returns nil and the cascade
+	// never fires.
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	vm := state.NewVersionMap(nil)
+	vm.Write(addr, state.StoragePath, slot1, ver, preSDValue1, true)
+	vm.Write(addr, state.StoragePath, slot2, ver, preSDValue2, true)
+	vm.Write(addr, state.IncarnationPath, accounts.NilKey, ver, original.Incarnation, true)
+	vm.Write(addr, state.SelfDestructPath, accounts.NilKey, ver, true, true)
+	vm.Write(addr, state.BalancePath, accounts.NilKey, ver, uint256.Int{}, true)
+
+	rawWrites := state.VersionedWrites{
+		&state.VersionedWrite{Address: addr, Path: state.IncarnationPath, Val: original.Incarnation, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.SelfDestructPath, Val: true, Version: ver},
+		&state.VersionedWrite{Address: addr, Path: state.BalancePath, Val: uint256.Int{}, Version: ver},
+	}
+
+	stateReader := &preBlockReader{addr: addr, acc: original}
+	normalized := normalizeWriteSet(rawWrites, vm, 0, 0, stateReader)
+
+	// Sanity: normalizeWriteSet should have appended one StoragePath=0
+	// entry per slot in vm.StorageKeys(addr) — this is the load-bearing
+	// emit. If it's gone, the assertions below will still catch the
+	// effect (slots leak pre-SD values into the trie), but check it
+	// here too so a regression points directly at the offending loop.
+	storageZeroCount := 0
+	for _, w := range normalized {
+		if w.Path == state.StoragePath {
+			val := w.Val.(uint256.Int)
+			assert.True(t, val.IsZero(),
+				"normalizeWriteSet must emit StoragePath=0 for SD'd slots, got %v", val)
+			storageZeroCount++
+		}
+	}
+	assert.Equal(t, 2, storageZeroCount,
+		"normalizeWriteSet must emit one StoragePath=0 entry per vm.StorageKeys(addr) — this is the storage cascade")
+
+	cs.ApplyWrites(normalized)
+
+	updates := newTestUpdates()
+	cs.FlushToUpdates(updates)
+
+	// Walk all emitted updates and assert that every storage update for
+	// our SD'd address is a DeleteUpdate (not StorageUpdate with the
+	// pre-SD value).
+	addrBytes := addr.Value()
+	storageDeletes := 0
+	require.NoError(t, updates.HashSort(t.Context(), nil, func(_, k []byte, u *commitment.Update) error {
+		if len(k) != 52 {
+			return nil
+		}
+		if !bytes.Equal(k[:20], addrBytes[:]) {
+			return nil
+		}
+		assert.Equal(t, commitment.DeleteUpdate, u.Flags,
+			"slot %x must emit DeleteUpdate (storage cascade), not StorageUpdate with pre-SD value", k[20:])
+		storageDeletes++
+		return nil
+	}))
+	assert.Equal(t, 2, storageDeletes,
+		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
 func lookupKeyUpdate(t *testing.T, updates *commitment.Updates, plainKey string) *commitment.Update {

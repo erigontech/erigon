@@ -634,16 +634,15 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 }
 
 func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	// Intentionally NOT emitting IncarnationPath here even when
-	// original.Incarnation > 0, unlike LightCollector.DeleteAccount.
-	// versionedWriteCollector is wired only into txResult.finalize
-	// (fee calc + post-Cancun system calls); neither path SELFDESTRUCTs
-	// a pre-existing contract, so the SD-with-incarnation differentiator
-	// is unreachable from here today. If a future caller ever does emit
-	// DeleteAccount on a pre-existing contract through this collector,
-	// the calc would route it through the EIP-161 DeleteUpdate branch
-	// and produce a wrong root — at which point this code should mirror
-	// LightCollector.DeleteAccount's IncarnationPath emit.
+	// MIRROR-OF: LightCollector.DeleteAccount — kept symmetric so that
+	// future searches for one find the other. Both collectors emit only
+	// SelfDestructPath; the IncarnationPath needed by the parallel
+	// commitment calculator for the SD-of-pre-existing-contract case is
+	// emitted via IBS.Selfdestruct's versionWritten (intra_block_state.go
+	// around line 1430), not via either DeleteAccount. If a future caller
+	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
+	// pre-existing contract, both implementations would need an
+	// IncarnationPath emit here.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 
 	c.rs.accountsMutex.Lock()
@@ -738,23 +737,8 @@ func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, _
 	return nil
 }
 
-func (c *LightCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
-	// Emit the pre-deletion incarnation so the commitment calculator can
-	// differentiate the two flavours of DeleteAccount on the apply side:
-	//   - self-destruct of a pre-existing contract (original.Incarnation > 0):
-	//     serial's DomainDel writes the post-SD account encoding (incarnation
-	//     field present); the trie sees a non-empty val and the leaf survives
-	//     as zero balance/nonce/empty codeHash.
-	//   - EIP-161 emptyRemoval of an EOA-shaped touched-empty account
-	//     (original.Incarnation == 0): serial's DomainDel writes truly empty
-	//     bytes; the trie sees DeleteUpdate.
-	// Without this signal the calculator can't tell the two apart from the
-	// writes alone (both produce SelfDestructPath=true with empty fields)
-	// and emits the wrong leaf shape.
-	if original != nil && original.Incarnation > 0 {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: original.Incarnation})
-	}
 	return nil
 }
 
