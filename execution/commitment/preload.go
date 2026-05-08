@@ -72,9 +72,27 @@ func PreloadContractTrunk(
 		contractNibbles[2*i+1] = b & 0x0f
 	}
 
+	// Hard cap to bound preload work. A fully-saturated 4-level subtree
+	// is 1+16+256+4096 = 4369 branches; this gives headroom but still
+	// fails fast on malformed input (e.g. a contract with truly
+	// pathological branching). Tune downward if this turns out to bite.
+	const maxBranches = 10000
+
 	pinned := 0
+	var stopped bool
 	var enumerate func(pathNibbles []byte, depth int) error
 	enumerate = func(pathNibbles []byte, depth int) error {
+		if stopped {
+			return nil
+		}
+		if pinned >= maxBranches {
+			stopped = true
+			if logger != nil {
+				logger.Warn("[trunk-preload] hit max-branches cap",
+					"cap", maxBranches, "depth", depth)
+			}
+			return nil
+		}
 		prefix := nibbles.HexToCompact(pathNibbles)
 		v, step, found, err := reader(prefix)
 		if err != nil {
@@ -85,14 +103,18 @@ func PreloadContractTrunk(
 		}
 		cache.PinEntry(prefix, v, step, "preload-trunk")
 		pinned++
+		// Periodic progress log so a slow preload is observable.
+		if logger != nil && pinned%500 == 0 {
+			logger.Info("[trunk-preload] progress", "pinned", pinned, "depth", depth)
+		}
 		if depth >= maxDepth {
+			return nil
+		}
+		if len(v) < 4 {
 			return nil
 		}
 		// Branch encoding: 2-byte touchMap || 2-byte bitmap || per-child data.
 		// Only recurse into children that actually exist (bit set in bitmap).
-		if len(v) < 4 {
-			return nil
-		}
 		bitmap := binary.BigEndian.Uint16(v[2:4])
 		for n := 0; n < 16; n++ {
 			if bitmap&(1<<uint(n)) == 0 {
