@@ -173,9 +173,9 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Modify: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] write `TestEncodeKeyV2_SubtreeLocality`: over 10K iterations with a fixed seed, generate two random paths of random length `[0, 128]`, compute common nibble prefix `k`, assert encoded keys share at least `k/2` leading bytes
-- [ ] also include adversarial deterministic cases: odd parent + grandchild whose continuation begins with nibble `0` (parity-byte ordering edge case from brainstorm)
-- [ ] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
+- [x] write `TestEncodeKeyV2_SubtreeLocality`: over 10K iterations with a fixed seed, generate two random paths of random length `[0, 128]`, compute common nibble prefix `k`, assert encoded keys share at least `k/2` leading bytes
+- [x] also include adversarial deterministic cases: odd parent + grandchild whose continuation begins with nibble `0` (parity-byte ordering edge case from brainstorm)
+- [x] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
 
 ### Task 6: Round-trip fuzz target
 

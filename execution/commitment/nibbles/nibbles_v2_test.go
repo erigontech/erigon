@@ -19,6 +19,7 @@ package nibbles
 import (
 	"bytes"
 	"errors"
+	"math/rand"
 	"testing"
 )
 
@@ -195,6 +196,91 @@ func TestDecodeKeyV2_Errors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func commonNibblePrefix(a, b []byte) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+func commonBytePrefix(a, b []byte) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+func assertLocality(t *testing.T, a, b []byte) {
+	t.Helper()
+	k := commonNibblePrefix(a, b)
+	want := k / 2
+	keyA := EncodeKeyV2(a)
+	keyB := EncodeKeyV2(b)
+	got := commonBytePrefix(keyA, keyB)
+	if got < want {
+		t.Fatalf("locality violation: paths %x and %x share k=%d nibbles, "+
+			"want >= %d shared encoded bytes, got %d (keyA=%x, keyB=%x)",
+			a, b, k, want, got, keyA, keyB)
+	}
+}
+
+func TestEncodeKeyV2_SubtreeLocality(t *testing.T) {
+	// Adversarial deterministic cases — parity-byte ordering edge cases from the
+	// brainstorm. Each pair stresses an interaction between the trailing parity
+	// byte and a continuation that begins with nibble 0.
+	deterministic := []struct {
+		name string
+		a, b []byte
+	}{
+		{"identical_empty", []byte{}, []byte{}},
+		{"empty_vs_single", []byte{}, []byte{0x1}},
+		{"odd_parent_vs_grandchild_starting_with_0", []byte{0x2, 0xf, 0xb}, []byte{0x2, 0xf, 0xb, 0x0, 0x0}},
+		{"odd_parent_vs_child_appending_0", []byte{0x2, 0xf, 0xb}, []byte{0x2, 0xf, 0xb, 0x0}},
+		{"siblings_diverge_at_boundary_0_vs_1", []byte{0x2, 0xf, 0xb, 0x0}, []byte{0x2, 0xf, 0xb, 0x1}},
+		{"even_parent_vs_odd_grandchild_starting_with_0", []byte{0x2, 0xf}, []byte{0x2, 0xf, 0x0}},
+		{"identical_paths_three_nibbles", []byte{0xa, 0xb, 0xc}, []byte{0xa, 0xb, 0xc}},
+		{"completely_disjoint_first_nibble", []byte{0xa}, []byte{0xb}},
+		{"max_length_adjacent_last_nibble_differs", repeatByte(0xa, 128), append(repeatByte(0xa, 127), 0xb)},
+		{"odd_parent_zero_grandchild_zero", []byte{0x0, 0x0, 0x0}, []byte{0x0, 0x0, 0x0, 0x0, 0x0}},
+	}
+	for _, c := range deterministic {
+		t.Run("det/"+c.name, func(t *testing.T) {
+			assertLocality(t, c.a, c.b)
+		})
+	}
+
+	rng := rand.New(rand.NewSource(0xC0DEFEED))
+	for i := range 10_000 {
+		a := randomPath(rng)
+		b := randomPath(rng)
+		k := commonNibblePrefix(a, b)
+		want := k / 2
+		keyA := EncodeKeyV2(a)
+		keyB := EncodeKeyV2(b)
+		got := commonBytePrefix(keyA, keyB)
+		if got < want {
+			t.Fatalf("iter=%d: locality violation: paths %x and %x share k=%d nibbles, "+
+				"want >= %d shared encoded bytes, got %d (keyA=%x, keyB=%x)",
+				i, a, b, k, want, got, keyA, keyB)
+		}
+	}
+}
+
+func randomPath(rng *rand.Rand) []byte {
+	length := rng.Intn(MaxPathNibbles + 1)
+	out := make([]byte, length)
+	for i := range out {
+		out[i] = byte(rng.Intn(16))
+	}
+	return out
 }
 
 func TestEncodeKeyV2_Panics(t *testing.T) {
