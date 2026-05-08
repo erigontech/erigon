@@ -86,6 +86,9 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		if err == nil {
 			return beaconState, nil
 		}
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
 		log.Warn("[Checkpoint Sync] Failed to fetch beacon state", "uri", uri, "err", err)
 	}
 	return nil, err
