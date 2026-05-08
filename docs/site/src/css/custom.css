@@ -112,6 +112,39 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 800;
 }
 
+h1 { letter-spacing: -0.015em; }
+h2 { letter-spacing: -0.01em; }
+
+h6 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* ─── Typography rhythm ─────────────────────────────────────────────────── */
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+:root {
+  --ifm-heading-line-height: 1.2;
+}
+
+.markdown h2 {
+  margin-top: 2.5rem;
+}
+.markdown h3 {
+  margin-top: 1.75rem;
+}
+
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 1rem);
+}
+
 /* ─── Shared landing-page card grid ─────────────────────────────────────── */
 
 .lp-hero {
