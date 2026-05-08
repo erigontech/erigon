@@ -609,9 +609,11 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 		return lastKeyValue, err
 	}
 	defer sn.Close()
+	w := seg.NewWriter(sn, seg.CompressKeys|seg.CompressVals)
 
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
-		return sn.AddWord(v)
+		_, err := w.Write(v)
+		return err
 	}, workers, lvl, logger, hashResolver)
 
 	if err != nil {

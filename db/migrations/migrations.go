@@ -56,6 +56,8 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
 		dbSchemaVersion6,
+		SegHeaderV2,
+		SegHeaderV2Seg,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

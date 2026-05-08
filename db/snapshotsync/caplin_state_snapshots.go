@@ -616,6 +616,11 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		return err
 	}
 	defer sn.Close()
+	compression := seg.CompressKeys | seg.CompressVals
+	if !compress {
+		compression = seg.CompressNone
+	}
+	w := seg.NewWriter(sn, compression)
 
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
@@ -627,14 +632,8 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping "+snapName, "progress", i)
 		}
-		if compress {
-			if err := sn.AddWord(dump); err != nil {
-				return err
-			}
-		} else {
-			if err := sn.AddUncompressedWord(dump); err != nil {
-				return err
-			}
+		if _, err := w.Write(dump); err != nil {
+			return err
 		}
 	}
 	if sn.Count() != int(blocksPerFile) {
