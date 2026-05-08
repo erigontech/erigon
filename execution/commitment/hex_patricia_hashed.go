@@ -1016,6 +1016,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		} else {
 			if !cell.loaded.storage() {
 				hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
+				diskLoadStorage.Add(1)
 				update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
@@ -1102,6 +1103,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+			diskLoadAccount.Add(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
@@ -1256,6 +1258,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+			diskLoadAccount.Add(1)
 			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
@@ -1866,28 +1869,37 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 }
 
 var (
-	hadToLoad   atomic.Uint64
-	skippedLoad atomic.Uint64
-	hadToReset  atomic.Uint64
+	hadToLoad       atomic.Uint64
+	skippedLoad     atomic.Uint64
+	hadToReset      atomic.Uint64
+	diskLoadStorage atomic.Uint64
+	diskLoadAccount atomic.Uint64
 )
 
 // SkipLoadResetCounters returns the cumulative process-wide counts of:
 //   - hadToLoad:   computeCellHash had no memoized stateHash and had
 //     to fetch the underlying value from cache/DB to compute the leaf
-//     hash. This is the real "did we go to disk for state we needed"
-//     count.
+//     hash. NOTE: setFromUpdate increments this on EVERY call, so it
+//     conflates trie disk-fetches with EVM-write plumbing into cells.
+//     Use diskLoadStorage / diskLoadAccount to distinguish.
 //   - skippedLoad: the cell had a memoized stateHash so the fetch was
 //     skipped entirely (mxTrieStateSkipRate also counts these).
 //   - hadToReset:  the cell HAD a memoized stateHash but it was
 //     invalidated (extension fold path, depth change). Implies a
 //     fresh hash compute and may imply a load.
+//   - diskLoadStorage / diskLoadAccount: incremented ONLY at the
+//     actual storageFromCacheOrDB / accountFromCacheOrDB call sites
+//     inside computeCellHash. This is the unambiguous "trie went to
+//     fetch state it didn't have" count, separate from the EVM-write
+//     plumbing path that also flows through setFromUpdate.
 //
 // Counters are atomic and process-cumulative. To get per-block
 // deltas, snapshot before/after the block. Used by the perf-equivalence
 // investigation to measure whether memoization is doing its job or
 // whether we're paying for fetches that should have been skipped.
-func SkipLoadResetCounters() (load, skipped, reset uint64) {
-	return hadToLoad.Load(), skippedLoad.Load(), hadToReset.Load()
+func SkipLoadResetCounters() (load, skipped, reset, diskStorage, diskAccount uint64) {
+	return hadToLoad.Load(), skippedLoad.Load(), hadToReset.Load(),
+		diskLoadStorage.Load(), diskLoadAccount.Load()
 }
 
 type skipStat struct {
