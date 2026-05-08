@@ -968,16 +968,22 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 	return changes, nil
 }
 
-// triggerTrunkPreload kicks off a background goroutine that pre-pins
-// the storage-subtree-trunk of each contract in pinList for the
-// SharedDomains' BranchCache. pinList is a comma-separated list of
-// 64-hex-char contract hashes (keccak256(addr)). Run from the SD
-// constructor; gated by BranchCache.TryClaimPreload so it fires once
-// per cache lifetime.
+// triggerTrunkPreload runs a synchronous trunk-preload pass for each
+// contract listed in pinList against the SharedDomains' BranchCache.
+// pinList is a comma-separated list of 64-hex-char contract hashes
+// (keccak256(addr)). Run from the SD constructor; gated by
+// BranchCache.TryClaimPreload so it fires once per cache lifetime.
 //
-// Reader closes over sd + tx; the bench scenario keeps both alive for
-// the whole process so the closure is safe. For production, this
-// pattern needs revisiting (tx may not outlive the goroutine).
+// SYNCHRONOUS for prototype correctness: a previous async-goroutine
+// shape shared the SD's MDBX tx with the calling thread and tripped
+// "cgo argument has Go pointer to unpinned Go pointer" under
+// concurrent cursor use. Background-with-own-tx is a follow-up;
+// owning the SD's tx exclusively for the preload duration is the
+// safe shape until that lands.
+//
+// Boot cost is the per-contract preload time, paid once per cache
+// lifetime (TryClaimPreload guards). Block-app benchmarks see this
+// as a one-time hit during the first SD construction.
 func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, pinList string, logger log.Logger) {
 	const maxDepth = 70 // covers depths 64-70 = the dominant read range on bloat workloads
 	var hashes [][]byte
@@ -997,24 +1003,21 @@ func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalT
 	if len(hashes) == 0 {
 		return
 	}
-	cache := sd.branchCache
-	go func() {
-		reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-			v, step, err := sd.GetLatest(kv.CommitmentDomain, tx, prefix)
-			if err != nil {
-				return nil, 0, false, err
-			}
-			return v, uint64(step), len(v) > 0, nil
+	reader := func(prefix []byte) ([]byte, uint64, bool, error) {
+		v, step, err := sd.GetLatest(kv.CommitmentDomain, tx, prefix)
+		if err != nil {
+			return nil, 0, false, err
 		}
-		for _, h := range hashes {
-			n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, cache, logger)
-			if err != nil {
-				logger.Warn("[trunk-preload] failed",
-					"hash", hex.EncodeToString(h), "pinned_so_far", n, "err", err)
-				continue
-			}
-			logger.Info("[trunk-preload] contract done",
-				"hash", hex.EncodeToString(h), "pinned", n)
+		return v, uint64(step), len(v) > 0, nil
+	}
+	for _, h := range hashes {
+		n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, sd.branchCache, logger)
+		if err != nil {
+			logger.Warn("[trunk-preload] failed",
+				"hash", hex.EncodeToString(h), "pinned_so_far", n, "err", err)
+			continue
 		}
-	}()
+		logger.Info("[trunk-preload] contract done",
+			"hash", hex.EncodeToString(h), "pinned", n)
+	}
 }
