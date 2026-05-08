@@ -121,26 +121,6 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 	return branchData, err
 }
 
-// accountFromCacheOrDB reads account data via ctx.Account. No Go-side
-// caching; the read populates the OS page cache as a side effect.
-func (w *Warmuper) accountFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	update, err := trieCtx.Account(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	return update, nil
-}
-
-// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
-// caching; the read populates the OS page cache as a side effect.
-func (w *Warmuper) storageFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	update, err := trieCtx.Storage(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	return update, nil
-}
-
 // Start initializes and starts the warmup workers.
 func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
@@ -201,14 +181,15 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		}
 		nextNibble := int(hashedKey[depth])
 
-		// Extract and prefetch account/storage addresses to warm page cache
-		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
-		for _, addr := range cellAccounts {
-			_, _ = w.accountFromCacheOrDB(trieCtx, addr)
-		}
-		for _, addr := range cellStorages {
-			_, _ = w.storageFromCacheOrDB(trieCtx, addr)
-		}
+		// Account/storage prefetch removed: the warmer's scope is branch
+		// warm-up only. If a leaf hash needs underlying account/storage
+		// data during fold, that data is either (a) memoized as the
+		// cell's stateHash, (b) carried in the Updates buffer from the
+		// executor, or (c) faulted on the trie's own slow path —
+		// signalling a memoization gap that wants fixing at the trie
+		// layer, not papered over by a separate prefetcher. Counters
+		// disk_sto / disk_acc on the [commitment][cache-fp] log line
+		// expose any such fall-through.
 
 		branchData = branchData[2:] // skip touch map
 
