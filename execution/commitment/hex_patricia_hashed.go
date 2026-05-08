@@ -1883,7 +1883,38 @@ var (
 	// snapshots and was never re-priced. Used to quantify the cost of
 	// EIP-684 CREATE collision checks on the snapshot layout.
 	hasStorageMiss atomic.Uint64
+
+	// SSTORE classification counters. Hosted here (commitment) rather
+	// than in execution/state because state→commitment is the existing
+	// import direction; the inverse would create a cycle through
+	// db/rawdb/rawtemporaldb. Measurement scaffolding to size the value
+	// of pushing insert/update/delete down to the warmer / trie compute.
+	// INSERT  (prev==0, value!=0) — branch path won't exist below the
+	//                                divergence point.
+	// UPDATE  (prev!=0, value!=0, different) — full path exists.
+	// DELETE  (prev!=0, value==0) — read-side identical to UPDATE.
+	// NOOP    (prev==value)        — never reaches the trie.
+	sstoreInsert atomic.Uint64
+	sstoreUpdate atomic.Uint64
+	sstoreDelete atomic.Uint64
+	sstoreNoop   atomic.Uint64
 )
+
+// RecordSstoreInsert / Update / Delete / Noop are called from
+// stateObject.SetState to classify each SSTORE for measurement. See the
+// var block above for semantics. Process-cumulative; for per-block
+// deltas, snapshot via SstoreClassificationCounts before/after.
+func RecordSstoreInsert() { sstoreInsert.Add(1) }
+func RecordSstoreUpdate() { sstoreUpdate.Add(1) }
+func RecordSstoreDelete() { sstoreDelete.Add(1) }
+func RecordSstoreNoop()   { sstoreNoop.Add(1) }
+
+// SstoreClassificationCounts returns the cumulative process-wide counts
+// of SSTORE classifications (insert, update, delete, noop).
+func SstoreClassificationCounts() (insert, update, delete, noop uint64) {
+	return sstoreInsert.Load(), sstoreUpdate.Load(),
+		sstoreDelete.Load(), sstoreNoop.Load()
+}
 
 // RecordHasStorageMiss is incremented by IntraBlockState.HasStorage when
 // the in-memory checks miss and we fall through to stateReader.HasStorage
