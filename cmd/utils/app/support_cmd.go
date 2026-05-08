@@ -472,11 +472,18 @@ type subscrigeResponse struct {
 // Processes the incoming requests from the diagnostics system.
 // Handle subscribe/unsubscribe and all other messages.
 func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
-	for action := range nc.requestChannel {
+	for {
+		var (
+			action requestAction
+			ok     bool
+		)
 		select {
 		case <-nc.ctx.Done():
 			return
-		default:
+		case action, ok = <-nc.requestChannel:
+			if !ok {
+				return
+			}
 		}
 
 		switch {
@@ -552,11 +559,11 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 			buffer := &bytes.Buffer{}
 			if err := copyResponseBody(buffer, debugResponse); err != nil {
 				nc.responseChannel <- errorResponseMessage(action.requestId, http.StatusInternalServerError, "Request failed: "+err.Error())
-				debugResponse.Body.Close()
+				_ = debugResponse.Body.Close()
 				continue
 			}
 
-			debugResponse.Body.Close()
+			_ = debugResponse.Body.Close()
 			nc.responseChannel <- nodeResponse{
 				Id:     action.requestId,
 				Result: json.RawMessage(buffer.Bytes()),
@@ -569,11 +576,18 @@ func (nc *nodeConnection) processRequests(metricsClient *http.Client) {
 // Sends responses to the diagnostics system.
 // (support cmd) ----> (diagnostics system)
 func (nc *nodeConnection) processResponses() {
-	for response := range nc.responseChannel {
+	for {
+		var (
+			response nodeResponse
+			ok       bool
+		)
 		select {
 		case <-nc.ctx.Done():
 			return
-		default:
+		case response, ok = <-nc.responseChannel:
+			if !ok {
+				return
+			}
 		}
 
 		if err := nc.codec.WriteJSON(nc.ctx, response); err != nil {
