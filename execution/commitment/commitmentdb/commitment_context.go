@@ -353,19 +353,24 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// (branch reads), Storage (value loads), Account, Code.
 					// All cumulative; deltas via successive lines.
 					var aFiles, sFiles, cFiles, mFiles int64
+					var aUniq, sUniq, cUniq, mUniq int64
 					if m := sdc.sharedDomains.Metrics(); m != nil {
 						m.RLock()
 						if d := m.Domains[kv.AccountsDomain]; d != nil {
 							aFiles = d.FileReadCount
+							aUniq = d.UniqueFileReadCount
 						}
 						if d := m.Domains[kv.StorageDomain]; d != nil {
 							sFiles = d.FileReadCount
+							sUniq = d.UniqueFileReadCount
 						}
 						if d := m.Domains[kv.CodeDomain]; d != nil {
 							cFiles = d.FileReadCount
+							cUniq = d.UniqueFileReadCount
 						}
 						if d := m.Domains[kv.CommitmentDomain]; d != nil {
 							mFiles = d.FileReadCount
+							mUniq = d.UniqueFileReadCount
 						}
 						m.RUnlock()
 					}
@@ -392,7 +397,11 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"files_acc", aFiles,
 						"files_sto", sFiles,
 						"files_code", cFiles,
-						"files_comm", mFiles)
+						"files_comm", mFiles,
+						"uniq_acc", aUniq,
+						"uniq_sto", sUniq,
+						"uniq_code", cUniq,
+						"uniq_comm", mUniq)
 				}
 			}
 		}
