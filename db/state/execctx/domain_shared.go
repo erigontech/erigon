@@ -219,18 +219,15 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		}
 	}
 
-	// PIN_CONTRACT_TRUNKS=hash1,hash2,... preload contract storage-trunk
-	// into BranchCache's pinned tier. Run AFTER SeekCommitment so the
-	// SD has resolved its view of the chain head — reading via
-	// sd.GetLatest BEFORE that produced pinned values inconsistent with
-	// the committed state and broke subsequent block validation
-	// (every block came back SYNCING). TryClaimPreload guards
-	// fire-once-per-cache lifetime.
-	if branchCache != nil && branchCache.TryClaimPreload() {
-		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
-			triggerTrunkPreload(ctx, sd, tx, pinList, logger)
-		}
-	}
+	// PIN_CONTRACT_TRUNKS preload runs from EnableParaTrieDB (called by
+	// the staged sync exec stage) NOT here in NewSharedDomains — at SD
+	// construction time we'd block the engine HTTP handler for ~3-4s
+	// while preload reads, causing the bench's first NewPayload to be
+	// dropped. EnableParaTrieDB runs in the staged sync init goroutine,
+	// not the request handler, AND has access to the kv.TemporalRoDB
+	// needed to spawn an own-tx preload goroutine that doesn't share
+	// cursors with the main pipeline (the cause of the earlier
+	// cgo-pointer panic).
 
 	return sd, nil
 }
@@ -1119,6 +1116,24 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
+
+	// Trigger trunk-preload here (not from NewSharedDomains) so:
+	//  (a) we have a kv.TemporalRoDB to spawn an own-tx preload goroutine
+	//      with — avoids the cgo-pointer panic that the earlier shared-tx
+	//      attempt produced.
+	//  (b) we run from the stage-init path, not an engine request handler,
+	//      so we don't block engine HTTP responses during the 3-4s preload
+	//      window — the synchronous-from-NewSharedDomains shape caused the
+	//      bench's first NewPayload to be dropped, breaking block validation.
+	// TryClaimPreload guards fire-once-per-BranchCache-lifetime.
+	if sd.branchCache == nil || !sd.branchCache.TryClaimPreload() {
+		return
+	}
+	pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", "")
+	if pinList == "" {
+		return
+	}
+	triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
 }
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
@@ -1174,26 +1189,23 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 	return changes, nil
 }
 
-// triggerTrunkPreload runs a synchronous trunk-preload pass for each
-// contract listed in pinList against the SharedDomains' BranchCache.
-// pinList is a comma-separated list of 64-hex-char contract hashes
-// (keccak256(addr)). Run from the SD constructor; gated by
-// BranchCache.TryClaimPreload so it fires once per cache lifetime.
+// triggerTrunkPreload spawns a goroutine that pre-pins the storage-trunk
+// of each contract in pinList for the given BranchCache. pinList is a
+// comma-separated list of 64-hex-char contract hashes (keccak256(addr)).
 //
-// SYNCHRONOUS for prototype correctness: a previous async-goroutine
-// shape shared the SD's MDBX tx with the calling thread and tripped
-// "cgo argument has Go pointer to unpinned Go pointer" under
-// concurrent cursor use. Background-with-own-tx is a follow-up;
-// owning the SD's tx exclusively for the preload duration is the
-// safe shape until that lands.
+// The goroutine opens its OWN kv.TemporalRoTx via db.BeginTemporalRo,
+// distinct from the staged-sync's main tx. Two earlier shapes failed:
+//  1. Goroutine sharing the SD's MDBX tx → cgo "unpinned Go pointer"
+//     panic from concurrent cursor use across goroutines.
+//  2. Synchronous from NewSharedDomains → blocked the engine HTTP
+//     handler for ~3-4s during the preload window, dropping the bench's
+//     first NewPayload and breaking subsequent backward-download.
 //
-// Boot cost is the per-contract preload time, paid once per cache
-// lifetime (TryClaimPreload guards). Block-app benchmarks see this
-// as a one-time hit during the first SD construction.
-func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, pinList string, logger log.Logger) {
-	// Lower default depth (was 70 → blocked SD construction for too long
-	// on dense subtrees). 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K
-	// branches max per contract for a fully-saturated subtree.
+// Own-tx async sidesteps both. Caller must guarantee fire-once via
+// BranchCache.TryClaimPreload (the only call site does this).
+func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCache, db kv.TemporalRoDB, pinList string, logger log.Logger) {
+	// 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K branches max per
+	// contract for a fully-saturated subtree.
 	const maxDepth = 67
 	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
 	var hashes [][]byte
@@ -1214,25 +1226,38 @@ func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalT
 	if len(hashes) == 0 {
 		return
 	}
-	reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-		v, step, err := sd.GetLatest(kv.CommitmentDomain, tx, prefix)
+	go func() {
+		tx, err := db.BeginTemporalRo(ctx)
 		if err != nil {
-			return nil, 0, false, err
+			logger.Warn("[trunk-preload] BeginTemporalRo failed", "err", err)
+			return
 		}
-		return v, uint64(step), len(v) > 0, nil
-	}
-	for i, h := range hashes {
-		started := time.Now()
-		logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
-		n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, sd.branchCache, logger)
-		took := time.Since(started)
-		if err != nil {
-			logger.Warn("[trunk-preload] failed",
-				"hash", hex.EncodeToString(h), "pinned_so_far", n, "took", took, "err", err)
-			continue
+		defer tx.Rollback()
+		// Read directly via tx.GetLatest — no SharedDomains wrap.
+		// SD's GetLatest layers in sd.mem / parent.mem checks that
+		// (a) we don't need (the trunk hasn't been written yet in this
+		// goroutine's tx), and (b) would risk re-introducing the
+		// shared-cursor problem.
+		reader := func(prefix []byte) ([]byte, uint64, bool, error) {
+			v, step, err := tx.GetLatest(kv.CommitmentDomain, prefix)
+			if err != nil {
+				return nil, 0, false, err
+			}
+			return v, uint64(step), len(v) > 0, nil
 		}
-		logger.Info("[trunk-preload] contract done",
-			"hash", hex.EncodeToString(h), "pinned", n, "took", took)
-	}
-	logger.Info("[trunk-preload] all done", "contracts", len(hashes))
+		for i, h := range hashes {
+			started := time.Now()
+			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
+			n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, branchCache, logger)
+			took := time.Since(started)
+			if err != nil {
+				logger.Warn("[trunk-preload] failed",
+					"hash", hex.EncodeToString(h), "pinned_so_far", n, "took", took, "err", err)
+				continue
+			}
+			logger.Info("[trunk-preload] contract done",
+				"hash", hex.EncodeToString(h), "pinned", n, "took", took)
+		}
+		logger.Info("[trunk-preload] all done", "contracts", len(hashes))
+	}()
 }
