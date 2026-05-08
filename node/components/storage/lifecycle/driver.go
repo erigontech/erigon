@@ -269,61 +269,87 @@ var snapshotPrimaryExts = map[string]struct{}{
 	".seg": {},
 	".kv":  {},
 	".v":   {},
+	".ef":  {},
 }
 
-// discoverNewFiles scans SnapDir for primary files not yet in
-// Inventory and AddFile-s each at LifecycleDownloaded. Empty SnapDir
-// or read errors short-circuit silently — the next sweep retries.
+// discoverNewFiles scans SnapDir + Erigon's state subdirs (domain/,
+// history/, idx/, accessor/) for primary files not yet in Inventory
+// and AddFile-s each at LifecycleDownloaded. The set of subdirs is
+// derived from snapshot.PathForName so the discovery path and the
+// presence-checking path stay in sync. Empty SnapDir, missing subdirs,
+// and read errors short-circuit silently — the next sweep retries.
 //
 // Idempotent: files already in Inventory are skipped. Adds new
-// entries with minimal metadata (Name, Local=true, no Domain/Kind);
-// follow-up wires populate richer metadata via OnFilesChange.
+// entries with metadata populated from the file name via
+// PopulateFromName (Domain, Kind, FromStep/ToStep or
+// FromBlock/ToBlock per kind).
 //
-// Logs an Info summary if any new files were discovered, with the
-// count and an example name. Per-file Debug for the curious.
+// Logs an Info summary per directory if any new files were discovered.
 func (d *Driver) discoverNewFiles(logger log.Logger) {
 	if d.SnapDir == "" {
 		return
 	}
-	entries, err := os.ReadDir(d.SnapDir)
-	if err != nil {
-		logger.Debug("[storage-lifecycle] discoverNewFiles ReadDir", "dir", d.SnapDir, "err", err)
-		return
+	// Each entry pairs the directory to scan with the relative-to-
+	// SnapDir prefix used to key files in Inventory. The aggregator's
+	// onFilesChange / onFilesDelete callbacks key files by their
+	// relative-to-snap-dir path (e.g. "domain/v2.0-accounts.0-1.kv");
+	// the disk scan keys them the same way so a file the aggregator
+	// later deletes (e.g. after a merge) is found and removed instead
+	// of leaving an orphaned basename entry behind.
+	type scanDir struct{ path, prefix string }
+	dirs := []scanDir{
+		{d.SnapDir, ""},
+		{filepath.Join(d.SnapDir, "domain"), "domain"},
+		{filepath.Join(d.SnapDir, "history"), "history"},
+		{filepath.Join(d.SnapDir, "idx"), "idx"},
+		{filepath.Join(d.SnapDir, "accessor"), "accessor"},
 	}
-	added := 0
-	var firstAdded string
-	for _, e := range entries {
-		if e.IsDir() {
+	for _, sd := range dirs {
+		entries, err := os.ReadDir(sd.path)
+		if err != nil {
+			// Subdir might not exist on a fresh datadir; that's
+			// fine — Aggregator creates them when state files
+			// land. Silently skip.
 			continue
 		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if _, ok := snapshotPrimaryExts[ext]; !ok {
-			continue
+		added := 0
+		var firstAdded string
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(e.Name()))
+			if _, ok := snapshotPrimaryExts[ext]; !ok {
+				continue
+			}
+			name := e.Name()
+			if sd.prefix != "" {
+				name = sd.prefix + "/" + e.Name()
+			}
+			if _, ok := d.Inv.LifecycleState(name); ok {
+				continue
+			}
+			entry := &snapshot.FileEntry{
+				Name:  name,
+				Local: true, // → derives LifecycleDownloaded
+			}
+			// Populate step + domain + kind from the name so the
+			// entry joins the right step group (drives batch
+			// validation dispatch). Returns false silently for
+			// unrecognised patterns; the entry still gets added
+			// with whatever fields we set.
+			snapshot.PopulateFromName(entry)
+			_ = d.Inv.AddFile(entry)
+			logger.Debug("[storage-lifecycle] discovered new file", "name", name, "dir", sd.path)
+			added++
+			if firstAdded == "" {
+				firstAdded = name
+			}
 		}
-		if _, ok := d.Inv.LifecycleState(name); ok {
-			continue
+		if added > 0 {
+			logger.Info("[storage-lifecycle] discovered new on-disk files",
+				"count", added, "first", firstAdded, "dir", sd.path)
 		}
-		entry := &snapshot.FileEntry{
-			Name:  name,
-			Local: true, // → derives LifecycleDownloaded
-		}
-		// Populate step + domain + kind from the name so the entry
-		// joins the right step group (drives batch validation
-		// dispatch). Returns false silently for unrecognised
-		// patterns; the entry still gets added with whatever fields
-		// we set.
-		snapshot.PopulateFromName(entry)
-		_ = d.Inv.AddFile(entry)
-		logger.Debug("[storage-lifecycle] discovered new file", "name", name)
-		added++
-		if firstAdded == "" {
-			firstAdded = name
-		}
-	}
-	if added > 0 {
-		logger.Info("[storage-lifecycle] discovered new on-disk files",
-			"count", added, "first", firstAdded, "dir", d.SnapDir)
 	}
 }
 
