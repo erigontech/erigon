@@ -35,6 +35,7 @@ import (
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
+	GetLatestBlockNumber(ctx context.Context) (uint64, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
 	GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error)
@@ -51,6 +52,15 @@ func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB) *GraphQLAPIImpl {
 		BaseAPI: base,
 		db:      db,
 	}
+}
+
+func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	return rpchelper.GetLatestBlockNumber(tx)
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {

@@ -64,7 +64,6 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 	case uint64:
 		result = "0x" + strconv.FormatInt(int64(v), 16)
 	default:
-		fmt.Println("unhandled/string", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = "unhandled"
 	}
 
@@ -95,7 +94,6 @@ func convertDataToIntP(abstractMap map[string]any, field string) *int {
 	case int:
 		result = v
 	default:
-		fmt.Println("unhandled/int", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 
@@ -128,11 +126,10 @@ func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 	case *hexutil.Big:
 		result = v.ToInt().Uint64()
 	case int:
-		result = abstractMap[field].(uint64)
+		result = uint64(v)
 	case uint64:
-		result = abstractMap[field].(uint64)
+		result = v
 	default:
-		fmt.Println("unhandled/uint64", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 

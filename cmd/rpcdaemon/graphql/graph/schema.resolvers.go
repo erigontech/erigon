@@ -18,7 +18,7 @@ import (
 
 // Storage is the resolver for the storage field.
 func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
-	panic(fmt.Errorf("not implemented: Storage - storage"))
+	panic("not implemented: Storage - storage")
 }
 
 // TransactionAt is the resolver for the transactionAt field.
@@ -31,7 +31,7 @@ func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, ind
 
 // Logs is the resolver for the logs field.
 func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
-	panic(fmt.Errorf("not implemented: Logs - logs"))
+	panic("not implemented: Logs - logs")
 }
 
 // Account is the resolver for the account field.
@@ -44,12 +44,12 @@ func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address s
 
 // Call is the resolver for the call field.
 func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error) {
-	panic(fmt.Errorf("not implemented: Call - call"))
+	panic("not implemented: Call - call")
 }
 
 // EstimateGas is the resolver for the estimateGas field.
 func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
-	panic(fmt.Errorf("not implemented: EstimateGas - estimateGas"))
+	panic("not implemented: EstimateGas - estimateGas")
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -115,19 +115,11 @@ func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([
 	if to != nil {
 		toBlockNumber = *to
 	} else {
-		latestRes, err := r.GraphQLAPI.GetBlockDetails(ctx, rpc.LatestBlockNumber)
+		latest, err := r.GraphQLAPI.GetLatestBlockNumber(ctx)
 		if err != nil {
 			return nil, err
 		}
-		if latestRes == nil {
-			return nil, nil
-		}
-		blk, ok := latestRes["block"].(map[string]any)
-		if !ok {
-			return nil, nil
-		}
-		latestNum := *convertDataToUint64P(blk, "number")
-		toBlockNumber = latestNum
+		toBlockNumber = latest
 	}
 
 	if toBlockNumber < fromBlockNumber {
@@ -142,7 +134,10 @@ func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([
 	blocks := make([]*model.Block, 0, toBlockNumber-fromBlockNumber+1)
 	for i := fromBlockNumber; i <= toBlockNumber; i++ {
 		blockNumberStr := strconv.FormatUint(i, 10)
-		block, _ := r.Block(ctx, &blockNumberStr, nil)
+		block, err := r.Block(ctx, &blockNumberStr, nil)
+		if err != nil {
+			return nil, err
+		}
 		if block != nil {
 			blocks = append(blocks, block)
 		}
