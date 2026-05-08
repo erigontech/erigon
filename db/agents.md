@@ -8,6 +8,7 @@ Erigon uses a temporal database architecture separating hot (mutable) from cold 
 2. Periodic snapshots freeze old data
 3. Cold data compressed for long-term storage
 4. `Unwind` beyond data in snapshots not allowed
+5. Manual files-deletion not allowed in Erigon - there can be alive readers - read from closed mmap will cause SegFault. Need: `agg.BeginFilesRO()` and defer `rotx.Close()` (or accept existing `rotx` as parameter), mark files as `canDelete=true`, then last reader of this files will auto-delete them inside `aggRoTx.Close()` method.
 
 ## Storage Architecture
 
