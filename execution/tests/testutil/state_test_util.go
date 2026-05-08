@@ -93,20 +93,20 @@ type stPostState struct {
 }
 
 type stTransaction struct {
-	GasPrice             *math.HexOrDecimal256     `json:"gasPrice"`
-	MaxFeePerGas         *math.HexOrDecimal256     `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *math.HexOrDecimal256     `json:"maxPriorityFeePerGas"`
-	Nonce                math.HexOrDecimal64       `json:"nonce"`
-	GasLimit             []math.HexOrDecimal64     `json:"gasLimit"`
-	PrivateKey           hexutil.Bytes             `json:"secretKey"`
-	To                   string                    `json:"to"`
-	Data                 []string                  `json:"data"`
-	Value                []string                  `json:"value"`
-	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
-	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
-	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
-	Authorizations       []stAuthorization         `json:"authorizationList"`
-	IsSetCodeTx          bool                      `json:"-"` // true when authorizationList present in JSON
+	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
+	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
+	Nonce                math.HexOrDecimal64   `json:"nonce"`
+	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
+	PrivateKey           hexutil.Bytes         `json:"secretKey"`
+	To                   string                `json:"to"`
+	Data                 []string              `json:"data"`
+	Value                []string              `json:"value"`
+	AccessLists          []*types.AccessList   `json:"accessLists,omitempty"`
+	BlobVersionedHashes  []common.Hash         `json:"blobVersionedHashes,omitempty"`
+	BlobGasFeeCap        *math.HexOrDecimal256 `json:"maxFeePerBlobGas,omitempty"`
+	Authorizations       []stAuthorization     `json:"authorizationList"`
+	IsSetCodeTx          bool                  `json:"-"` // true when authorizationList present in JSON
 }
 
 func (tx *stTransaction) UnmarshalJSON(data []byte) error {

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -209,34 +210,29 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 			}
 			dirs := datadir.New(tmpDir)
 			db := temporaltest.NewTestDB(nil, dirs)
-			tx, txErr := db.BeginTemporalRw(context.Background())
-			if txErr != nil {
-				db.Close()
-				dir.RemoveAll(tmpDir)
-				result.Pass, result.Error = false, txErr.Error()
-				results = append(results, *result)
-				continue
-			}
 
-			statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
-			if err != nil {
+			err = db.UpdateTemporal(context.Background(), func(tx kv.TemporalRwTx) error {
+				statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+				}
+				if statedb != nil {
+					h := common.Hash(root)
+					result.Root = &h
+				}
+				if bench {
+					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
+						_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
+						return nil, gasUsed, nil
+					})
+					result.Stats = &stats
+				}
+				return nil
+			})
+			if err != nil && result.Pass {
 				result.Pass, result.Error = false, err.Error()
 			}
 
-			if statedb != nil {
-				h := common.Hash(root)
-				result.Root = &h
-			}
-
-			if bench {
-				_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-					_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
-					return nil, gasUsed, nil
-				})
-				result.Stats = &stats
-			}
-
-			tx.Rollback()
 			db.Close()
 			dir.RemoveAll(tmpDir)
 
