@@ -101,16 +101,6 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// enableWarmupCache toggles the (now-vestigial) warmup cache enable
-	// path through this trie. It's still propagated by callers but no
-	// longer attaches a Go-side cache here — branch / account / storage
-	// reads go straight through ctx.Branch / ctx.Account / ctx.Storage
-	// to SD.GetLatest, where the aggregator-scope BranchCache (for
-	// commitment) and OS page cache (for accounts/storage) provide the
-	// only caching layer. Field retained pending step 2c removal of the
-	// EnableWarmupCache plumbing chain.
-	enableWarmupCache bool
-
 	// branchCache is the BranchCache instance attached via SetBranchCache.
 	// Production wires the aggregator-scope instance through
 	// InitializeTrieAndUpdates; tests/benchmarks may pass a per-init
@@ -214,7 +204,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	hph.mounted = false
 	hph.mountedNib = 0
-	hph.enableWarmupCache = false
 
 	// tracing / capture
 	hph.capture = nil
@@ -2881,18 +2870,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
-		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		// EnableWarmupCache toggle is a no-op now: HPH no longer holds a
-		// Go-side warmup cache. The warmer still pre-fetches via ctx.Branch /
-		// Account / Storage to populate sd.mem and OS page cache; the
-		// trie-side reads go through the same paths and hit the
-		// aggregator-scope BranchCache (for commitment) or page cache
-		// (accounts/storage). The flag plumbing is retained pending step 2c
-		// removal.
-		_ = warmup.EnableWarmupCache
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -3029,8 +3009,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
-func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
-
 // SetBranchCache attaches a BranchCache for branch read-through and
 // write-through. Also propagates to the trie's BranchEncoder so encoder
 // writes update the cache via mark-dirty-then-Put (see CollectUpdate).
@@ -3126,12 +3104,6 @@ func (hph *HexPatriciaHashed) ClearBranchCache() {
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
-
-// Cache always returns nil — HPH no longer holds a Go-side warmup
-// cache. Retained as a stub so external callers (squeeze/fork-validation
-// ClearWarmupCache plumbing) compile; they short-circuit on nil.
-// Pending step 2c removal of the EnableWarmupCache plumbing chain.
-func (hph *HexPatriciaHashed) Cache() *WarmupCache { return nil }
 
 // verifyBranchCache, when true, makes branchFromCacheOrDB cross-check
 // every BranchCache hit against ctx.Branch and record a divergence on

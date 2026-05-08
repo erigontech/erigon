@@ -55,12 +55,11 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled           bool
-	EnableWarmupCache bool // If true, cache warmed data for use during trie processing
-	CtxFactory        TrieContextFactory
-	NumWorkers        int
-	MaxDepth          int
-	LogPrefix         string
+	Enabled    bool
+	CtxFactory TrieContextFactory
+	NumWorkers int
+	MaxDepth   int
+	LogPrefix  string
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -85,9 +84,6 @@ type Warmuper struct {
 	// Worker group
 	g *errgroup.Group
 
-	// Cache for storing warmed data to be used during trie processing
-	cache *WarmupCache
-
 	// Stats
 	keysProcessed atomic.Uint64
 	startTime     time.Time
@@ -105,7 +101,7 @@ type warmupWorkItem struct {
 // NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
-	w := &Warmuper{
+	return &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
@@ -113,64 +109,34 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
-	if cfg.EnableWarmupCache {
-		w.cache = NewWarmupCache()
-	}
-	return w
 }
 
-// Cache returns the warmup cache, or nil if caching is disabled.
-func (w *Warmuper) Cache() *WarmupCache {
-	return w.cache
-}
-
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
+// branchFromCacheOrDB reads branch data via ctx.Branch. The Go-side
+// warmup cache that previously sat above this has been removed; the
+// aggregator-scope BranchCache (reached through SD.GetLatest) is the
+// only branch cache. The function is kept as a thin wrapper to
+// preserve the warmer-side error handling shape.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
-	if w.cache != nil {
-		if data, found := w.cache.GetBranch(prefix); found {
-			return data, nil
-		}
-	}
 	branchData, _, err := trieCtx.Branch(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData)
-	}
-	return branchData, nil
+	return branchData, err
 }
 
-// accountFromCacheOrDB reads account data from cache if available, otherwise from DB and caches it.
+// accountFromCacheOrDB reads account data via ctx.Account. No Go-side
+// caching; the read populates the OS page cache as a side effect.
 func (w *Warmuper) accountFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetAccount(plainKey); found {
-			return update, nil
-		}
-	}
 	update, err := trieCtx.Account(plainKey)
 	if err != nil {
 		return nil, err
 	}
-	if w.cache != nil {
-		w.cache.PutAccount(plainKey, update)
-	}
 	return update, nil
 }
 
-// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB and caches it.
+// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
+// caching; the read populates the OS page cache as a side effect.
 func (w *Warmuper) storageFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetStorage(plainKey); found {
-			return update, nil
-		}
-	}
 	update, err := trieCtx.Storage(plainKey)
 	if err != nil {
 		return nil, err
-	}
-	if w.cache != nil {
-		w.cache.PutStorage(plainKey, update)
 	}
 	return update, nil
 }

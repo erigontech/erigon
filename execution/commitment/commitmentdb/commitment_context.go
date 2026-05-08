@@ -185,19 +185,6 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 	sdc.updates = updates
 }
 
-// EnableWarmupCache enables/disables warmup cache during commitment processing.
-func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
-	sdc.patriciaTrie.EnableWarmupCache(enable)
-}
-
-// ClearWarmupCache discards any stale account/storage values held in the active
-// warmup cache. Safe to call at block boundaries between ComputeCommitment calls.
-func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.Cache() != nil {
-		hph.Cache().Clear()
-	}
-}
-
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
@@ -492,12 +479,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}()
 	}
 
-	if recorder != nil {
-		// Disable warmup cache during recording — cache hits bypass the
-		// RecordingContext, producing incomplete traces for replay.
-		sdc.patriciaTrie.EnableWarmupCache(false)
-		defer sdc.patriciaTrie.EnableWarmupCache(true)
-	}
+	// Note: a previous EnableWarmupCache(false)+defer(true) guard lived here
+	// to ensure RecordingContext saw every read during trace capture. Now
+	// that the Go-side WarmupCache is gone, every read already goes through
+	// ctx.* (observable to the recorder by construction); no guard needed.
 
 	var warmupConfig commitment.WarmupConfig
 	var drainCollectors func() []*etl.Collector
