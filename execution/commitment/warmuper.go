@@ -273,6 +273,15 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
+		// If the child cell is a leaf (holds a plain key), there is no
+		// branch below it — stop walking. Without this check the warmer
+		// pays one extra recsplit + xorfilter lookup per leaf-terminating
+		// path, all of which return empty. Mirrors what unfold does
+		// implicitly by traversing the actual trie structure.
+		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
+			break
+		}
+
 		// Check if child has extension
 		hasExtension := (fieldBits & 1) != 0
 		if hasExtension && pos < len(branchData) {
