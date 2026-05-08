@@ -226,10 +226,9 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 	// auxiliary buffer
 	hph.auxBuffer.Reset()
 
-	// branch encoder: clear deferred updates, reset buffer, nil cache, re-enable deferred
+	// branch encoder: clear deferred updates, reset buffer, re-enable deferred
 	hph.branchEncoder.ClearDeferred()
 	hph.branchEncoder.buf.Reset()
-	hph.branchEncoder.cache = nil
 	hph.branchEncoder.SetDeferUpdates(true)
 
 	// depth-to-txnum mapping
@@ -2887,17 +2886,18 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		// Set cache on trie if warmup cache is enabled
+		// Set cache on trie if warmup cache is enabled. BranchEncoder no longer
+		// uses WarmupCache (its read fast-path was redundant with sd.mem masking
+		// and its write-back was redundant with SD.Flush's BranchCache update);
+		// HPH read-through paths (account/storage/branch) still consult hph.cache
+		// pending step 2b of the WarmupCache deletion.
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()
-			hph.branchEncoder.SetCache(hph.cache)
 			defer func() {
 				hph.cache = nil
-				hph.branchEncoder.SetCache(nil)
 			}()
 		} else {
 			hph.cache = nil
-			hph.branchEncoder.SetCache(nil)
 		}
 	}
 
