@@ -955,7 +955,11 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 // lifetime (TryClaimPreload guards). Block-app benchmarks see this
 // as a one-time hit during the first SD construction.
 func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, pinList string, logger log.Logger) {
-	const maxDepth = 70 // covers depths 64-70 = the dominant read range on bloat workloads
+	// Lower default depth (was 70 → blocked SD construction for too long
+	// on dense subtrees). 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K
+	// branches max per contract for a fully-saturated subtree.
+	const maxDepth = 67
+	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
 	var hashes [][]byte
 	for _, hexStr := range strings.Split(pinList, ",") {
 		hexStr = strings.TrimSpace(hexStr)
@@ -970,6 +974,7 @@ func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalT
 		}
 		hashes = append(hashes, h)
 	}
+	logger.Info("[trunk-preload] hashes parsed", "count", len(hashes), "max_depth", maxDepth)
 	if len(hashes) == 0 {
 		return
 	}
@@ -980,14 +985,18 @@ func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalT
 		}
 		return v, uint64(step), len(v) > 0, nil
 	}
-	for _, h := range hashes {
+	for i, h := range hashes {
+		started := time.Now()
+		logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
 		n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, sd.branchCache, logger)
+		took := time.Since(started)
 		if err != nil {
 			logger.Warn("[trunk-preload] failed",
-				"hash", hex.EncodeToString(h), "pinned_so_far", n, "err", err)
+				"hash", hex.EncodeToString(h), "pinned_so_far", n, "took", took, "err", err)
 			continue
 		}
 		logger.Info("[trunk-preload] contract done",
-			"hash", hex.EncodeToString(h), "pinned", n)
+			"hash", hex.EncodeToString(h), "pinned", n, "took", took)
 	}
+	logger.Info("[trunk-preload] all done", "contracts", len(hashes))
 }
