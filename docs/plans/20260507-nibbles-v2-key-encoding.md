@@ -192,12 +192,12 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Modify: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] write `BenchmarkLocalityV1VsV2`: generate 100K seeded random paths with realistic length distribution
-- [ ] V1 key form for comparison = `nibbles.HexToCompact(path)` with no terminator; V2 key form = `EncodeKeyV2(path)`
-- [ ] build sorted V1 key set and sorted V2 key set; report mean nibble-prefix-length between consecutive sorted keys for each scheme
-- [ ] use `b.ReportMetric` to surface `v1_neighbor_prefix` and `v2_neighbor_prefix` as named metrics
-- [ ] **NOT a pass/fail assertion** — evidence-only for the issue thread
-- [ ] verify it runs: `go test ./execution/commitment/nibbles/ -run='^$' -bench=Locality -benchtime=1x`
+- [x] write `BenchmarkLocalityV1VsV2`: generate 100K seeded random paths with realistic length distribution
+- [x] V1 key form for comparison = `nibbles.HexToCompact(path)` with no terminator; V2 key form = `EncodeKeyV2(path)`
+- [x] build sorted V1 key set and sorted V2 key set; report mean nibble-prefix-length between consecutive sorted keys for each scheme
+- [x] use `b.ReportMetric` to surface `v1_neighbor_prefix` and `v2_neighbor_prefix` as named metrics
+- [x] **NOT a pass/fail assertion** — evidence-only for the issue thread
+- [x] verify it runs: `go test ./execution/commitment/nibbles/ -run='^$' -bench=Locality -benchtime=1x`
 
 ### Task 8: Verify acceptance criteria
 
