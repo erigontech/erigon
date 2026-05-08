@@ -87,7 +87,6 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&initCommand,
 		&importCommand,
 		&snapshotCommand,
-		&supportCommand,
 		&backtestCommitmentCommand,
 		//&backupCommand,
 	}
