@@ -2034,7 +2034,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 					return err
 				}
 			}
-			return nil
 		})
 	}
 
