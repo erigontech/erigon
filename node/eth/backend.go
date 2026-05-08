@@ -458,6 +458,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
 		Events:            backend.notifications.Events,
 		Logger:            logger,
+		Disable:           stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err

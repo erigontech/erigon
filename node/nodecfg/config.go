@@ -172,7 +172,8 @@ type Config struct {
 
 	Http httpcfg.HttpCfg
 
-	DebugMux *http.ServeMux
+	DebugMux      *http.ServeMux
+	DisableSentry bool
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
