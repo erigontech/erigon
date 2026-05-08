@@ -202,6 +202,10 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
+	if i.decompressor == nil {
+		panic("assert: double close")
+	}
+
 	// Delete accessors before the data file. If the process is killed between
 	// deleting the data file and accessors, the accessor files become
 	// permanently orphaned.
@@ -308,19 +312,8 @@ func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, f
 		}
 		dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
-
-		// if merged file not visible for any alive reader (even for us): can remove it immediately
-		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
-		if out.refcount.Load() == 0 {
-			out.closeFilesAndRemove()
-
-			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
-			}
-		} else {
-			if filenameBase == traceFileLife && out.decompressor != nil {
-				logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
-			}
+		if filenameBase == traceFileLife && out.decompressor != nil {
+			logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
 		}
 	}
 }
