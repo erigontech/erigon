@@ -299,6 +299,8 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
 		},
+		DisableTxPool: true,
+		DisableSentry: true,
 	})
 	if err != nil {
 		// Best-effort: drop the temp dir we just created. The tester wasn't

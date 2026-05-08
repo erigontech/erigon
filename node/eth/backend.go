@@ -211,6 +211,7 @@ type Ethereum struct {
 	heimdallService    *heimdall.Service
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
+	readAheader        *exec.BlockReadAheader
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -331,6 +332,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
+		readAheader:               exec.NewBlockReadAheader(),
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -456,6 +458,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
 		Events:            backend.notifications.Events,
 		Logger:            logger,
+		Disable:           stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
@@ -866,6 +869,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Genesis,
 			config.Sync,
 			config.ExperimentalBAL,
+			backend.readAheader,
 		),
 		backend.notifications.Events,
 		&vm.Config{},
@@ -968,18 +972,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
-		validationNotifications, blockReader, blockWriter, logger)
+		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
@@ -1008,6 +1012,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.readAheader,
 		backend.stopNode,
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
@@ -1545,11 +1550,11 @@ func (s *Ethereum) Stop() error {
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
-	// transactions. The global read-aheader spawns fire-and-forget goroutines
-	// via AddHeaderAndBodyToGlobalReadAheader during ValidateChain.
+	// transactions. The read-aheader spawns fire-and-forget goroutines via
+	// AddHeaderAndBody during ValidateChain.
 	{
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		exec.WaitForWarmup(warmCtx)
+		s.readAheader.WaitForWarmup(warmCtx)
 		warmCancel()
 	}
 
