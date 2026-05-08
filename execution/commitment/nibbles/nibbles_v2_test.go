@@ -312,3 +312,27 @@ func TestEncodeKeyV2_Panics(t *testing.T) {
 		})
 	}
 }
+
+func FuzzEncodeDecodeKeyV2(f *testing.F) {
+	seedLengths := []uint{0, 1, 2, 3, 4, 8, 9, 64, 127, 128}
+	for i, length := range seedLengths {
+		f.Add(length, uint64(0xC0DEFEED+i))
+	}
+	f.Fuzz(func(t *testing.T, length uint, seed uint64) {
+		// clamp to valid range; encoder panics above MaxPathNibbles by contract
+		n := int(length % (MaxPathNibbles + 1))
+		rng := rand.New(rand.NewSource(int64(seed)))
+		path := make([]byte, n)
+		for i := range path {
+			path[i] = byte(rng.Intn(16))
+		}
+		encoded := EncodeKeyV2(path)
+		decoded, err := DecodeKeyV2(encoded)
+		if err != nil {
+			t.Fatalf("decode error after encode: path=%x encoded=%x err=%v", path, encoded, err)
+		}
+		if !bytes.Equal(decoded, path) {
+			t.Fatalf("round-trip mismatch: path=%x encoded=%x decoded=%x", path, encoded, decoded)
+		}
+	})
+}

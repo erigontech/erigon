@@ -182,10 +182,10 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Modify: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] add `FuzzEncodeDecodeKeyV2` using `testing.F`: input is `(uint, uint64)` → length and seed; generate path, assert `Decode(Encode(P)) == P`
-- [ ] seed corpus with the lengths `0, 1, 2, 3, 4, 8, 9, 64, 127, 128`
-- [ ] run fuzz briefly: `go test ./execution/commitment/nibbles/ -run='^$' -fuzz=FuzzEncodeDecodeKeyV2 -fuzztime=10s` — must complete clean
-- [ ] run normal tests: `go test ./execution/commitment/nibbles/ -v` — all pass before next task
+- [x] add `FuzzEncodeDecodeKeyV2` using `testing.F`: input is `(uint, uint64)` → length and seed; generate path, assert `Decode(Encode(P)) == P`
+- [x] seed corpus with the lengths `0, 1, 2, 3, 4, 8, 9, 64, 127, 128`
+- [x] run fuzz briefly: `go test ./execution/commitment/nibbles/ -run='^$' -fuzz=FuzzEncodeDecodeKeyV2 -fuzztime=10s` — must complete clean
+- [x] run normal tests: `go test ./execution/commitment/nibbles/ -v` — all pass before next task
 
 ### Task 7: Locality benchmark vs V1
 
