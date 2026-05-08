@@ -60,19 +60,27 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	defer tx.Rollback()
 	aggTx := state.AggTx(tx)
 	defer aggTx.Close()
-	files := aggTx.Files(kv.CommitmentDomain)
+	allFiles := aggTx.Files(kv.CommitmentDomain)
 	// atm our older files are missing the root due to purification, so this flag can be used to only check the last file
-	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", true)
+	onlyCheckLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE", false)
 	// may want to check all files for root key presence, but only recompute for the last file (due to purification)
-	onlyRecomputeLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE_RECOMPUTE", true)
-	if onlyCheckLastFile && len(files) > 0 {
+	onlyRecomputeLastFile := dbg.EnvBool("CHECK_COMMITMENT_ROOT_ONLY_LAST_FILE_RECOMPUTE", false)
+	files := make([]state.VisibleFile, 0, len(allFiles))
+	for _, f := range allFiles {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			files = append(files, f)
+		}
+	}
+	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
+	if len(files) == 0 {
+		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
+		return nil
+	}
+	if onlyCheckLastFile {
 		files = files[len(files)-1:]
 	}
 	var integrityErr error
 	for i, file := range files {
-		if !strings.HasSuffix(file.Fullpath(), ".kv") {
-			continue
-		}
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
@@ -207,8 +215,8 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	latestTxNum, _, err := sd.SeekCommitment(ctx, tx)                // seek commitment again to use the new state reader instead
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
+	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
@@ -240,17 +248,13 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
-	trace := logger.Enabled(ctx, log.LvlTrace)
-	touchLoggingVisitor := func(k []byte) {
-		if trace {
-			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
-		}
-	}
-	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
+	accountTouches, storageTouches, err := sd.TouchChangedKeysFromHistory(tx, info.blockMinTxNum, info.txNum+1)
 	if err != nil {
 		return err
 	}
-	logger.Info("[integrity] CommitmentRoot recomputing", "touches", touches, "file", filepath.Base(f.Fullpath()))
+	logger.Info("[integrity] CommitmentRoot recomputing",
+		"accountTouches", accountTouches, "storageTouches", storageTouches,
+		"file", filepath.Base(f.Fullpath()))
 	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
@@ -259,7 +263,10 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	if recomputed != info.rootHash {
 		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.rootHash)
 	}
-	logger.Info("[integrity] CommitmentRoot recomputed matches", "root", recomputed, "touches", touches, "file", filepath.Base(f.Fullpath()))
+	logger.Info("[integrity] CommitmentRoot recomputed matches",
+		"root", recomputed,
+		"accountTouches", accountTouches, "storageTouches", storageTouches,
+		"file", filepath.Base(f.Fullpath()))
 	return nil
 }
 
