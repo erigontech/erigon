@@ -111,10 +111,10 @@ Once your node is running, there are two ways to confirm it is making progress a
 Erigon's logs are organized by [staged sync](logs#staged-synchronization-architecture). Every log line emitted by the sync engine is prefixed with the current stage and its position in the pipeline. For example:
 
 ```
-INFO[02-20|15:00:00.123] [3/12 Bodies] Downloading block bodies   block=18234567 ...
+INFO[02-20|15:00:00.123] [4/8 Bodies] Downloading block bodies   block=18234567 ...
 ```
 
-The prefix `[3/12 Bodies]` means: *"stage 3 of 12, currently in the Bodies stage"*. As stages complete, the prefix advances (`[4/12 Senders]`, `[5/12 Execution]`, …) until you reach `[12/12 Finish]`, at which point the node is at the chain tip.
+The prefix `[4/8 Bodies]` means: *"stage 4 of 8, currently in the Bodies stage"*. As stages complete, the prefix advances (`[5/8 Senders]`, `[6/8 Execution]`, …) until you reach `[8/8 Finish]`, at which point the node is at the chain tip.
 
 The full ordered stage list is in [Logs → Stage Definitions](logs#stage-definitions).
 
@@ -128,7 +128,7 @@ curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:8545
 ```
 
-* While syncing, the result is an object containing `startingBlock`, `currentBlock`, and `highestBlock` (all hex). Subtract `currentBlock` from `highestBlock` to see how many blocks remain.
+* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{StageName, BlockNumber}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
 * Once fully synced, the result is simply `false`.
 
 :::tip

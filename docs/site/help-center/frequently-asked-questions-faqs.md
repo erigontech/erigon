@@ -25,7 +25,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 15. **What is a "snapshot sync"?** Snapshot sync is a stage of the synchronization process where the node downloads pre-made snapshots of the blockchain state. This significantly accelerates the initial sync, reducing the time required to catch up with the network. See [Sync Modes](/fundamentals/sync-modes) for details.
 16. **How do I monitor my node's sync progress?** There are three complementary ways:
 
-    * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[3/12 Bodies]`. The prefix advances through the stages until `[12/12 Finish]`, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
+    * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[4/8 Bodies]`. The prefix advances through the stages until `[8/8 Finish]`, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
     * **Query the JSON-RPC** — call `eth_syncing` against the RPC daemon (default port `8545`):
 
       ```bash
@@ -34,7 +34,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
         http://localhost:8545
       ```
 
-      While syncing the result is an object with `startingBlock`, `currentBlock`, and `highestBlock`; once fully synced it is simply `false`.
+      While syncing the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (per-stage progress, matching the log prefix); once fully synced it is simply `false`. (`startingBlock` is also returned but is hardcoded to `"0x0"`.)
     * **Ask an AI assistant via MCP** — Erigon's built-in [MCP server](/fundamentals/mcp) (default `127.0.0.1:8553`) lets a connected assistant like Claude Desktop answer questions like *"Is my node synced? How many blocks behind am I?"* in plain language by querying the same data the JSON-RPC exposes. Useful when you'd rather not parse logs or `eth_syncing` output by hand.
 17. **Can I use Erigon with Docker?** Yes, Erigon provides official Docker images on Dockerhub. See the [Installation](/get-started/installation) guide for the Docker setup instructions.
 18. **Does Erigon support other chains besides Ethereum?** Yes, Erigon is an EVM-compatible client and supports other networks like Gnosis. You can specify the chain with the `--chain` flag. See [Supported Networks](/fundamentals/supported-networks) and the [Easy Nodes](/get-started/easy-nodes) guides for chain-specific setup.

@@ -114,10 +114,10 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
 | `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present instead of `result` when the call frame reverted, e.g. `"Reverted"`, `"Out of gas"`, `"Bad instruction"`. |
+| `error` | String | (Optional) Present when the call frame errored, e.g. `"Reverted"`, `"Out of gas"`, `"Bad instruction"`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
-| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward, only in `trace_block`). |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
 | `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
 | `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
 | `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
@@ -143,6 +143,7 @@ The `action` object's shape depends on `type`:
 | Field | Type | Description |
 | --- | --- | --- |
 | `from` | DATA, 20 BYTES | Address that initiated the creation. |
+| `creationMethod` | String | How the contract was created: `"create"`, `"create2"`, or `"eofcreate"`. |
 | `value` | QUANTITY | Wei value sent to the new contract. |
 | `gas` | QUANTITY | Gas provided to the creation. |
 | `init` | DATA | Init bytecode (constructor + runtime). |
@@ -155,7 +156,7 @@ The `action` object's shape depends on `type`:
 | `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
 | `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
 
-**`type: "reward"`** (block/uncle reward, `trace_block` only)
+**`type: "reward"`** (block/uncle reward, in `trace_block` and `trace_filter`)
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -602,7 +603,7 @@ params: [{
 
 #### Returns
 
-`Array<TraceEntry>` — flat list of call frames that match the filter, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`) on each entry. See [Response Fields Reference](#response-fields-reference).
+`Array<TraceEntry>` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Each entry has block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
