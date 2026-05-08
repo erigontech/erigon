@@ -57,7 +57,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
-	se.resetWorkers(ctx, se.rs, se.applyTx)
+	if se.cfg.vmConfig == nil || !se.cfg.vmConfig.UseGevm {
+		se.resetWorkers(ctx, se.rs, se.applyTx)
+	} else {
+		se.applyTx = rwTx
+	}
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -330,6 +334,10 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+	if se.cfg.vmConfig != nil && se.cfg.vmConfig.UseGevm {
+		return se.executeBlockGevm(ctx, tasks, isInitialCycle)
+	}
+
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 

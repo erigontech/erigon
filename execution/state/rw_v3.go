@@ -948,6 +948,25 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
 }
 
+func (w *Writer) WriteAccountStorageRaw(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+	if original == value {
+		return nil
+	}
+	var composite [20 + 32]byte
+	copy(composite[:20], address[:])
+	copy(composite[20:], key[:])
+	if value.IsZero() {
+		return w.tx.DomainDel(kv.StorageDomain, composite[:], w.txNum, nil)
+	}
+	var valueBuf [32]byte
+	value.WriteToSlice(valueBuf[:])
+	valueBytes := valueBuf[32-value.ByteLen():]
+	if w.accumulator != nil {
+		w.accumulator.ChangeStorage(address, incarnation, key, valueBytes)
+	}
+	return w.tx.DomainPut(kv.StorageDomain, composite[:], valueBytes, w.txNum, nil)
+}
+
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)
 
 func (w *Writer) CreateContract(address accounts.Address) error {
@@ -1381,12 +1400,16 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	if !address.IsNil() {
 		value = address.Value()
 	}
+	return r.HasStorageRaw(value)
+}
+
+func (r *ReaderV3) HasStorageRaw(address common.Address) (bool, error) {
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, address[:]); len(enc) == 0 {
 		return false, err
 	}
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
+	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, address[:])
 	return hasStorage, err
 }
 
@@ -1400,7 +1423,11 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
+	return r.ReadAccountDataRaw(value)
+}
+
+func (r *ReaderV3) ReadAccountDataRaw(address common.Address) ([]byte, *accounts.Account, error) {
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, address[:])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1426,7 +1453,6 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	var composite [20 + 32]byte
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
@@ -1435,8 +1461,13 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
-	copy(composite[0:20], addressValue[0:20])
-	copy(composite[20:], keyValue[:])
+	return r.ReadAccountStorageRaw(addressValue, keyValue)
+}
+
+func (r *ReaderV3) ReadAccountStorageRaw(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+	var composite [20 + 32]byte
+	copy(composite[0:20], address[0:20])
+	copy(composite[20:], key[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
 	if err != nil {
 		return uint256.Int{}, false, err
@@ -1464,7 +1495,11 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
+	return r.ReadAccountCodeRaw(addressValue)
+}
+
+func (r *ReaderV3) ReadAccountCodeRaw(address common.Address) ([]byte, error) {
+	enc, _, err := r.getter.GetLatest(kv.CodeDomain, address[:])
 	if err != nil {
 		return nil, err
 	}

@@ -100,6 +100,11 @@ var (
 		Usage: "generate block access list",
 		Value: false,
 	}
+	UseGevmFlag = cli.BoolFlag{
+		Name:  "use-gevm",
+		Usage: "Use GEVM for block execution",
+		Value: false,
+	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
@@ -270,6 +275,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+	cfg.UseGevm = ctx.Bool(UseGevmFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
@@ -362,6 +368,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
 		cfg.ExperimentalBAL = *v
+	}
+	if v := f.Bool(UseGevmFlag.Name, false, UseGevmFlag.Usage); v != nil {
+		cfg.UseGevm = *v
 	}
 
 	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {

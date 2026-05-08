@@ -343,6 +343,12 @@ func WithFcuBackgroundPrune() Option {
 	}
 }
 
+func WithUseGevm() Option {
+	return func(opts *options) {
+		opts.useGevm = true
+	}
+}
+
 type options struct {
 	stepSize            *uint64
 	experimentalBAL     bool
@@ -356,6 +362,7 @@ type options struct {
 	enableDomains       []kv.Domain
 	fcuBackgroundCommit bool
 	fcuBackgroundPrune  bool
+	useGevm             bool
 }
 
 func applyOptions(opts []Option) options {
@@ -428,6 +435,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	cfg.AlwaysGenerateChangesets = true
+	cfg.UseGevm = opt.useGevm
+	vmConfig := &vm.Config{UseGevm: opt.useGevm}
 	cfg.PersistReceiptsCacheV2 = true
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
@@ -629,7 +638,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.BatchSize,
 			mock.ChainConfig,
 			mock.Engine,
-			&vm.Config{},
+			vmConfig,
 			mock.Notifications,
 			cfg.StateStream,
 			false, /*badBlockHalt*/
@@ -641,7 +650,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			false, /*experimentalBAL*/
 		),
 		nil, /*notifier*/
-		&vm.Config{},
+		vmConfig,
 		dirs.Tmp,
 		mock.TxPool,
 		miningCancel,
@@ -666,7 +675,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{},
+				vmConfig,
 				mock.Notifications,
 				cfg.StateStream,
 				false, /*badBlockHalt*/

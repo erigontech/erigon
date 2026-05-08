@@ -191,21 +191,26 @@ func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
-	enc, ok, err := hr.getAsOf(kv.AccountsDomain, addressValue[:])
+	_, acc, err := hr.ReadAccountDataRaw(addressValue)
+	return acc, err
+}
+
+func (hr *HistoryReaderV3) ReadAccountDataRaw(address common.Address) ([]byte, *accounts.Account, error) {
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, address[:])
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("%sReadAccountData (hist)[%x] => []\n", hr.tracePrefix, address)
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var a accounts.Account
 	if err := accounts.DeserialiseV3(&a, enc); err != nil {
-		return nil, fmt.Errorf("%sread account data (hist)(%x): %w", hr.tracePrefix, address, err)
+		return nil, nil, fmt.Errorf("%sread account data (hist)(%x): %w", hr.tracePrefix, address, err)
 	}
 	if hr.trace {
 		fmt.Printf("%sReadAccountData (hist)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", hr.tracePrefix, address, a.Nonce, &a.Balance, a.CodeHash)
 	}
-	return &a, nil
+	return enc, &a, nil
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -217,7 +222,11 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
+	return hr.ReadAccountStorageRaw(addressValue, keyValue)
+}
+
+func (hr *HistoryReaderV3) ReadAccountStorageRaw(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+	hr.composite = append(append(hr.composite[:0], address[:]...), key[:]...)
 	enc, ok, err := hr.getAsOf(kv.StorageDomain, hr.composite)
 	if hr.trace {
 		fmt.Printf("%sReadAccountStorage (hist)[%x] [%x] => [%x]\n", hr.tracePrefix, address, key, enc)
@@ -231,12 +240,16 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 
 func (hr *HistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	addressValue := address.Value()
-	to, ok := kv.NextSubtree(addressValue[:])
+	return hr.HasStorageRaw(addressValue)
+}
+
+func (hr *HistoryReaderV3) HasStorageRaw(address common.Address) (bool, error) {
+	to, ok := kv.NextSubtree(address[:])
 	if !ok {
 		to = nil
 	}
 
-	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, addressValue[:], to, hr.txNum, order.Asc, kv.Unlim)
+	it, err := hr.ttx.RangeAsOf(kv.StorageDomain, address[:], to, hr.txNum, order.Asc, kv.Unlim)
 	if err != nil {
 		return false, err
 	}
@@ -264,7 +277,11 @@ func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, er
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
 	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	addressValue := address.Value()
-	code, _, err := hr.getAsOf(kv.CodeDomain, addressValue[:])
+	return hr.ReadAccountCodeRaw(addressValue)
+}
+
+func (hr *HistoryReaderV3) ReadAccountCodeRaw(address common.Address) ([]byte, error) {
+	code, _, err := hr.getAsOf(kv.CodeDomain, address[:])
 	if hr.trace {
 		lenc, cs := printCode(code)
 		fmt.Printf("%sReadAccountCode (hist)[%x] => [%d:%s]\n", hr.tracePrefix, address, lenc, cs)

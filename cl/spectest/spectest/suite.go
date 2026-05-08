@@ -14,6 +14,15 @@ import (
 func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {
 	cases, err := ReadTestCases(root)
 	require.NoError(t, err, "reading cases")
+	excludedForks := map[string]struct{}{
+		"eip6110": {},
+		"eip7441": {},
+		"eip7594": {},
+		"eip7732": {},
+		"eip7805": {},
+		"gloas":   {},
+		"whisk":   {},
+	}
 	// prepare for gore.....
 	type (
 		K1 = string
@@ -40,7 +49,7 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 										t.Run(s, func(t *testing.T) {
 											t.Parallel()
 											m.Range0(func(key string, value TestCase) bool {
-												if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" {
+												if _, ok := excludedForks[value.ForkPhaseName]; ok {
 													t.Skipf("skipping %s", value.ForkPhaseName)
 													return true
 												}

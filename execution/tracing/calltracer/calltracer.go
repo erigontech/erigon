@@ -67,6 +67,10 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 func (ct *CallTracer) Reset() {
 	ct.froms, ct.tos = nil, nil
 }
+func (ct *CallTracer) ResetKeepMaps() {
+	clear(ct.froms)
+	clear(ct.tos)
+}
 func (ct *CallTracer) Froms() map[accounts.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[accounts.Address]struct{}   { return ct.tos }
 

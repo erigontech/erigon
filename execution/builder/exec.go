@@ -88,15 +88,6 @@ func StageBuilderExecCfg(
 
 // execBlock builds a block by executing transactions from the txpool,
 // then computes the state root from the accumulated domain writes.
-//
-// State changes flow through a single execution path:
-//  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
-//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
-//  3. ComputeCommitment(sd) produces the state root
-//  4. sd writes are discarded when Builder.Build returns (tx is read-only, sd is never flushed)
-//
-// TODO:
-// - resubmitAdjustCh - variable is not implemented
 func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
 	const logPrefix = "BuilderExec"
 
@@ -137,9 +128,12 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
 	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
 
-	ibs := state.New(stateReader)
-	defer ibs.Release(false)
-	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
+	var ibs *state.IntraBlockState
+	if !cfg.vmConfig.UseGevm {
+		ibs = state.New(stateReader)
+		defer ibs.Release(false)
+		ibs.SetTxContext(current.Header.Number.Uint64(), -1)
+	}
 
 	current.PayloadId = cfg.payloadId
 	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
@@ -148,9 +142,13 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
 	}, current)
+	defer ba.Release()
 	ba.SetStateWriter(stateWriter)
+	if cfg.vmConfig.UseGevm {
+		ba.SetGevmStateReader(stateReader)
+	}
 
-	if ba.HasBAL() {
+	if ba.HasBAL() && ibs != nil {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 	}
 
@@ -163,11 +161,17 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return execCfg.BlockReader().Header(ctx, tx, hash, number)
 	}
 
-	if err := ba.Initialize(ibs, tx, logger); err != nil {
-		return err
-	}
-
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
+
+	if cfg.vmConfig.UseGevm {
+		if err := ba.InitializeGevm(getHeader, coinbase); err != nil {
+			return err
+		}
+	} else {
+		if err := ba.Initialize(ibs, tx, logger); err != nil {
+			return err
+		}
+	}
 
 	yielded := mapset.NewSet[[32]byte]()
 

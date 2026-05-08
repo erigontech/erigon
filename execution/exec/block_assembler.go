@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -21,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	gevmexec "github.com/erigontech/erigon/execution/vm/gevm"
 
 	"github.com/erigontech/erigon/db/services"
 )
@@ -103,6 +105,11 @@ type BlockAssembler struct {
 	balIO       *state.VersionedIO
 	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
 	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
+
+	gevmStateReader state.StateReader
+	gevmBlockExec   *gevmexec.BlockExecutor
+	gevmInitialized bool
+	gevmFinalized   bool
 }
 
 func (ba *BlockAssembler) CumulativeGasUsed() protocol.GasUsed { return ba.gasUsed }
@@ -143,6 +150,17 @@ func (ba *BlockAssembler) BalIO() *state.VersionedIO {
 	return ba.balIO
 }
 
+func (ba *BlockAssembler) Release() {
+	if ba.gevmBlockExec != nil {
+		ba.gevmBlockExec.Release()
+		ba.gevmBlockExec = nil
+	}
+}
+
+func (ba *BlockAssembler) SetGevmStateReader(reader state.StateReader) {
+	ba.gevmStateReader = reader
+}
+
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
 	// Use NoopWriter for FinalizeTx during initialization. Intermediate state
 	// writes to SharedDomains would become stale if later system calls (e.g.
@@ -171,6 +189,9 @@ func (ba *BlockAssembler) AddTransactions(
 	interrupt *atomic.Bool,
 	logPrefix string,
 	logger log.Logger) (types.Logs, bool, error) {
+	if vmConfig != nil && vmConfig.UseGevm {
+		return ba.addTransactionsGevm(ctx, getHeader, txns, coinbase, vmConfig, interrupt, logPrefix, logger)
+	}
 
 	// Use len(ba.Txns) instead of ibs.TxnIndex()+1 to avoid gaps in the
 	// BAL access index sequence. When a batch ends with a failed tx,
@@ -361,7 +382,214 @@ LOOP:
 	return coalescedLogs, done, nil
 }
 
+func (ba *BlockAssembler) ensureGevmExecutor(getHeader func(hash common.Hash, number uint64) (*types.Header, error), coinbase accounts.Address) error {
+	if ba.gevmBlockExec == nil {
+		if ba.gevmStateReader == nil {
+			return errors.New("missing GEVM state reader for block assembly")
+		}
+		blockContext := protocol.NewEVMBlockContext(ba.Header, protocol.GetHashFn(ba.Header, getHeader), ba.cfg.Engine, coinbase, ba.cfg.ChainConfig)
+		ba.gevmBlockExec = gevmexec.NewBlockExecutorWithReader(ba.cfg.ChainConfig, ba.Header, blockContext, ba.gevmStateReader)
+	}
+	if ba.gevmInitialized {
+		return nil
+	}
+	if ba.cfg.ChainConfig.IsCancun(ba.Header.Time) {
+		ba.gevmBlockExec.ApplyBeaconRoot(ba.Header.ParentBeaconBlockRoot)
+	}
+	if ba.cfg.ChainConfig.IsPrague(ba.Header.Time) {
+		if err := ba.gevmBlockExec.StoreParentHash(ba.Header); err != nil {
+			return err
+		}
+	}
+	ba.gevmBlockExec.CommitTx()
+	ba.gevmInitialized = true
+	return nil
+}
+
+func (ba *BlockAssembler) InitializeGevm(getHeader func(hash common.Hash, number uint64) (*types.Header, error), coinbase accounts.Address) error {
+	return ba.ensureGevmExecutor(getHeader, coinbase)
+}
+
+func (ba *BlockAssembler) addTransactionsGevm(
+	ctx context.Context,
+	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
+	txns types.Transactions,
+	coinbase accounts.Address,
+	vmConfig *vm.Config,
+	interrupt *atomic.Bool,
+	logPrefix string,
+	logger log.Logger,
+) (types.Logs, bool, error) {
+	if err := ba.ensureGevmExecutor(getHeader, coinbase); err != nil {
+		return nil, false, err
+	}
+
+	txnIdx := len(ba.Txns)
+	header := ba.AssembledBlock.Header
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
+	if header.BlobGasUsed != nil {
+		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
+	}
+	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), ba.cfg.Engine, coinbase, ba.cfg.ChainConfig)
+	rules := blockContext.Rules(ba.cfg.ChainConfig)
+	gasUsed := &ba.gasUsed
+
+	var coalescedLogs types.Logs
+	var stopped *time.Ticker
+	defer func() {
+		if stopped != nil {
+			stopped.Stop()
+		}
+	}()
+
+	done := false
+	for _, txn := range txns {
+		if stopped != nil {
+			select {
+			case <-stopped.C:
+				done = true
+				return coalescedLogs, done, nil
+			default:
+			}
+		}
+		if err := common.Stopped(ctx.Done()); err != nil {
+			return nil, true, err
+		}
+		if interrupt != nil && interrupt.Load() && stopped == nil {
+			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
+			stopped = time.NewTicker(500 * time.Millisecond)
+		}
+		if gasPool.Gas() < params.TxGas {
+			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+			done = true
+			break
+		}
+
+		rlpSpacePostTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig, txn)
+		if rlpSpacePostTxn < 0 {
+			rlpSpacePreTxn := ba.AvailableRlpSpace(ba.cfg.ChainConfig)
+			logger.Debug(
+				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
+				"hash", txn.Hash(),
+				"pre", rlpSpacePreTxn,
+				"post", rlpSpacePostTxn,
+			)
+			continue
+		}
+
+		from, err := txn.Sender(*signer)
+		if err != nil {
+			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
+			continue
+		}
+		if txn.Protected() && !ba.cfg.ChainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", ba.cfg.ChainConfig.SpuriousDragonBlock)
+			continue
+		}
+		if txn.GetGasLimit() > gasPool.Gas() {
+			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
+			continue
+		}
+		if err := gasPool.SubBlobGas(txn.GetBlobGas()); err != nil {
+			logger.Debug(fmt.Sprintf("[%s] Blob gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
+			continue
+		}
+
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+		if err != nil {
+			gasPool.AddBlobGas(txn.GetBlobGas())
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
+			continue
+		}
+		out, err := ba.gevmBlockExec.ExecuteTx(txn, msg, nil)
+		if err != nil {
+			gasPool.AddBlobGas(txn.GetBlobGas())
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
+			continue
+		}
+		if out.ValidationError {
+			gasPool.AddBlobGas(txn.GetBlobGas())
+			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", out.Result.Err)
+			continue
+		}
+		if gasUsed.BlockRegular+out.Result.BlockRegularGasUsed > header.GasLimit {
+			gasPool.AddBlobGas(txn.GetBlobGas())
+			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
+			continue
+		}
+		if err := gasPool.SubGas(out.Result.BlockRegularGasUsed); err != nil {
+			gasPool.AddBlobGas(txn.GetBlobGas())
+			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
+			continue
+		}
+
+		gasUsed.Receipt += out.Result.ReceiptGasUsed
+		gasUsed.BlockRegular += out.Result.BlockRegularGasUsed
+		gasUsed.BlockState += out.Result.BlockStateGasUsed
+		gasUsed.Blob += txn.GetBlobGas()
+		protocol.SetGasUsed(header, gasUsed)
+
+		receipt, err := makeGevmReceipt(header, txn, msg, txnIdx, gasUsed.Receipt, out.Result, out.Logs, ba.Receipts)
+		if err != nil {
+			return nil, false, err
+		}
+		ba.AddTxn(txn)
+		ba.Receipts = append(ba.Receipts, receipt)
+		logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", ba.PayloadId)
+		coalescedLogs = append(coalescedLogs, receipt.Logs...)
+		txnIdx++
+	}
+
+	return coalescedLogs, done, nil
+}
+
+func makeGevmReceipt(header *types.Header, txn types.Transaction, msg *types.Message, txIndex int, cumulativeGasUsed uint64, result evmtypes.ExecutionResult, logs types.Logs, previous types.Receipts) (*types.Receipt, error) {
+	var firstLogIndex uint32
+	if len(previous) > 0 {
+		last := previous[len(previous)-1]
+		firstLogIndex = last.FirstLogIndexWithinBlock + uint32(len(last.Logs))
+	}
+	logIndex := firstLogIndex
+	for _, l := range logs {
+		l.Index = hexutil.Uint(logIndex)
+		logIndex++
+	}
+	receipt := &types.Receipt{
+		BlockNumber:              &header.Number,
+		BlockHash:                header.Hash(),
+		TransactionIndex:         uint(txIndex),
+		Type:                     txn.Type(),
+		GasUsed:                  result.ReceiptGasUsed,
+		CumulativeGasUsed:        cumulativeGasUsed,
+		TxHash:                   txn.Hash(),
+		Logs:                     logs,
+		FirstLogIndexWithinBlock: firstLogIndex,
+	}
+	for _, l := range receipt.Logs {
+		l.TxHash = receipt.TxHash
+		l.BlockNumber = hexutil.Uint64(header.Number.Uint64())
+		l.BlockHash = receipt.BlockHash
+	}
+	if result.Failed() {
+		receipt.Status = types.ReceiptStatusFailed
+	} else {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	if txn.Type() == types.BlobTxType {
+		receipt.BlobGasUsed = txn.GetBlobGas()
+	}
+	if msg.To().IsNil() {
+		receipt.ContractAddress = types.CreateAddress(msg.From().Value(), txn.GetNonce())
+	}
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	return receipt, nil
+}
+
 func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
+	if ba.gevmBlockExec != nil {
+		return ba.assembleBlockGevm(logger)
+	}
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
 	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
@@ -402,5 +630,31 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		}
 	}
 
+	return block, nil
+}
+
+func (ba *BlockAssembler) assembleBlockGevm(logger log.Logger) (*types.Block, error) {
+	if ba.gevmFinalized {
+		return types.NewBlockForAsembling(ba.Header, ba.Txns, ba.Uncles, ba.Receipts, ba.Withdrawals), nil
+	}
+	requests, err := ba.gevmBlockExec.FinalizeBlock(ba.cfg.Engine, ba.cfg.ChainConfig, ba.Header, ba.Uncles, ba.Receipts, ba.Withdrawals)
+	if err != nil {
+		return nil, fmt.Errorf("cannot finalize GEVM block execution: %s", err)
+	}
+	ba.Requests = requests
+	if err := ba.gevmBlockExec.ApplyState(ba.writer()); err != nil {
+		return nil, err
+	}
+	ba.gevmFinalized = true
+	block := types.NewBlockForAsembling(ba.Header, ba.Txns, ba.Uncles, ba.Receipts, ba.Withdrawals)
+	header := block.HeaderNoCopy()
+	if ba.cfg.ChainConfig.IsPrague(header.Time) && header.RequestsHash != nil {
+		requestsHash := common.Hash{}
+		if len(ba.Requests) > 0 {
+			requestsHash = *ba.Requests.Hash()
+		}
+		header.RequestsHash = &requestsHash
+	}
+	logger.Trace("Assembled block with GEVM", "block", header.Number.Uint64(), "txs", len(ba.Txns))
 	return block, nil
 }

@@ -224,6 +224,13 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
+	useGevm := UseGevm()
+	if useGevm && !gevmTesterSupported(config) {
+		useGevm = false
+	}
+	if useGevm {
+		mOpts = append(mOpts, execmoduletester.WithUseGevm())
+	}
 	m := execmoduletester.New(t, mOpts...)
 
 	bt.br = m.BlockReader
@@ -265,7 +272,18 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
+	mOpts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(bt.genesis(config)),
+		execmoduletester.WithEngine(engine),
+	}
+	useGevm := UseGevm()
+	if useGevm && !gevmTesterSupported(config) {
+		useGevm = false
+	}
+	if useGevm {
+		mOpts = append(mOpts, execmoduletester.WithUseGevm())
+	}
+	m := execmoduletester.New(nil, mOpts...)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
