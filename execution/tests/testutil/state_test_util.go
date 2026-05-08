@@ -364,7 +364,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
 
-	// Coinbase touch (even for failed txs, matching geth behavior)
+	// Coinbase touch (even for failed txs)
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
