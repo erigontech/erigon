@@ -25,8 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// BranchCache stores commitment-trie branch data with a persistence-friendly
-// shape distinct from WarmupCache:
+// BranchCache stores commitment-trie branch data:
 //
 //   - Bounded LRU tail with configurable capacity (eviction is well-defined,
 //     suitable for long-lived caching across many Process calls without
@@ -34,24 +33,53 @@ import (
 //   - Single pinned slot for the root branch (always hottest, always present
 //     once populated, never subject to LRU eviction). Compact prefix of
 //     length 0 (or single-byte "no-key" form) targets this slot.
-//   - dirty-flag + PutIfClean invariants (carried from step 4 of the
-//     representation-reduction sequence) so cross-block writers can race
+//   - dirty-flag + PutIfClean invariants so cross-block writers can race
 //     safely with fold updates.
-//   - Lazy-decoded read path (GetDecoded) — same pattern as WarmupCache's
-//     GetBranchDecoded; cells are populated from the cached encoded form
-//     on first decoded-read and reused thereafter.
+//   - Lazy-decoded read path (GetDecoded) — cells are populated from the
+//     cached encoded form on first decoded-read and reused thereafter.
 //
-// Today this is constructed as ephemeral infrastructure (per-Process,
-// alongside the trie). Future cross-block persistence work (step 7 of
-// the representation-reduction sequence) will lift its lifetime to the
-// aggTx level. The wire-up between the trie's read path and BranchCache
-// is intentionally NOT done in this commit — see the integration
-// discussion captured at the time of step 6.
+// Lifetime: aggregator-scope (one instance per Domain). SharedDomains
+// pulls the instance via BranchCacheProvider on the AggregatorRoTx;
+// commitment-context plumbs it through to the trie via
+// InitializeTrieAndUpdates. The previous WarmupCache type (per-Process,
+// duplicating account/storage/branch caching above this layer) was
+// deleted in the WarmupCache consolidation; BranchCache is now the
+// single branch cache.
 //
-// Distinct from WarmupCache: WarmupCache is a simple unbounded map for
-// warmup-fill hot-read patterns within one Process. BranchCache is
-// designed for the longer-lived cache lifetime that the cross-block
-// persistence work needs.
+// # Responsibility split (architectural)
+//
+// The cache is a passive store. Reads and writes are driven by the
+// trie walker / encoder; the cache itself never reaches into the
+// underlying state.
+//
+//   - BranchCache: passive store of branch bytes / decoded cells.
+//     Doesn't fetch anything.
+//   - Branch warmer (warmuper.go): narrow scope — pre-fetches
+//     *branches* along touched-key paths via SD.GetLatest. No
+//     account/storage prefetch — that conflated branch warm-up with
+//     leaf-data fetch. If a fold needs leaf data the trie walker
+//     fetches it directly (or it's already in Updates / memoized as
+//     stateHash).
+//   - Trie walker, block-processing path: receives Updates from the
+//     executor, folds them. Memoized stateHashes serve siblings; new
+//     values come from Updates. Doesn't reach into leaf data via
+//     prefetch.
+//   - Trie walker, witness / proof generation path: walks the trie
+//     structure and *needs* to fetch state to materialize the proof.
+//     This is the walker's responsibility — it drives its own reads
+//     against SD. If that path turns out to be cold-bound on real
+//     workloads it may indicate a need for separate account / storage
+//     caches (the `add_execution_context_with_caches` work has a
+//     reference design for these). Treat that as a separate concern
+//     from this BranchCache — different scope, different lifetime,
+//     different invalidation. Do not regrow the branch warmer's
+//     scope to cover it.
+//
+// The disk_sto / disk_acc counters on the [commitment][cache-fp] log
+// line surface any fall-through where the trie compute reaches the
+// underlying ctx.Account / ctx.Storage paths. On block-processing
+// workloads they should remain zero; non-zero values signal a
+// memoization gap or a missing walker-side prefetch.
 //
 // # Concurrency contract — caller invariants
 //
