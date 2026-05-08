@@ -202,9 +202,6 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
-	if i.decompressor == nil {
-		panic("assert: double close")
-	}
 
 	// Delete accessors before the data file. If the process is killed between
 	// deleting the data file and accessors, the accessor files become
