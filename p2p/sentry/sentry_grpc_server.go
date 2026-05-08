@@ -1437,7 +1437,122 @@ func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 		return nil, fmt.Errorf("could not start server: %w", err)
 	}
 
+	go forceDiscv5Bonding(ss.ctx, srv, ss.logger)
+
 	return srv, nil
+}
+
+// forceDiscv5Bonding keeps known endpoints in the discv5 routing table
+// with their latest ENR. On each tick it Pings every connected devp2p
+// peer, configured static peer, and bootnode; PING is a single round-trip
+// that returns the peer's current ENR sequence number, so we can detect
+// updates without re-fetching the full record. When the sequence has
+// advanced (or we have no cached value), Resolve fetches the rich ENR
+// and AddKnownNode injects it into the routing table.
+//
+// Dedup criterion is (id, enr-seq): a node is only "duplicate" if it's
+// the same node AND its metadata has not changed since we last processed
+// it. Anything else triggers a refresh — sequence-bumps from a snapshot
+// publisher regenerating chain-toml info-hashes are exactly what we need
+// to propagate quickly.
+//
+// This is required for snapshot discovery, not just chain consensus. The
+// snapshot-flow architecture distributes chain.toml info-hashes via discv5
+// ENR records; consumers find publishers by scanning peers for that ENR
+// entry. Without explicit injection the chain-toml ENR is only learnt via
+// a discv5 random-walk that is minutes long on sparse networks. Without
+// per-seq refresh, ENR updates between bonds are silently dropped.
+//
+// Two reasons we use Resolve+AddKnownNode (not Ping alone) on the refresh
+// path:
+//  1. dv5.Ping bonds the peer at the wire layer, but the table-side add
+//     (via addInboundNode) is dropped while the table is still completing
+//     its initial seeding (see Table.handleAddNode's isInitDone gate).
+//     Resolve fetches the rich ENR over the wire; AddKnownNode injects it
+//     via the non-inbound path that bypasses that gate.
+//  2. Snapshot publishers may refuse our devp2p dial when their peer slots
+//     are full (DiscTooManyPeers), so a peer-only loop iterating srv.Peers()
+//     never targets them. Bootnodes are the same case, more load-bearing
+//     because in the snapshot-distribution model they are often root
+//     publishers of chain-toml. discv5 is lightweight UDP and snapshot
+//     peering lives in the torrent layer; neither belongs gated on the
+//     chain-consensus peer cap. discv5 seeds bootnodes into the table at
+//     startup but does not retry on failure; this loop re-bonds them and
+//     bonds static peers independently of devp2p connection state. See
+//     docs/plans/20260507-discv5-handshake-on-connect.md.
+func forceDiscv5Bonding(ctx context.Context, srv *p2p.Server, logger log.Logger) {
+	var mu sync.Mutex
+	lastSeq := make(map[enode.ID]uint64) // last successfully-injected ENR seq per id
+	inFlight := make(map[enode.ID]bool)  // ids currently being bonded
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		dv5 := srv.DiscV5()
+		if dv5 == nil {
+			continue
+		}
+		// Dedup nodes across the four source lists for this tick.
+		candidates := make(map[enode.ID]*enode.Node)
+		for _, peer := range srv.Peers() {
+			candidates[peer.Node().ID()] = peer.Node()
+		}
+		for _, n := range srv.StaticNodes {
+			candidates[n.ID()] = n
+		}
+		for _, n := range srv.BootstrapNodesV5 {
+			candidates[n.ID()] = n
+		}
+		for _, n := range srv.BootstrapNodes {
+			candidates[n.ID()] = n
+		}
+		for id, n := range candidates {
+			mu.Lock()
+			if inFlight[id] {
+				mu.Unlock()
+				continue
+			}
+			inFlight[id] = true
+			cached, hadCache := lastSeq[id]
+			mu.Unlock()
+			go func(n *enode.Node, cached uint64, hadCache bool) {
+				id := n.ID()
+				defer func() {
+					mu.Lock()
+					delete(inFlight, id)
+					mu.Unlock()
+				}()
+				pong, err := dv5.Ping(n)
+				if err != nil {
+					logger.Debug("[discv5] forced bond: ping failed",
+						"peer", id.TerminalString(), "err", err)
+					return
+				}
+				if hadCache && pong.ENRSeq == cached {
+					return // same node, unchanged metadata: nothing to refresh
+				}
+				resolved := dv5.Resolve(n)
+				if resolved == nil {
+					logger.Debug("[discv5] forced bond: resolve returned nil",
+						"peer", id.TerminalString())
+					return
+				}
+				// AddKnownNode returns false both when the node can't be
+				// admitted and when it was already in the bucket (in which
+				// case bumpInBucket updates the record in place). Either way
+				// the table is now consistent with the resolved record, so
+				// we treat this as a successful refresh.
+				dv5.AddKnownNode(resolved)
+				mu.Lock()
+				lastSeq[id] = resolved.Seq()
+				mu.Unlock()
+			}(n, cached, hadCache)
+		}
+	}
 }
 
 func (ss *GrpcServer) getP2PServer() *p2p.Server {
