@@ -142,12 +142,12 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Create: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] add `v2Vectors` table covering all rows in Technical Details (including the two starred rows `[2,f,b]→2f b0 01` and `[2,f,b,3]→2f b3 00`)
-- [ ] write `TestEncodeKeyV2_Vectors` asserting `EncodeKeyV2(nibbles) == key` for each vector
-- [ ] write `TestDecodeKeyV2_Vectors` asserting `DecodeKeyV2(key) == nibbles` for each vector
-- [ ] write `TestEncodeKeyV2_RoundTrip` over the same vectors (`Decode(Encode(P)) == P`)
-- [ ] write `TestEncodeKeyV2_MaxLen` asserting `len(EncodeKeyV2(make([]byte, 128))) == 65`
-- [ ] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
+- [x] add `v2Vectors` table covering all rows in Technical Details (including the two starred rows `[2,f,b]→2f b0 01` and `[2,f,b,3]→2f b3 00`)
+- [x] write `TestEncodeKeyV2_Vectors` asserting `EncodeKeyV2(nibbles) == key` for each vector
+- [x] write `TestDecodeKeyV2_Vectors` asserting `DecodeKeyV2(key) == nibbles` for each vector
+- [x] write `TestEncodeKeyV2_RoundTrip` over the same vectors (`Decode(Encode(P)) == P`)
+- [x] write `TestEncodeKeyV2_MaxLen` asserting `len(EncodeKeyV2(make([]byte, 128))) == 65`
+- [x] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
 
 ### Task 3: Decoder error tests
 
