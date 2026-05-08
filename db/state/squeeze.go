@@ -487,8 +487,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
 	domains.EnableTrieWarmup(true)
-	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
-	domains.EnableWarmupCache(useWarmupCache)
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -517,8 +515,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
-			"warmupCache", useWarmupCache)
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize)
 	}
 	var totalKeysProcessed uint64
 	var rh []byte
@@ -599,7 +596,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
 		domains.EnableTrieWarmup(true)
-		domains.EnableWarmupCache(useWarmupCache)
 		return nil
 	}
 
@@ -699,11 +695,12 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						return err
 					}
 				}
-				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
+				// Set correct state reader before TouchKey calls begin. The previous
+				// ClearWarmupCache call here cleared the now-removed Go-side warmup
+				// cache; with no such cache, no clear is needed.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
-				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
 			var domain kv.Domain
