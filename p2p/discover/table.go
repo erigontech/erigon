@@ -517,11 +517,34 @@ func (tab *Table) bucketAtDistance(d int) *bucket {
 	return tab.buckets[d-bucketMinDistance-1]
 }
 
+// shouldEnforceIPCap decides whether the per-/24 IP cap should be applied to
+// adds into bucket b. The flat cap (bucketIPLimit / tableIPLimit) is a sybil
+// mitigation, but it only does useful work when the bucket is BOTH far in
+// Kademlia space (the populous regime where flooding lands) AND already
+// crowded (where extra same-/24 entries would actually displace diversity).
+// In other regimes the cap is dead weight that penalises legitimate clusters
+// (DC-deployed nodes from a single /24, multi-instance test setups).
+//
+// In the geth bucket layout, only the upper 1/15 of distances get dedicated
+// buckets; everything else is dumped into buckets[0]. So buckets with
+// index>0 are inherently sparse close-distance buckets — the cap there is
+// almost never useful. buckets[0] is the populous catch-all and is the one
+// regime where a fill-based threshold is meaningful.
+func (tab *Table) shouldEnforceIPCap(b *bucket) bool {
+	if b.index > 0 {
+		return false
+	}
+	return len(b.entries) >= bucketSize/2
+}
+
 func (tab *Table) addIP(b *bucket, ip netip.Addr) bool {
 	if !ip.IsValid() || ip.IsUnspecified() {
 		return false // Nodes without IP cannot be added.
 	}
 	if netutil.AddrIsLAN(ip) {
+		return true
+	}
+	if !tab.shouldEnforceIPCap(b) {
 		return true
 	}
 	if !tab.ips.AddAddr(ip) {

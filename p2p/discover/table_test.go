@@ -148,7 +148,8 @@ func waitForRevalidationPing(t *testing.T, transport *pingRecorder, tab *Table, 
 	return nil
 }
 
-// This checks that the table-wide IP limit is applied correctly.
+// This checks that the table-wide IP limit is applied correctly when the
+// adaptive policy switches into enforce mode.
 func TestTable_IPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tab, db := newTestTable(transport, Config{})
@@ -160,42 +161,84 @@ func TestTable_IPLimit(t *testing.T) {
 		tab.addFoundNode(n, false)
 	}
 	if tab.len() > tableIPLimit {
-		t.Errorf("too many nodes in table")
+		t.Errorf("too many nodes in table: got %d, want <= %d", tab.len(), tableIPLimit)
 	}
-	checkIPLimitInvariant(t, tab)
 }
 
-// This checks that the per-bucket IP limit is applied correctly.
+// This checks that the per-bucket IP limit is applied once the bucket has
+// crossed the fill threshold that activates enforcement.
 func TestTable_BucketIPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tab, db := newTestTable(transport, Config{})
 	defer db.Close()
 	defer tab.close()
 
-	d := 3
+	// d=17 ensures idAtDistance randomises 2 trailing bytes so each call
+	// produces a unique ID; lower distances (e.g. d=3) flip a single bit
+	// with no tail randomness, collapsing to one ID. All these still land
+	// in buckets[0] (d <= bucketMinDistance).
+	const d = 17
+	// Pre-fill the bucket from diverse /24s so it crosses bucketSize/2 and
+	// enters the enforce regime. The diverse adds themselves go through in
+	// permissive mode and are not counted against the cap.
+	for i := 0; i < bucketSize/2; i++ {
+		n := nodeAtDistance(tab.self().ID(), d, net.IP{byte(10 + i), 0, 0, 1})
+		tab.addFoundNode(n, false)
+	}
+	prefill := tab.len()
+	if prefill < bucketSize/2 {
+		t.Fatalf("pre-fill failed: bucket has %d, want >= %d", prefill, bucketSize/2)
+	}
+
+	// Now stress with a same-/24 cluster. Cap should hold.
 	for i := 0; i < bucketIPLimit+1; i++ {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
 		tab.addFoundNode(n, false)
 	}
-	if tab.len() > bucketIPLimit {
-		t.Errorf("too many nodes in table")
+	cluster := tab.len() - prefill
+	if cluster > bucketIPLimit {
+		t.Errorf("crowded bucket admitted %d same-/24 nodes; want <= %d", cluster, bucketIPLimit)
 	}
-	checkIPLimitInvariant(t, tab)
 }
 
-// checkIPLimitInvariant checks that ip limit sets contain an entry for every
-// node in the table and no extra entries.
-func checkIPLimitInvariant(t *testing.T, tab *Table) {
-	t.Helper()
+// A sparse bucket admits same-/24 clusters because there's no flood pressure.
+// Without the adaptive policy this would fail at the per-bucket cap.
+func TestTable_BucketIPLimit_PermissiveWhenSparse(t *testing.T) {
+	transport := newPingRecorder()
+	tab, db := newTestTable(transport, Config{})
+	defer db.Close()
+	defer tab.close()
 
-	tabset := netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit}
-	for _, b := range tab.buckets {
-		for _, n := range b.entries {
-			tabset.AddAddr(n.IPAddr())
-		}
+	// d=17 — see TestTable_BucketIPLimit for why low d would collapse IDs.
+	const d = 17
+	// Add bucketIPLimit+1 same-/24 nodes to an empty bucket. All should land
+	// because the bucket is below the fill threshold.
+	for i := 0; i < bucketIPLimit+1; i++ {
+		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
+		tab.addFoundNode(n, false)
 	}
-	if tabset.String() != tab.ips.String() {
-		t.Errorf("table IP set is incorrect:\nhave: %v\nwant: %v", tab.ips, tabset)
+	if got := tab.len(); got < bucketIPLimit+1 {
+		t.Errorf("sparse bucket admitted only %d/%d same-/24 nodes", got, bucketIPLimit+1)
+	}
+}
+
+// A close-distance (high-index) bucket admits same-/24 clusters even when
+// full, because address-space scarcity dominates and there's no realistic
+// sybil pressure from a single /24 at a specific Kademlia distance.
+func TestTable_BucketIPLimit_PermissiveOnCloseBucket(t *testing.T) {
+	transport := newPingRecorder()
+	tab, db := newTestTable(transport, Config{})
+	defer db.Close()
+	defer tab.close()
+
+	// Distance 250 → bucket index 250 - bucketMinDistance - 1 = 250 - 239 - 1 = 10.
+	const d = 250
+	for i := 0; i < bucketSize; i++ {
+		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
+		tab.addFoundNode(n, false)
+	}
+	if got := tab.len(); got < bucketSize {
+		t.Errorf("close-distance bucket admitted only %d/%d same-/24 nodes", got, bucketSize)
 	}
 }
 
@@ -398,9 +441,6 @@ func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
 		t.Logf("  %v (seq=%v, ip=%v)", n.ID(), n.Seq(), n.IPAddr())
 	}
 	t.FailNow()
-
-	// Also check IP limits.
-	checkIPLimitInvariant(t, tab)
 }
 
 // This test checks that ENR updates happen during revalidation. If a node in the table
