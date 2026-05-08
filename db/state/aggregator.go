@@ -2503,7 +2503,12 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 		return nil, kv.Step(0), false, err
 	}
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		metrics.UpdateFileReads(domain, start)
+		// UpdateFileReadsUnique tracks both total reads and distinct
+		// prefixes. The ratio FileReadCount / UniqueFileReadCount is
+		// the read amplification factor — useful when investigating
+		// whether the same prefixes are being re-read from file layer
+		// (cache misses on hot prefixes).
+		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
