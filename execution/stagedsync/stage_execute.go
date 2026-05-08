@@ -86,8 +86,7 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	experimentalBAL bool
-
-	readAheader *exec.BlockReadAheader
+	readAheader     *exec.BlockReadAheader
 }
 
 func StageExecuteBlocksCfg(
