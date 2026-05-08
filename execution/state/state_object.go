@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -265,7 +266,21 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	}
 
 	if !force && source != UnknownSource && prev == value {
+		commitment.RecordSstoreNoop()
 		return false, nil
+	}
+
+	// SSTORE classification — measurement scaffolding to size the value of
+	// pushing insert/update/delete information down to the warmer / trie
+	// compute (would let those layers skip xorfilter / verify-by-compare
+	// when the operation is known to be a UPDATE on an existing branch).
+	switch {
+	case prev.IsZero() && !value.IsZero():
+		commitment.RecordSstoreInsert()
+	case !prev.IsZero() && value.IsZero():
+		commitment.RecordSstoreDelete()
+	default:
+		commitment.RecordSstoreUpdate()
 	}
 
 	// New value is different, update and journal the change

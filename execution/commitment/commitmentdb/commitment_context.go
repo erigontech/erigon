@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -362,6 +363,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// memoized stateHash?"
 					load, skipped, reset, diskSto, diskAcc := commitment.SkipLoadResetCounters()
 					hasStoMiss := commitment.HasStorageMissCount()
+					xfTrue, xfFalse := existence.ContainsHashStats()
+					ssIns, ssUpd, ssDel, _ := commitment.SstoreClassificationCounts()
+					wHit, wEmpty := commitment.WarmerBranchOutcomeStats()
 					// Per-domain file-read counts: lets us decompose the
 					// aggregate `files=N` from [domain reads] into Commitment
 					// (branch reads), Storage (value loads), Account, Code.
@@ -396,6 +400,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"disk_sto", diskSto,
 						"disk_acc", diskAcc,
 						"has_sto_miss", hasStoMiss,
+						"xf_true", xfTrue,
+						"xf_false", xfFalse,
+						"ss_ins", ssIns,
+						"ss_upd", ssUpd,
+						"ss_del", ssDel,
+						"w_hit", wHit,
+						"w_empty", wEmpty,
 						"files_acc", aFiles,
 						"files_sto", sFiles,
 						"files_code", cFiles,
