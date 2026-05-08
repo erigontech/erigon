@@ -65,7 +65,7 @@ func NewBlockExecutorWithReader(chainConfig *chain.Config, header *types.Header,
 	if fid == gevmspec.London && blockCtx.PrevRanDao != nil {
 		fid = gevmspec.Merge
 	}
-	evm := gevmhost.NewEvmWithReaderOps(reader, readerOps(reader), fid, blockEnv(blockCtx), cfgEnv(chainConfig))
+	evm := gevmhost.NewEvm(newGevmDatabase(reader), fid, blockEnv(blockCtx), cfgEnv(chainConfig))
 	b := &BlockExecutor{evm: evm, rules: rules, header: header}
 	b.runner.DebugGasTable = gevmvm.DebugGasTableForFork(evm.ForkID)
 	b.gevmHooks.OnEnter = b.onEnter
@@ -79,57 +79,81 @@ type rawReader interface {
 	ReadAccountCodeRaw(common.Address) ([]byte, error)
 }
 
-func readerOps(reader erigonstate.StateReader) gevmstate.ReaderOps {
+// gevmDatabase implements gevmstate.Database by forwarding to Erigon's
+// StateReader (and its `*Raw` fast-path if the reader exposes it).
+type gevmDatabase struct {
+	reader erigonstate.StateReader
+	raw    rawReader
+	hasRaw bool
+}
+
+func newGevmDatabase(reader erigonstate.StateReader) *gevmDatabase {
 	raw, hasRaw := reader.(rawReader)
-	return gevmstate.ReaderOps{
-		Basic: func(address gevmtypes.Address) (gevmstate.AccountInfo, bool, error) {
-			var acc *accounts.Account
-			var err error
-			if hasRaw {
-				_, acc, err = raw.ReadAccountDataRaw(common.Address(address))
-			} else {
-				acc, err = reader.ReadAccountData(toErigonAddress(address))
-			}
-			if err != nil || acc == nil {
-				return gevmstate.AccountInfo{}, false, err
-			}
-			info := gevmstate.AccountInfo{
-				Balance:     acc.Balance,
-				Nonce:       acc.Nonce,
-				Root:        gevmtypes.B256(acc.Root),
-				Incarnation: acc.Incarnation,
-				CodeHash:    gevmtypes.B256(acc.CodeHash.Value()),
-			}
-			if info.Incarnation == 0 && info.CodeHash != gevmtypes.B256Zero && info.CodeHash != gevmtypes.KeccakEmpty {
-				info.Incarnation = 1
-			}
-			return info, true, nil
-		},
-		Storage: func(address gevmtypes.Address, key uint256.Int) (uint256.Int, error) {
-			if hasRaw {
-				value, _, err := raw.ReadAccountStorageRaw(common.Address(address), common.Hash(key.Bytes32()))
-				return value, err
-			}
-			value, _, err := reader.ReadAccountStorage(toErigonAddress(address), storageKey(key))
-			return value, err
-		},
-		HasStorage: func(address gevmtypes.Address) (bool, error) {
-			if hasRaw {
-				return raw.HasStorageRaw(common.Address(address))
-			}
-			return reader.HasStorage(toErigonAddress(address))
-		},
-		Code: func(address gevmtypes.Address) (gevmtypes.Bytes, error) {
-			var code []byte
-			var err error
-			if hasRaw {
-				code, err = raw.ReadAccountCodeRaw(common.Address(address))
-			} else {
-				code, err = reader.ReadAccountCode(toErigonAddress(address))
-			}
-			return gevmtypes.Bytes(code), err
-		},
+	return &gevmDatabase{reader: reader, raw: raw, hasRaw: hasRaw}
+}
+
+func (d *gevmDatabase) Basic(address gevmtypes.Address) (gevmstate.AccountInfo, bool, error) {
+	var acc *accounts.Account
+	var err error
+	if d.hasRaw {
+		_, acc, err = d.raw.ReadAccountDataRaw(common.Address(address))
+	} else {
+		acc, err = d.reader.ReadAccountData(toErigonAddress(address))
 	}
+	if err != nil || acc == nil {
+		return gevmstate.AccountInfo{}, false, err
+	}
+	info := gevmstate.AccountInfo{
+		Balance:     acc.Balance,
+		Nonce:       acc.Nonce,
+		Root:        gevmtypes.B256(acc.Root),
+		Incarnation: acc.Incarnation,
+		CodeHash:    gevmtypes.B256(acc.CodeHash.Value()),
+	}
+	if info.Incarnation == 0 && info.CodeHash != gevmtypes.B256Zero && info.CodeHash != gevmtypes.KeccakEmpty {
+		info.Incarnation = 1
+	}
+	return info, true, nil
+}
+
+func (d *gevmDatabase) Storage(address gevmtypes.Address, key uint256.Int) (uint256.Int, error) {
+	if d.hasRaw {
+		value, _, err := d.raw.ReadAccountStorageRaw(common.Address(address), common.Hash(key.Bytes32()))
+		return value, err
+	}
+	value, _, err := d.reader.ReadAccountStorage(toErigonAddress(address), storageKey(key))
+	return value, err
+}
+
+func (d *gevmDatabase) HasStorage(address gevmtypes.Address) (bool, error) {
+	if d.hasRaw {
+		return d.raw.HasStorageRaw(common.Address(address))
+	}
+	return d.reader.HasStorage(toErigonAddress(address))
+}
+
+func (d *gevmDatabase) Code(address gevmtypes.Address) (gevmtypes.Bytes, error) {
+	var code []byte
+	var err error
+	if d.hasRaw {
+		code, err = d.raw.ReadAccountCodeRaw(common.Address(address))
+	} else {
+		code, err = d.reader.ReadAccountCode(toErigonAddress(address))
+	}
+	return gevmtypes.Bytes(code), err
+}
+
+// CodeByHash is unused on the Erigon path: GEVM's host loads code via
+// Code(address); BLOCKHASH-style code-hash-keyed lookups don't happen
+// during stage_exec. Returning nil here is safe.
+func (d *gevmDatabase) CodeByHash(codeHash gevmtypes.B256) (gevmtypes.Bytes, error) {
+	return nil, nil
+}
+
+// BlockHash is unused on the Erigon path: BlockEnv.GetHash is set in
+// blockEnv() and EvmHost.BlockHash prefers it over the Database path.
+func (d *gevmDatabase) BlockHash(number uint64) (gevmtypes.B256, error) {
+	return gevmtypes.B256Zero, nil
 }
 
 func (b *BlockExecutor) Release() {

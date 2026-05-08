@@ -57,8 +57,8 @@ github.com/FastFilter/xorfilter v0.5.1 h1:UjtPttI1SnKWUmeQKu8Y+4ZvMJv7KP6/NZTsGB
 github.com/FastFilter/xorfilter v0.5.1/go.mod h1:h+9l02/leuyyhepO30BKr25MkZdy7LHcfPRBDRuflXw=
 github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e h1:RrlPQT2lAmlGWldQ7PIhmxnusr7V5cFXynPWhktgP30=
 github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
-github.com/Giulio2002/gevm v0.0.0-20260508142314-92fa74d27f4c h1:pAg2GYjRqODVzg0cKHGFJL7IbEeXuy2I8R/V7h1yoXI=
-github.com/Giulio2002/gevm v0.0.0-20260508142314-92fa74d27f4c/go.mod h1:Mz4nQgnOmhniJ+JZmB7UhPJOxT0eEqtbZxpbt6u3vP0=
+github.com/Giulio2002/gevm v0.0.0-20260508150222-5376a47e22e4 h1:v1aOGtlTnMMJIk/G21HlL4DLH0CT+OaICaw4ZdI3W/Q=
+github.com/Giulio2002/gevm v0.0.0-20260508150222-5376a47e22e4/go.mod h1:Mz4nQgnOmhniJ+JZmB7UhPJOxT0eEqtbZxpbt6u3vP0=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=

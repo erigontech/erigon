@@ -4,7 +4,7 @@ go 1.25.7
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
-replace github.com/Giulio2002/gevm => github.com/Giulio2002/gevm v0.0.0-20260508142314-92fa74d27f4c
+replace github.com/Giulio2002/gevm => github.com/Giulio2002/gevm v0.0.0-20260508150222-5376a47e22e4
 
 require (
 	github.com/Giulio2002/gevm v0.0.0-00010101000000-000000000000
