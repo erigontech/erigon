@@ -358,7 +358,6 @@ type BranchEncoder struct {
 	deferUpdates    bool
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
 	// branchCache, when set, receives mark-dirty-before-encode + Put-after-
 	// canonical-write so the cache stays consistent with ctx.PutBranch.
 	// Set via HexPatriciaHashed.SetBranchCache (which propagates here).
@@ -569,10 +568,6 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
-func (be *BranchEncoder) SetCache(cache *WarmupCache) {
-	be.cache = cache
-}
-
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -580,7 +575,6 @@ func (be *BranchEncoder) CollectUpdate(
 	cells *[16]cellEncodeData,
 ) error {
 	var prev []byte
-	var foundInCache bool
 	var err error
 
 	// Mark the BranchCache entry dirty BEFORE doing the encode work. Any
@@ -592,17 +586,9 @@ func (be *BranchEncoder) CollectUpdate(
 		be.branchCache.MarkDirty(prefix)
 	}
 
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	prev, _, err = ctx.Branch(prefix)
+	if err != nil {
+		return err
 	}
 
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
@@ -625,16 +611,13 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy)
-	}
-	// Put on BranchCache replaces the (now dirty) prior entry with the
-	// fresh canonical bytes — clears the dirty flag in the process
-	// (the new entry is born clean). Single writer per prefix per fold
-	// invariant means no concurrent Put races on this key.
-	// Cache is populated by sd.GetLatest on MDBX reads; CollectUpdate writes
-	// only to sd.mem (via ctx.PutBranch above). Pre-flush invalidation isn't
-	// needed because sd.mem masks the cache for any prefix the writer touched.
+	// BranchCache update happens lazily: ctx.PutBranch writes only to sd.mem,
+	// which masks any cached value at this prefix for the rest of the block.
+	// On sd.Flush, sd.mem is moved to MDBX and BranchCache is invalidated +
+	// repopulated for the affected prefixes (see SD.Flush). The MarkDirty
+	// above protects against concurrent warmer-style writers between now and
+	// that flush. Single writer per prefix per fold invariant means no
+	// concurrent Put races on this key.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -668,22 +651,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// try to get previous data from cache
-	var (
-		prev         []byte
-		foundInCache bool
-		err          error
-	)
-
-	if be.cache != nil {
-		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
-		if foundInCache && be.metrics != nil {
-			be.metrics.cacheBranch.Add(1)
-		}
-	}
-	if !foundInCache {
-		prev, _, err = ctx.Branch(prefix)
-	}
+	prev, _, err := ctx.Branch(prefix)
 	if err != nil {
 		return err
 	}
