@@ -566,7 +566,6 @@ func newkey() *ecdsa.PrivateKey {
 }
 
 // This test checks that waitForNodes does not deadlock with addFoundNode.
-// See https://github.com/ethereum/go-ethereum/issues/34881.
 func TestTable_waitForNodesLocking(t *testing.T) {
 	transport := newPingRecorder()
 	tab, db := newTestTable(transport, Config{})
