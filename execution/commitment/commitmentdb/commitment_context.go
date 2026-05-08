@@ -364,7 +364,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// Used to answer: "what fraction of computeCellHash calls
 					// actually fetched the underlying value vs reused a
 					// memoized stateHash?"
-					load, skipped, reset := commitment.SkipLoadResetCounters()
+					load, skipped, reset, diskSto, diskAcc := commitment.SkipLoadResetCounters()
 					// Per-domain file-read counts: lets us decompose the
 					// aggregate `files=N` from [domain reads] into Commitment
 					// (branch reads), Storage (value loads), Account, Code.
@@ -396,6 +396,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"load", load,
 						"skipped", skipped,
 						"reset", reset,
+						"disk_sto", diskSto,
+						"disk_acc", diskAcc,
 						"files_acc", aFiles,
 						"files_sto", sFiles,
 						"files_code", cFiles,
