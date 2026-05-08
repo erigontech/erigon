@@ -205,8 +205,6 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(!isApplyingBlocks)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than

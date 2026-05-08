@@ -161,6 +161,12 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
 		branchCache = p.BranchCache()
 	}
+	// DISABLE_BRANCH_CACHE_READS gates the cache out for A/B benchmarking.
+	// When set, sd.branchCache stays nil so sd.GetLatest skips the cache
+	// layer entirely and every CommitmentDomain read goes to MDBX.
+	if dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false) {
+		branchCache = nil
+	}
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
@@ -396,8 +402,11 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 // SetStateCache sets the state cache for faster lookups.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
+		sd.logger.Info("[state-cache] SetStateCache skipped",
+			"useStateCache", dbg.UseStateCache, "stateCacheNil", stateCache == nil)
 		return
 	}
+	sd.logger.Info("[state-cache] SetStateCache enabled on SD")
 	sd.stateCache = stateCache
 }
 
@@ -521,17 +530,22 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	if err := sd.mem.Flush(ctx, tx); err != nil {
-		return err
-	}
-	// Cache mirrors MDBX-flushed bytes; clear after flush so cache cannot
-	// hold pre-flush bytes for keys whose MDBX value just changed. Refills
-	// lazily on next read. PR2 will switch to per-key invalidation using
-	// the just-flushed CommitmentDomain diff.
+	// Update the cache with the bytes about to land in MDBX, atomically
+	// with the flush. FlushWithCallback holds the latestState write lock
+	// for the full window so a concurrent DomainPut cannot interleave
+	// between the cache update and the MDBX write — readers see either
+	// the local sd.mem value (during the lock) or the cached/MDBX value
+	// (after release). No window where cache is stale vs MDBX.
 	if sd.branchCache != nil {
-		sd.branchCache.Clear()
+		return sd.mem.FlushWithCallback(ctx, tx, kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+			if len(v) == 0 {
+				sd.branchCache.Invalidate(k)
+				return
+			}
+			sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
+		})
 	}
-	return nil
+	return sd.mem.Flush(ctx, tx)
 }
 
 // TemporalDomain satisfaction
@@ -580,7 +594,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
 	if sd.stateCache != nil {
-		if v, ok := sd.stateCache.Get(domain, k); ok {
+		v, ok := sd.stateCache.Get(domain, k)
+		if dbg.KVReadLevelledMetrics {
+			if ok {
+				sd.metrics.UpdateStateCacheHit(domain)
+			} else {
+				sd.metrics.UpdateStateCacheMiss(domain)
+			}
+		}
+		if ok {
 			if dbg.AssertStateCache {
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
@@ -650,6 +672,14 @@ func (sd *SharedDomains) LogMetrics() []any {
 			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
 	}
 
+	if hits, misses := sd.metrics.StateCacheHitCount, sd.metrics.StateCacheMissCount; hits+misses > 0 {
+		metrics = append(metrics, "stateCache",
+			fmt.Sprintf("hit=%s miss=%s rate=%.0f%%",
+				common.PrettyCounter(hits),
+				common.PrettyCounter(misses),
+				100*float64(hits)/float64(hits+misses)))
+	}
+
 	if readCount := sd.metrics.DbReadCount; readCount > 0 {
 		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
 	}
@@ -672,6 +702,14 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 
 		if readCount := dm.CacheReadCount; readCount > 0 {
 			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration/time.Duration(readCount), 0))
+		}
+
+		if hits, misses := dm.StateCacheHitCount, dm.StateCacheMissCount; hits+misses > 0 {
+			metrics = append(metrics, "stateCache",
+				fmt.Sprintf("hit=%s miss=%s rate=%.0f%%",
+					common.PrettyCounter(hits),
+					common.PrettyCounter(misses),
+					100*float64(hits)/float64(hits+misses)))
 		}
 
 		if readCount := dm.DbReadCount; readCount > 0 {
@@ -869,14 +907,6 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
-}
-
-func (sd *SharedDomains) EnableWarmupCache(enable bool) {
-	sd.sdCtx.EnableWarmupCache(enable)
-}
-
-func (sd *SharedDomains) ClearWarmupCache() {
-	sd.sdCtx.ClearWarmupCache()
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.

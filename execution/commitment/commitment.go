@@ -100,8 +100,6 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
-	EnableWarmupCache(bool)
 	// SetBranchCache attaches a BranchCache instance for branch read/write
 	// caching across the trie + branchEncoder. ConcurrentPatriciaHashed
 	// implementations propagate the same instance to all mounts so the
@@ -1806,9 +1804,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if warmuper != nil && warmuper.Cache() != nil {
-				warmuper.Cache().EvictPlainKey(v)
-			}
+			// (previously called warmuper.Cache().EvictPlainKey(v) here to drop
+			// stale account/storage entries; the warmer's cache was removed
+			// alongside WarmupCache so there's nothing to evict.)
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
