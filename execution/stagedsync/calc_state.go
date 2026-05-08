@@ -209,8 +209,19 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			}
 		case state.StoragePath:
 			v := w.Val.(uint256.Int)
-			cs.ensureStorage(w.Address, w.Key) // lazy-load if needed
-			cs.storageState[w.Address][w.Key] = v
+			// The previous slot value is irrelevant here: the next line
+			// overwrites it with the EVM-write value, and the only
+			// downstream consumer (FlushToUpdates) reads exactly the
+			// value we set. Skip the ensureStorage lazy-load — it
+			// triggers a cold .ef GetAsOf seek per first-touched slot
+			// (~5,910 wasted seeks per SSTORE-bloat block) and discards
+			// the loaded value. Initialize just the inner map.
+			slots := cs.storageState[w.Address]
+			if slots == nil {
+				slots = make(map[accounts.StorageKey]uint256.Int)
+				cs.storageState[w.Address] = slots
+			}
+			slots[w.Key] = v
 			if cs.storageDirty[w.Address] == nil {
 				cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
 			}
