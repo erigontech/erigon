@@ -384,6 +384,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"1B:%d|2-4B:%d|5-8B:%d|9-16B:%d|17-32B:%d|33B:%d|34-36B:%d|37-44B:%d|45-64B:%d|>64B:%d",
 						mLens[0], mLens[1], mLens[2], mLens[3], mLens[4],
 						mLens[5], mLens[6], mLens[7], mLens[8], mLens[9])
+					pinHits, pinMisses, pinEntries := bc.PinnedStats()
 					log.Info("[commitment][cache-fp]",
 						"block", blockNum,
 						"root", hex.EncodeToString(rootHash),
@@ -412,7 +413,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						"uniq_sto", sUniq,
 						"uniq_code", cUniq,
 						"uniq_comm", mUniq,
-						"comm_lens", commLens)
+						"comm_lens", commLens,
+						"pin_hit", pinHits,
+						"pin_miss", pinMisses,
+						"pin_count", pinEntries)
 				}
 			}
 		}
