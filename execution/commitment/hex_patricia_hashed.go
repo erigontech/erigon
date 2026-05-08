@@ -101,15 +101,20 @@ type HexPatriciaHashed struct {
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
-	// Warmup cache for serving reads from pre-warmed data
-	cache             *WarmupCache
-	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
+	// enableWarmupCache toggles the (now-vestigial) warmup cache enable
+	// path through this trie. It's still propagated by callers but no
+	// longer attaches a Go-side cache here — branch / account / storage
+	// reads go straight through ctx.Branch / ctx.Account / ctx.Storage
+	// to SD.GetLatest, where the aggregator-scope BranchCache (for
+	// commitment) and OS page cache (for accounts/storage) provide the
+	// only caching layer. Field retained pending step 2c removal of the
+	// EnableWarmupCache plumbing chain.
+	enableWarmupCache bool
 
 	// branchCache is the BranchCache instance attached via SetBranchCache.
-	// Wired into branchFromCacheOrDB as Level-2 (between WarmupCache and DB)
-	// and into branchEncoder for write-back. Today created per-Process by
-	// InitializeTrieAndUpdates; future cross-block persistence work lifts
-	// this to aggTx scope. See branch_cache.go's concurrency contract.
+	// Production wires the aggregator-scope instance through
+	// InitializeTrieAndUpdates; tests/benchmarks may pass a per-init
+	// fallback. See branch_cache.go's concurrency contract.
 	branchCache *BranchCache
 
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
@@ -209,9 +214,6 @@ func (hph *HexPatriciaHashed) resetForReuse() {
 
 	hph.mounted = false
 	hph.mountedNib = 0
-
-	// warmup cache
-	hph.cache = nil
 	hph.enableWarmupCache = false
 
 	// tracing / capture
@@ -2305,9 +2307,6 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 		if err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, nil); err != nil {
 			return fmt.Errorf("failed to encode leaf node update: %w", err)
 		}
-		if evictCache && hph.cache != nil {
-			hph.cache.EvictBranch(updateKey)
-		}
 	}
 	return nil
 }
@@ -2886,19 +2885,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
-		// Set cache on trie if warmup cache is enabled. BranchEncoder no longer
-		// uses WarmupCache (its read fast-path was redundant with sd.mem masking
-		// and its write-back was redundant with SD.Flush's BranchCache update);
-		// HPH read-through paths (account/storage/branch) still consult hph.cache
-		// pending step 2b of the WarmupCache deletion.
-		if warmup.EnableWarmupCache {
-			hph.cache = warmuper.Cache()
-			defer func() {
-				hph.cache = nil
-			}()
-		} else {
-			hph.cache = nil
-		}
+		// EnableWarmupCache toggle is a no-op now: HPH no longer holds a
+		// Go-side warmup cache. The warmer still pre-fetches via ctx.Branch /
+		// Account / Storage to populate sd.mem and OS page cache; the
+		// trie-side reads go through the same paths and hit the
+		// aggregator-scope BranchCache (for commitment) or page cache
+		// (accounts/storage). The flag plumbing is retained pending step 2c
+		// removal.
+		_ = warmup.EnableWarmupCache
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -3133,10 +3127,11 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// Cache returns the active warmup cache, or nil if none is set.
-func (hph *HexPatriciaHashed) Cache() *WarmupCache {
-	return hph.cache
-}
+// Cache always returns nil — HPH no longer holds a Go-side warmup
+// cache. Retained as a stub so external callers (squeeze/fork-validation
+// ClearWarmupCache plumbing) compile; they short-circuit on nil.
+// Pending step 2c removal of the EnableWarmupCache plumbing chain.
+func (hph *HexPatriciaHashed) Cache() *WarmupCache { return nil }
 
 // verifyBranchCache, when true, makes branchFromCacheOrDB cross-check
 // every BranchCache hit against ctx.Branch and record a divergence on
@@ -3157,62 +3152,27 @@ var verifyBranchCache = dbg.EnvBool("BRANCH_CACHE_VERIFY", false)
 // further) from "deeper compute bug" (bench fails at the same block).
 var disableBranchCacheReads = dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false)
 
-// branchFromCacheOrDB reads branch data through the SD chain:
-//   - L1: WarmupCache (ephemeral, populated by warmup workers ahead of fold)
-//   - L2: ctx.Branch — sd.mem -> sd.parent.mem -> branchCache -> MDBX
-//
-// The aggregator-scope BranchCache lives behind sd.mem inside sd.GetLatest;
-// CollectUpdate writes only to sd.mem, so cross-SD pollution can no longer
-// occur. L1 (WarmupCache) is still checked first for prefix-walk-derived
-// freshness within a Process.
+// branchFromCacheOrDB reads branch data via ctx.Branch, which goes
+// through sd.mem -> sd.parent.mem -> aggregator-scope BranchCache ->
+// MDBX. The HPH-side warmup cache layer that used to sit above this
+// has been removed (step 2b of WarmupCache deletion); BranchCache is
+// the only branch cache.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
-	if hph.cache != nil {
-		if data, found := hph.cache.GetBranch(key); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheBranch.Add(1)
-			}
-			return data, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missBranch.Add(1)
-		}
-	}
 	data, _, err := hph.ctx.Branch(key)
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
+	return data, err
 }
 
-// accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
+// accountFromCacheOrDB reads account data via ctx.Account. No Go-side
+// caching layer (the warmup cache layer was removed in step 2b of
+// WarmupCache deletion); accounts go straight to the BTree-backed
+// AccountsDomain via SD, with OS page cache as the only caching layer.
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
-	if hph.cache != nil {
-		if update, found := hph.cache.GetAccount(plainKey); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheAccount.Add(1)
-			}
-			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missAccount.Add(1)
-		}
-	}
 	return hph.ctx.Account(plainKey)
 }
 
-// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB.
+// storageFromCacheOrDB reads storage data via ctx.Storage. No Go-side
+// caching layer (see accountFromCacheOrDB).
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
-	if hph.cache != nil {
-		if update, found := hph.cache.GetStorage(plainKey); found {
-			if hph.metrics != nil {
-				hph.metrics.cacheStorage.Add(1)
-			}
-			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missStorage.Add(1)
-		}
-	}
 	return hph.ctx.Storage(plainKey)
 }
 
