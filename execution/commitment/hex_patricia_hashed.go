@@ -1874,7 +1874,25 @@ var (
 	hadToReset      atomic.Uint64
 	diskLoadStorage atomic.Uint64
 	diskLoadAccount atomic.Uint64
+	// hasStorageMiss tracks IBS.HasStorage calls that fell through to
+	// stateReader.HasStorage (i.e. could not be answered from in-memory
+	// state) and therefore hit kv.HasPrefix on the storage domain. On
+	// snapshot-backed storage that scan walks the .bt index, paging the
+	// .bt into RAM. On the original MDBX-only layout the same call was
+	// a cursor seek; the cost equation changed when storage moved to
+	// snapshots and was never re-priced. Used to quantify the cost of
+	// EIP-684 CREATE collision checks on the snapshot layout.
+	hasStorageMiss atomic.Uint64
 )
+
+// RecordHasStorageMiss is incremented by IntraBlockState.HasStorage when
+// the in-memory checks miss and we fall through to stateReader.HasStorage
+// (the kv.HasPrefix path). See the comment on hasStorageMiss for context.
+func RecordHasStorageMiss() { hasStorageMiss.Add(1) }
+
+// HasStorageMissCount returns the cumulative process-wide count of
+// IBS.HasStorage calls that fell through to a kv.HasPrefix scan.
+func HasStorageMissCount() uint64 { return hasStorageMiss.Load() }
 
 // SkipLoadResetCounters returns the cumulative process-wide counts of:
 //   - hadToLoad:   computeCellHash had no memoized stateHash and had
