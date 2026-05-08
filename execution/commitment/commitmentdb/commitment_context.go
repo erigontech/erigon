@@ -359,7 +359,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 					// All cumulative; deltas via successive lines.
 					var aFiles, sFiles, cFiles, mFiles int64
 					var aUniq, sUniq, cUniq, mUniq int64
-					var mLens [7]int64
+					var mLens [10]int64
 					if m := sdc.sharedDomains.Metrics(); m != nil {
 						m.RLock()
 						if d := m.Domains[kv.AccountsDomain]; d != nil {
@@ -381,9 +381,14 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 						}
 						m.RUnlock()
 					}
-					// commLens compact form: "1B:N0|2-4B:N1|5-8B:N2|9-16B:N3|17-32B:N4|33-64B:N5|>64B:N6"
-					commLens := fmt.Sprintf("1B:%d|2-4B:%d|5-8B:%d|9-16B:%d|17-32B:%d|33-64B:%d|>64B:%d",
-						mLens[0], mLens[1], mLens[2], mLens[3], mLens[4], mLens[5], mLens[6])
+					// commLens shows depth distribution. Buckets within the storage
+					// subtree (33B+) are sub-divided to distinguish per-contract
+					// storage trunk (33B / 34-36B) from leaf-parent depths
+					// (45-64B). See state_changeset.go UniqueLenBuckets.
+					commLens := fmt.Sprintf(
+						"1B:%d|2-4B:%d|5-8B:%d|9-16B:%d|17-32B:%d|33B:%d|34-36B:%d|37-44B:%d|45-64B:%d|>64B:%d",
+						mLens[0], mLens[1], mLens[2], mLens[3], mLens[4],
+						mLens[5], mLens[6], mLens[7], mLens[8], mLens[9])
 					log.Info("[commitment][cache-fp]",
 						"block", blockNum,
 						"root", hex.EncodeToString(rootHash),

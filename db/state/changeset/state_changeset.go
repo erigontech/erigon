@@ -473,18 +473,23 @@ type DomainIOMetrics struct {
 	UniqueFileReadCount int64
 	// UniqueLenBuckets is the byte-length distribution of distinct
 	// prefixes seen by UpdateFileReadsUnique. The compact-encoded
-	// commitment prefix carries depth-dependent length:
-	//   0 : 1 byte    (root / depth 0)
-	//   1 : 2-4 bytes
-	//   2 : 5-8 bytes
-	//   3 : 9-16 bytes
-	//   4 : 17-32 bytes
-	//   5 : 33-64 bytes
-	//   6 : 65+ bytes (out of range for storage paths)
-	// Used to investigate depth distribution of touched prefixes —
-	// e.g., are the 25K commitment reads mostly leaf-parents (deep)
-	// or trunk (shallow)?
-	UniqueLenBuckets [7]int64
+	// prefix length is 1 + ⌈depth/2⌉ bytes (HP encoding), so byte
+	// length maps to trie depth as follows:
+	//   0 : 1 byte    (depth 0-1, root)
+	//   1 : 2-4 bytes (depth 2-7, top trunk)
+	//   2 : 5-8 bytes (depth 8-15)
+	//   3 : 9-16 bytes (depth 16-31)
+	//   4 : 17-32 bytes (depth 32-63, near account leaf)
+	//   5 : 33 bytes (depth 64, storage subtree root)
+	//   6 : 34-36 bytes (depth 65-70, storage subtree top)
+	//   7 : 37-44 bytes (depth 71-86, mid storage)
+	//   8 : 45-64 bytes (depth 87-127, leaf-parents and deep)
+	//   9 : 65+ bytes (out of range)
+	// Used to localise where the per-block file reads concentrate —
+	// e.g., are the 25K commitment reads on bloat workload
+	// storage-subtree-trunk (where per-contract pinning helps) or
+	// leaf-parents (where it doesn't)?
+	UniqueLenBuckets [10]int64
 
 	// StateCache hit/miss tracks the SharedDomains.stateCache layer
 	// specifically (the per-execution Account/Storage/Code cache), distinct
@@ -583,7 +588,9 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 }
 
 // lenBucket maps a prefix byte-length to its UniqueLenBuckets index.
-// See DomainIOMetrics.UniqueLenBuckets for the bucket layout.
+// See DomainIOMetrics.UniqueLenBuckets for the bucket layout. Buckets
+// 5-8 sub-divide the storage subtree (depths 64-127) so per-contract
+// trunk vs deep leaf-parent reads are distinguishable.
 func lenBucket(n int) int {
 	switch {
 	case n <= 1:
@@ -596,10 +603,16 @@ func lenBucket(n int) int {
 		return 3
 	case n <= 32:
 		return 4
-	case n <= 64:
+	case n == 33:
 		return 5
-	default:
+	case n <= 36:
 		return 6
+	case n <= 44:
+		return 7
+	case n <= 64:
+		return 8
+	default:
+		return 9
 	}
 }
 
