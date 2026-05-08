@@ -1,0 +1,462 @@
+package stagedsync
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+)
+
+// commitmentResult is the outcome of a single commitment computation.
+type commitmentResult struct {
+	blockNum uint64
+	txNum    uint64
+	rootHash []byte
+	err      error
+}
+
+// commitComputeRequest is sent through the commitResults channel to tell
+// the calculator to compute commitment NOW. It flows through the same
+// channel as txResult/blockResult so ordering is preserved — by the time
+// the calculator sees it, all prior touches have been accumulated.
+type commitComputeRequest struct{}
+
+// commitmentCalculator receives the same txResult/blockResult stream as the
+// apply loop (via a fan-out channel). For each txResult it accumulates key
+// touches from the writes. It contains the break logic that decides when
+// to compute:
+//
+//   - BatchCommitments mode (default, initial sync): accumulates across many
+//     blocks, computes only when the apply loop sends a commitComputeRequest
+//     at batch boundaries (flushPending, maxBlockNum, exhausted).
+//
+//   - Per-block mode (!BatchCommitments): computes at every blockResult.
+//     Used at chain tip or when shouldGenerateChangesets is true.
+//
+// The calculator owns its own commitment.Updates buffer. Writes from the
+// execLoop flow through VersionedWrites.TouchUpdates() which calls
+// TouchPlainKeyDirect() — no serialization round-trip.
+//
+// It reads values from sd.mem (shared with the execLoop) via GetLatest.
+// The execLoop's Flush writes to sd.mem before sending the blockResult,
+// so by the time the calculator receives the blockResult, sd.mem has the
+// correct block-boundary state.
+type commitmentCalculator struct {
+	doms      *execctx.SharedDomains
+	db        kv.TemporalRoDB
+	logPrefix string
+	logger    log.Logger
+
+	// updates is the calculator's OWN buffer — never shared with the
+	// execLoop or apply loop. Only this goroutine reads/writes it.
+	updates *commitment.Updates
+
+	// state accumulates account/storage values across TX writes.
+	// At block boundary, the accumulated state is flushed to updates.
+	// Values are lazy-loaded from the domain on first touch via asOfReader.
+	state *calcState
+
+	// asOfReader is shared between calcState (lazy-load) and compute
+	// methods (fold/unfold sibling reads). Its txNum is updated at each
+	// block boundary.
+	asOfReader *asOfStateReader
+
+	// roTx is a persistent read-only transaction for domain reads.
+	// Opened at start, lives for the calculator's lifetime.
+	roTx kv.TemporalTx
+
+	// lastBlockResult tracks the most recent block boundary so that
+	// computeAndPublish knows which block to compute for.
+	lastBlockResult *blockResult
+
+	// lastComputedBlock tracks the block number of the last computed
+	// commitment to avoid duplicate computation when commitComputeRequest
+	// arrives after a per-block computation already covered this block.
+	lastComputedBlock uint64
+
+	// hasComputed disambiguates lastComputedBlock=0: without this flag,
+	// "never computed" and "computed block 0 (genesis)" both look like
+	// lastComputedBlock=0. The commitComputeRequest dedup check would
+	// then skip computing the very first batch when its lastBlockResult
+	// is block 0 — leaving the genesis commitment unwritten to sd, which
+	// breaks SeekCommitment for the next exec3 cycle (it falls back to
+	// stage progress instead of finding a commitment state).
+	hasComputed bool
+
+	// in receives the same applyResult stream as the apply loop,
+	// plus commitComputeRequest messages for explicit compute triggers.
+	in chan applyResult
+	// out publishes commitment roots.
+	out chan commitmentResult
+
+	wg   sync.WaitGroup
+	done chan struct{}
+}
+
+func newCommitmentCalculator(
+	ctx context.Context,
+	doms *execctx.SharedDomains,
+	db kv.TemporalRoDB,
+	logPrefix string,
+	logger log.Logger,
+	in chan applyResult,
+	out chan commitmentResult,
+) (*commitmentCalculator, error) {
+	// Create the calculator's own Updates buffer in ModeUpdate.
+	// ModeUpdate stores actual values (balance, nonce, storage) in the btree,
+	// so ComputeCommitment reads values from the Updates rather than sd.mem.
+	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
+	calcUpdates := sdCtxUpdates.NewEmpty()
+	calcUpdates.SetMode(commitment.ModeUpdate)
+
+	// Open a persistent read-only TX for lazy-loading state from the domain.
+	// This lives for the calculator's lifetime, like worker TX handles.
+	roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
+	}
+	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
+	// deferred here. Safe across collate/prune cycles because the calculator
+	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
+	// stageloop's rwTx.Commit(), and CollateAndPruneIfNeeded only fires
+	// between batches via FCU. So this roTx never spans a prune — by the
+	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
+	// back and the calculator goroutine is gone.
+
+	// Single asOfStateReader shared by calcState (lazy-load) and compute
+	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
+	// (avoids future sd.mem state) and GetLatest for commitment branches
+	// (written sequentially by this calculator).
+	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+
+	return &commitmentCalculator{
+		doms:       doms,
+		db:         db,
+		logPrefix:  logPrefix,
+		logger:     logger,
+		updates:    calcUpdates,
+		state:      newCalcState(asOfReader, logger, logPrefix),
+		asOfReader: asOfReader,
+		roTx:       roTx,
+		in:         in,
+		out:        out,
+		done:       make(chan struct{}),
+	}, nil
+}
+
+func (cc *commitmentCalculator) Start(ctx context.Context) {
+	cc.wg.Add(1)
+	go cc.loop(ctx)
+}
+
+func (cc *commitmentCalculator) Stop() {
+	close(cc.done)
+	cc.wg.Wait()
+	if cc.roTx != nil {
+		cc.roTx.Rollback()
+	}
+}
+
+func (cc *commitmentCalculator) loop(ctx context.Context) {
+	defer cc.wg.Done()
+	defer close(cc.out) // Signal apply loop that no more results will come.
+
+	// The calculator exits ONLY when cc.in is closed (by the exec loop).
+	// Do NOT add ctx.Done or cc.done checks here — the exec loop owns
+	// shutdown sequencing. Exiting early would leave commitment behind
+	// sd.mem, causing nonce mismatches on batch restart. The calculator
+	// must process ALL buffered items before exiting.
+	// Context cancellation is handled by the exec loop which closes
+	// cc.in after stopping.
+	for result := range cc.in {
+		cc.handleMessage(ctx, result)
+	}
+}
+
+// handleMessage contains the break logic — decides what to do with each
+// message in the stream.
+func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResult) {
+	switch r := msg.(type) {
+	case *txResult:
+		// Accumulate writes in the calculator's local state.
+		// Values are lazy-loaded from domain on first touch, then
+		// overwritten by each TX's writes. At block boundary,
+		// the accumulated final values are flushed to the trie.
+		//
+		// Pin asOfReader at this tx's txNum BEFORE ApplyWrites so any
+		// first-touch lazy-load reads the canonical "pre-tx" state via
+		// GetAsOf(r.txNum). Without this the calculator's initial
+		// asOfReader.txNum=0 leaks into the first lazy-load and crashes
+		// with seekInFiles(txNum=0) on snapshot-loaded datadirs whose
+		// visible history window starts well past genesis (e.g. devnets
+		// loaded from a chunked snapshot). On synced-from-genesis
+		// datadirs txNum=0 is in-window so the bug is invisible.
+		//
+		// computeAndPublish overwrites this back to lastTxNum+1 right
+		// before ComputeCommitment, so the per-tx setting only affects
+		// the lazy-load path and never leaks into the trie fold path.
+		if len(r.writes) > 0 {
+			cc.asOfReader.txNum = r.txNum
+			cc.state.ApplyWrites(r.writes)
+		}
+
+	case *blockResult:
+		// Track the latest block boundary.
+		cc.lastBlockResult = r
+
+		// Break logic: in per-block mode, compute at every block boundary.
+		// Skip the first block if it's a partial block (resumed mid-block).
+		if !dbg.BatchCommitments {
+			if cc.lastComputedBlock == 0 && r.isPartial {
+				// First block is partial (resumed mid-block).
+				// Compute it (like serial does) to save trie state, then
+				// restore that state so the next full block starts from
+				// the same trie state as serial's batch 2 start.
+				cc.computeWithoutCheck(ctx, r)
+			} else {
+				cc.computeAndCheck(ctx, r)
+			}
+		}
+		// In BatchCommitments mode: just accumulate — compute only on
+		// explicit commitComputeRequest from the apply loop.
+
+	case *commitComputeRequest:
+		// Explicit compute signal from the apply loop at batch boundary.
+		if cc.shouldComputeOnRequest() {
+			cc.computeAndPublish(ctx, cc.lastBlockResult)
+		} else {
+			// Publish empty result so drainBeforeExit doesn't block forever
+			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
+		}
+	}
+}
+
+// shouldComputeOnRequest decides whether a commitComputeRequest should
+// trigger a fresh ComputeCommitment vs. publish an empty result. Returns
+// true when there is a blockResult to compute against AND either:
+//
+//	(a) we haven't computed at all yet — covers the very first batch
+//	    which may be just genesis at blockNum=0; without this, the
+//	    genesis commitment would never be written to sd because
+//	    lastBlockResult.BlockNum=0 fails the > lastComputedBlock=0 check
+//	    (the same blockNum=0 ambiguity as SeekCommitment's stageProgress
+//	    fallback), leaving SeekCommitment in a subsequent exec3 cycle
+//	    to fall back to stage progress instead of finding a commitment
+//	    state — which then forces re-execution of block 0 and corrupts
+//	    the next batch's commitment.
+//
+//	(b) a new block boundary advanced past the last computed one.
+func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
+	if cc.lastBlockResult == nil {
+		return false
+	}
+	if !cc.hasComputed {
+		return true
+	}
+	return cc.lastBlockResult.BlockNum > cc.lastComputedBlock
+}
+
+func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	if err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: %w", err),
+		})
+		return
+	}
+
+	r := commitmentResult{
+		blockNum: br.BlockNum,
+		txNum:    br.lastTxNum,
+		rootHash: rh,
+	}
+
+	// Check against expected root from the block header.
+	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
+		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
+	}
+
+	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
+	cc.publish(ctx, r)
+}
+
+// computeWithoutCheck computes commitment but doesn't verify the root.
+// Used for the first partial block where the trie state doesn't match the header.
+func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	if _, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil); err != nil {
+		// Partial-block compute is intentionally not verified (no header root
+		// to compare against), but a real ComputeCommitment failure leaves
+		// later trie state suspect — log so the failure isn't silent.
+		if cc.logger != nil {
+			cc.logger.Warn("["+cc.logPrefix+"] commitmentCalculator: computeWithoutCheck failed", "block", br.BlockNum, "txNum", br.lastTxNum, "err", err)
+		}
+	}
+
+	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
+}
+
+// computeAndCheck computes per-block commitment and validates the root.
+// Only publishes errors to the output channel — successful results are
+// tracked internally. This avoids filling the output channel buffer
+// (which would deadlock the pipeline when batch size > buffer size).
+// Uses the SharedDomains' roTx (not a separate DB connection) to ensure
+// consistency between sd.mem and the trie node reads.
+func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockResult) {
+	if err := cc.state.LazyLoadErr(); err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: lazy-load failed: %w", err),
+		})
+		return
+	}
+	// Flush accumulated local state to the trie's Updates buffer.
+	// This produces one Update per dirty account/slot with the final
+	// block-end values — not intermediate per-TX values.
+	cc.state.FlushToUpdates(cc.updates)
+	cc.state.ResetBlockFlags()
+
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
+
+	// Install asOfStateReader so fold/unfold sibling reads see state at
+	// this block's txNum, not the apply loop's future state in sd.mem.
+	cc.asOfReader.txNum = br.lastTxNum + 1
+	sdCtx.SetStateReader(cc.asOfReader)
+
+	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	if err != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			err:      fmt.Errorf("commitmentCalculator: %w", err),
+		})
+		return
+	}
+
+	cc.lastComputedBlock = br.BlockNum
+	cc.hasComputed = true
+
+	// Trim old version entries from sd.mem — only keeps the latest
+	// entry at or before this block's txNum. Reclaims memory from
+	// accumulated inMemHistoryReads entries during batch processing.
+
+	// Only publish on mismatch — success is silent.
+	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
+		cc.publish(ctx, commitmentResult{
+			blockNum: br.BlockNum,
+			txNum:    br.lastTxNum,
+			rootHash: rh,
+			err:      fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot),
+		})
+	}
+}
+
+func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	select {
+	case cc.out <- r:
+	case <-ctx.Done():
+	case <-cc.done:
+	}
+}
+
+// asOfStateReader reads account/storage/code at a specific txNum via
+// sd.GetAsOf (which checks sd.mem first, then falls through to files).
+// Commitment domain reads use GetLatest since branches are only written
+// by the calculator sequentially.
+type asOfStateReader struct {
+	sd    *execctx.SharedDomains
+	roTx  kv.TemporalTx
+	txNum uint64
+}
+
+func (r *asOfStateReader) WithHistory() bool { return false }
+
+func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
+	return nil
+}
+
+func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	if d == kv.CommitmentDomain {
+		// Branches: use GetLatest — written only by this calculator, sequential.
+		enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
+	} else {
+		// Account/storage/code: use GetAsOf to avoid reading future state.
+		// Check sd.mem first (in-memory data from current batch), then
+		// fall through to DB files for data not in the batch.
+		var ok bool
+		enc, ok, err = r.sd.GetAsOf(d, plainKey, r.txNum)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !ok {
+			// Not in sd.mem — read from DB files
+			enc, ok, err = r.roTx.GetAsOf(d, plainKey, r.txNum)
+			if err != nil {
+				return nil, 0, err
+			}
+			if !ok {
+				enc = nil
+			}
+		}
+		if stepSize > 0 {
+			step = kv.Step(r.txNum / stepSize)
+		}
+	}
+	return enc, step, err
+}
+
+func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+}
+
+// Keep imports used.
+var _ = commitment.CommitProgress{}
