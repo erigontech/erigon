@@ -164,9 +164,9 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Modify: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] write `TestEncodeKeyV2_Panics` covering: nibble byte `0x10`, nibble byte `0xff`, length `129` (over `MaxPathNibbles`)
-- [ ] use `defer/recover` to assert each case panics
-- [ ] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
+- [x] write `TestEncodeKeyV2_Panics` covering: nibble byte `0x10`, nibble byte `0xff`, length `129` (over `MaxPathNibbles`)
+- [x] use `defer/recover` to assert each case panics
+- [x] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
 
 ### Task 5: Subtree-locality property test
 

@@ -196,3 +196,33 @@ func TestDecodeKeyV2_Errors(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeKeyV2_Panics(t *testing.T) {
+	cases := []struct {
+		name    string
+		nibbles []byte
+	}{
+		{
+			name:    "nibble_0x10",
+			nibbles: []byte{0x10},
+		},
+		{
+			name:    "nibble_0xff",
+			nibbles: []byte{0x1, 0xff, 0x2},
+		},
+		{
+			name:    "length_129_over_max",
+			nibbles: make([]byte, 129),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatalf("EncodeKeyV2(%x) did not panic", c.nibbles)
+				}
+			}()
+			_ = EncodeKeyV2(c.nibbles)
+		})
+	}
+}
