@@ -1871,6 +1871,25 @@ var (
 	hadToReset  atomic.Uint64
 )
 
+// SkipLoadResetCounters returns the cumulative process-wide counts of:
+//   - hadToLoad:   computeCellHash had no memoized stateHash and had
+//     to fetch the underlying value from cache/DB to compute the leaf
+//     hash. This is the real "did we go to disk for state we needed"
+//     count.
+//   - skippedLoad: the cell had a memoized stateHash so the fetch was
+//     skipped entirely (mxTrieStateSkipRate also counts these).
+//   - hadToReset:  the cell HAD a memoized stateHash but it was
+//     invalidated (extension fold path, depth change). Implies a
+//     fresh hash compute and may imply a load.
+//
+// Counters are atomic and process-cumulative. To get per-block
+// deltas, snapshot before/after the block. Used by the perf-equivalence
+// investigation to measure whether memoization is doing its job or
+// whether we're paying for fetches that should have been skipped.
+func SkipLoadResetCounters() (load, skipped, reset uint64) {
+	return hadToLoad.Load(), skippedLoad.Load(), hadToReset.Load()
+}
+
 type skipStat struct {
 	accLoaded, accSkipped, accReset, storReset, storLoaded, storSkipped uint64
 }
