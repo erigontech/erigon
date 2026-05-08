@@ -553,6 +553,7 @@ func (c *BranchCache) Fingerprint() uint64 {
 // per-Process log lines can compose them.
 func (c *BranchCache) Stats() string {
 	rh, rm := c.rootHits.Load(), c.rootMisses.Load()
+	ph, pm := c.pinnedHits.Load(), c.pinnedMisses.Load()
 	th, tm := c.tailHits.Load(), c.tailMisses.Load()
 	bb := c.bytesServed.Load()
 	pct := func(hit, miss uint64) float64 {
@@ -563,13 +564,20 @@ func (c *BranchCache) Stats() string {
 		return 100.0 * float64(hit) / float64(total)
 	}
 	return fmt.Sprintf(
-		"branch-cache root hit=%d miss=%d (%.1f%%) | tail hit=%d miss=%d (%.1f%%) | served %.1f MiB | tail entries=%d | divergences=%d",
+		"branch-cache root hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | divergences=%d",
 		rh, rm, pct(rh, rm),
-		th, tm, pct(th, tm),
+		ph, pm, pct(ph, pm), c.pinned.Len(),
+		th, tm, pct(th, tm), c.tail.Len(),
 		float64(bb)/1024/1024,
-		c.tail.Len(),
 		c.verifyDivergences.Load(),
 	)
+}
+
+// PinnedStats returns the pinned-tier hit/miss/entries counters. Used
+// by the cache-fp log to expose pin effectiveness for the trunk-pin
+// prototype debug.
+func (c *BranchCache) PinnedStats() (hits, misses uint64, entries int) {
+	return c.pinnedHits.Load(), c.pinnedMisses.Load(), c.pinned.Len()
 }
 
 // VerifyDivergences returns the number of cache-vs-canonical divergences
