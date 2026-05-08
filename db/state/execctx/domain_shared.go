@@ -19,10 +19,12 @@ package execctx
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -169,6 +171,18 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
+
+	// PIN_CONTRACT_TRUNKS=hash1,hash2,...  (each hash is 64 hex chars =
+	// 32 bytes = keccak256(contractAddr)). When set and BranchCache is
+	// available, fire a one-shot background goroutine to preload the
+	// listed contracts' storage-subtree-trunk into the cache's pinned
+	// tier. Use TryClaimPreload to ensure we run exactly once per
+	// BranchCache lifetime even though many SDs may be constructed.
+	if branchCache != nil && branchCache.TryClaimPreload() {
+		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
+			triggerTrunkPreload(ctx, sd, tx, pinList, logger)
+		}
+	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -952,4 +966,55 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		changes++
 	}
 	return changes, nil
+}
+
+// triggerTrunkPreload kicks off a background goroutine that pre-pins
+// the storage-subtree-trunk of each contract in pinList for the
+// SharedDomains' BranchCache. pinList is a comma-separated list of
+// 64-hex-char contract hashes (keccak256(addr)). Run from the SD
+// constructor; gated by BranchCache.TryClaimPreload so it fires once
+// per cache lifetime.
+//
+// Reader closes over sd + tx; the bench scenario keeps both alive for
+// the whole process so the closure is safe. For production, this
+// pattern needs revisiting (tx may not outlive the goroutine).
+func triggerTrunkPreload(ctx context.Context, sd *SharedDomains, tx kv.TemporalTx, pinList string, logger log.Logger) {
+	const maxDepth = 70 // covers depths 64-70 = the dominant read range on bloat workloads
+	var hashes [][]byte
+	for _, hexStr := range strings.Split(pinList, ",") {
+		hexStr = strings.TrimSpace(hexStr)
+		if hexStr == "" {
+			continue
+		}
+		h, err := hex.DecodeString(hexStr)
+		if err != nil || len(h) != 32 {
+			logger.Warn("[trunk-preload] skipping invalid PIN_CONTRACT_TRUNKS entry",
+				"entry", hexStr, "err", err, "len", len(h))
+			continue
+		}
+		hashes = append(hashes, h)
+	}
+	if len(hashes) == 0 {
+		return
+	}
+	cache := sd.branchCache
+	go func() {
+		reader := func(prefix []byte) ([]byte, uint64, bool, error) {
+			v, step, err := sd.GetLatest(kv.CommitmentDomain, tx, prefix)
+			if err != nil {
+				return nil, 0, false, err
+			}
+			return v, uint64(step), len(v) > 0, nil
+		}
+		for _, h := range hashes {
+			n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, cache, logger)
+			if err != nil {
+				logger.Warn("[trunk-preload] failed",
+					"hash", hex.EncodeToString(h), "pinned_so_far", n, "err", err)
+				continue
+			}
+			logger.Info("[trunk-preload] contract done",
+				"hash", hex.EncodeToString(h), "pinned", n)
+		}
+	}()
 }

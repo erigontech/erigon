@@ -191,6 +191,22 @@ type BranchCache struct {
 	// origin label and timestamp to identify which write produced the
 	// stale bytes.
 	writeSeq atomic.Uint64
+
+	// preloadClaimed is set the first time TryClaimPreload is called.
+	// Used by the trunk-preload trigger (PIN_CONTRACT_TRUNKS hook in
+	// SharedDomains construction) so the preload goroutine fires
+	// exactly once per cache lifetime, even though many SharedDomains
+	// instances may be created over a process's lifetime.
+	preloadClaimed atomic.Bool
+}
+
+// TryClaimPreload returns true the first time it's called on a given
+// BranchCache instance, false on every subsequent call. Used by the
+// trunk-preload trigger to ensure the preload goroutine runs exactly
+// once per cache (process-lifetime), regardless of how many
+// SharedDomains instances are constructed.
+func (c *BranchCache) TryClaimPreload() bool {
+	return c.preloadClaimed.CompareAndSwap(false, true)
 }
 
 type branchCacheEntry struct {
