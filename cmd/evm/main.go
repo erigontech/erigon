@@ -138,8 +138,8 @@ var (
 	}
 	WorkersFlag = cli.IntFlag{
 		Name:  "workers",
-		Usage: "Number of parallel workers for processing fixture files",
-		Value: 1,
+		Value: 0,
+		Usage: "Number of workers to execute tests in parallel (0 means use the command's defaul)",
 	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
@@ -201,6 +201,7 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineXTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}

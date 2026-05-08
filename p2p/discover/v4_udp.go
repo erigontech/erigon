@@ -561,8 +561,9 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 		if err := t.handlePacket(from, buf[:nbytes]); err != nil && unhandled == nil {
 			t.log.Trace("[p2p] Bad discv4 packet", "addr", from, "err", err)
 		} else if err != nil && unhandled != nil {
+			p := ReadPacket{bytes.Clone(buf[:nbytes]), from}
 			select {
-			case unhandled <- ReadPacket{buf[:nbytes], from}:
+			case unhandled <- p:
 			default:
 			}
 		}
