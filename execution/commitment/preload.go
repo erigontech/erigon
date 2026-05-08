@@ -76,7 +76,7 @@ func PreloadContractTrunk(
 	// is 1+16+256+4096 = 4369 branches; this gives headroom but still
 	// fails fast on malformed input (e.g. a contract with truly
 	// pathological branching). Tune downward if this turns out to bite.
-	const maxBranches = 10000
+	const maxBranches = 200000
 
 	pinned := 0
 	var stopped bool

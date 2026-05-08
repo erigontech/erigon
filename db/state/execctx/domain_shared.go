@@ -1204,9 +1204,13 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 // Own-tx async sidesteps both. Caller must guarantee fire-once via
 // BranchCache.TryClaimPreload (the only call site does this).
 func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCache, db kv.TemporalRoDB, pinList string, logger log.Logger) {
-	// 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K branches max per
-	// contract for a fully-saturated subtree.
-	const maxDepth = 67
+	// Default 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K branches max
+	// per contract for a fully-saturated subtree. Override via
+	// PIN_TRUNK_MAX_DEPTH for sweep experiments.
+	maxDepth := 67
+	if v := dbg.EnvInt("PIN_TRUNK_MAX_DEPTH", 67); v >= 64 {
+		maxDepth = v
+	}
 	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
 	var hashes [][]byte
 	for _, hexStr := range strings.Split(pinList, ",") {
