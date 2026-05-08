@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -53,6 +54,13 @@ type sd interface {
 	// to localise which state layer holds bytes that diverge from
 	// cache. Read-only.
 	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
+
+	// Metrics exposes the per-SD DomainMetrics so callers can read
+	// per-domain (cache, db, file) read counters. Used by the
+	// cache-fp log line to break the aggregate `files=N` count down
+	// per domain (Storage value loads vs Commitment branch reads
+	// vs Account loads).
+	Metrics() *changeset.DomainMetrics
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -347,13 +355,47 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		if logCacheFingerprint {
 			if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
 				if bc := hph.BranchCache(); bc != nil {
+					// Skip/load/reset counters are process-cumulative; the
+					// per-block delta requires subtracting consecutive lines.
+					// Used to answer: "what fraction of computeCellHash calls
+					// actually fetched the underlying value vs reused a
+					// memoized stateHash?"
+					load, skipped, reset := commitment.SkipLoadResetCounters()
+					// Per-domain file-read counts: lets us decompose the
+					// aggregate `files=N` from [domain reads] into Commitment
+					// (branch reads), Storage (value loads), Account, Code.
+					// All cumulative; deltas via successive lines.
+					var aFiles, sFiles, cFiles, mFiles int64
+					if m := sdc.sharedDomains.Metrics(); m != nil {
+						m.RLock()
+						if d := m.Domains[kv.AccountsDomain]; d != nil {
+							aFiles = d.FileReadCount
+						}
+						if d := m.Domains[kv.StorageDomain]; d != nil {
+							sFiles = d.FileReadCount
+						}
+						if d := m.Domains[kv.CodeDomain]; d != nil {
+							cFiles = d.FileReadCount
+						}
+						if d := m.Domains[kv.CommitmentDomain]; d != nil {
+							mFiles = d.FileReadCount
+						}
+						m.RUnlock()
+					}
 					log.Info("[commitment][cache-fp]",
 						"block", blockNum,
 						"root", hex.EncodeToString(rootHash),
 						"fp", fmt.Sprintf("%016x", bc.Fingerprint()),
 						"divergences", bc.VerifyDivergences(),
 						"took", took,
-						"keys", common.PrettyCounter(updateCount))
+						"keys", common.PrettyCounter(updateCount),
+						"load", load,
+						"skipped", skipped,
+						"reset", reset,
+						"files_acc", aFiles,
+						"files_sto", sFiles,
+						"files_code", cFiles,
+						"files_comm", mFiles)
 				}
 			}
 		}
