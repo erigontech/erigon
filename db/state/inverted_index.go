@@ -411,17 +411,18 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 
 func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
 	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-	return ii.beginFilesRo(iv)
+	return ii.beginFilesRo(iv, false)
 }
 
-func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
-	iv.files.refcntIncrement()
+func (ii *InvertedIndex) beginFilesRo(iv *iiVisible, includeFrozen bool) *InvertedIndexRoTx {
+	iv.files.refcntIncrement(includeFrozen)
 	return &InvertedIndexRoTx{
 		ii:                ii,
 		visible:           iv,
 		files:             iv.files,
 		stepSize:          ii.stepSize,
 		stepsInFrozenFile: ii.stepsInFrozenFile,
+		includeFrozen:     includeFrozen,
 		name:              ii.Name,
 		salt:              ii.salt.Load(),
 	}
@@ -434,7 +435,7 @@ func (iit *InvertedIndexRoTx) Close() {
 	iit.files = nil
 	for i := 0; i < len(files); i++ {
 		src := files[i].src
-		if src == nil || src.frozen {
+		if src == nil || (src.frozen && !iit.includeFrozen) {
 			continue
 		}
 		refCnt := src.refcount.Add(-1)
@@ -495,6 +496,7 @@ type InvertedIndexRoTx struct {
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
+	includeFrozen     bool
 
 	reUsableSeq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }

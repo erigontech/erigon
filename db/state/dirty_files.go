@@ -63,11 +63,12 @@ type FilesItem struct {
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
-	refcount atomic.Int32 // only for `frozen=false`
+	refcount atomic.Int32 // normally only for `frozen=false`
 
-	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
-	// other processes (which also reading files, may have same logic)
-	canDelete atomic.Bool
+	// canDelete hides the item from new readers; deleteFrozen allows retention
+	// cleanup to remove frozen files after existing readers close.
+	canDelete    atomic.Bool
+	deleteFrozen atomic.Bool
 }
 
 // type FilesItem interface {
@@ -207,8 +208,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
+		if !i.frozen || i.deleteFrozen.Load() {
 			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.index.FileName())
 			}
@@ -240,8 +240,7 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.decompressor != nil {
 		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
+		if !i.frozen || i.deleteFrozen.Load() {
 			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
@@ -687,13 +686,14 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
 
-// refcntIncrement pins every non-frozen file by incrementing its refcount.
+// refcntIncrement pins files by incrementing their refcount.
 // Callers must pair this with a matching decrement in RoTx.Close.
-func (files visibleFiles) refcntIncrement() {
+func (files visibleFiles) refcntIncrement(includeFrozen bool) {
 	for i := range files {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
+		if files[i].src.frozen && !includeFrozen {
+			continue
 		}
+		files[i].src.refcount.Add(1)
 	}
 }
 

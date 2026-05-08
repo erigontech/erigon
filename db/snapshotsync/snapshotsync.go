@@ -255,11 +255,8 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
-// isCommitmentHistorySegmentExpired reports whether segment p ends at or below
-// commitmentMinStep, which the caller pre-computes once per sync from the
-// retention boundary. Returns false when commitmentMinStep is 0 (retention
-// inactive) or the filename can't be parsed. Segments overlapping the boundary
-// are kept because they can still contain retained commitment history.
+// isCommitmentHistorySegmentExpired keeps segments that overlap the retained
+// window; they can still contain commitment history inside the boundary.
 func isCommitmentHistorySegmentExpired(p snapcfg.PreverifiedItem, commitmentMinStep uint64) bool {
 	if commitmentMinStep == 0 {
 		return false
@@ -409,8 +406,8 @@ func SyncSnapshots(
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
-		// Pre-compute commitment-history retention boundary once. The per-segment
-		// filter below is then a cheap fromStep < commitmentMinStep comparison.
+		// Compute the retention boundary once; the per-segment filter is just
+		// filename parsing after this.
 		var commitmentMinStep uint64
 		commitmentRetentionActive := syncCfg.KeepExecutionProofs && syncCfg.KeepExecutionProofsBlocks > 0
 		if commitmentRetentionActive && frozenBlocks > syncCfg.KeepExecutionProofsBlocks && stepSize > 0 {

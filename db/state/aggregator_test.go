@@ -640,6 +640,9 @@ func TestAggregator_DeleteCommitmentHistoryFilesBelowNotifiesDownloader(t *testi
 	_, agg := testDbAndAggregatorv3(t, 10)
 	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	require.NoError(t, agg.OpenFolder())
+	reader := agg.BeginFilesRo()
+	require.Empty(t, reader.d[kv.CommitmentDomain].ht.files)
+	reader.Close()
 
 	var deleted []string
 	agg.OnFilesChange(func([]string) {}, func(files []string) {
@@ -656,6 +659,59 @@ func TestAggregator_DeleteCommitmentHistoryFilesBelowNotifiesDownloader(t *testi
 	require.True(t, hasPathSuffix(deleted, filepath.Join("accessor", "v1.0-commitment.0-1.vi")))
 	require.True(t, hasPathSuffix(deleted, filepath.Join("idx", "v1.0-commitment.0-1.ef")))
 	require.True(t, hasPathSuffix(deleted, filepath.Join("accessor", "v1.0-commitment.0-1.efi")))
+
+	for _, p := range deleted {
+		exists, err := dir.FileExist(filepath.Join(agg.Dirs().Snap, p))
+		require.NoError(t, err)
+		require.False(t, exists)
+	}
+	require.Equal(t, 0, agg.DeleteCommitmentHistoryFilesBelow(10))
+	require.Len(t, deleted, 4)
+}
+
+func TestAggregator_DeleteCommitmentHistoryFilesBelowWaitsForFrozenReaders(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+
+	agg := NewTest(dirs).StepSize(10).StepsInFrozenFile(1).Logger(logger).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
+	generateAccountsFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	generateCodeFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	generateStorageFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
+	generateCommitmentHistoryAndIndexFiles(t, agg.Dirs(), []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder())
+
+	reader := agg.BeginFilesRo()
+	histItem := reader.d[kv.CommitmentDomain].ht.files[0].src
+	iiItem := reader.d[kv.CommitmentDomain].ht.iit.files[0].src
+	require.True(t, histItem.frozen)
+	require.True(t, iiItem.frozen)
+	paths := append(histItem.FilePaths(agg.Dirs().Snap), iiItem.FilePaths(agg.Dirs().Snap)...)
+	for i := range paths {
+		paths[i] = filepath.Join(agg.Dirs().Snap, paths[i])
+	}
+
+	removed := agg.DeleteCommitmentHistoryFilesBelow(10)
+	require.Equal(t, 4, removed)
+	for _, p := range paths {
+		exists, err := dir.FileExist(p)
+		require.NoError(t, err)
+		require.True(t, exists, "file must stay on disk while an older reader is open: %s", p)
+	}
+
+	reader.Close()
+	for _, p := range paths {
+		exists, err := dir.FileExist(p)
+		require.NoError(t, err)
+		require.False(t, exists, "file must be removed after the last reader closes: %s", p)
+	}
 }
 
 func hasPathSuffix(paths []string, suffix string) bool {

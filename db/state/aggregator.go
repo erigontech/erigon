@@ -2082,11 +2082,8 @@ func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs ui
 	}
 }
 
-// DeleteCommitmentHistoryFilesBelow removes commitment-history files whose
-// endTxNum is at or below threshold. File paths are captured before
-// deleteMergeFile runs because that path preserves frozen files on disk —
-// retention must override that cleanAfterMerge safety net. Used by
-// --prune.commitment-history.distance.blocks.
+// DeleteCommitmentHistoryFilesBelow marks commitment-history files whose
+// endTxNum is at or below threshold for deletion. Removal waits for readers.
 func (a *Aggregator) DeleteCommitmentHistoryFilesBelow(threshold uint64) int {
 	d := a.d[kv.CommitmentDomain]
 	if d.History.SnapshotsDisabled {
@@ -2094,46 +2091,33 @@ func (a *Aggregator) DeleteCommitmentHistoryFilesBelow(threshold uint64) int {
 	}
 	h := d.History
 
-	pathsToRemove := a.markCommitmentHistoryBelowDeletable(h, threshold)
-	if len(pathsToRemove) == 0 {
+	rotx := a.BeginFilesRo()
+	defer rotx.Close()
+
+	deleted, marked := a.markCommitmentHistoryBelowDeletable(h, threshold)
+	if len(deleted) == 0 {
 		return 0
 	}
-	deleted := make([]string, 0, len(pathsToRemove))
-	for _, p := range pathsToRemove {
-		rel, err := filepath.Rel(a.dirs.Snap, p)
-		if err != nil {
-			a.logger.Warn("[agg] commitment-history retention: relative path", "err", err, "path", p)
-			continue
-		}
-		deleted = append(deleted, rel)
-	}
-	// Match cleanAfterMerge ordering: de-register from downloader before unlinking,
-	// otherwise the downloader may recreate files after local removal.
 	a.onFilesDelete(deleted)
-
-	removed := 0
-	for _, p := range pathsToRemove {
-		if err := dir.RemoveFile(p); err != nil && !os.IsNotExist(err) {
-			a.logger.Warn("[agg] commitment-history retention: remove file", "err", err, "path", p)
-			continue
+	// Dirty but invisible files were not pinned by rotx; visible files wait for
+	// rotx.Close or older readers.
+	for _, item := range marked {
+		if item.refcount.Load() == 0 {
+			item.closeFilesAndRemove()
 		}
-		// .torrent absent for locally-built files; ignore.
-		_ = dir.RemoveFile(p + ".torrent")
-		removed++
 	}
-	return removed
+	return len(deleted)
 }
 
-// markCommitmentHistoryBelowDeletable holds dirtyFilesLock while removing the
-// files from dirtyFiles. deleteMergeFile may also close and unlink non-frozen
-// files; frozen files are force-removed by DeleteCommitmentHistoryFilesBelow.
-func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold uint64) []string {
+// markCommitmentHistoryBelowDeletable removes the matching FilesItems from
+// dirtyFiles and returns paths for the downloader notification.
+func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold uint64) ([]string, []*FilesItem) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
 	// dirtyFiles is ordered by endTxNum (filesItemLess), so items satisfying
 	// endTxNum <= threshold cluster at the start; break on first miss.
-	collect := func(t *btree.BTreeG[*FilesItem], pathsOut *[]string) []*FilesItem {
+	collect := func(t *btree.BTreeG[*FilesItem]) []*FilesItem {
 		outs := make([]*FilesItem, 0, t.Len())
 		iter := t.Iter()
 		defer iter.Release()
@@ -2146,31 +2130,45 @@ func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold u
 				break
 			}
 			outs = append(outs, item)
-			if item.decompressor != nil {
-				*pathsOut = append(*pathsOut, item.decompressor.FilePath())
-			}
-			if item.index != nil {
-				*pathsOut = append(*pathsOut, item.index.FilePath())
-			}
 		}
 		return outs
 	}
 
-	paths := make([]string, 0, h.dirtyFiles.Len()*2)
-	histOuts := collect(h.dirtyFiles, &paths)
-	iiOuts := collect(h.InvertedIndex.dirtyFiles, &paths)
+	histOuts := collect(h.dirtyFiles)
+	iiOuts := collect(h.InvertedIndex.dirtyFiles)
 	if len(histOuts) == 0 && len(iiOuts) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	if len(histOuts) > 0 {
-		deleteMergeFile(h.dirtyFiles, histOuts, h.FilenameBase, a.logger)
+	deleted := make([]string, 0, (len(histOuts)+len(iiOuts))*2)
+	marked := make([]*FilesItem, 0, len(histOuts)+len(iiOuts))
+	addRel := func(absPath string) {
+		if rel, err := filepath.Rel(a.dirs.Snap, absPath); err == nil {
+			deleted = append(deleted, rel)
+		}
 	}
-	if len(iiOuts) > 0 {
-		deleteMergeFile(h.InvertedIndex.dirtyFiles, iiOuts, h.InvertedIndex.FilenameBase, a.logger)
+	mark := func(t *btree.BTreeG[*FilesItem], outs []*FilesItem) {
+		for _, item := range outs {
+			if item.decompressor != nil {
+				addRel(item.decompressor.FilePath())
+			}
+			if item.index != nil {
+				addRel(item.index.FilePath())
+			}
+			t.Delete(item)
+			if item.frozen {
+				// Close paths key off canDelete, so publish deleteFrozen first.
+				item.deleteFrozen.Store(true)
+			}
+			item.canDelete.Store(true)
+			marked = append(marked, item)
+		}
 	}
+	mark(h.dirtyFiles, histOuts)
+	mark(h.InvertedIndex.dirtyFiles, iiOuts)
+
 	a.recalcVisibleFiles()
-	return paths
+	return deleted, marked
 }
 
 func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
@@ -2496,7 +2494,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		if iv == nil {
 			continue
 		}
-		ac.iis[id] = a.iis[id].beginFilesRo(iv)
+		ac.iis[id] = a.iis[id].beginFilesRo(iv, false)
 	}
 	for id, dv := range v.d {
 		if dv == nil {
