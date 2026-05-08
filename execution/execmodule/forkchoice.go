@@ -163,6 +163,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
+	fcuStart := time.Now()
 	shouldReleaseSema := true
 	defer func() {
 		if shouldReleaseSema {
@@ -475,6 +476,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	var mergeDur, runLoopDur, flushCommitDur time.Duration
 	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
@@ -488,15 +490,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
+		mergeStart := time.Now()
 		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		mergeDur = time.Since(mergeStart)
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
 	firstCycle := false
 
+	runLoopStart := time.Now()
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle:    initialCycle,
 		FirstCycle:      firstCycle,
@@ -553,6 +558,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
+	runLoopDur = time.Since(runLoopStart)
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
@@ -668,10 +674,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// Foreground commit: pass the outer roTx so it gets released
 			// between Flush and Commit (same openTxs=2→1 optimization as
 			// the bg-commit path).
+			flushCommitStart := time.Now()
 			ct, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
+			flushCommitDur = time.Since(flushCommitStart)
 			commitTimings = ct
 		}
 
@@ -706,6 +714,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			commitTimings = append(commitTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			e.logger.Info("Timings: Forkchoice", commitTimings...)
 		}
+
+		var blocksProcessed uint64
+		if headNumber != nil && *headNumber > finishProgressBefore {
+			blocksProcessed = *headNumber - finishProgressBefore
+		}
+		e.logger.Info("[fcu] timing breakdown",
+			"total", common.Round(time.Since(fcuStart), 0),
+			"merge", common.Round(mergeDur, 0),
+			"runLoop", common.Round(runLoopDur, 0),
+			"flushCommit", common.Round(flushCommitDur, 0),
+			"blocks", blocksProcessed,
+			"head", headHash,
+			"number", *headNumber,
+		)
 	}
 
 	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
