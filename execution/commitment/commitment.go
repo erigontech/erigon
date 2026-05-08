@@ -657,6 +657,17 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
+	// Mark BranchCache entry dirty BEFORE the deferred enqueue. Mirrors
+	// the CollectUpdate path so that both immediate and deferred encoder
+	// entries consistently invalidate the cache. Concurrent warmer-style
+	// writers calling PutIfClean for this prefix between now and the
+	// eventual ApplyDeferredBranchUpdates write see the dirty flag and
+	// skip — preventing a stale read from racing the deferred write.
+	// See branch_cache.go's Concurrency Contract.
+	if be.branchCache != nil {
+		be.branchCache.MarkDirty(prefix)
+	}
+
 	prev, _, err := ctx.Branch(prefix)
 	if err != nil {
 		return err
