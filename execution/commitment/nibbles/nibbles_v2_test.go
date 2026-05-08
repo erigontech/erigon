@@ -18,6 +18,7 @@ package nibbles
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -134,5 +135,64 @@ func TestEncodeKeyV2_MaxLen(t *testing.T) {
 	got := EncodeKeyV2(make([]byte, 128))
 	if len(got) != 65 {
 		t.Fatalf("EncodeKeyV2(128 nibbles) length = %d, want 65", len(got))
+	}
+}
+
+func TestDecodeKeyV2_Errors(t *testing.T) {
+	overlong := make([]byte, 67)
+	cases := []struct {
+		name string
+		key  []byte
+		want error
+	}{
+		{
+			name: "empty_input",
+			key:  []byte{},
+			want: ErrV2KeyLength,
+		},
+		{
+			name: "overlong_67_bytes",
+			key:  overlong,
+			want: ErrV2KeyLength,
+		},
+		{
+			name: "parity_byte_0x02",
+			key:  []byte{0x2f, 0x02},
+			want: ErrV2KeyParity,
+		},
+		{
+			name: "parity_byte_0xff",
+			key:  []byte{0x2f, 0xff},
+			want: ErrV2KeyParity,
+		},
+		{
+			name: "shape_parity1_no_packed_byte",
+			key:  []byte{0x01},
+			want: ErrV2KeyShape,
+		},
+		{
+			name: "non_canonical_pad_last_byte",
+			key:  []byte{0x2f, 0xb3, 0x01},
+			want: ErrV2NonCanonicalPad,
+		},
+		{
+			name: "non_canonical_pad_mid_key",
+			key:  []byte{0x00, 0xa1, 0x01},
+			want: ErrV2NonCanonicalPad,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := DecodeKeyV2(c.key)
+			if err == nil {
+				t.Fatalf("DecodeKeyV2(%x) = %x, want error %v", c.key, got, c.want)
+			}
+			if !errors.Is(err, c.want) {
+				t.Fatalf("DecodeKeyV2(%x) error = %v, want %v", c.key, err, c.want)
+			}
+			if got != nil {
+				t.Fatalf("DecodeKeyV2(%x) returned %x with error, want nil result", c.key, got)
+			}
+		})
 	}
 }

@@ -154,10 +154,10 @@ For any two paths `P1`, `P2` with common nibble prefix length `k`, `EncodeKeyV2(
 **Files:**
 - Modify: `execution/commitment/nibbles/nibbles_v2_test.go`
 
-- [ ] write `TestDecodeKeyV2_Errors` table-driven with one row per sentinel error
-- [ ] cover: empty input, 67-byte over-long input, parity byte `0x02`, parity byte `0xff`, `{0x01}` (shape: parity=1 no packed byte), `{0x2f, 0xb3, 0x01}` (non-canonical pad), `{0x00, 0xa1, 0x01}` (non-canonical pad mid-key)
-- [ ] use `errors.Is` for sentinel comparison
-- [ ] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
+- [x] write `TestDecodeKeyV2_Errors` table-driven with one row per sentinel error
+- [x] cover: empty input, 67-byte over-long input, parity byte `0x02`, parity byte `0xff`, `{0x01}` (shape: parity=1 no packed byte), `{0x2f, 0xb3, 0x01}` (non-canonical pad), `{0x00, 0xa1, 0x01}` (non-canonical pad mid-key)
+- [x] use `errors.Is` for sentinel comparison
+- [x] run tests: `go test ./execution/commitment/nibbles/ -run V2 -v` — must pass before next task
 
 ### Task 4: Encoder panic tests
 
