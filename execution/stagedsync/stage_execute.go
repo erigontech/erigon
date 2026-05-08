@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -85,6 +86,7 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	experimentalBAL bool
+	readAheader     *exec.BlockReadAheader
 }
 
 func StageExecuteBlocksCfg(
@@ -104,6 +106,7 @@ func StageExecuteBlocksCfg(
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	experimentalBAL bool,
+	readAheader *exec.BlockReadAheader,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -126,6 +129,7 @@ func StageExecuteBlocksCfg(
 		historyV3:       true,
 		syncCfg:         syncCfg,
 		experimentalBAL: experimentalBAL,
+		readAheader:     readAheader,
 	}
 }
 

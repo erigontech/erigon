@@ -583,7 +583,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if err != nil {
 				return err
 			}
-			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 			if b == nil || !ok {
 				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
 			}
