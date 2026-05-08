@@ -203,18 +203,6 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
-	// PIN_CONTRACT_TRUNKS=hash1,hash2,...  (each hash is 64 hex chars =
-	// 32 bytes = keccak256(contractAddr)). When set and BranchCache is
-	// available, fire a one-shot background goroutine to preload the
-	// listed contracts' storage-subtree-trunk into the cache's pinned
-	// tier. Use TryClaimPreload to ensure we run exactly once per
-	// BranchCache lifetime even though many SDs may be constructed.
-	if branchCache != nil && branchCache.TryClaimPreload() {
-		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
-			triggerTrunkPreload(ctx, sd, tx, pinList, logger)
-		}
-	}
-
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err
@@ -228,6 +216,19 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 		}
 		if lastBn < blockNum {
 			return sd, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", commitmentdb.ErrBehindCommitment, lastBn, blockNum)
+		}
+	}
+
+	// PIN_CONTRACT_TRUNKS=hash1,hash2,... preload contract storage-trunk
+	// into BranchCache's pinned tier. Run AFTER SeekCommitment so the
+	// SD has resolved its view of the chain head — reading via
+	// sd.GetLatest BEFORE that produced pinned values inconsistent with
+	// the committed state and broke subsequent block validation
+	// (every block came back SYNCING). TryClaimPreload guards
+	// fire-once-per-cache lifetime.
+	if branchCache != nil && branchCache.TryClaimPreload() {
+		if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
+			triggerTrunkPreload(ctx, sd, tx, pinList, logger)
 		}
 	}
 
