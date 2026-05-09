@@ -193,8 +193,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
 	}
 
-	// Start the commitment calculator.
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, commitResults, rootResults)
+	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
+	// per-block gate (exec3_serial.go: `if !dbg.BatchCommitments ||
+	// shouldGenerateChangesets || KeepExecutionProofs`). When changesets
+	// must be generated (for unwind/reorg) the calculator must compute
+	// per-block — otherwise batch-mode dedupes branch updates across the
+	// batch and flushes them all into the last block's changeset, which
+	// fails on subsequent reorgs.
+	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -828,17 +835,29 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
-					return err
-				}
-
-				// Snapshot the just-completed block's changeset and clear sd.mem's
-				// accumulator before any further sd.mem writes occur. This must
-				// happen here (in the exec loop) — not in the apply loop — so that
-				// it is serialized with the exec loop's other sd.mem writes
-				// (system calls, finalize, ApplyStateWrites for the next block).
+				// Snapshot the just-completed block's changeset BEFORE sending the
+				// blockResult, so that the commitment calculator (which consumes
+				// blockResults on a separate goroutine) can find this block's
+				// saved changeset via GetChangesetByBlockNum at compute time.
+				// In per-block compute mode (shouldGenerateChangesets), the
+				// calculator switches the accumulator to this saved CS for the
+				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
+				// so branch writes land in block N's CS rather than whatever the
+				// exec loop has installed as current. If we saved AFTER sendResult,
+				// the calculator could race ahead and look up an unsaved CS,
+				// causing branch deltas to leak into the next block's CS and
+				// produce wrong-trie-root chains on subsequent reorg-driven
+				// re-execution (see TestRecreateAndRewind reproducer). Clearing
+				// the live accumulator and the local pointer must still happen
+				// here (in the exec loop) so the rotation-to-next-block install
+				// at line 893-895 is serialized with the exec loop's other
+				// sd.mem writes (system calls, finalize, ApplyStateWrites for
+				// the next block).
 				if pe.shouldGenerateChangesets && pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
+				}
+				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+					return err
 				}
 				pe.domains().SetChangesetAccumulator(nil)
 				pe.currentChangeSet = nil

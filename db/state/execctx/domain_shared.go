@@ -310,6 +310,28 @@ func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) 
 	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 }
 
+// GetChangesetAccumulator returns the currently-installed live changeset
+// accumulator (the one DomainPut writes diff entries into). Returns nil if
+// none is installed. Used by callers that need to temporarily switch to a
+// past block's saved changeset (via SetChangesetAccumulator) and restore
+// the previous one after.
+func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
+	if h, ok := sd.mem.(changesetSwitcher); ok {
+		return h.GetChangesetAccumulator()
+	}
+	return nil
+}
+
+// GetChangesetByBlockNum returns the saved changeset for a given block
+// number (and the block hash it was saved under), or (zero hash, nil) if
+// no such changeset has been saved via SavePastChangesetAccumulator.
+func (sd *SharedDomains) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
+	if h, ok := sd.mem.(changesetSwitcher); ok {
+		return h.GetChangesetByBlockNum(blockNumber)
+	}
+	return common.Hash{}, nil
+}
+
 func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	sd.mem.(accHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }

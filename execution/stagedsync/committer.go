@@ -96,6 +96,18 @@ type commitmentCalculator struct {
 	// out publishes commitment roots.
 	out chan commitmentResult
 
+	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
+	// ComputeCommitment at every block boundary. Mirrors serial's
+	// `!dbg.BatchCommitments || shouldGenerateChangesets || KeepExecutionProofs`
+	// gate in [exec3_serial.go]: when changesets must be generated (reorg
+	// support) or execution proofs must be kept, per-block computation is
+	// required so that each block's changeset records the branch deltas
+	// attributable to that block alone. In batch mode, the trie folds
+	// multiple blocks together and the deferred buffer dedupes branch
+	// prefixes across the batch — those merged updates flush into the
+	// LAST block's changeset, which is wrong for per-block unwind.
+	forcePerBlockCompute bool
+
 	wg   sync.WaitGroup
 	done chan struct{}
 }
@@ -106,6 +118,7 @@ func newCommitmentCalculator(
 	db kv.TemporalRoDB,
 	logPrefix string,
 	logger log.Logger,
+	forcePerBlockCompute bool,
 	in chan applyResult,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
@@ -137,17 +150,18 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
 	return &commitmentCalculator{
-		doms:       doms,
-		db:         db,
-		logPrefix:  logPrefix,
-		logger:     logger,
-		updates:    calcUpdates,
-		state:      newCalcState(asOfReader, logger, logPrefix),
-		asOfReader: asOfReader,
-		roTx:       roTx,
-		in:         in,
-		out:        out,
-		done:       make(chan struct{}),
+		doms:                 doms,
+		db:                   db,
+		logPrefix:            logPrefix,
+		logger:               logger,
+		updates:              calcUpdates,
+		state:                newCalcState(asOfReader, logger, logPrefix),
+		asOfReader:           asOfReader,
+		roTx:                 roTx,
+		in:                   in,
+		out:                  out,
+		forcePerBlockCompute: forcePerBlockCompute,
+		done:                 make(chan struct{}),
 	}, nil
 }
 
@@ -213,7 +227,12 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 
 		// Break logic: in per-block mode, compute at every block boundary.
 		// Skip the first block if it's a partial block (resumed mid-block).
-		if !dbg.BatchCommitments {
+		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
+		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
+		// || shouldGenerateChangesets || ...` check) — per-block compute is
+		// required when changesets must record per-block branch deltas
+		// (reorg support, KeepExecutionProofs).
+		if !dbg.BatchCommitments || cc.forcePerBlockCompute {
 			if cc.lastComputedBlock == 0 && r.isPartial {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
@@ -224,8 +243,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.computeAndCheck(ctx, r)
 			}
 		}
-		// In BatchCommitments mode: just accumulate — compute only on
-		// explicit commitComputeRequest from the apply loop.
+		// In BatchCommitments mode (without forcePerBlockCompute): just
+		// accumulate — compute only on explicit commitComputeRequest from
+		// the apply loop.
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
@@ -372,7 +392,15 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	// In per-block compute mode, the exec loop has (or is about to)
+	// swap the changeset accumulator to block N+1 by the time this runs.
+	// Wrap ComputeCommitment so any branch writes (mid-process inline
+	// flushes from `pendingPrefixes` collisions, plus any writes via
+	// putBranch) go into block N's saved changeset, not whatever the
+	// exec loop has set as current. Without this wrap, block N's
+	// branch deltas leak into block N+1's CS, producing a wrong-trie-root
+	// chain on subsequent blocks (see TestTxLookupUnwind reproducer).
+	rh, err := cc.computeWithBlockAccumulator(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -406,6 +434,27 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	case <-ctx.Done():
 	case <-cc.done:
 	}
+}
+
+// computeWithBlockAccumulator runs ComputeCommitment with the changeset
+// accumulator switched to block N's saved changeset (looked up by block
+// number) so that any branch writes during compute (mid-process inline
+// flushes from `pendingPrefixes` collisions, plus deferred-buffer flushes
+// from the wrapper) land in block N's CS rather than whatever the exec
+// loop has installed as current.
+//
+// If block N's CS hasn't been saved yet (rare race with the exec loop's
+// SavePastChangesetAccumulator), falls through to whatever current is
+// installed — same as the pre-fix behavior.
+func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, br *blockResult) ([]byte, error) {
+	_, cs := cc.doms.GetChangesetByBlockNum(br.BlockNum)
+	if cs == nil {
+		return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	}
+	prev := cc.doms.GetChangesetAccumulator()
+	cc.doms.SetChangesetAccumulator(cs)
+	defer cc.doms.SetChangesetAccumulator(prev)
+	return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
