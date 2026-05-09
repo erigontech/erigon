@@ -32,10 +32,9 @@ import (
 // receipt roots matching block headers. It auto-detects the range
 // [Byzantium, rcacheTip] and delegates to CheckRCacheRootAtBlkRange.
 //
-// Pre-Byzantium blocks are skipped: their consensus receipt encoding includes
-// the 32-byte intermediate state root (PostState), which Erigon does not
-// compute or persist at execution time, so RCache cannot reconstruct the
-// canonical receipt root for those blocks.
+// Pre-Byzantium blocks need PostState in RCache to derive the correct receipt
+// root. When PostState is absent (datadirs built before the fix), the check
+// starts at Byzantium instead of block 1.
 func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, failFast bool, logger log.Logger) (err error) {
 	defer func() {
 		logger.Info("[integrity] ReceiptRootIntegrity: done", "err", err)
@@ -62,33 +61,36 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 
 // CheckRCacheRootAtBlk verifies the receipt root for a single block by
 // reconstructing receipts from RCache and comparing against the block header.
-// Pre-Byzantium blocks cannot be verified (see CheckReceiptRootIntegrity); for
-// such a block this logs a warning and returns nil.
 func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, blockNum uint64, failFast bool, logger log.Logger) error {
 	if cc.ByzantiumBlock != nil && blockNum < *cc.ByzantiumBlock {
-		logger.Warn("[integrity] check-rcache-root-at-blk: skipping pre-Byzantium block (no PostState in RCache)",
-			"block", blockNum, "byzantium", *cc.ByzantiumBlock)
-		return nil
+		if !rcacheHasPostStateForPreByzantium(ctx, db, blockReader, blockNum, *cc.ByzantiumBlock) {
+			logger.Warn("[integrity] check-rcache-root-at-blk: skipping pre-Byzantium block (no PostState in RCache)",
+				"block", blockNum, "byzantium", *cc.ByzantiumBlock)
+			return nil
+		}
 	}
 	return checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast)
 }
 
 // CheckRCacheRootAtBlkRange verifies receipt roots over [from, to) using
-// sampling. Pre-Byzantium blocks are skipped; if `from` falls below Byzantium
-// it is clamped up with a warning.
+// sampling. Pre-Byzantium blocks are skipped when RCache does not contain
+// PostState; probes the first available pre-Byzantium receipt to decide.
 func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, cc *chain.Config, from, to uint64, failFast bool, logger log.Logger) error {
 	if from >= to {
 		logger.Info("[integrity] check-rcache-root-at-blk-range: empty range, skipping", "from", from, "to", to)
 		return nil
 	}
+
 	if cc.ByzantiumBlock != nil && from < *cc.ByzantiumBlock {
-		byzantium := *cc.ByzantiumBlock
-		logger.Warn("[integrity] check-rcache-root-at-blk-range: clamping from to Byzantium (pre-Byzantium blocks have no PostState in RCache)",
-			"from", from, "byzantium", byzantium)
-		from = byzantium
-		if from >= to {
-			logger.Info("[integrity] check-rcache-root-at-blk-range: range entirely pre-Byzantium, skipping", "to", to, "byzantium", byzantium)
-			return nil
+		if !rcacheHasPostStateForPreByzantium(ctx, db, blockReader, from, *cc.ByzantiumBlock) {
+			byzantium := *cc.ByzantiumBlock
+			logger.Warn("[integrity] check-rcache-root-at-blk-range: clamping from to Byzantium (pre-Byzantium blocks have no PostState in RCache)",
+				"from", from, "byzantium", byzantium)
+			from = byzantium
+			if from >= to {
+				logger.Info("[integrity] check-rcache-root-at-blk-range: range entirely pre-Byzantium, skipping", "to", to, "byzantium", byzantium)
+				return nil
+			}
 		}
 	}
 	logger.Info("[integrity] check-rcache-root-at-blk-range starting", "from", from, "to", to)
@@ -186,14 +188,6 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 			r.Bloom = types.CreateBloom(types.Receipts{r})
 			receipts = append(receipts, r)
 		}
-
-		if txNum%1000 == 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
 	}
 
 	for blockNum <= toBlock {
@@ -203,4 +197,28 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	}
 
 	return nil
+}
+
+// rcacheHasPostStateForPreByzantium probes the first available pre-Byzantium
+// receipt to check whether RCache was built with PostState support.
+func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, fromBlock, byzantiumBlock uint64) bool {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false
+	}
+	defer tx.Rollback()
+
+	txNumsReader := blockReader.TxnumReader()
+	for blockNum := fromBlock; blockNum < byzantiumBlock; blockNum++ {
+		minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
+		if err != nil {
+			return false
+		}
+		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{TxNum: minTxNum, DontCalcBloom: true})
+		if err != nil || !ok || receipt == nil {
+			continue
+		}
+		return len(receipt.PostState) > 0
+	}
+	return false
 }

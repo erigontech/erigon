@@ -517,6 +517,18 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
+// commitAndComputeRoot commits the IBS and computes the state root at txNum.
+func (rw *Worker) CommitAndComputeRoot(ctx context.Context, rules *chain.Rules, blockNum, txNum uint64) ([]byte, error) {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+
+	stateWriter := state.NewWriter(rw.rs.Domains().AsPutDel(rw.chainTx), nil, txNum)
+	if err := rw.ibs.CommitBlock(rules, stateWriter); err != nil {
+		return nil, err
+	}
+	return rw.rs.Domains().ComputeCommitment(ctx, rw.chainTx, false, blockNum, txNum, "worker-poststate", nil)
+}
+
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {

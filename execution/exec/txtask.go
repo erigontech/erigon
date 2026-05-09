@@ -120,6 +120,7 @@ type TxResult struct {
 	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
 	// adjustments are applied directly to these writes.
 	CollectorWrites state.VersionedWrites
+	PostState       []byte
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -182,6 +183,9 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	if len(r.PostState) > 0 {
+		receipt.PostState = r.PostState
 	}
 
 	// if the transaction created a contract, store the creation address in the receipt.

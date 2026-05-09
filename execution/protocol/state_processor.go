@@ -156,12 +156,16 @@ func MakeReceipt(
 	result *evmtypes.ExecutionResult,
 	ibs *state.IntraBlockState,
 	evm *vm.EVM,
+	postState ...[]byte,
 ) *types.Receipt {
 	receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: cumulativeGasUsed}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
+	}
+	if len(postState) > 0 && len(postState[0]) > 0 {
+		receipt.PostState = postState[0]
 	}
 	receipt.TxHash = txn.Hash()
 	receipt.GasUsed = result.ReceiptGasUsed
