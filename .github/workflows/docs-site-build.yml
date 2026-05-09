@@ -10,15 +10,16 @@ jobs:
       - uses: actions/checkout@v6
 
       # Defensive guard — skip silently if docs/site/ is absent (e.g. branches
-      # that predate the Docusaurus migration).
+      # that predate the Docusaurus migration) or if the Python scripts aren't
+      # present yet (partial migration state).
       - name: Check docs/site is present
         id: guard
         run: |
-          if [ -f docs/site/package.json ]; then
+          if [ -f docs/site/package.json ] && [ -f docs/site/scripts/generate-llms.py ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "docs/site/package.json not found — skipping build"
+            echo "docs/site/ or scripts not found — skipping build"
           fi
 
       - uses: actions/setup-python@v5
