@@ -58,27 +58,27 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// aggWorkers serializes all Preset* writes against each other and against the
+// workersCfg serializes all Preset* writes against each other and against the
 // LockWorkersEditing/UnlockWorkersEditing toggle. Long ops set allowEditing=false
 // (under mu) before concurrent reads of per-domain CompressorCfg, then restore
 // it after. Preset* acquires mu, checks the flag, and skips the write if false,
 // eliminating the data race that the previous implementation tripped when ExecV3's
 // PresetChainTipConcurrency raced with a background buildFiles goroutine reading
 // InvertedIndex.CompressorCfg.
-type aggWorkers struct {
+type workersCfg struct {
 	mu              sync.Mutex
 	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
 	merge           int  // usually 1
 	collateAndBuild int
 }
 
-func (w *aggWorkers) getMerge() int {
+func (w *workersCfg) getMerge() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.merge
 }
 
-func (w *aggWorkers) setMerge(n int) {
+func (w *workersCfg) setMerge(n int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.allowEditing {
@@ -86,13 +86,13 @@ func (w *aggWorkers) setMerge(n int) {
 	}
 }
 
-func (w *aggWorkers) getCollateAndBuild() int {
+func (w *workersCfg) getCollateAndBuild() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.collateAndBuild
 }
 
-func (w *aggWorkers) setCollateAndBuild(n int) {
+func (w *workersCfg) setCollateAndBuild(n int) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.allowEditing {
@@ -101,7 +101,7 @@ func (w *aggWorkers) setCollateAndBuild(n int) {
 }
 
 // trySet runs fn under mu only if allowEditing is true.
-func (w *aggWorkers) trySet(fn func()) {
+func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.allowEditing {
@@ -109,13 +109,13 @@ func (w *aggWorkers) trySet(fn func()) {
 	}
 }
 
-func (w *aggWorkers) lockEditing() {
+func (w *workersCfg) lockEditing() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.allowEditing = false
 }
 
-func (w *aggWorkers) unlockEditing() {
+func (w *workersCfg) unlockEditing() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.allowEditing = true
@@ -147,7 +147,7 @@ type Aggregator struct {
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory bool
-	workers        aggWorkers
+	workers        workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -218,7 +218,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:              background.NewProgressSet(),
 		logger:          logger,
-		workers:         aggWorkers{allowEditing: true, merge: 1, collateAndBuild: 1},
+		workers:         workersCfg{allowEditing: true, merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
