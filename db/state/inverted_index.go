@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/spaolacci/murmur3"
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -72,7 +71,7 @@ type InvertedIndex struct {
 	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
 	// iiVisible snapshot and published atomically via Aggregator.visible. BeginFilesRo
 	// opens readers against that snapshot in zero-copy way.
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *DirtyFiles
 
 	logger log.Logger
 
@@ -102,7 +101,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		InvIdxCfg:  cfg,
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: newDirtyFiles(),
 		logger:     logger,
 
 		stepSize:          stepSize,

@@ -27,17 +27,16 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -52,6 +51,44 @@ import (
 // list of filesItem must be represented as Tree - because they may overlap
 
 // visibleFile - class is used for good/visible files
+
+type DirtyFiles struct {
+	btree2.BTreeG[*FilesItem]
+}
+
+func newDirtyFiles() *DirtyFiles {
+	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
+}
+
+func (df *DirtyFiles) copy() *DirtyFiles {
+	return &DirtyFiles{*df.BTreeG.Copy()}
+}
+
+func (df *DirtyFiles) MadvNormal() {
+	if df == nil {
+		return
+	}
+	for _, f := range df.Items() {
+		f.MadvNormal()
+	}
+}
+func (df *DirtyFiles) DisableReadAhead() {
+	if df == nil {
+		return
+	}
+	for _, f := range df.Items() {
+		f.DisableReadAhead()
+	}
+}
+func (df *DirtyFiles) EnableReadAhead() {
+	if df == nil {
+		return
+	}
+	for _, f := range df.Items() {
+		f.EnableReadAhead()
+	}
+}
+
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
@@ -69,16 +106,6 @@ type FilesItem struct {
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
 }
-
-// type FilesItem interface {
-// 	Segment() *seg.Decompressor
-// 	AccessorIndex() *recsplit.Index
-// 	BtIndex() *BtIndex
-// 	ExistenceFilter() *existence.Filter
-// 	Range() (startTxNum, endTxNum uint64)
-// }
-
-//var _ FilesItem = (*filesItem)(nil)
 
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
@@ -301,7 +328,7 @@ func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, fi
 	return res
 }
 
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, filenameBase string, logger log.Logger) {
+func deleteMergeFile(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
@@ -587,7 +614,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	// trace = true
 	if trace {
@@ -687,6 +714,22 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
 
+func (files visibleFiles) MadvNormal() {
+	for _, f := range files {
+		f.src.MadvNormal()
+	}
+}
+func (files visibleFiles) EnableReadAhead() {
+	for _, f := range files {
+		f.src.EnableReadAhead()
+	}
+}
+func (files visibleFiles) DisableReadAhead() {
+	for _, f := range files {
+		f.src.DisableReadAhead()
+	}
+}
+
 // refcntIncrement pins every non-frozen file by incrementing its refcount.
 // Callers must pair this with a matching decrement in RoTx.Close.
 func (files visibleFiles) refcntIncrement() {
@@ -782,7 +825,7 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 
 // closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
 // is not in the provided fNames list.
-func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) {
+func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
 	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
