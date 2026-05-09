@@ -86,7 +86,19 @@ type Aggregator struct {
 	disableHistory         bool
 	collateAndBuildWorkers int  // minimize amount of background workers by default
 	mergeWorkers           int  // usually 1
-	lockWorkersEditing     bool // allow changing #workers for merge/collate/build
+	lockWorkersEditing     bool // allow changing #workers for merge/collate/build (read/write under workersMu)
+	// workersMu serializes all Set*Workers writes against each other and
+	// against the LockWorkersEditing/UnlockWorkersEditing toggle. It does
+	// NOT need to be held during long-running operations like buildFiles —
+	// the convention is: long ops set lockWorkersEditing=true (under mu)
+	// before doing concurrent reads of the per-domain CompressorCfg, then
+	// clear it after. Set*Workers acquires mu, checks the flag, and skips
+	// the writes if true. The combination of the mutex (provides
+	// happens-before) and the flag (suppresses writes during reads)
+	// eliminates the data race that the previous implementation tripped
+	// when ExecV3's PresetChainTipConcurrency raced with a background
+	// buildFiles goroutine reading InvertedIndex.CompressorCfg.
+	workersMu sync.Mutex
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -272,6 +284,14 @@ func (a *Aggregator) StepSize() uint64          { return a.stepSize.Load() }
 func (a *Aggregator) Dirs() datadir.Dirs        { return a.dirs }
 func (a *Aggregator) StepsInFrozenFile() uint64 { return a.stepsInFrozenFile.Load() }
 func (a *Aggregator) Logger() log.Logger        { return a.logger }
+
+// SetErigondbDomainStepsInFrozenFile applies a domain-only merge cap override at runtime.
+// Intended for one-shot tools (e.g. `erigon seg retire`) that construct the aggregator
+// via openAgg and need to override the cap after construction. Must be called before any
+// merge work begins.
+func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
+	a.erigondbDomainStepsInFrozenFile = steps
+}
 
 func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
 	a.d[domain].ReplaceKeysInValues = v
@@ -586,18 +606,24 @@ func (a *Aggregator) closeDirtyFiles() {
 
 func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
 	a.collateAndBuildWorkers = i
 }
 func (a *Aggregator) SetMergeWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
 	a.mergeWorkers = i
 }
 func (a *Aggregator) SetCompressWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
@@ -617,6 +643,8 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 }
 
 func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
@@ -683,8 +711,23 @@ func (a *Aggregator) PresetOfflineExecution() {
 	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
-func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
-func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
+// LockWorkersEditing makes subsequent Set*Workers calls a no-op until
+// UnlockWorkersEditing is called. Pair with `defer a.UnlockWorkersEditing()`
+// at the start of any operation that reads per-domain CompressorCfg
+// concurrently with the chain-tip-driven worker reconfiguration in
+// ExecV3 — the toggle prevents Set*Workers from mutating
+// CompressorCfg.Workers under the readers' feet.
+func (a *Aggregator) LockWorkersEditing() {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
+	a.lockWorkersEditing = true
+}
+
+func (a *Aggregator) UnlockWorkersEditing() {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
+	a.lockWorkersEditing = false
+}
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
@@ -834,6 +877,14 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 var errStepNotReady = errors.New("step not ready")
 
 func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
+	// Pin worker counts for the duration of buildFiles. The collate /
+	// build phases below read per-domain/per-II CompressorCfg.Workers
+	// directly (passed by-value into seg.NewCompressor); without this
+	// guard, ExecV3's chain-tip-driven Set*Workers calls would race
+	// with those reads.
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+
 	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
@@ -2183,6 +2234,45 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if !hasData {
 			close(fin)
 			return
+		}
+
+		// Gap detection: refuse to build when MDBX's earliest history entry lies
+		// strictly above `step` AND we already have snapshot files below `step`.
+		// In that case iterating [step, lastInDB) would collate empty ranges for
+		// the gap steps, producing header-only .kv files. A subsequent merge
+		// combines those with the existing earlier files and yields a composite
+		// whose advertised step range is larger than its actual data coverage —
+		// silent, permanent state corruption.
+		//
+		// The `step > 0` clause is what distinguishes this from a legitimate
+		// empty step on a fresh datadir (no earlier files exist, so there's
+		// nothing to merge with and no corruption path). The bug only lives on
+		// datadirs where the preverified snapshot set stops below MDBX's
+		// minimum step. `minStepInDB` returns 0 for both "no keys" and "first
+		// key at step 0"; either way a zero can't exceed a positive `step`, so
+		// we don't need to disambiguate.
+		if step > 0 {
+			var firstInDB kv.Step
+			if err := a.db.View(a.ctx, func(tx kv.Tx) error {
+				for _, d := range []*Domain{a.d[kv.AccountsDomain], a.d[kv.StorageDomain], a.d[kv.CodeDomain]} {
+					s := kv.Step(d.minStepInDB(tx))
+					if s > 0 && (firstInDB == 0 || s < firstInDB) {
+						firstInDB = s
+					}
+				}
+				return nil
+			}); err != nil {
+				a.logger.Warn("[snapshots] gap-detection", "err", err)
+			}
+			if firstInDB > step {
+				a.logger.Error("[snapshots] gap between snapshots and MDBX — refusing to build files",
+					"step", step, "firstInDB", firstInDB, "lastInDB", lastInDB,
+					"hint", "MDBX history starts above the next step to aggregate; building here would create empty step files and a merge would silently drop state. "+
+						"To recover, stop erigon and delete BOTH the state snapshots (e.g. `erigon snapshots reset`) AND the chaindata/ directory, then re-sync. "+
+						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
+				close(fin)
+				return
+			}
 		}
 
 		// Cap to maxCollationTxNum if set (prevents domain files extending past block files).

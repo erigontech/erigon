@@ -101,7 +101,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 		var ok bool
-		b, ok = exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+		b, ok = se.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 		if b == nil || !ok {
 			b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 			if err != nil {

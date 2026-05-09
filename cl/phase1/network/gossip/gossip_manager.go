@@ -393,6 +393,9 @@ func extractTopicName(topic string) string {
 
 func extractSubnetIndexByGossipTopic(name string) int {
 	// e.g blob_sidecar_3, we want to extract 3
+	if name == "" {
+		return -1
+	}
 	// reject if last character is not a number
 	if !unicode.IsNumber(rune(name[len(name)-1])) {
 		return -1

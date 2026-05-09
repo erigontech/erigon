@@ -141,11 +141,6 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-// SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
-}
-
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
@@ -793,7 +788,16 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	return sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
+	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
+	// underlying state cache / getter aliases shared storage that another goroutine
+	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
+	// boundary so all downstream consumers are safe.
+	return common.Copy(enc), step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
