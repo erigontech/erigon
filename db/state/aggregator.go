@@ -675,12 +675,6 @@ func (a *Aggregator) PresetOfflineExecution() {
 	a.workers.setMerge(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
-// LockWorkersEditing makes subsequent Preset* calls a no-op until
-// UnlockWorkersEditing is called. Pair with `defer a.UnlockWorkersEditing()`
-// at the start of any operation that reads per-domain CompressorCfg
-// concurrently with the chain-tip-driven worker reconfiguration in
-// ExecV3 — the toggle prevents Preset* from mutating
-// CompressorCfg.Workers under the readers' feet.
 func (a *Aggregator) LockWorkersEditing() {
 	a.workers.lockEditing()
 }
