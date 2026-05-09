@@ -58,69 +58,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// workersCfg serializes all Preset* writes against each other and against the
-// LockWorkersEditing/UnlockWorkersEditing toggle. Long ops set allowEditing=false
-// (under mu) before concurrent reads of per-domain CompressorCfg, then restore
-// it after. Preset* acquires mu, checks the flag, and skips the write if false,
-// eliminating the data race that the previous implementation tripped when ExecV3's
-// PresetChainTipConcurrency raced with a background buildFiles goroutine reading
-// InvertedIndex.CompressorCfg.
-type workersCfg struct {
-	mu              sync.Mutex
-	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
-	merge           int  // usually 1
-	collateAndBuild int
-}
-
-func (w *workersCfg) getMerge() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.merge
-}
-
-func (w *workersCfg) setMerge(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.allowEditing {
-		w.merge = n
-	}
-}
-
-func (w *workersCfg) getCollateAndBuild() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.collateAndBuild
-}
-
-func (w *workersCfg) setCollateAndBuild(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.allowEditing {
-		w.collateAndBuild = n
-	}
-}
-
-// trySet runs fn under mu only if allowEditing is true.
-func (w *workersCfg) trySet(fn func()) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.allowEditing {
-		fn()
-	}
-}
-
-func (w *workersCfg) lockEditing() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.allowEditing = false
-}
-
-func (w *workersCfg) unlockEditing() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.allowEditing = true
-}
-
 type Aggregator struct {
 	db                kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d                 [kv.DomainLen]*Domain
