@@ -9,16 +9,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # docs/site/ does not exist on main until PR #21013 merges.
-      # Guard so merge_group runs don't fail on unrelated PRs in the interim.
-      - name: Check docs/site is present
+      # Defensive guard — skip silently if docs/site/ is absent (e.g. branches
+      # that predate the Docusaurus migration) or if the Python scripts are not
+      # present yet (partial migration state).
+      - name: Check docs/site prerequisites are present
         id: guard
         run: |
-          if [ -f docs/site/package.json ]; then
+          if [ -f docs/site/package.json ] && [ -f docs/site/package-lock.json ] && [ -d docs/site/scripts ] && [ -f docs/site/scripts/generate-llms.py ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "docs/site/package.json not found — skipping build"
+            echo "docs/site prerequisites not found — skipping build"
           fi
 
       - uses: actions/setup-python@v5
@@ -50,3 +51,4 @@ jobs:
       - run: npm run build
         if: steps.guard.outputs.present == 'true'
         working-directory: docs/site
+
