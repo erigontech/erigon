@@ -16,10 +16,11 @@ import (
 
 // calcAccountState holds the accumulated account state for the commitment calculator.
 type calcAccountState struct {
-	Balance  uint256.Int
-	Nonce    uint64
-	CodeHash [32]byte
-	Deleted  bool
+	Balance     uint256.Int
+	Nonce       uint64
+	CodeHash    [32]byte
+	Incarnation uint64
+	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
 }
@@ -203,9 +204,31 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				acc := cs.ensureAccount(w.Address)
 				acc.Deleted = true
 				acc.dirty = true
-				// Clear accumulated storage for this account
-				delete(cs.storageState, w.Address)
-				delete(cs.storageDirty, w.Address)
+				// Mark every tracked storage slot dirty so
+				// FlushToUpdates emits a per-slot update. Serial's
+				// MakeWriteSet for an SD account emits storage writes
+				// (with their pre-SD values) alongside the account-
+				// reset, and the trie processes them in fold order.
+				//
+				// LOAD-BEARING INVARIANT: the marked slots emit as
+				// DeleteUpdate (not StorageUpdate with pre-SD values)
+				// because normalizeWriteSet at exec3_parallel.go's
+				// SelfDestructPath case adds StoragePath=0 entries for
+				// every key in vm.StorageKeys(addr). Those zeros
+				// arrive in this ApplyWrites loop AFTER the
+				// SelfDestructPath case, overwrite cs.storageState's
+				// pre-SD values, and FlushToUpdates emits DeleteUpdate
+				// per slot. Without that loop in normalizeWriteSet
+				// this code would silently leak pre-SD slot values
+				// into the trie.
+				if slots, ok := cs.storageState[w.Address]; ok {
+					if cs.storageDirty[w.Address] == nil {
+						cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
+					}
+					for key := range slots {
+						cs.storageDirty[w.Address][key] = true
+					}
+				}
 			}
 		case state.StoragePath:
 			v := w.Val.(uint256.Int)
@@ -215,6 +238,18 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 				cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
 			}
 			cs.storageDirty[w.Address][w.Key] = true
+		case state.IncarnationPath:
+			// Carries the pre-deletion incarnation when emitted by
+			// LightCollector.DeleteAccount alongside SelfDestructPath=true.
+			// Used by FlushToUpdates to differentiate self-destruct of a
+			// pre-existing contract from EIP-161 emptyRemoval. Direct
+			// type-assertion (panic on mismatch) matches the other cases
+			// in this function — silently zero-ing Incarnation here would
+			// route a real SD into the EIP-161 DeleteUpdate branch and
+			// reproduce the very wrong-root bug this PR fixes.
+			acc := cs.ensureAccount(w.Address)
+			acc.Incarnation = w.Val.(uint64)
+			acc.dirty = true
 		}
 	}
 }
@@ -231,12 +266,40 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		address := addr.Value()
 		key := string(address[:])
 
-		if acc.Deleted {
+		// Three flavours of "Deleted" writeset, distinguished by whether
+		// the account fields actually became zero:
+		//   1. SD of a pre-existing contract: SD zeroes balance (sent to
+		//      beneficiary) and incarnation > 0 in writeset. Serial's
+		//      DomainDel emits the post-SD encoding (zero fields, leaf
+		//      survives because incarnation is preserved in the
+		//      serialised account). Emit zero-account UPDATE.
+		//   2. EIP-161 emptyRemoval of a touched-empty EOA-shaped account:
+		//      all fields zero, incarnation also zero. Serial's DomainDel
+		//      emits truly empty bytes. Emit DeleteUpdate.
+		//   3. Deleted-but-not-empty (defense-in-depth): if the writeset
+		//      has SelfDestructPath=true but balance/nonce/code retain
+		//      non-zero values (e.g. OOG-during-CREATE2 with retained
+		//      value transfer per EIP-1014, or any write-ordering race
+		//      where BalancePath arrives before SelfDestructPath), serial
+		//      does NOT remove the leaf — it stays as the actual
+		//      balance-only or fully-populated account. Emit a regular
+		//      UPDATE with the actual values rather than zeroing them.
+		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
+		switch {
+		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
+			updates.TouchPlainKeyDirect(key, &commitment.Update{
+				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+				Balance:  uint256.Int{},
+				Nonce:    0,
+				CodeHash: empty.CodeHash,
+			})
+		case acc.Deleted && isAllZero:
 			updates.TouchPlainKeyDirect(key, &commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,
 			})
-		} else {
+		default:
+			// Either not Deleted, or Deleted-with-retained-values.
 			updates.TouchPlainKeyDirect(key, &commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  acc.Balance,
