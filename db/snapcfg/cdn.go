@@ -6,6 +6,14 @@ import (
 	"net/http"
 )
 
+// SnapshotSource selects which CDN to fetch preverified snapshot TOMLs from.
+type SnapshotSource int
+
+const (
+	Github SnapshotSource = 0
+	R2     SnapshotSource = 1
+)
+
 // cloudflareHeaders are required for R2 CDN access.
 // TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (cloudflareHeaders).
 // Remove the copy in erigon-snapshot once this is the canonical location.
