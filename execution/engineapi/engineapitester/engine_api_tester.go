@@ -269,16 +269,12 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
-		// Cap MDBX MapSize for chaindata/consensus DBs. The default is 2 TB
-		// per env, and each running tester reserves that virtual range from
-		// the process's ~128 TB user-space pool. Many testers in one process
-		// (the engine-x runner) would otherwise hit the address-space ceiling
-		// long before we run out of physical RAM. 1 GB is plenty for a
-		// short-lived per-test chaindata DB.
 		MdbxDBSizeLimit: 1 * datasize.GB,
+		DisableSentry:   args.DisableSentry,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
+	txPoolConfig.Disable = args.DisableTxPool
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
@@ -408,6 +404,8 @@ type EngineApiTesterInitArgs struct {
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
+	DisableTxPool          bool
+	DisableSentry          bool
 }
 
 type EngineApiTester struct {
