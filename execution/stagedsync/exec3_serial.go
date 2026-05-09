@@ -475,9 +475,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				blockReceipts = append(blockReceipts, receipt)
-				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
-					hooks.OnTxEnd(receipt, result.Err)
-				}
 
 				if receipt != nil && !se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) {
 					root, rootErr := se.worker.CommitAndComputeRoot(ctx, txTask.Rules(), txTask.BlockNumber(), txTask.TxNum)
@@ -486,6 +483,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 					receipt.PostState = root
 					result.PostState = root
+				}
+
+				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
+					hooks.OnTxEnd(receipt, result.Err)
 				}
 			} else {
 				se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())

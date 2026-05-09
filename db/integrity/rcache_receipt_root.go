@@ -214,7 +214,8 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 		if err != nil {
 			return false
 		}
-		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{TxNum: minTxNum, DontCalcBloom: true})
+		// minTxNum is the system-begin tx; receipts start at minTxNum+1.
+		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{TxNum: minTxNum + 1, DontCalcBloom: true})
 		if err != nil || !ok || receipt == nil {
 			continue
 		}

@@ -517,7 +517,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	return result
 }
 
-// commitAndComputeRoot commits the IBS and computes the state root at txNum.
+// CommitAndComputeRoot commits the IBS and computes the state root at txNum.
 func (rw *Worker) CommitAndComputeRoot(ctx context.Context, rules *chain.Rules, blockNum, txNum uint64) ([]byte, error) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
