@@ -29,7 +29,7 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=mainnet
-      - --http.addr="0.0.0.0"
+      - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
@@ -63,10 +63,10 @@ docker compose up
 
 * `--chain=mainnet` specifies to run on Ethereum mainnet, see also other [Supported Networks](../../fundamentals/supported-networks)
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet)
+* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
-When you get familiar with running Erigon from CLI you may also consider [staking](../../../staking/caplin) and/or run a Ethereum node with an [external Consensus Layer](ethereum-with-an-external-cl.md).
+When you get familiar with running Erigon from CLI you may also consider [staking](../../../staking/caplin) and/or run an Ethereum node with an [external Consensus Layer](ethereum-with-an-external-cl.md).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.

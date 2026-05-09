@@ -363,7 +363,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `32mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
+* `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs.
   * Default: `1`
