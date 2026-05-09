@@ -883,7 +883,7 @@ services:
     command:
       # --- Basic Configuration ---
       - --chain=mainnet
-      - --http.addr="0.0.0.0"
+      - --http.addr=0.0.0.0
       - --http.api=eth,web3,net,debug,trace,txpool
       # --- Performance Tweaks ---
       - --torrent.download.rate=512mb
@@ -915,12 +915,12 @@ docker compose up
 
 ## Flag explanation
 
-* `--chain=gnosis` specifies to run on Gnosis Chain, use `--chain=chiado` for Chiado testnet
+* `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
+* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
-When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or run a Gnosis node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
+When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
 :::tip
 Press `Ctrl+C` in your terminal to stop Erigon.
@@ -1063,7 +1063,7 @@ Additional flags can be added to [configure](/fundamentals/configuring-erigon/) 
 URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl
 
 
-Alternatively, you can also run a Ethereum node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
+Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
 
 ### 1. Start Erigon:
 
@@ -1127,7 +1127,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
      --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
 
-Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.
+Check the Erigon and Lighthouse logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
 
 ---
 
@@ -1216,7 +1216,7 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
  --http \
  --ws \
  --http.api=eth,debug,net,trace,web3,erigon \
- --log.dir.path=/desired/path/to/logs
+ --log.dir.path=/desired/path/to/logs \
  --torrent.download.rate=512mb
 ```
 
@@ -1229,9 +1229,9 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
     ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
-* Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
-* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
+* Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
+* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
@@ -1300,7 +1300,7 @@ This will execute the clean target in the Makefile, which cleans the `go cache`,
 URL: https://docs.erigon.tech/fundamentals/sync-modes
 
 
-Erigon 3 supports three prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -2815,13 +2815,13 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
-* `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
-  * Default: `false`
-* `--snap.stop`: Stops generating new snapshots.
-  * Default: `false`
-* `--snap.state.stop`: Stops generating new state files.
-  * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
+  * Default: `false`
+* `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
+  * Default: `false`
+* `--snap.stop`: Workaround for snapshot-related bugs — stops producing new snapshot files (DB will grow as a result).
+  * Default: `false`
+* `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
 
 ### Transaction Pool (TxPool)
@@ -3111,8 +3111,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
-  * Default: `512mb`
+* `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
@@ -3823,7 +3822,7 @@ The Downloader is a service responsible for seeding and downloading historical d
 **Info**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
 :::
 
-For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
+For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/readme.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
 
 1. **Snapshots overview**: An introduction to snapshots, their benefits, and how they are created and used in Erigon.
 2. **Starting Erigon with snapshots support**: Instructions on how to start Erigon with snapshots support, either by default or as a separate process.
@@ -6805,7 +6804,7 @@ lighthouse account validator import --directory <path_to_validator_keys>
 URL: https://docs.erigon.tech/staking/external-consensus-client-as-validator
 
 
-To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighhouse and Prysm to run along with Erigon:
+To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighthouse and Prysm to run along with Erigon:
 
 * [Ethereum](../get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl)
 * [Gnosis Chain](../get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl)
@@ -6835,7 +6834,7 @@ erigon \
   --externalcl \
   --datadir=/data/erigon \
   --chain=sepolia \
-  --authrpc.jwtsecret=/jwt
+  --authrpc.jwtsecret=/jwt \
   --authrpc.addr=0.0.0.0 \
   --http \
   --http.addr=0.0.0.0 \
@@ -6955,7 +6954,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
    git clone https://github.com/<your-username>/erigon.git
    cd erigon
    ```
-2. Build the project (requires Go 1.24+ and a C++ compiler):
+2. Build the project (requires Go 1.25+ and a C++ compiler):
    ```bash
    make erigon
    ```
