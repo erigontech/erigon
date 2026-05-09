@@ -15,8 +15,6 @@ const (
 )
 
 // cloudflareHeaders are required for R2 CDN access.
-// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (cloudflareHeaders).
-// Remove the copy in erigon-snapshot once this is the canonical location.
 var cloudflareHeaders = http.Header{
 	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
 }

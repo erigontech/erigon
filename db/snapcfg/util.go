@@ -529,8 +529,6 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
-// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
-// Remove the copies in erigon-snapshot once this is the canonical location.
 func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
 	if source == R2 {
