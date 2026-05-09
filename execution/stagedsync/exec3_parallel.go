@@ -3133,6 +3133,13 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// and empty CodeHash, it should be deleted — not written as a regular
 	// account with zero values. Serial's updateAccount checks Empty() and
 	// calls DeleteAccount. We must match that behavior.
+	//
+	// The Nonce==0 check correctly excludes successful CREATE/CREATE2
+	// (which sets Nonce to 1 per EIP-161) — including the
+	// "constructor returned empty bytecode but wrote storage" case the
+	// calc-side 3-way Deleted branch protects via incarnation tracking.
+	// OOG-during-CREATE2 leaves Nonce==0 in the writeset, so it
+	// correctly falls through to deletion here.
 	type acctState struct {
 		balance  uint256.Int
 		nonce    uint64
@@ -3171,7 +3178,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// Check for empty accounts and replace with Delete
+	// Check for empty accounts and replace with Delete.
 	emptyAddrs := make(map[accounts.Address]bool)
 	for addr, s := range acctStates {
 		if s.hasBal && s.hasNonce && s.hasCode &&
