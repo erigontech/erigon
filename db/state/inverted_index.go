@@ -672,7 +672,6 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		indexTable:  iit.ii.ValuesTable,
 		orderAscend: asc,
 		limit:       limit,
-		seq:         &multiencseq.SequenceReader{},
 		accessors:   iit.ii.Accessors,
 		ii:          iit,
 	}
