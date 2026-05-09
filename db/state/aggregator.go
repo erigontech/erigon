@@ -58,6 +58,69 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+// aggWorkers serializes all Preset* writes against each other and against the
+// LockWorkersEditing/UnlockWorkersEditing toggle. Long ops set allowEditing=false
+// (under mu) before concurrent reads of per-domain CompressorCfg, then restore
+// it after. Preset* acquires mu, checks the flag, and skips the write if false,
+// eliminating the data race that the previous implementation tripped when ExecV3's
+// PresetChainTipConcurrency raced with a background buildFiles goroutine reading
+// InvertedIndex.CompressorCfg.
+type aggWorkers struct {
+	mu              sync.Mutex
+	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
+	merge           int  // usually 1
+	collateAndBuild int
+}
+
+func (w *aggWorkers) getMerge() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.merge
+}
+
+func (w *aggWorkers) setMerge(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.merge = n
+	}
+}
+
+func (w *aggWorkers) getCollateAndBuild() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.collateAndBuild
+}
+
+func (w *aggWorkers) setCollateAndBuild(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.collateAndBuild = n
+	}
+}
+
+// trySet runs fn under mu only if allowEditing is true.
+func (w *aggWorkers) trySet(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		fn()
+	}
+}
+
+func (w *aggWorkers) lockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = false
+}
+
+func (w *aggWorkers) unlockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = true
+}
+
 type Aggregator struct {
 	db                kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d                 [kv.DomainLen]*Domain
@@ -83,22 +146,8 @@ type Aggregator struct {
 	visible           atomic.Pointer[aggregatorVisible]
 	snapshotBuildSema *semaphore.Weighted
 
-	disableHistory         bool
-	collateAndBuildWorkers int  // minimize amount of background workers by default
-	mergeWorkers           int  // usually 1
-	lockWorkersEditing     bool // allow changing #workers for merge/collate/build (read/write under workersMu)
-	// workersMu serializes all Set*Workers writes against each other and
-	// against the LockWorkersEditing/UnlockWorkersEditing toggle. It does
-	// NOT need to be held during long-running operations like buildFiles —
-	// the convention is: long ops set lockWorkersEditing=true (under mu)
-	// before doing concurrent reads of the per-domain CompressorCfg, then
-	// clear it after. Set*Workers acquires mu, checks the flag, and skips
-	// the writes if true. The combination of the mutex (provides
-	// happens-before) and the flag (suppresses writes during reads)
-	// eliminates the data race that the previous implementation tripped
-	// when ExecV3's PresetChainTipConcurrency raced with a background
-	// buildFiles goroutine reading InvertedIndex.CompressorCfg.
-	workersMu sync.Mutex
+	disableHistory bool
+	workers        aggWorkers
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -159,18 +208,17 @@ type FrozenBlocksProvider interface {
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &Aggregator{
-		ctx:                    ctx,
-		ctxCancel:              ctxCancel,
-		onFilesChange:          func(frozenFileNames []string) {},
-		onFilesDelete:          func(frozenFileNames []string) {},
-		dirs:                   dirs,
-		reorgBlockDepth:        reorgBlockDepth,
-		db:                     db,
-		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:                     background.NewProgressSet(),
-		logger:                 logger,
-		collateAndBuildWorkers: 1,
-		mergeWorkers:           1,
+		ctx:             ctx,
+		ctxCancel:       ctxCancel,
+		onFilesChange:   func(frozenFileNames []string) {},
+		onFilesDelete:   func(frozenFileNames []string) {},
+		dirs:            dirs,
+		reorgBlockDepth: reorgBlockDepth,
+		db:              db,
+		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		ps:              background.NewProgressSet(),
+		logger:          logger,
+		workers:         aggWorkers{allowEditing: true, merge: 1, collateAndBuild: 1},
 
 		produce: true,
 	}
@@ -605,128 +653,103 @@ func (a *Aggregator) closeDirtyFiles() {
 }
 
 func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
-func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	if a.lockWorkersEditing {
-		return
-	}
-	a.collateAndBuildWorkers = i
-}
-func (a *Aggregator) SetMergeWorkers(i int) {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	if a.lockWorkersEditing {
-		return
-	}
-	a.mergeWorkers = i
-}
-func (a *Aggregator) SetCompressWorkers(i int) {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	if a.lockWorkersEditing {
-		return
-	}
-	for _, d := range a.d {
-		if d == nil {
-			continue
+
+func (a *Aggregator) setBuildAccessorsWorkers(i int) {
+	a.workers.trySet(func() {
+		for _, d := range a.d {
+			if d == nil {
+				continue
+			}
+			d.BuildAccessorsWorkers = i
+			if d.History != nil {
+				d.History.BuildAccessorsWorkers = i
+				d.History.InvertedIndex.BuildAccessorsWorkers = i
+			}
 		}
-		d.CompressCfg.Workers = i
-		if d.History != nil {
-			d.History.CompressorCfg.Workers = i
-			d.History.InvertedIndex.CompressorCfg.Workers = i
+		for _, ii := range a.standaloneIIs() {
+			ii.BuildAccessorsWorkers = i
 		}
-	}
-	for _, ii := range a.standaloneIIs() {
-		ii.CompressorCfg.Workers = i
-	}
+	})
 }
 
-func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	if a.lockWorkersEditing {
-		return
-	}
-	for _, d := range a.d {
-		if d == nil {
-			continue
+func (a *Aggregator) setCompressWorkers(i int) {
+	a.workers.trySet(func() {
+		for _, d := range a.d {
+			if d == nil {
+				continue
+			}
+			d.CompressCfg.Workers = i
+			if d.History != nil {
+				d.History.CompressorCfg.Workers = i
+				d.History.InvertedIndex.CompressorCfg.Workers = i
+			}
 		}
-		d.BuildAccessorsWorkers = i
-		if d.History != nil {
-			d.History.BuildAccessorsWorkers = i
-			d.History.InvertedIndex.BuildAccessorsWorkers = i
+		for _, ii := range a.standaloneIIs() {
+			ii.CompressorCfg.Workers = i
 		}
-	}
-	for _, ii := range a.standaloneIIs() {
-		ii.BuildAccessorsWorkers = i
-	}
+	})
 }
 
 // PresetChainTipConcurrency configures workers for live chain-tip syncing:
 // minimal collate workers to avoid competing with block execution.
 func (a *Aggregator) PresetChainTipConcurrency() {
-	a.SetCollateAndBuildWorkers(1)
-	a.SetMergeWorkers(dbg.MergeWorkers)
-	a.SetCompressWorkers(max(1, dbg.CompressWorkers))
-	a.SetBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
+	a.workers.setCollateAndBuild(1)
+	a.workers.setMerge(dbg.MergeWorkers)
+	a.setCompressWorkers(max(1, dbg.CompressWorkers))
+	a.setBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
 }
 
 // PresetNonChainTipConcurrency configures workers for initial sync (not at chain tip):
 // allows more collate/merge parallelism via env-var overrides.
 func (a *Aggregator) PresetNonChainTipConcurrency() {
-	a.SetCollateAndBuildWorkers(dbg.CollateWorkers)
-	a.SetMergeWorkers(dbg.MergeWorkers)
-	a.SetCompressWorkers(max(1, dbg.CompressWorkers))
-	a.SetBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
+	a.workers.setCollateAndBuild(dbg.CollateWorkers)
+	a.workers.setMerge(dbg.MergeWorkers)
+	a.setCompressWorkers(max(1, dbg.CompressWorkers))
+	a.setBuildAccessorsWorkers(max(1, dbg.CompressWorkers))
 }
 
 // PresetOfflineMerge configures workers for offline merge operations:
 // uses RAM/CPU estimates to maximise merge and compression throughput.
 // COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineMerge() {
-	a.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
+	a.workers.setCollateAndBuild(estimate.StateV3Collate.Workers())
 	if dbg.CompressWorkers > 0 {
-		a.SetCompressWorkers(dbg.CompressWorkers)
-		a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+		a.setCompressWorkers(dbg.CompressWorkers)
+		a.setBuildAccessorsWorkers(dbg.CompressWorkers)
 	} else {
-		a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.Workers())
+		a.setCompressWorkers(estimate.CompressSnapshot.Workers())
+		a.setBuildAccessorsWorkers(estimate.IndexSnapshot.Workers())
 	}
-	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
+	a.workers.setMerge(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
 // uses RAM/CPU estimates to maximise collate/build and compression throughput.
 // COMPRESS_WORKERS env-var overrides the estimate when set.
 func (a *Aggregator) PresetOfflineExecution() {
-	a.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+	a.workers.setCollateAndBuild(min(2, estimate.StateV3Collate.Workers()))
 	if dbg.CompressWorkers > 0 {
-		a.SetCompressWorkers(dbg.CompressWorkers)
-		a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+		a.setCompressWorkers(dbg.CompressWorkers)
+		a.setBuildAccessorsWorkers(dbg.CompressWorkers)
 	} else {
-		a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
-		a.SetBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
+		a.setCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
+		a.setBuildAccessorsWorkers(estimate.IndexSnapshot.WorkersHalf())
 	}
-	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
+	a.workers.setMerge(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
-// LockWorkersEditing makes subsequent Set*Workers calls a no-op until
+// LockWorkersEditing makes subsequent Preset* calls a no-op until
 // UnlockWorkersEditing is called. Pair with `defer a.UnlockWorkersEditing()`
 // at the start of any operation that reads per-domain CompressorCfg
 // concurrently with the chain-tip-driven worker reconfiguration in
-// ExecV3 — the toggle prevents Set*Workers from mutating
+// ExecV3 — the toggle prevents Preset* from mutating
 // CompressorCfg.Workers under the readers' feet.
 func (a *Aggregator) LockWorkersEditing() {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	a.lockWorkersEditing = true
+	a.workers.lockEditing()
 }
 
 func (a *Aggregator) UnlockWorkersEditing() {
-	a.workersMu.Lock()
-	defer a.workersMu.Unlock()
-	a.lockWorkersEditing = false
+	a.workers.unlockEditing()
 }
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
@@ -877,11 +900,10 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 var errStepNotReady = errors.New("step not ready")
 
 func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
-	// Pin worker counts for the duration of buildFiles. The collate /
-	// build phases below read per-domain/per-II CompressorCfg.Workers
-	// directly (passed by-value into seg.NewCompressor); without this
-	// guard, ExecV3's chain-tip-driven Set*Workers calls would race
-	// with those reads.
+	// Pin worker counts for the duration of buildFiles. The collate/build phases
+	// below read per-domain/per-II CompressorCfg.Workers (passed by-value into
+	// seg.NewCompressor); without this guard, ExecV3's chain-tip-driven
+	// Preset* calls would race with those reads.
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
@@ -979,7 +1001,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	// Phase 2: build files from collations in parallel (no DB access needed).
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateAndBuildWorkers)
+	g.SetLimit(a.workers.getCollateAndBuild())
 
 	for _, dc := range domainColls {
 		dc := dc
@@ -1023,10 +1045,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.collateAndBuildWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "collate_in", buildAt.Sub(stepStartedAt), "build_in", time.Since(buildAt))
+	a.logger.Debug("[agg] collate-build", "step", step, "collate_workers", a.workers.getCollateAndBuild(), "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers, "collate_in", buildAt.Sub(stepStartedAt), "build_in", time.Since(buildAt))
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
-	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.collateAndBuildWorkers)
+	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.workers.getCollateAndBuild())
 
 	return nil
 }
@@ -1142,7 +1164,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, 
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.workers.getCollateAndBuild(), "merge_workers", a.workers.getMerge(), "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
@@ -1946,7 +1968,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
 	mf = &MergedFilesV3{}
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(at.a.mergeWorkers)
+	g.SetLimit(at.a.workers.getMerge())
 	closeFiles := true
 	defer func() {
 		if closeFiles {
