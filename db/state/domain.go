@@ -238,7 +238,15 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
-	pred := func(item *FilesItem) bool { return item.StartStep(d.stepSize) >= lowerBound }
+	pred := func(item *FilesItem) bool {
+		if item.StartStep(d.stepSize) < lowerBound {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
+		}
+		return true
+	}
 	d.dirtyFiles.CloseIf(pred)
 	d.History.dirtyFiles.CloseIf(pred)
 	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
@@ -1400,20 +1408,7 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
-	for i := range files {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && dt.d.FilenameBase == traceFileLife {
-				dt.d.logger.Warn("[agg.dbg] real remove at DomainRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
+	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
 	for _, r := range dt.mapReaders {
 		r.Close()
 	}

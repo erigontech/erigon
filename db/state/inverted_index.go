@@ -431,20 +431,7 @@ func (iit *InvertedIndexRoTx) Close() {
 	}
 	files := iit.files
 	iit.files = nil
-	for i := 0; i < len(files); i++ {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && iit.ii.FilenameBase == traceFileLife {
-				iit.ii.logger.Warn("[agg.dbg] real remove at InvertedIndexRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
+	files.refcntDecrement(iit.ii.FilenameBase, iit.ii.logger)
 
 	for _, r := range iit.readers {
 		r.Close()

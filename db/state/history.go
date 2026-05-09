@@ -1128,20 +1128,7 @@ func (ht *HistoryRoTx) Close() {
 	}
 	files := ht.files
 	ht.files = nil
-	for i := 0; i < len(files); i++ {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && ht.h.FilenameBase == traceFileLife {
-				ht.h.logger.Warn("[agg.dbg] real remove at HistoryRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
+	files.refcntDecrement(ht.h.FilenameBase, ht.h.logger)
 	for _, r := range ht.readers {
 		r.Close()
 	}

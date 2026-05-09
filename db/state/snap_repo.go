@@ -213,7 +213,15 @@ func (f *SnapshotRepo) Close() {
 
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 	rootNum := uint64(after)
-	f.dirtyFiles.CloseIf(func(item *FilesItem) bool { return item.startTxNum >= rootNum })
+	f.dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.startTxNum < rootNum {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("instructed_close_after_%d", rootNum))
+		}
+		return true
+	})
 }
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {

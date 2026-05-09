@@ -66,13 +66,13 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 
 func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 	for _, item := range items {
-		item.closeFiles()
 		df.Delete(item)
+		item.closeFiles()
 	}
 }
 
 func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
-	var toClose []*FilesItem
+	toClose := make([]*FilesItem, 0, df.Len())
 	df.Scan(func(item *FilesItem) bool {
 		if predicate(item) {
 			toClose = append(toClose, item)
@@ -81,29 +81,18 @@ func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
 	})
 	for _, item := range toClose {
 		df.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug("[snapshots] closing", "file", fName)
 		item.closeFiles()
 	}
 }
 
 func (df *DirtyFiles) MadvNormal() {
-	for _, f := range df.Items() {
-		f.MadvNormal()
-	}
+	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
 }
 func (df *DirtyFiles) DisableReadAhead() {
-	for _, f := range df.Items() {
-		f.DisableReadAhead()
-	}
+	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
 }
 func (df *DirtyFiles) EnableReadAhead() {
-	for _, f := range df.Items() {
-		f.EnableReadAhead()
-	}
+	df.Scan(func(f *FilesItem) bool { f.EnableReadAhead(); return true })
 }
 
 func (df *DirtyFiles) EndTxNumMax() uint64 {
@@ -113,8 +102,7 @@ func (df *DirtyFiles) EndTxNumMax() uint64 {
 	return 0
 }
 
-// updateMinimax returns min(current, max endTxNum in df).
-// If df is empty it returns current unchanged — callers use 0 as "not set yet".
+// updateMinimax: callers use 0 as "not set yet".
 func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
 	if max, ok := df.Max(); ok {
 		if current == 0 {
@@ -476,7 +464,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	}
 	iter.Release()
 
-	d.dirtyFiles.CloseItems(invalidFileItems)
+	d.dirtyFiles.CloseItems(invalidFileItems) // just close, not remove from disk
 
 	return nil
 }
@@ -761,8 +749,25 @@ func (files visibleFiles) DisableReadAhead() {
 // Callers must pair this with a matching decrement in RoTx.Close.
 func (files visibleFiles) refcntIncrement() {
 	for i := range files {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
+		if files[i].src.frozen {
+			continue
+		}
+		files[i].src.refcount.Add(1)
+	}
+}
+
+func (files visibleFiles) refcntDecrement(filenameBase string, logger log.Logger) {
+	traceActive := traceFileLife != "" && filenameBase == traceFileLife
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
+			continue
+		}
+		if src.refcount.Add(-1) == 0 && src.canDelete.Load() {
+			if traceActive {
+				logger.Warn("[agg.dbg] real remove at RoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 }
