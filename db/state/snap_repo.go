@@ -212,23 +212,8 @@ func (f *SnapshotRepo) Close() {
 }
 
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
-	var toClose []*FilesItem
 	rootNum := uint64(after)
-	f.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.startTxNum >= rootNum {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		f.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, instructed_close_after_%d", fName, rootNum))
-		item.closeFiles()
-	}
+	f.dirtyFiles.CloseIf(func(item *FilesItem) bool { return item.startTxNum >= rootNum })
 }
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
@@ -421,10 +406,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		f.dirtyFiles.Delete(item)
-	}
+	f.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }

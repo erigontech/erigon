@@ -238,56 +238,10 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
-	var toClose []*FilesItem
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		d.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
-	}
-
-	toClose = toClose[:0]
-	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		d.History.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
-	}
-
-	toClose = toClose[:0]
-	d.History.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
-	}
+	pred := func(item *FilesItem) bool { return item.StartStep(d.stepSize) >= lowerBound }
+	d.dirtyFiles.CloseIf(pred)
+	d.History.dirtyFiles.CloseIf(pred)
+	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {

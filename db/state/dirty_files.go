@@ -64,6 +64,32 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 	return &DirtyFiles{*df.BTreeG.Copy()}
 }
 
+func (df *DirtyFiles) CloseItems(items []*FilesItem) {
+	for _, item := range items {
+		item.closeFiles()
+		df.Delete(item)
+	}
+}
+
+func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
+	var toClose []*FilesItem
+	df.Scan(func(item *FilesItem) bool {
+		if predicate(item) {
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		df.Delete(item)
+		fName := ""
+		if item.decompressor != nil {
+			fName = item.decompressor.FileName()
+		}
+		log.Debug("[snapshots] closing", "file", fName)
+		item.closeFiles()
+	}
+}
+
 func (df *DirtyFiles) MadvNormal() {
 	for _, f := range df.Items() {
 		f.MadvNormal()
@@ -450,10 +476,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles() // just close, not remove from disk
-		d.dirtyFiles.Delete(item)
-	}
+	d.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }
@@ -526,10 +549,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		h.dirtyFiles.Delete(item)
-	}
+	h.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }
@@ -592,10 +612,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		ii.dirtyFiles.Delete(item)
-	}
+	ii.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }
@@ -840,20 +857,11 @@ func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*FilesItem
-	iter := dirtyFiles.Iter()
-	for ok := iter.First(); ok; ok = iter.Next() {
-		item := iter.Item()
-		if item.decompressor != nil {
-			if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-				continue
-			}
+	dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.decompressor == nil {
+			return true
 		}
-		toClose = append(toClose, item)
-	}
-	iter.Release()
-	for _, item := range toClose {
-		item.closeFiles()
-		dirtyFiles.Delete(item)
-	}
+		_, protected := protectFiles[item.decompressor.FileName()]
+		return !protected
+	})
 }
