@@ -280,6 +280,9 @@ func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []b
 }
 
 func (cell *cell) hashStorageKey(keccak keccak.KeccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) error {
+	if accountKeyLen > cell.storageAddrLen {
+		accountKeyLen = cell.storageAddrLen
+	}
 	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, hashBuf)
 }
 
