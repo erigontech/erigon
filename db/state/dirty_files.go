@@ -80,6 +80,13 @@ func (df *DirtyFiles) EnableReadAhead() {
 	}
 }
 
+func (df *DirtyFiles) EndTxNumMax() uint64 {
+	if max, ok := df.Max(); ok {
+		return max.endTxNum
+	}
+	return 0
+}
+
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
