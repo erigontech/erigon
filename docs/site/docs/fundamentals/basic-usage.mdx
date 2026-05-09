@@ -128,7 +128,7 @@ curl -s -X POST -H "Content-Type: application/json" \
   http://localhost:8545
 ```
 
-* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{StageName, BlockNumber}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
+* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
 * Once fully synced, the result is simply `false`.
 
 :::tip

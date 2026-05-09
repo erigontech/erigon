@@ -114,7 +114,7 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
 | `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present when the call frame errored, e.g. `"Reverted"`, `"Out of gas"`, `"Bad instruction"`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
@@ -143,7 +143,7 @@ The `action` object's shape depends on `type`:
 | Field | Type | Description |
 | --- | --- | --- |
 | `from` | DATA, 20 BYTES | Address that initiated the creation. |
-| `creationMethod` | String | How the contract was created: `"create"`, `"create2"`, or `"eofcreate"`. |
+| `creationMethod` | String | How the contract was created: `"create"` or `"create2"`. |
 | `value` | QUANTITY | Wei value sent to the new contract. |
 | `gas` | QUANTITY | Gas provided to the creation. |
 | `init` | DATA | Init bytecode (constructor + runtime). |
