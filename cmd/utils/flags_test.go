@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
@@ -69,6 +70,22 @@ func Test_SplitTagsFlag(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	trueFlag := cli.BoolFlag{Name: "feature.enabled", Usage: "test", Value: true}
+	falseFlag := cli.BoolFlag{Name: "feature.disabled", Usage: "test", Value: false}
+
+	CobraFlags(cmd, []cli.Flag{&trueFlag, &falseFlag})
+
+	gotTrue, err := cmd.PersistentFlags().GetBool(trueFlag.Name)
+	require.NoError(t, err)
+	require.True(t, gotTrue)
+
+	gotFalse, err := cmd.PersistentFlags().GetBool(falseFlag.Name)
+	require.NoError(t, err)
+	require.False(t, gotFalse)
 }
 
 func TestResolveChainName(t *testing.T) {
