@@ -65,25 +65,16 @@ func (df *DirtyFiles) copy() *DirtyFiles {
 }
 
 func (df *DirtyFiles) MadvNormal() {
-	if df == nil {
-		return
-	}
 	for _, f := range df.Items() {
 		f.MadvNormal()
 	}
 }
 func (df *DirtyFiles) DisableReadAhead() {
-	if df == nil {
-		return
-	}
 	for _, f := range df.Items() {
 		f.DisableReadAhead()
 	}
 }
 func (df *DirtyFiles) EnableReadAhead() {
-	if df == nil {
-		return
-	}
 	for _, f := range df.Items() {
 		f.EnableReadAhead()
 	}

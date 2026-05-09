@@ -361,7 +361,6 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
-		//filesGetter: ,
 		filesGetter: func() *DirtyFiles {
 			return commitmentR.dirtyFiles
 		},
