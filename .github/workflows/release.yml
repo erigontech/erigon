@@ -61,7 +61,7 @@ jobs:
     #runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     timeout-minutes: 60
-    name: Create git tag, build and publish Release Artifacts
+    name: Build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
       short-commit-id: ${{ steps.getCommitId.outputs.short_commit_id }}
@@ -109,7 +109,7 @@ jobs:
           path: 'erigon'
           token: ${{ steps.generate_token_build.outputs.token }}
 
-      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -119,10 +119,7 @@ jobs:
             echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
             exit 1
           else
-            echo "OK: tag ${RELEASE_VERSION} does not exists. Proceeding."
-            git tag ${RELEASE_VERSION}
-            git push origin ${RELEASE_VERSION}
-            echo; echo "Git TAG ${RELEASE_VERSION} created and pushed."
+            echo "OK: tag ${RELEASE_VERSION} does not exist. Proceeding."
           fi
 
       - name: Create sub-directories, get commit id, etc
@@ -692,6 +689,30 @@ jobs:
         fi
         echo "=== All artifacts verified OK ==="
 
+    - name: Checkout git repository ${{ env.APP_REPO }} at release commit
+      if: ${{ inputs.perform_release }}
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ env.APP_REPO }}
+        fetch-depth: 0
+        ref: ${{ needs.build-release.outputs.commit-id }}
+        path: 'erigon'
+        token: ${{ steps.generate_token.outputs.token }}
+
+    - name: Create and push git tag ${{ inputs.release_version }}
+      if: ${{ inputs.perform_release && inputs.release_version != '' }}
+      env:
+        RELEASE_VERSION: ${{ inputs.release_version }}
+      run: |
+        cd erigon
+        if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
+          echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
+          exit 1
+        fi
+        git tag "${RELEASE_VERSION}" "${{ needs.build-release.outputs.commit-id }}"
+        git push origin "${RELEASE_VERSION}"
+        echo "Git TAG ${RELEASE_VERSION} created and pushed."
+
     - name: Publish draft of the Release notes with assets in case perform_release is set
       if: ${{ inputs.perform_release }}
       env:
@@ -710,6 +731,7 @@ jobs:
         set +e
         gh release create \
           --target ${GITHUB_RELEASE_TARGET} \
+          --verify-tag \
           --draft=true \
           --title "${RELEASE_VERSION}" \
           --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${DOCKER_TAGS}<br><br>... coming soon<br>" \
@@ -745,8 +767,9 @@ jobs:
     name: "Rollback: remove remote git tag if release did not publish successfully"
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
     # Run whenever the release didn't fully publish — covers failure, cancellation,
-    # and skipped-due-to-upstream cases uniformly. Also runs when build-release was
-    # cancelled mid-flight (the tag may already have been pushed by then).
+    # and skipped-due-to-upstream cases uniformly. The tag is created only after
+    # release artifacts are verified, but publish-release can still be cancelled
+    # or fail after pushing it.
     if: >-
       always() &&
       inputs.perform_release &&
