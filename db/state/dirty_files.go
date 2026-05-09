@@ -87,6 +87,18 @@ func (df *DirtyFiles) EndTxNumMax() uint64 {
 	return 0
 }
 
+// updateMinimax returns min(current, max endTxNum in df).
+// If df is empty it returns current unchanged — callers use 0 as "not set yet".
+func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+	if max, ok := df.Max(); ok {
+		if current == 0 {
+			return max.endTxNum
+		}
+		return min(current, max.endTxNum)
+	}
+	return current
+}
+
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
