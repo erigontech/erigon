@@ -73,7 +73,7 @@ func (df *DirtyFiles) CloseItems(items []*FilesItem) {
 
 func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
 	toClose := make([]*FilesItem, 0, df.Len())
-	df.Scan(func(item *FilesItem) bool {
+	df.Scan(func(item *FilesItem) bool { // can't call .Delete() inside .Scan()
 		if predicate(item) {
 			toClose = append(toClose, item)
 		}

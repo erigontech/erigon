@@ -1942,8 +1942,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	return r
 }
 
-func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
-	mf = &MergedFilesV3{}
+func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, r *Ranges) (mf *MergeResult, err error) {
+	mf = &MergeResult{}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.mergeWorkers)
 	closeFiles := true
@@ -2031,7 +2031,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	return mf, err
 }
 
-func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
+func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
@@ -2052,7 +2052,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 	}
 }
 
-func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
+func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	var deleted []string
 
 	at := a.BeginFilesRo()
