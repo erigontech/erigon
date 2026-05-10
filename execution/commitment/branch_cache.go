@@ -192,6 +192,14 @@ type BranchCache struct {
 	// stale bytes.
 	writeSeq atomic.Uint64
 
+	// onMiss is an optional hook fired when lookup misses all three
+	// tiers (root, pinned, LRU). Used by the adaptive trunk-pin
+	// controller to attribute miss pressure per-contract and decide
+	// promotions. Stored as atomic.Pointer so registration is
+	// lock-free and the hot read path skips the dereference cleanly
+	// when no callback is installed.
+	onMiss atomic.Pointer[MissCallback]
+
 	// preloadClaimed is set the first time TryClaimPreload is called.
 	// Used by the trunk-preload trigger (PIN_CONTRACT_TRUNKS hook in
 	// SharedDomains construction) so the preload goroutine fires
@@ -292,6 +300,7 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 		entry := c.root.Load()
 		if entry == nil {
 			c.rootMisses.Add(1)
+			c.fireOnMiss(prefix)
 			return nil, false
 		}
 		c.rootHits.Add(1)
@@ -307,10 +316,19 @@ func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	entry, ok := c.tail.Get(prefix)
 	if !ok {
 		c.tailMisses.Add(1)
+		c.fireOnMiss(prefix)
 		return nil, false
 	}
 	c.tailHits.Add(1)
 	return entry, true
+}
+
+// fireOnMiss invokes the registered miss callback (if any). Hot path —
+// the no-callback case is a single atomic load and a nil check.
+func (c *BranchCache) fireOnMiss(prefix []byte) {
+	if cb := c.onMiss.Load(); cb != nil {
+		(*cb)(prefix)
+	}
 }
 
 func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
@@ -353,6 +371,40 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin s
 // PreloadContractTrunk run).
 func (c *BranchCache) PinnedCount() int {
 	return c.pinned.Len()
+}
+
+// MissCallback is invoked when lookup misses ALL three tiers (root,
+// pinned, LRU tail). Called on the hot read path; implementations
+// must be lock-free or short and not block.
+type MissCallback func(prefix []byte)
+
+// SetMissCallback installs a hook fired on every triple-miss. Pass
+// nil to clear. Used by the adaptive controller to attribute miss
+// pressure per contract; the cache itself does no per-contract
+// bookkeeping. Replaces any prior callback atomically.
+func (c *BranchCache) SetMissCallback(cb MissCallback) {
+	if cb == nil {
+		c.onMiss.Store(nil)
+		return
+	}
+	c.onMiss.Store(&cb)
+}
+
+// ContractHashFromPrefix extracts the 32-byte contract hash from a
+// commitment-trunk prefix. Returns (hash, true) if the prefix is a
+// storage-trunk prefix (depth >= 64, encoded as compact-hex with the
+// contract's 64-nibble keccak prefix), or (_, false) for shorter
+// prefixes (account-trie branches at depth < 64).
+//
+// Compact-hex encoding: 1-byte HP flag, then nibble-pairs packed
+// 2-per-byte. The contract's 64-nibble path occupies 32 bytes after
+// the flag byte, so a storage-trunk prefix is at least 33 bytes.
+func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
+	if len(prefix) < 33 {
+		return hash, false
+	}
+	copy(hash[:], prefix[1:33])
+	return hash, true
 }
 
 // Get retrieves branch data from the cache. Returns the canonical encoded
