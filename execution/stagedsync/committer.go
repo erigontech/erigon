@@ -189,7 +189,21 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// Values are lazy-loaded from domain on first touch, then
 		// overwritten by each TX's writes. At block boundary,
 		// the accumulated final values are flushed to the trie.
+		//
+		// Pin asOfReader at this tx's txNum BEFORE ApplyWrites so any
+		// first-touch lazy-load reads the canonical "pre-tx" state via
+		// GetAsOf(r.txNum). Without this the calculator's initial
+		// asOfReader.txNum=0 leaks into the first lazy-load and crashes
+		// with seekInFiles(txNum=0) on snapshot-loaded datadirs whose
+		// visible history window starts well past genesis (e.g. devnets
+		// loaded from a chunked snapshot). On synced-from-genesis
+		// datadirs txNum=0 is in-window so the bug is invisible.
+		//
+		// computeAndPublish overwrites this back to lastTxNum+1 right
+		// before ComputeCommitment, so the per-tx setting only affects
+		// the lazy-load path and never leaks into the trie fold path.
 		if len(r.writes) > 0 {
+			cc.asOfReader.txNum = r.txNum
 			cc.state.ApplyWrites(r.writes)
 		}
 
