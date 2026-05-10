@@ -270,16 +270,6 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 // chooseTopics checks if the log topics match the filter's topics.
 // It returns true if the log topics match the filter's topics, otherwise false.
 func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []common.Hash) bool {
-	var found bool
-	for _, logTopic := range logTopics {
-		if _, ok := filter.topics.Get(logTopic); ok {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return false
-	}
 	if len(filter.topicsOriginal) > len(logTopics) {
 		return false
 	}
