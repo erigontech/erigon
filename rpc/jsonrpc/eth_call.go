@@ -913,9 +913,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
-	// Add 'from', 'to', precompiles to the exclusion list
+	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
+	// 'to' is intentionally not excluded: its storage slots must appear in the
+	// access list so they are warmed (EIP-2929 warms the address, not its slots).
 	excl[*args.From] = struct{}{}
-	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc.Value()] = struct{}{}
 	}
