@@ -87,31 +87,55 @@ This:
    browser.
 4. Starts the local panda server on port 2480.
 
-**REQUIRED PROMPT during OAuth** — when `panda init` prints the
-device-flow URL + code, use `AskUserQuestion`:
+**REQUIRED OAUTH HANDOFF — two-step format**: the device-flow URL and
+code MUST be presented as plain markdown FIRST so they render as a
+clickable link / copyable code in the user's UI. Then ask a minimal
+question with NO embedded URL/code (AskUserQuestion can't reliably
+render long URLs or distinct copyable strings).
+
+Step 1 — output the URL + code as a markdown text message (regular
+output, not a tool call):
 
 ```
-header: "GitHub OAuth"
-question: "Open the URL printed above in any browser, sign in with
-the GitHub account allowlisted by EthPandaOps, and paste the code
-panda showed. Press Continue once panda confirms 'auth complete'."
+**URL:** <paste the dex URL from panda auth output>
+**Code:** `<paste the code from panda auth output>`
+
+Steps in browser:
+1. Click the URL above
+2. Sign in with the EthPandaOps-allowlisted GitHub identity
+3. Paste the code when prompted
+4. Approve the access
+
+The `panda auth login` process is sitting waiting — it will complete
+on its own when the browser side is done.
+```
+
+Step 2 — minimal `AskUserQuestion` for the next step:
+
+```
+header: "Status"
+question: "OAuth done?"
 options:
-  - Continue (auth completed in browser)
-  - Cancel (skip OAuth — Panda will not have proxy access)
+  - Done — verify now
+  - Need a fresh code
+  - Hit an error (tell me what the browser said)
 ```
 
-If the OAuth fails (user not allowlisted, network issue), `panda init`
-exits non-zero. Fall back to step 4 (self-hosted) or surface to the
-user with a coordination ask:
+Why two steps: AskUserQuestion option labels are short (≤5 words each)
+and the question text doesn't render long URLs as clickable in most
+clients. Putting the URL/code in a plain message first lets the user
+click + copy with their normal terminal/UI affordances.
+
+If OAuth fails (user not allowlisted, network issue, expired code),
+fall back via:
 
 ```
-header: "EthPandaOps allowlist needed"
-question: "Panda OAuth failed — your GitHub identity may not be on
-the EthPandaOps allowlist. Coordinate access by:"
+header: "Allowlist?"
+question: "OAuth failed — GitHub identity may not be allowlisted. What next?"
 options:
-  - I'll request allowlist access (re-run this skill once granted)
-  - Switch to self-hosted proxy (provide my own credentials)
-  - Stop — install CLI only, configure later
+  - Request allowlist (re-run skill when granted)
+  - Switch to self-hosted proxy
+  - Install CLI only
 ```
 
 ## Step 4 — Self-host the proxy (alternative path)
