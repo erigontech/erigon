@@ -665,12 +665,53 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+// FlushWithCallback updates a downstream cache via cb for each
+// (key, value, step) tuple in domain, then flushes the mem-batch to tx.
+// Cache-update is ordered BEFORE the MDBX flush so that during the
+// MDBX write window the cache still holds the entry — a reader that
+// goes (sd write buffer → cache → MDBX) never observes a key missing
+// from all three sources. The MDBX commit provides db-side atomicity
+// independently.
+//
+// Used by SharedDomains.Flush to keep an external BranchCache in sync
+// with commitment-domain writes.
+//
+// cb is called under latestStateLock so the snapshot it sees matches
+// the in-memory state at flush time. Flush itself runs under the same
+// lock to prevent concurrent DomainPut from interleaving with the
+// snapshot/cache-update/flush sequence.
+//
+// If Flush fails, the cache has already been updated for this batch.
+// That's the same invariant the cache maintains for any other write
+// path — values may exist in the cache before they reach disk; a
+// retry of Flush re-applies them.
+func (sd *TemporalMemBatch) FlushWithCallback(
+	ctx context.Context, tx kv.RwTx, domain kv.Domain,
+	cb func(k []byte, v []byte, step kv.Step),
+) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
+	// dir is unset on entries written via DomainPut/DomainDel (always
+	// default zero); the latest history entry per key is authoritative.
+	// data may be nil/empty for deletes — caller's cb is expected to
+	// distinguish (see SharedDomains.Flush, which Invalidate's on
+	// len(v)==0 and Put's otherwise).
+	for keyStr, history := range sd.domains[domain] {
+		if len(history) == 0 {
+			continue
+		}
+		latest := history[len(history)-1]
+		cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+	}
+
+	return sd.flushLocked(ctx, tx)
+}
+
+// flushLocked is the body of Flush, factored so FlushWithCallback can
+// run it inside latestStateLock without re-acquiring.
+func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
-		// Replay against the RAW (step-preserving) changeset — the collapsed
-		// unwindChangeset would lose every (key, step) entry except one per
-		// real key, which leaves orphan domain-values entries at steps above
-		// the unwind target (observed on mainnet for the commitment domain).
 		for domain := range sd.unwindChangesetRaw {
 			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
 				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
@@ -680,7 +721,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-
 	if err := sd.flushDiffSet(ctx, tx); err != nil {
 		return err
 	}
@@ -691,6 +731,12 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 		return fmt.Errorf("can't write plain state version: %w", err)
 	}
 	return nil
+}
+
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+	return sd.flushLocked(ctx, tx)
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
