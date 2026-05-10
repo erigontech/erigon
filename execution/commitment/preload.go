@@ -16,7 +16,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// CommitmentReader is the read interface PreloadContractTrunk needs:
+// CommitmentReader is the read interface ContractTrunkPreload needs:
 // GetLatest on the CommitmentDomain. Returns (value, step, found, err).
 // Decoupled from any specific tx/aggregator type so callers can plug
 // the reader in at preload time without dragging in db/state imports.
@@ -29,97 +29,107 @@ type CommitmentReader func(prefix []byte) (v []byte, step uint64, found bool, er
 // pinning the next entry would exceed the configured budget.
 const estimatedEntryOverheadBytes = 168
 
-// PreloadContractTrunk pins commitment branches for the given contract's
-// storage subtree into the supplied BranchCache, breadth-first from
-// depth 64 (storage subtree root) outward. The descent is bounded by
-// ramBudgetBytes — pinning stops the moment the next entry would push
-// estimated total RAM over the budget. The depth reached is therefore
-// emergent from (trie shape, contract sparsity, budget), not configured
-// directly.
-//
-// Why BFS: a depth-first descent under a hard branch-count cap can
-// exhaust budget on one subtree's deep children before completing the
-// shallower trunk for sibling branches, producing a pin set that is
-// "deep narrow slice" rather than "saturated trunk". Trunk reuse is
-// proportional to depth shallowness — each branch at depth N is shared
-// across all of its descendant slot reads. BFS guarantees layer N is
-// completely pinned before layer N+1 starts, so the budget is always
-// spent on the highest-value (most-shared) branches first.
-//
-// contractHash is keccak256(address) — 32 bytes. The trunk lives at
-// the commitment-domain prefix that corresponds to nibbles 0..63 of
-// the storage path; enumeration extends from there into nibbles 64+
-// until the budget is exhausted or the contract's storage trie has
-// no further branches.
-//
-// Returns the number of pinned branches and any error from the reader.
-// On error the partial pin set remains in place — those entries are
-// still valid cache hits.
-func PreloadContractTrunk(
-	contractHash []byte,
-	ramBudgetBytes int,
-	reader CommitmentReader,
-	cache *BranchCache,
-	logger log.Logger,
-) (int, error) {
-	if len(contractHash) != 32 {
-		return 0, fmt.Errorf("PreloadContractTrunk: contractHash must be 32 bytes, got %d", len(contractHash))
-	}
-	if cache == nil {
-		return 0, fmt.Errorf("PreloadContractTrunk: cache is nil")
-	}
-	if ramBudgetBytes <= 0 {
-		return 0, fmt.Errorf("PreloadContractTrunk: ramBudgetBytes must be positive, got %d", ramBudgetBytes)
-	}
+// pathDepth pairs a nibble path with the trie depth it terminates at.
+// Used as the BFS queue element.
+type pathDepth struct {
+	path  []byte
+	depth int
+}
 
-	// Convert contract hash bytes to 64 nibbles — the path prefix
-	// that anchors all of the contract's storage subtree branches.
+// ContractTrunkPreload holds the resumable state of a BFS preload for
+// one contract's storage subtree. Created by NewContractTrunkPreload
+// and advanced incrementally via Run; this lets callers split the
+// preload into an initial sync view (small budget for d=64-67) and
+// per-block extensions (additional budget while the contract stays
+// hot), instead of burst-loading the full budget at promotion time.
+//
+// Caller MUST NOT use the same instance from multiple goroutines.
+type ContractTrunkPreload struct {
+	contractHash    []byte
+	queue           []pathDepth
+	pinned          int
+	usedBytes       int
+	maxDepthReached int
+}
+
+// NewContractTrunkPreload constructs a preload state seeded at depth 64
+// (storage subtree root) for the given contract. The contract's
+// storage subtree path is keccak256(address) — 32 bytes / 64 nibbles.
+func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error) {
+	if len(contractHash) != 32 {
+		return nil, fmt.Errorf("NewContractTrunkPreload: contractHash must be 32 bytes, got %d", len(contractHash))
+	}
 	contractNibbles := make([]byte, 64)
 	for i, b := range contractHash {
 		contractNibbles[2*i] = b >> 4
 		contractNibbles[2*i+1] = b & 0x0f
 	}
+	return &ContractTrunkPreload{
+		contractHash:    contractHash,
+		queue:           []pathDepth{{path: contractNibbles, depth: 64}},
+		maxDepthReached: 64,
+	}, nil
+}
 
-	type pathDepth struct {
-		path  []byte
-		depth int
+// Run advances the BFS preload, pinning branches into cache until
+// either the additional budget is exhausted or the queue is empty.
+// Returns the number of entries pinned during THIS call (not the
+// cumulative total — see PinnedTotal), whether the queue is now
+// empty (preload fully complete), and any error from the reader.
+//
+// Calling Run repeatedly with small budgets implements the phased
+// load: an initial Run with the InitialBudget covers depths 64-67;
+// each subsequent Run extends BFS one chunk further. Per-block
+// callers should size the chunk to fit within inter-block idle time.
+//
+// On reader error the partial pin set survives; the queue position
+// is preserved so a retry on the next Run picks up where it left off.
+func (p *ContractTrunkPreload) Run(
+	additionalBudgetBytes int,
+	reader CommitmentReader,
+	cache *BranchCache,
+	logger log.Logger,
+) (newlyPinned int, queueEmpty bool, err error) {
+	if cache == nil {
+		return 0, false, fmt.Errorf("ContractTrunkPreload.Run: cache is nil")
+	}
+	if additionalBudgetBytes <= 0 {
+		return 0, len(p.queue) == 0, nil
 	}
 
-	queue := []pathDepth{{path: contractNibbles, depth: 64}}
-	pinned := 0
-	usedBytes := 0
-	maxDepthReached := 64
-	budgetExhausted := false
+	chunkUsedBytes := 0
+	chunkPinned := 0
 
-	for len(queue) > 0 {
-		head := queue[0]
-		queue = queue[1:]
+	for len(p.queue) > 0 {
+		head := p.queue[0]
+		p.queue = p.queue[1:]
 
 		prefix := nibbles.HexToCompact(head.path)
-		v, step, found, err := reader(prefix)
-		if err != nil {
-			return pinned, fmt.Errorf("preload at depth %d: %w", head.depth, err)
+		v, step, found, rerr := reader(prefix)
+		if rerr != nil {
+			return chunkPinned, false, fmt.Errorf("preload at depth %d: %w", head.depth, rerr)
 		}
 		if !found {
 			continue
 		}
 
 		entryCost := estimatedEntryOverheadBytes + len(prefix) + len(v)
-		if usedBytes+entryCost > ramBudgetBytes {
-			budgetExhausted = true
+		if chunkUsedBytes+entryCost > additionalBudgetBytes {
+			// Re-queue the head so a future Run picks it up.
+			p.queue = append([]pathDepth{head}, p.queue...)
 			break
 		}
 
 		cache.PinEntry(prefix, v, step, "preload-trunk")
-		usedBytes += entryCost
-		pinned++
-		if head.depth > maxDepthReached {
-			maxDepthReached = head.depth
+		chunkUsedBytes += entryCost
+		chunkPinned++
+		if head.depth > p.maxDepthReached {
+			p.maxDepthReached = head.depth
 		}
-		if logger != nil && pinned%5000 == 0 {
+		if logger != nil && (p.pinned+chunkPinned)%5000 == 0 {
 			logger.Info("[trunk-preload] progress",
-				"pinned", pinned, "depth", head.depth,
-				"used_mb", usedBytes/(1<<20))
+				"pinned", p.pinned+chunkPinned, "depth", head.depth,
+				"used_mb", (p.usedBytes+chunkUsedBytes)/(1<<20))
 		}
 
 		// Decode bitmap and queue children. Branch encoding:
@@ -136,20 +146,60 @@ func PreloadContractTrunk(
 			childPath := make([]byte, len(head.path)+1)
 			copy(childPath, head.path)
 			childPath[len(head.path)] = byte(n)
-			queue = append(queue, pathDepth{path: childPath, depth: head.depth + 1})
+			p.queue = append(p.queue, pathDepth{path: childPath, depth: head.depth + 1})
 		}
 	}
 
+	p.pinned += chunkPinned
+	p.usedBytes += chunkUsedBytes
+	return chunkPinned, len(p.queue) == 0, nil
+}
+
+// PinnedTotal returns the cumulative number of branches pinned by
+// this preload state across all Run calls.
+func (p *ContractTrunkPreload) PinnedTotal() int { return p.pinned }
+
+// UsedBytes returns the cumulative byte cost of this preload's pin set.
+func (p *ContractTrunkPreload) UsedBytes() int { return p.usedBytes }
+
+// QueueRemaining returns the number of paths still queued for descent.
+// Zero means the preload is complete; further Run calls are no-ops.
+func (p *ContractTrunkPreload) QueueRemaining() int { return len(p.queue) }
+
+// MaxDepthReached returns the deepest trie depth pinned so far.
+func (p *ContractTrunkPreload) MaxDepthReached() int { return p.maxDepthReached }
+
+// PreloadContractTrunk runs the full BFS preload for a contract in a
+// single call, bounded by ramBudgetBytes. Convenience wrapper around
+// NewContractTrunkPreload + Run for callers that don't need phased
+// loading. Existing one-shot trigger paths (PIN_CONTRACT_TRUNKS env
+// hook) use this; the adaptive layer holds a *ContractTrunkPreload
+// and calls Run incrementally.
+func PreloadContractTrunk(
+	contractHash []byte,
+	ramBudgetBytes int,
+	reader CommitmentReader,
+	cache *BranchCache,
+	logger log.Logger,
+) (int, error) {
+	if ramBudgetBytes <= 0 {
+		return 0, fmt.Errorf("PreloadContractTrunk: ramBudgetBytes must be positive, got %d", ramBudgetBytes)
+	}
+	p, err := NewContractTrunkPreload(contractHash)
+	if err != nil {
+		return 0, err
+	}
+	pinned, queueEmpty, err := p.Run(ramBudgetBytes, reader, cache, logger)
 	if logger != nil {
 		logger.Info("[trunk-preload] complete",
 			"contract_hash", fmt.Sprintf("%x", contractHash),
 			"ram_budget_mb", ramBudgetBytes/(1<<20),
-			"used_mb", usedBytes/(1<<20),
+			"used_mb", p.UsedBytes()/(1<<20),
 			"pinned", pinned,
-			"max_depth_reached", maxDepthReached,
-			"budget_exhausted", budgetExhausted,
-			"queue_remaining", len(queue),
+			"max_depth_reached", p.MaxDepthReached(),
+			"budget_exhausted", !queueEmpty,
+			"queue_remaining", p.QueueRemaining(),
 			"cache_pinned_total", cache.PinnedCount())
 	}
-	return pinned, nil
+	return pinned, err
 }
