@@ -90,6 +90,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
+	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -520,16 +521,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// Shared event bus. When storage is running its orchestrator (i.e.
-	// LifecycleDrivenByStorage), bind sentry + downloader to the same
-	// bus so PeerManifestReceived / DownloadComplete reach the
-	// orchestrator and InitialStateReady fires on real peer events.
+	// LifecycleDrivenByStorage), bind sentry + downloader + manifest_exchange
+	// to the same bus so the chain
+	//   sentry PeerEvent → manifest_exchange (fetches peer chain.toml.v2)
+	//     → flow.PeerManifestReceived → orchestrator → InitialStateReady
+	// closes on real peer events.
 	if bus := backend.components.Storage.Bus(); bus != nil {
 		if err := backend.sentryProvider.BindBus(bus); err != nil {
 			return nil, fmt.Errorf("sentry BindBus: %w", err)
 		}
+		if _, err := backend.sentryProvider.EnablePeerEventAutoWire(ctx); err != nil {
+			return nil, fmt.Errorf("sentry EnablePeerEventAutoWire: %w", err)
+		}
 		if backend.components.Downloader != nil {
 			if err := backend.components.Downloader.BindBus(ctx, bus); err != nil {
 				return nil, fmt.Errorf("downloader BindBus: %w", err)
+			}
+			mx := &manifestexchange.Provider{}
+			if err := mx.BindBus(ctx, bus, backend.components.Downloader, logger); err != nil {
+				return nil, fmt.Errorf("manifest_exchange BindBus: %w", err)
 			}
 		}
 	}
