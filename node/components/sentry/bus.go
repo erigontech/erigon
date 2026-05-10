@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/node/app/event"
@@ -217,11 +218,15 @@ func (p *Provider) EnablePeerEventAutoWire(ctx context.Context) (execp2p.Unregis
 		peerID := execp2p.PeerIdFromH512(msg.PeerId)
 		switch msg.EventId {
 		case sentryproto.PeerEvent_Connect:
-			node := p.peerNodeByID([64]byte(*peerID))
-			if node == nil {
-				return
-			}
-			p.PublishPeerConnected(node)
+			// PeerEvent_Connect arrives via the sentry gRPC stream;
+			// the GrpcServer's good-peers map updates independently
+			// (see peerNodeByID). The two paths can race: the event
+			// arrives before the peer is added to good-peers, and a
+			// synchronous lookup returns nil. Spawn a bounded retry
+			// goroutine so the observer doesn't block the stream and
+			// we don't silently drop the manifest-exchange path's
+			// only trigger.
+			go p.publishPeerConnectedWithRetry(ctx, [64]byte(*peerID))
 		case sentryproto.PeerEvent_Disconnect:
 			p.PublishPeerDisconnected(peerID.String())
 		}
@@ -229,6 +234,32 @@ func (p *Provider) EnablePeerEventAutoWire(ctx context.Context) (execp2p.Unregis
 
 	unreg := p.ExecutionP2PMessageListener.RegisterPeerEventObserver(observer, execp2p.WithReplayConnected(ctx))
 	return unreg, nil
+}
+
+// publishPeerConnectedWithRetry resolves the peer's enode.Node via
+// peerNodeByID, retrying briefly to absorb the race between
+// PeerEvent_Connect arrival and good-peers map update. Logs a Warn
+// on giving up so a missing manifest_exchange trigger is visible.
+func (p *Provider) publishPeerConnectedWithRetry(ctx context.Context, peerID [64]byte) {
+	const (
+		maxAttempts = 20 // 20 × 100ms = 2s total
+		retryDelay  = 100 * time.Millisecond
+	)
+	for i := 0; i < maxAttempts; i++ {
+		if node := p.peerNodeByID(peerID); node != nil {
+			p.PublishPeerConnected(node)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryDelay):
+		}
+	}
+	if p.logger != nil {
+		p.logger.Warn("[sentry] peer connect event without node lookup — manifest_exchange skipped",
+			"peerID", fmt.Sprintf("%x", peerID[:8]))
+	}
 }
 
 // peerNodeByID asks each local GrpcServer in turn for the *enode.Node of
