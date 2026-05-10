@@ -77,7 +77,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 
 ```bash
 # Reduce memory-mapped database growth to minimize disk churn
---db.growth.step=32MB
+--db.growth.step=32MB \
 --db.size.limit=512MB
 ```
 

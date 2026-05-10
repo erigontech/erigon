@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Gnosis Chain with an external CL
 
-Alternatively, you can also run a Ethereum node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
+Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
 
 ### 1. Start Erigon:
 
@@ -69,4 +69,4 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
      --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
 
-Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.
+Check the Erigon and Lighthouse logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
