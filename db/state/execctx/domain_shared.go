@@ -275,7 +275,30 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // FlushPendingUpdates applies the pending deferred commitment update.
 // It sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
+//
+// Concurrency contract: the inner swap (set cs_N → apply → restore prev)
+// mutates the global accumulator pointer and per-domain diff fields that
+// the apply goroutine's DomainPut/DomainDel writes through. Calls from
+// inside the calculator's outer LockChangesetAccumulator window must hold
+// that same Mutex; calls from end-of-stage Flush are single-threaded
+// against apply but still need the lock for race-detector happens-before
+// against any concurrent reads via DomainPut. Caller passes
+// `lockHeld=true` when it already holds changesetMu (calc path);
+// `false` when FlushPendingUpdates should acquire it itself
+// (Flush / standalone callers).
 func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(ctx, tx, false)
+}
+
+// FlushPendingUpdatesLocked is the variant for callers that already hold
+// changesetMu via LockChangesetAccumulator (the parallel calculator's
+// per-block compute window). The public FlushPendingUpdates above
+// acquires the lock itself.
+func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(ctx, tx, true)
+}
+
+func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
@@ -283,7 +306,16 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 	defer upd.Clear()
 
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+		// Use the unlocked variant — we either hold the lock externally
+		// (lockHeld=true) or inside this function (locked below). Using
+		// the public DomainPut would re-acquire and self-deadlock for
+		// commitment-domain writes if the lock is held externally.
+		return sd.domainPutNoLock(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+	}
+
+	if !lockHeld {
+		sd.changesetMu.Lock()
+		defer sd.changesetMu.Unlock()
 	}
 
 	switcher, ok := sd.mem.(changesetSwitcher)
@@ -309,7 +341,8 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 	if cs != nil {
 		// Save current accumulator, switch to the pending update's block
 		// changeset, apply deferred branch writes, save it back, then
-		// restore the original accumulator.
+		// restore the original accumulator. All accesses under
+		// changesetMu — see concurrency contract on the wrappers above.
 		prev := switcher.GetChangesetAccumulator()
 		switcher.SetChangesetAccumulator(cs)
 
@@ -326,6 +359,43 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 	// No past changeset found — write into whatever is current
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
+}
+
+// domainPutNoLock is the locked-already variant of DomainPut for use by
+// callers (FlushPendingUpdates) that hold changesetMu externally and would
+// self-deadlock if DomainPut took the lock again. Mirrors DomainPut's body
+// exactly, just without the lock acquisition.
+func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+	if v == nil {
+		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
+	}
+	ks := string(k)
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
+	if prevVal == nil {
+		var err error
+		prevVal, _, err = sd.GetLatest(domain, roTx, k)
+		if err != nil {
+			return err
+		}
+	}
+	switch domain {
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
+		if bytes.Equal(prevVal, v) {
+			return nil
+		}
+	case kv.RCacheDomain:
+		//noop
+	default:
+		if bytes.Equal(prevVal, v) {
+			return nil
+		}
+	}
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
+	}
+	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
 type temporalGetter struct {
@@ -944,6 +1014,23 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	// GetChangesetByBlockNum). This ensures the branch writes are recorded in
 	// the original block's diffset so they can be properly reverted on unwind.
 	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+		return nil, err
+	}
+	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
+}
+
+// ComputeCommitmentLocked is the variant for callers (the parallel
+// commitment calculator) that already hold changesetMu via
+// LockChangesetAccumulator. The pending-updates flush uses the *Locked
+// internal path so it doesn't self-deadlock on the outer mutex.
+//
+// Routes the deferred branch writes from the previous block into the
+// correct block's changeset (via the hash-aware lookup in
+// FlushPendingUpdatesLocked) without releasing the calculator's outer
+// lock — closing the SetChangesetAccumulator-vs-SetChangesetAccumulator
+// races between calc-internal swap and the apply-side SetChangesetAccumulator.
+func (sd *SharedDomains) ComputeCommitmentLocked(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	if err := sd.FlushPendingUpdatesLocked(ctx, tx); err != nil {
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)

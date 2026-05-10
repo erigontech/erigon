@@ -479,28 +479,32 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	}()
 
 	cs := cc.doms.GetChangesetByHash(br.BlockNum, br.BlockHash)
-	if cs == nil {
-		return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
-	}
-	// LOAD-BEARING LOCK (band-aid; see SharedDomains.changesetMu doc).
-	// The Set/restore dance below mutates the global current-accumulator
-	// pointer that the apply goroutine's DomainPut/DomainDel writes through.
-	// Without serialization, apply-side writes for block N+1 land in
-	// block N's CS during the calculator's per-block compute, producing
-	// missing prev-value entries on unwind (TestBlockchainHeaderchainReorgConsistency
-	// etc.). Locking here serializes apply against compute — perf cost
-	// goes away when the per-block accumulator is derived post-hoc from
-	// sd entries at flush time and exec stops touching it altogether.
-	//
-	// Inside the lock we must use the *Locked variants of Get/Set —
-	// the public Set/GetChangesetAccumulator re-acquire the same Mutex
-	// and would self-deadlock.
+	// Always take the lock around ComputeCommitment, even on the cs==nil
+	// fast path: the FlushPendingUpdates that ComputeCommitment runs
+	// internally still mutates the global accumulator pointer + per-domain
+	// diff fields, racing with the apply loop's SetChangesetAccumulator if
+	// we don't serialize. Without this, race detector flags ~73 SetDiff vs
+	// PutWithPrev hits on the cs==nil path (genesis, missing-CS edge cases).
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
+	if cs == nil {
+		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	}
+	// LOAD-BEARING swap under the outer lock (already taken above). The
+	// Set/restore dance below mutates the global current-accumulator
+	// pointer; the deferred branch writes from block N-1 (flushed inside
+	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
+	// marker write at end of compute also touch that same global pointer
+	// and the per-domain diff fields. Holding changesetMu through all of
+	// it serializes against the apply goroutine's DomainPut/DomainDel.
+	//
+	// Inside the lock we must use the *Locked variants of Get/Set/Compute
+	// — the public counterparts re-acquire the same Mutex and would
+	// self-deadlock.
 	prev := cc.doms.GetChangesetAccumulatorLocked()
 	cc.doms.SetChangesetAccumulatorLocked(cs)
 	defer cc.doms.SetChangesetAccumulatorLocked(prev)
-	return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via
