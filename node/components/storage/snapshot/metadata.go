@@ -256,6 +256,8 @@ func domainFromTypeString(typeString string) Domain {
 		return DomainCode
 	case "commitment":
 		return DomainCommitment
+	case "receipt":
+		return DomainReceipt
 	}
 	return ""
 }

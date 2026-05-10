@@ -587,13 +587,22 @@ func (p *Provider) Initialize(deps Deps) error {
 		// are available (tools / tests may construct a Provider
 		// without them).
 		if p.ChainDB != nil && p.BlockReader != nil {
-			batchChain = append(batchChain, CommitmentDomainValidator{
-				DB:          p.ChainDB,
-				BlockReader: p.BlockReader,
-				Inventory:   deps.Inventory,
-				Logger:      logger, // emits "binding registered source=lifecycle"
-				PausedCache: NewPausedCommitmentCache(),
-			})
+			batchChain = append(batchChain,
+				HeaderChainValidator{DB: p.ChainDB, BlockReader: p.BlockReader},
+				TxRootValidator{DB: p.ChainDB, BlockReader: p.BlockReader},
+				CommitmentDomainValidator{
+					DB:          p.ChainDB,
+					BlockReader: p.BlockReader,
+					Inventory:   deps.Inventory,
+					Logger:      logger,
+					PausedCache: NewPausedCommitmentCache(),
+				},
+				ReceiptRootValidator{
+					DB:          p.ChainDB,
+					BlockReader: p.BlockReader,
+					ChainConfig: p.ChainConfig,
+				},
+			)
 		}
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,

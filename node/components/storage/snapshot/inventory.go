@@ -31,6 +31,7 @@ const (
 	DomainStorage    Domain = "storage"
 	DomainCode       Domain = "code"
 	DomainCommitment Domain = "commitment"
+	DomainReceipt    Domain = "receipt"
 )
 
 // FileKind identifies what role a file plays in the snapshot archive. Empty
