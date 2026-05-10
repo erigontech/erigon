@@ -230,6 +230,17 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 		}
 	}
 
+	if promoted > 0 {
+		mxAdaptivePromoted.AddUint64(uint64(promoted))
+	}
+	if extended > 0 {
+		mxAdaptiveExtended.AddUint64(uint64(extended))
+	}
+	if demoted > 0 {
+		mxAdaptiveDemoted.AddUint64(uint64(demoted))
+	}
+	mxAdaptiveActive.SetUint64(uint64(len(c.states)))
+
 	if c.logger != nil && (promoted+extended+demoted > 0 || len(c.states) > 0) {
 		c.logger.Info("[adaptive-pin]",
 			"block", blockNum,
