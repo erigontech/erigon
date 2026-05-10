@@ -414,6 +414,11 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 }
 
 // GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
+//
+// WARNING: ambiguous when pastChangesAccumulator holds multiple changesets for
+// the same block number (e.g. canonical + fork during a reorg-bounce test).
+// The first match in non-deterministic map iteration order is returned.
+// Prefer GetChangesetByHash when the caller has the block hash available.
 func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
 	sd.pastChangesLock.RLock()
 	defer sd.pastChangesLock.RUnlock()
@@ -425,6 +430,21 @@ func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.H
 		}
 	}
 	return common.Hash{}, nil
+}
+
+// GetChangesetByHash returns the changeset saved under the exact (blockNumber,
+// blockHash) key. Returns nil if not found. Use this in preference to
+// GetChangesetByBlockNum when both pieces of information are known —
+// pastChangesAccumulator can hold multiple changesets per block number after
+// a fork-bounce, and number-only lookups can return the wrong one
+// non-deterministically.
+func (sd *TemporalMemBatch) GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet {
+	var key [40]byte
+	binary.BigEndian.PutUint64(key[:8], blockNumber)
+	copy(key[8:], blockHash[:])
+	sd.pastChangesLock.RLock()
+	defer sd.pastChangesLock.RUnlock()
+	return sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]
 }
 
 func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {

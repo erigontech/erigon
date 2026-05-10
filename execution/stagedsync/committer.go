@@ -302,7 +302,9 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	rh, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
+	// Use hash-aware accumulator wrap — see computeWithBlockAccumulator
+	// docstring for why this is mandatory in reorg scenarios.
+	rh, err := cc.computeWithBlockAccumulator(ctx, br)
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: br.BlockNum,
@@ -349,7 +351,12 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, br *blo
 	cc.asOfReader.txNum = br.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
-	if _, err := cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil); err != nil {
+	// Use the same hash-aware accumulator wrap as computeAndCheck — without
+	// it, the [state] write inside ComputeCommitment can land in a stale
+	// past-changeset entry chosen non-deterministically by GetChangesetByBlockNum
+	// when pastChangesAccumulator holds multiple changesets per block number
+	// (canonical + fork during reorg-bounce tests).
+	if _, err := cc.computeWithBlockAccumulator(ctx, br); err != nil {
 		// Partial-block compute is intentionally not verified (no header root
 		// to compare against), but a real ComputeCommitment failure leaves
 		// later trie state suspect — log so the failure isn't silent.
@@ -437,17 +444,41 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 }
 
 // computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by block
-// number) so that any branch writes during compute (mid-process inline
-// flushes from `pendingPrefixes` collisions, plus deferred-buffer flushes
-// from the wrapper) land in block N's CS rather than whatever the exec
-// loop has installed as current.
+// accumulator switched to block N's saved changeset (looked up by hash) so
+// that any branch writes during compute (mid-process inline flushes from
+// `pendingPrefixes` collisions, plus the [state] write at end via
+// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
+// the exec loop has installed as current.
+//
+// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
+// can hold multiple changesets per block number after a fork-bounce
+// (canonical block 1 + forks[i] block 1 with different hashes), and a
+// number-only GetChangesetByBlockNum returns the first match in
+// non-deterministic map iteration order. That non-determinism caused the
+// calculator's [state] write for canonical block 1 to land in the fork's
+// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
+// reproducer, leaving canonical block 1's CS without [state] and producing
+// off-by-one wrong-trie-root chains on the next iteration's re-execution.
 //
 // If block N's CS hasn't been saved yet (rare race with the exec loop's
 // SavePastChangesetAccumulator), falls through to whatever current is
 // installed — same as the pre-fix behavior.
+//
+// Also annotates the pending deferred update (set inside ComputeCommitment
+// when defer mode is on) with the block's hash, so the next call's
+// FlushPendingUpdates uses the same hash-aware routing.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, br *blockResult) ([]byte, error) {
-	_, cs := cc.doms.GetChangesetByBlockNum(br.BlockNum)
+	defer func() {
+		// Stamp the pending update (if any was set during ComputeCommitment)
+		// with this block's hash so FlushPendingUpdates on the next call
+		// routes to the exact (BlockNum, BlockHash) entry rather than
+		// guessing among ambiguous block-number-only matches.
+		if upd := cc.doms.GetCommitmentContext().PeekPendingUpdate(); upd != nil && upd.BlockNum == br.BlockNum {
+			upd.BlockHash = br.BlockHash
+		}
+	}()
+
+	cs := cc.doms.GetChangesetByHash(br.BlockNum, br.BlockHash)
 	if cs == nil {
 		return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	}

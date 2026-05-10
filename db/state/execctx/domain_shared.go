@@ -190,6 +190,12 @@ type changesetSwitcher interface {
 	// GetChangesetByBlockNum returns the changeset for a given block number and
 	// the block hash it is keyed under.
 	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
+	// GetChangesetByHash returns the changeset saved under (blockNumber, blockHash).
+	// Use in preference to GetChangesetByBlockNum when both are known —
+	// pastChangesAccumulator can hold multiple changesets per block number after
+	// a fork-bounce reorg, and number-only lookups are non-deterministic in that
+	// scenario.
+	GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet
 	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
@@ -249,7 +255,20 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return err
 	}
 
-	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
+	// Hash-aware lookup when the pending update carries a BlockHash. This
+	// disambiguates pastChangesAccumulator entries when multiple changesets
+	// exist for the same block number (canonical + fork during a reorg-bounce).
+	// Falls back to the legacy number-only lookup if the hash isn't set
+	// (zero hash) — preserves behavior for callers that don't yet thread
+	// the hash through.
+	var blockHash common.Hash
+	var cs *changeset.StateChangeSet
+	if upd.BlockHash != (common.Hash{}) {
+		blockHash = upd.BlockHash
+		cs = switcher.GetChangesetByHash(upd.BlockNum, blockHash)
+	} else {
+		blockHash, cs = switcher.GetChangesetByBlockNum(upd.BlockNum)
+	}
 	if cs != nil {
 		// Save current accumulator, switch to the pending update's block
 		// changeset, apply deferred branch writes, save it back, then
@@ -325,11 +344,26 @@ func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
 // GetChangesetByBlockNum returns the saved changeset for a given block
 // number (and the block hash it was saved under), or (zero hash, nil) if
 // no such changeset has been saved via SavePastChangesetAccumulator.
+//
+// WARNING: ambiguous when pastChangesAccumulator holds multiple changesets
+// for the same block number (e.g. canonical + fork during a reorg-bounce).
+// Prefer GetChangesetByHash when the caller has the block hash available.
 func (sd *SharedDomains) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
 	if h, ok := sd.mem.(changesetSwitcher); ok {
 		return h.GetChangesetByBlockNum(blockNumber)
 	}
 	return common.Hash{}, nil
+}
+
+// GetChangesetByHash returns the saved changeset for an exact (blockNumber,
+// blockHash) key, or nil if not found. Use this when the caller knows both —
+// pastChangesAccumulator can hold multiple changesets per block number after
+// a fork-bounce reorg, and number-only lookups are non-deterministic.
+func (sd *SharedDomains) GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet {
+	if h, ok := sd.mem.(changesetSwitcher); ok {
+		return h.GetChangesetByHash(blockNumber, blockHash)
+	}
+	return nil
 }
 
 func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
