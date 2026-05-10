@@ -1238,11 +1238,31 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 	// SSTORE-bloat workload — covers the structural d=68 saturation
 	// (~70K branches) plus most-shared d=69 branches, beyond which
 	// marginal returns drop sharply (256 MiB sweep showed −2 ms TEST
-	// took for +35 s preload). Override via PIN_TRUNK_RAM_BUDGET_MB
-	// for tuning on different workload classes.
-	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", 64)
+	// took for +35 s preload).
+	//
+	// 64 MiB is the per-contract MAX for this PR. Larger budgets are
+	// not safe to ship without (a) per-account touch-driven minimisation
+	// that prunes the pinned set to the actually-useful subset (R11)
+	// and (b) a global RAM cap aware of available memory (R12). Until
+	// both land, an operator setting 256 MiB across many promoted
+	// contracts could pin GBs without material perf benefit.
+	//
+	// Override is plausibly justified in narrow cases — a measured-hot
+	// mainnet contract whose perf curve genuinely requires deeper
+	// coverage, or operator-driven diagnostic profiling. NOT in scope
+	// for this PR; an override path lands once R11 + R12 + a
+	// per-contract whitelist mechanism exist. Until then, larger values
+	// silently clamp with a warning so an operator can see they were
+	// ignored.
+	const maxPerContractBudgetMB = 64
+	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", maxPerContractBudgetMB)
 	if ramBudgetMB <= 0 {
-		ramBudgetMB = 64
+		ramBudgetMB = maxPerContractBudgetMB
+	}
+	if ramBudgetMB > maxPerContractBudgetMB {
+		logger.Warn("[trunk-preload] clamping budget to per-contract max",
+			"requested_mb", ramBudgetMB, "clamped_mb", maxPerContractBudgetMB)
+		ramBudgetMB = maxPerContractBudgetMB
 	}
 	ramBudgetBytes := ramBudgetMB << 20
 	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
