@@ -2896,8 +2896,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
+
 // SetBranchCache attaches a BranchCache for branch read-through and
 // write-through. Also propagates to the trie's BranchEncoder so encoder
 // writes update the cache via mark-dirty-then-Put (see CollectUpdate).
