@@ -176,7 +176,9 @@ func TestBranchCache_Stats(t *testing.T) {
 	for _, want := range []string{
 		"root hit=1 miss=0",
 		"tail hit=1 miss=1",
-		"tail entries=1", // we put 1 deep entry; root not counted in tail
+		// Pinned tier added; tail still has 1 entry (the deep Put),
+		// pinned tier remains empty in this test.
+		"tail hit=1 miss=1 (50.0%) entries=1",
 	} {
 		require.Contains(t, s, want, "Stats output: %s", s)
 	}
