@@ -2972,6 +2972,26 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
+	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
+	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
+	// d.incarnation != nil and routes into the "cleanup-before-recreate"
+	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
+	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
+	// account stays in sd.mem with non-zero incarnation, and a subsequent
+	// block's CREATE2 at the same address sees a phantom existing account,
+	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
+	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
+	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	sdSet := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath {
+			if v, ok := w.Val.(bool); ok && v {
+				sdSet[w.Address] = true
+			}
+		}
+	}
+
 	// Track which addresses have account-level writes vs storage-only writes.
 	// Serial's MakeWriteSet calls UpdateAccountData for every dirty object,
 	// including those with only storage changes. The commitment needs the
@@ -2980,6 +3000,14 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	hasStorageWrite := make(map[accounts.Address]bool)
 
 	for _, w := range writes {
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
+		// takes the pure-delete branch instead of cleanup-before-recreate.
+		if sdSet[w.Address] {
+			switch w.Path {
+			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath:
+				continue
+			}
+		}
 		switch w.Path {
 		case state.StoragePath:
 			// Only include writes from the current (validated) incarnation.
@@ -3086,6 +3114,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	}
 
 	for addr := range allAddresses {
+		if sdSet[addr] {
+			// Don't fill account fields for SD'd addresses — same rationale as
+			// the sdSet drop in the filter loop above. Without this, the
+			// stateReader fallback below would round-trip pre-SD account state
+			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// the SD when applyVersionedWrites picks the cleanup-then-recreate
+			// branch.
+			continue
+		}
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
 		fields := addrFields[addr]
 

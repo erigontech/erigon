@@ -170,9 +170,21 @@ func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKe
 }
 
 // ApplyWrites updates the local state with all writes from a TX result.
+//
+// IBS.Selfdestruct emits THREE versionWritten entries in this order:
+// IncarnationPath, SelfDestructPath, BalancePath=0. If we apply them in
+// arrival order, BalancePath's `acc.Deleted = false` reset clobbers the
+// `Deleted=true` flag set by SelfDestructPath, leaving the calculator's
+// phoenix entry in the wrong state at flush time. Apply the SD case in a
+// second pass so SD wins regardless of order in the writeset (matches
+// serial's IBS finalization where DeleteAccount is the terminal call).
 func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
+	// First pass: account-field, storage, code, etc. writes.
 	for _, w := range writes {
 		if w.Val == nil {
+			continue
+		}
+		if w.Path == state.SelfDestructPath {
 			continue
 		}
 
@@ -199,37 +211,7 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc.CodeHash = crypto.Keccak256Hash(code)
 			acc.dirty = true
 			acc.Deleted = false
-		case state.SelfDestructPath:
-			if destructed, ok := w.Val.(bool); ok && destructed {
-				acc := cs.ensureAccount(w.Address)
-				acc.Deleted = true
-				acc.dirty = true
-				// Mark every tracked storage slot dirty so
-				// FlushToUpdates emits a per-slot update. Serial's
-				// MakeWriteSet for an SD account emits storage writes
-				// (with their pre-SD values) alongside the account-
-				// reset, and the trie processes them in fold order.
-				//
-				// LOAD-BEARING INVARIANT: the marked slots emit as
-				// DeleteUpdate (not StorageUpdate with pre-SD values)
-				// because normalizeWriteSet at exec3_parallel.go's
-				// SelfDestructPath case adds StoragePath=0 entries for
-				// every key in vm.StorageKeys(addr). Those zeros
-				// arrive in this ApplyWrites loop AFTER the
-				// SelfDestructPath case, overwrite cs.storageState's
-				// pre-SD values, and FlushToUpdates emits DeleteUpdate
-				// per slot. Without that loop in normalizeWriteSet
-				// this code would silently leak pre-SD slot values
-				// into the trie.
-				if slots, ok := cs.storageState[w.Address]; ok {
-					if cs.storageDirty[w.Address] == nil {
-						cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
-					}
-					for key := range slots {
-						cs.storageDirty[w.Address][key] = true
-					}
-				}
-			}
+		// SelfDestructPath handled in second pass — see ApplyWrites docstring.
 		case state.StoragePath:
 			v := w.Val.(uint256.Int)
 			cs.ensureStorage(w.Address, w.Key) // lazy-load if needed
@@ -250,6 +232,55 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc := cs.ensureAccount(w.Address)
 			acc.Incarnation = w.Val.(uint64)
 			acc.dirty = true
+		}
+	}
+
+	// Second pass: SelfDestructPath. Applied last so SD always wins over
+	// the BalancePath=0 / NoncePath=0 / CodeHashPath=empty writes that
+	// IBS.Selfdestruct emits alongside it. See ApplyWrites docstring.
+	for _, w := range writes {
+		if w.Val == nil || w.Path != state.SelfDestructPath {
+			continue
+		}
+		destructed, ok := w.Val.(bool)
+		if !ok || !destructed {
+			continue
+		}
+		acc := cs.ensureAccount(w.Address)
+		acc.Deleted = true
+		acc.dirty = true
+		// Zero ALL fields so FlushToUpdates routes into the
+		// `acc.Deleted && isAllZero` DeleteUpdate branch (matching
+		// serial's DomainDel behavior). Incarnation also zeroed: a
+		// pure SD without recreate emits DeleteUpdate; a recreate
+		// (CREATE2 in the same tx) writes a new IncarnationPath
+		// AFTER this pass, but recreate writes don't go through this
+		// SelfDestructPath case — they come via UpdateAccountData
+		// emissions which are handled in the first pass.
+		acc.Balance = uint256.Int{}
+		acc.Nonce = 0
+		acc.CodeHash = empty.CodeHash
+		acc.Incarnation = 0
+		// Zero every tracked storage slot AND mark dirty so
+		// FlushToUpdates emits DeleteUpdate per slot. The previous
+		// approach assumed normalizeWriteSet's StoragePath=0 entries
+		// (via vm.StorageKeys) would arrive in the same writeset and
+		// overwrite cs.storageState's pre-SD values — but vm.StorageKeys
+		// only returns slots written in the current tx's version map,
+		// and SD via Selfdestruct() doesn't write storage explicitly.
+		// Without zeroing here, FlushToUpdates emits StorageUpdate with
+		// pre-SD values, leaving stale storage in the trie and producing
+		// wrong roots in TestRecreateAndRewind block 4 (recreate sees
+		// stale storage). Match serial's DomainDelPrefix behavior of
+		// removing every slot under the SD'd account.
+		if slots, ok := cs.storageState[w.Address]; ok {
+			if cs.storageDirty[w.Address] == nil {
+				cs.storageDirty[w.Address] = make(map[accounts.StorageKey]bool)
+			}
+			for key := range slots {
+				slots[key] = uint256.Int{}
+				cs.storageDirty[w.Address][key] = true
+			}
 		}
 	}
 }

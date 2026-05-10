@@ -482,9 +482,24 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	if cs == nil {
 		return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	}
-	prev := cc.doms.GetChangesetAccumulator()
-	cc.doms.SetChangesetAccumulator(cs)
-	defer cc.doms.SetChangesetAccumulator(prev)
+	// LOAD-BEARING LOCK (band-aid; see SharedDomains.changesetMu doc).
+	// The Set/restore dance below mutates the global current-accumulator
+	// pointer that the apply goroutine's DomainPut/DomainDel writes through.
+	// Without serialization, apply-side writes for block N+1 land in
+	// block N's CS during the calculator's per-block compute, producing
+	// missing prev-value entries on unwind (TestBlockchainHeaderchainReorgConsistency
+	// etc.). Locking here serializes apply against compute — perf cost
+	// goes away when the per-block accumulator is derived post-hoc from
+	// sd entries at flush time and exec stops touching it altogether.
+	//
+	// Inside the lock we must use the *Locked variants of Get/Set —
+	// the public Set/GetChangesetAccumulator re-acquire the same Mutex
+	// and would self-deadlock.
+	cc.doms.LockChangesetAccumulator()
+	defer cc.doms.UnlockChangesetAccumulator()
+	prev := cc.doms.GetChangesetAccumulatorLocked()
+	cc.doms.SetChangesetAccumulatorLocked(cs)
+	defer cc.doms.SetChangesetAccumulatorLocked(prev)
 	return cc.doms.ComputeCommitment(ctx, cc.roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 }
 
