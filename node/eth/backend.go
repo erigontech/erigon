@@ -519,6 +519,21 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	// Shared event bus. When storage is running its orchestrator (i.e.
+	// LifecycleDrivenByStorage), bind sentry + downloader to the same
+	// bus so PeerManifestReceived / DownloadComplete reach the
+	// orchestrator and InitialStateReady fires on real peer events.
+	if bus := backend.components.Storage.Bus(); bus != nil {
+		if err := backend.sentryProvider.BindBus(bus); err != nil {
+			return nil, fmt.Errorf("sentry BindBus: %w", err)
+		}
+		if backend.components.Downloader != nil {
+			if err := backend.components.Downloader.BindBus(ctx, bus); err != nil {
+				return nil, fmt.Errorf("downloader BindBus: %w", err)
+			}
+		}
+	}
+
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	// Only applies in local downloader mode; remote-downloader mode has nil Downloader.
 	// Gated behind --snap.p2p-manifest so default syncs stay on the pre-v2 path and

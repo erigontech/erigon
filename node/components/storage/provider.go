@@ -657,6 +657,14 @@ func (p *Provider) Initialize(deps Deps) error {
 	return nil
 }
 
+// Bus returns the storage component's event bus, or nil when storage
+// isn't running its own orchestrator (LifecycleDrivenByStorage=false
+// or pre-Initialize). Production wiring (backend.go) hands this to
+// sentry.Provider.BindBus and downloader.Provider.BindBus so all
+// three components share one bus and the orchestrator's
+// InitialStateReady can fire on real peer events.
+func (p *Provider) Bus() event.EventBus { return p.eventBus }
+
 // Stop releases the storage component's runtime resources. The
 // lifecycle driver and the flow orchestrator both need explicit
 // shutdown; other resources (DB, BlockRetire, etc.) follow the
