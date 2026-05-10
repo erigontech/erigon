@@ -97,13 +97,13 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
-* `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
-  * Default: `false`
-* `--snap.stop`: Stops generating new snapshots.
-  * Default: `false`
-* `--snap.state.stop`: Stops generating new state files.
-  * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
+  * Default: `false`
+* `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
+  * Default: `false`
+* `--snap.stop`: Workaround for snapshot-related bugs — stops producing new snapshot files (DB will grow as a result).
+  * Default: `false`
+* `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
 
 ### Transaction Pool (TxPool)
@@ -393,8 +393,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
-  * Default: `512mb`
+* `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
