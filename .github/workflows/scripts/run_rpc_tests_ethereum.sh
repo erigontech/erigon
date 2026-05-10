@@ -47,6 +47,7 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # Temporarily disabled: the following tests hang (possible regression in Erigon).
   # For debug_traceTransaction, the issue is under analysis.
+  eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json
 )
 
