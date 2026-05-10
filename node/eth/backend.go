@@ -453,25 +453,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		DownloaderClient: backend.downloaderClient,
 		RepublishChainToml: func() error {
 			// Re-publish chain.toml after retire/merge produces fresh
-			// snapshot files (called from OnFilesChange). Emits both
-			// V1 (legacy chain.toml) and V2 (chain.v2.<seq>.toml
-			// sidecar) so consumers running manifest_exchange.Provider
-			// can fetch a usable manifest by info-hash. The ENR's
-			// ChainToml info-hash points to V2 (V2 is published last,
-			// its enrUpdater wins). nil-safe — no-ops on consumer-only
-			// nodes whose downloader isn't a publisher.
+			// snapshot files (called from OnFilesChange). Downloader
+			// emits V1 + V2 internally when SetInventory has been
+			// called; the ENR ends pointing at the V2 info-hash.
+			// nil-safe on consumer-only nodes.
 			if backend.components == nil || backend.components.Downloader == nil ||
 				backend.components.Downloader.Downloader == nil {
 				return nil
 			}
-			dl := backend.components.Downloader.Downloader
-			if err := dl.PublishLocalChainToml(); err != nil {
-				return err
-			}
-			if backend.components.Storage != nil {
-				return dl.PublishLocalChainTomlV2(backend.components.Storage.Inventory)
-			}
-			return nil
+			return backend.components.Downloader.Downloader.PublishLocalChainToml()
 		},
 		Inventory:            inv,
 		Aggregator:           agg,
@@ -480,6 +470,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Logger:               logger,
 	}); err != nil {
 		return nil, err
+	}
+
+	// Hand the storage component's inventory to the downloader so
+	// PublishLocalChainToml emits V2 sidecars alongside V1. Required
+	// for consumer-side manifest_exchange to fetch a usable manifest.
+	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil &&
+		backend.components.Storage != nil {
+		backend.components.Downloader.Downloader.SetInventory(backend.components.Storage.Inventory)
 	}
 
 	// Wire wait-on-miss into the read handles. Awaiter is satisfied

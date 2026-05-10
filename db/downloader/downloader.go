@@ -122,6 +122,13 @@ type Downloader struct {
 	// Set via SetENRUpdater after P2P is available.
 	enrUpdater func(enr.ChainToml)
 
+	// inventory is an optional reference to the storage component's
+	// inventory. When set, PublishLocalChainToml also emits the V2
+	// chain.v2.<seq>.toml sidecar so consumer-side manifest_exchange
+	// can fetch the V2 manifest by info-hash from the ENR. Set via
+	// SetInventory by production wiring (backend.go).
+	inventory *storagesnapshot.Inventory
+
 	// nodeSourceFn lazily resolves the P2P node source for chain.toml discovery.
 	// Returns nil if P2P is not yet available. Called each discovery iteration.
 	nodeSourceFn func() NodeSource
@@ -476,7 +483,28 @@ func (d *Downloader) PublishLocalChainToml() error {
 	if err := d.seedChainTomlTorrent(); err != nil {
 		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
 	}
+	// V2 sidecar: emit a fresh chain.v2.<seq>.toml whose info-hash
+	// becomes the ENR ChainToml advertisement. Without this, every
+	// PublishLocalChainToml call would leave the ENR pointing at the
+	// V1 chain.toml info-hash and consumer-side manifest_exchange
+	// rejects "not a chain.v2.<seq>.toml sidecar". Inventory is set
+	// in production by SetInventory; nil in tests/tools that don't
+	// run the storage component.
+	if d.inventory != nil {
+		if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
+			d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
+		}
+	}
 	return nil
+}
+
+// SetInventory wires the storage component's inventory so that every
+// PublishLocalChainToml call also emits a V2 chain.v2.<seq>.toml
+// sidecar. Call once after Storage.Initialize.
+func (d *Downloader) SetInventory(inv *storagesnapshot.Inventory) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.inventory = inv
 }
 
 // PublishLocalChainTomlV2 emits the next chain.v2.<seq>.toml generation
