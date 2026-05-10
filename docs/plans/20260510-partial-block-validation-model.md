@@ -183,10 +183,10 @@ block .seg covering its `AtBlock`. This protects against:
   error on pause; if the lifecycle's quarantine policy increments
   on each retry, persistent pauses can erroneously quarantine the
   commitment file.)
-- **Watch-point** for retest: if quarantine triggers prematurely,
-  introduce a sentinel error type so quarantine-counter skips
-  pause errors. Tracked in
-  [memory/design-gap-partial-block-validation.md].
+- **Resolved 2026-05-10**: `validation.ErrPause` sentinel; lifecycle
+  dispatch's `errors.Is(err, validation.ErrPause)` skips the
+  quarantine counter. Persistent (non-pause) failures continue to
+  quarantine normally.
 
 ### Cost: consumer-side delay-to-tip
 - Consumer that pulls a manifest mid-republish may hit a window
@@ -209,8 +209,7 @@ block .seg covering its `AtBlock`. This protects against:
 
 ## Long-term fix candidates
 
-Listed in increasing complexity. Tracked in
-[memory/design-gap-partial-block-validation.md].
+Listed in increasing complexity.
 
 1. **Publisher-side replay-verify**: replay txns from
    `header[blockNum-1].Root` forward to `txNum` on every

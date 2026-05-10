@@ -225,6 +225,22 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 	return res, isStateFile, true
 }
 
+// ParseRange returns just the (typeString, from, to) coordinates of a
+// file name. ParseFileName's `ok` returns false when the file's Type
+// isn't registered with the enum (e.g. block types whose registration
+// happens in freezeblocks's init), but From/To/TypeString are still
+// populated. This helper exposes the range-only path so callers that
+// don't need a Type enum value (range/coverage/classification logic)
+// don't have to repeat the workaround. ok reports the weaker
+// invariant: from < to and TypeString non-empty.
+func ParseRange(fileName string) (typeString string, from, to uint64, ok bool) {
+	info, _, _ := ParseFileName("", fileName)
+	if info.TypeString == "" || info.From >= info.To {
+		return "", 0, 0, false
+	}
+	return info.TypeString, info.From, info.To, true
+}
+
 func ParseFileNameOld(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res, ok = parseFileName(dir, fileName)
 	if ok {

@@ -433,23 +433,11 @@ type PartialBlockWithoutCoverage struct {
 	AtBlock uint64
 }
 
-// FindPartialBlockCommitmentsWithoutCoverage scans the manifest for
-// partial-block commitments whose AtBlock is NOT covered by any block
-// .seg in the same manifest. Mirror of the publisher-side
-// blockSegAdvertisableForBlock check (commitment_validator.go), but
-// against a discovered manifest instead of the local lifecycle: the
-// consumer trusts a partial-block commitment as a usable snapshot tip
-// only when the publisher has bundled the matching block data in the
-// same manifest generation. Files in the returned list represent
-// "abnormal" manifest states the consumer should refuse to load —
-// either the publisher is mid-republish (transient) or its lifecycle
-// is in an unusual state (operational signal).
-//
-// Block file ranges are parsed from m.Blocks names (e.g.
-// "v1.1-025040-025050-headers.seg" → [25_040_000, 25_050_000)).
-//
-// Pure function; no inventory or chain-reader needed. Empty result
-// means the manifest is self-consistent for partial-block tips.
+// FindPartialBlockCommitmentsWithoutCoverage returns manifest entries
+// flagged IsPartialBlock=true whose AtBlock is not covered by any
+// block .seg in the same manifest's [blocks] section. Pure function;
+// the consumer's defensive gate that mirrors the publisher's
+// blockSegAdvertisableForBlock check.
 func FindPartialBlockCommitmentsWithoutCoverage(m *ChainTomlV2) []PartialBlockWithoutCoverage {
 	if m == nil {
 		return nil
@@ -457,15 +445,11 @@ func FindPartialBlockCommitmentsWithoutCoverage(m *ChainTomlV2) []PartialBlockWi
 	type blockRange struct{ from, to uint64 }
 	var ranges []blockRange
 	for name := range m.Blocks {
-		// ParseFileName populates From/To even when ok=false (the ok
-		// signal requires the file's Type to be registered via
-		// freezeblocks init). For range-only logic we tolerate
-		// ok=false as long as From < To.
-		info, _, _ := snaptype.ParseFileName("", name)
-		if info.From >= info.To {
+		_, from, to, ok := snaptype.ParseRange(name)
+		if !ok {
 			continue
 		}
-		ranges = append(ranges, blockRange{from: info.From, to: info.To})
+		ranges = append(ranges, blockRange{from: from, to: to})
 	}
 
 	var out []PartialBlockWithoutCoverage

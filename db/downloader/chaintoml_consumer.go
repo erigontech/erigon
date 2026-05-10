@@ -156,16 +156,11 @@ func ClassifyRetiredEntries(old, new map[string]string) RetiredClassification {
 	// "accounts" apart from "commitment" by Type alone.
 	newByType := make(map[string][]rangeKey, len(new))
 	for name := range new {
-		// ParseFileName populates TypeString and From/To even when
-		// ok=false (the ok signal requires the type to be registered
-		// in snaptype's enum, which holds for state files but not
-		// for block types in every import graph). We accept the
-		// fields if TypeString is non-empty AND From < To.
-		info, _, _ := snaptype.ParseFileName("", name)
-		if info.TypeString == "" || info.From >= info.To {
+		typ, from, to, ok := snaptype.ParseRange(name)
+		if !ok {
 			continue
 		}
-		newByType[info.TypeString] = append(newByType[info.TypeString], rangeKey{info.From, info.To})
+		newByType[typ] = append(newByType[typ], rangeKey{from, to})
 	}
 
 	var result RetiredClassification
@@ -173,14 +168,14 @@ func ClassifyRetiredEntries(old, new map[string]string) RetiredClassification {
 		if _, stillThere := new[name]; stillThere {
 			continue
 		}
-		info, _, _ := snaptype.ParseFileName("", name)
-		if info.TypeString == "" || info.From >= info.To {
+		typ, from, to, ok := snaptype.ParseRange(name)
+		if !ok {
 			result.Removed = append(result.Removed, name)
 			continue
 		}
 		merged := false
-		for _, candidate := range newByType[info.TypeString] {
-			if candidate.from <= info.From && candidate.to >= info.To {
+		for _, candidate := range newByType[typ] {
+			if candidate.from <= from && candidate.to >= to {
 				merged = true
 				break
 			}

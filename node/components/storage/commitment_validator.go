@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -183,17 +182,12 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 			blockNum, txNum, containingBlock, fromStep, toStep)
 	}
 
-	// State-loop closure splits on whether the commitment ends at the
-	// block boundary or mid-block. Step boundaries normally cut MID-
-	// block (see the comment block above), so partial-block is the
-	// typical case; mid-block state hashes have NO direct consensus
-	// anchor — there's no header field that records "state after txn
-	// K within block N". A naive "rootHash == header.Root" check
-	// would reject every well-formed retire-step commitment.
-	//
-	// Adopted model (2026-05-10): pause-until-block-seg-Advertisable.
-	// See memory/design-gap-partial-block-validation.md for the full
-	// rationale and long-term fix candidates.
+	// Block-aligned commitments cross-check rootHash against
+	// header.stateRoot directly; partial-block commitments (the
+	// typical retire-step output) have no consensus anchor for
+	// mid-block state, so they pause until the matching block .seg
+	// is Advertisable for replay-verify. See
+	// docs/plans/20260510-partial-block-validation-model.md.
 	if len(rootHashBytes) != 32 {
 		return fmt.Errorf("commitment rootHash is %d bytes, want 32 (step [%d, %d))",
 			len(rootHashBytes), fromStep, toStep)
@@ -223,27 +217,11 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 			return fmt.Errorf("commitment rootHash %x disagrees with block %d header.stateRoot %x (step [%d, %d))",
 				rootArr, blockNum, header.Root, fromStep, toStep)
 		}
-	} else {
-		// Partial-block: cannot directly compare to a header. Require
-		// the block .seg covering blockNum to be at
-		// LifecycleAdvertisable so a consumer can independently
-		// replay-verify the txns from txNum+1..blockMaxTxNum forward
-		// against header.stateRoot. If not yet Advertisable, pause —
-		// validator returns error so the file stays at Indexed; the
-		// lifecycle's next sweep retries when block data catches up.
-		//
-		// Watch-point: if pause causes excessive publication delay
-		// in retest, fall back to accept-mismatch (advance with
-		// IsPartialBlock=true; rely on consumer-side replay-verify
-		// or trust). See design-gap memory.
-		if !blockSegAdvertisableForBlock(v.Inventory, blockNum) {
-			// Wrap validation.ErrPause so lifecycle dispatch
-			// recognises this as transient and does NOT tick the
-			// per-file quarantine counter. The block .seg lifecycle
-			// catching up is normal operation.
-			return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
-				blockNum, txNum, blockMaxTxNum, fromStep, toStep, validation.ErrPause)
-		}
+	} else if !blockSegAdvertisableForBlock(v.Inventory, blockNum) {
+		// Pause (validation.ErrPause is treated as transient by the
+		// lifecycle dispatch — no quarantine tick).
+		return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
+			blockNum, txNum, blockMaxTxNum, fromStep, toStep, validation.ErrPause)
 	}
 
 	// All checks passed — register the (step, block) binding for
@@ -267,36 +245,21 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 
 // blockSegAdvertisableForBlock reports whether some block-domain
 // FileEntry in inv covers blockNum and is at LifecycleAdvertisable.
-//
-// Used by partial-block commitment validation (see ValidateStep): the
-// publisher commits to advertising the partial-block commitment and
-// the block .seg containing its blockNum together, so a consumer can
-// independently replay txNum+1..blockMaxTxNum forward to verify the
-// commitment's recorded rootHash against header.stateRoot. If the
-// block .seg isn't yet advertised, the commitment is paused at
-// Indexed; future lifecycle sweeps retry as block data catches up.
-//
-// Block snapshot files (headers.seg, bodies.seg, transactions.seg)
-// share the same block-range encoding. Any one of them being
-// Advertisable for the range is enough — the lifecycle advances them
-// together within a block-range group.
+// Uses the FromBlock/ToBlock fields already populated by
+// PopulateFromName at AddFile time — no re-parse. Iterates in reverse
+// because partial-block validations are tip-relative and matching
+// block .seg entries are appended last.
 func blockSegAdvertisableForBlock(inv *snapshot.Inventory, blockNum uint64) bool {
 	if inv == nil {
 		return false
 	}
-	for _, f := range inv.BlockFiles() {
-		if !f.Advertisable {
+	files := inv.BlockFiles()
+	for i := len(files) - 1; i >= 0; i-- {
+		f := files[i]
+		if !f.Advertisable || f.ToBlock <= f.FromBlock {
 			continue
 		}
-		// ParseFileName populates From/To even when ok=false (its ok
-		// signal requires the file Type to be registered via
-		// freezeblocks init, which holds at runtime but not in
-		// every test context). Range-only logic accepts From < To.
-		info, _, _ := snaptype.ParseFileName("", f.Name)
-		if info.From >= info.To {
-			continue
-		}
-		if blockNum >= info.From && blockNum < info.To {
+		if blockNum >= f.FromBlock && blockNum < f.ToBlock {
 			return true
 		}
 	}

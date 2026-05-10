@@ -244,10 +244,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// .claude/plans/time-to-get-back-generic-mist.md).
 	storageDriven := cfg.lifecycleDrivenByStorage && cfg.initialStateReady != nil
 	if storageDriven {
-		log.Info(fmt.Sprintf("[%s] Storage owns download — waiting on initialStateReady", s.LogPrefix()))
+		// Bounded wait so a stuck/never-firing orchestrator surfaces
+		// instead of hanging the stage forever. Mirrors manifestReady's
+		// fallback timeout shape.
+		const initialStateReadyTimeout = 30 * time.Minute
+		log.Info(fmt.Sprintf("[%s] Storage owns download — waiting on initialStateReady (timeout %s)", s.LogPrefix(), initialStateReadyTimeout))
 		select {
 		case <-cfg.initialStateReady:
 			log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, proceeding", s.LogPrefix()))
+		case <-time.After(initialStateReadyTimeout):
+			return fmt.Errorf("storage initialStateReady not signalled within %s — orchestrator may be stalled", initialStateReadyTimeout)
 		case <-ctx.Done():
 			return ctx.Err()
 		}
