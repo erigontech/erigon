@@ -451,6 +451,20 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		"knownTx", best.ChainToml.KnownBlocks,
 		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
+	// Fire the production hook so manifest_exchange (subscribed to
+	// sentry.PeerConnected on the shared bus) can fetch the peer's V2
+	// manifest. The chain-toml ENR entry is now confirmed populated
+	// for this peer — re-publishing PeerConnected here gives
+	// manifest_exchange the up-to-date ENR view it didn't have when
+	// the original PeerConnected event fired (peer's discv5 ENR
+	// hadn't propagated chain-toml yet).
+	d.lock.RLock()
+	hook := d.onPeerWithChainTomlDiscovered
+	d.lock.RUnlock()
+	if hook != nil {
+		hook(best)
+	}
+
 	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to download chain.toml", "err", err)

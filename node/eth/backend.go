@@ -550,6 +550,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			if err := mx.BindBus(ctx, bus, backend.components.Downloader, logger); err != nil {
 				return nil, fmt.Errorf("manifest_exchange BindBus: %w", err)
 			}
+			// Re-fire PeerConnected via sentry whenever the legacy
+			// chain.toml discovery loop finds a peer with chain-toml
+			// ENR. The original observer-fired PeerConnected may have
+			// happened before the peer's ENR propagated the chain-toml
+			// entry; this gives manifest_exchange a second look with a
+			// known-populated ENR.
+			if dl := backend.components.Downloader.Downloader; dl != nil {
+				dl.SetOnPeerWithChainTomlDiscovered(func(peer *downloader.ChainTomlPeer) {
+					if peer == nil || peer.Node == nil {
+						return
+					}
+					backend.sentryProvider.PublishPeerConnected(peer.Node)
+				})
+			}
 		}
 	}
 

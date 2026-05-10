@@ -129,6 +129,17 @@ type Downloader struct {
 	// SetInventory by production wiring (backend.go).
 	inventory *storagesnapshot.Inventory
 
+	// onPeerWithChainTomlDiscovered is called whenever the legacy
+	// chain.toml discovery loop finds a peer advertising a chain-toml
+	// ENR entry. Production wiring (backend.go) plugs in a function
+	// that publishes sentry.PeerConnected on the shared bus, so
+	// manifest_exchange (which subscribes to PeerConnected) can fetch
+	// the peer's V2 manifest. Without this hook, the orchestrator
+	// only sees the FIRST PeerConnected for each peer — fired before
+	// the peer's ENR has the chain-toml extension propagated, so
+	// manifest_exchange's ENR check returns empty and silently skips.
+	onPeerWithChainTomlDiscovered func(*ChainTomlPeer)
+
 	// nodeSourceFn lazily resolves the P2P node source for chain.toml discovery.
 	// Returns nil if P2P is not yet available. Called each discovery iteration.
 	nodeSourceFn func() NodeSource
@@ -506,6 +517,16 @@ func (d *Downloader) SetInventory(inv *storagesnapshot.Inventory) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.inventory = inv
+}
+
+// SetOnPeerWithChainTomlDiscovered installs the callback the discovery
+// loop fires whenever it finds a peer advertising a chain-toml ENR
+// entry. Production wiring uses this to (re-)publish sentry.PeerConnected
+// for that peer so manifest_exchange can fetch its V2 manifest.
+func (d *Downloader) SetOnPeerWithChainTomlDiscovered(fn func(*ChainTomlPeer)) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.onPeerWithChainTomlDiscovered = fn
 }
 
 // PublishLocalChainTomlV2 emits the next chain.v2.<seq>.toml generation
