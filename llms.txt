@@ -25,7 +25,7 @@
 
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Core concepts for running Erigon — modules, CLI flags, sync modes, database internals, and node configuration.
 - [Basic Usage](https://docs.erigon.tech/fundamentals/basic-usage): Command-line flags, common arguments, and first steps running the Erigon binary.
-- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, and archive sync explained — choose the right mode for your use case.
+- [Sync Modes](https://docs.erigon.tech/fundamentals/sync-modes): Full, minimal, blocks, and archive sync explained — choose the right mode for your use case.
 - [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
