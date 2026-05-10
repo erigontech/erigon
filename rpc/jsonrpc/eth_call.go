@@ -956,6 +956,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		ibs := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
