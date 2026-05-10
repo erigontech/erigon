@@ -138,6 +138,37 @@ options:
   - Install CLI only
 ```
 
+**Recognising the allowlist failure mode**: the symptom is GitHub
+returning `bad_verification_code` during the code-exchange step.
+That's NOT an expired code — it's GitHub refusing to issue a token
+because the user can't access the upstream OAuth app
+(`panda-proxy`). Distinguish from a genuinely expired code by
+checking that the failure is immediate after device-flow approval,
+not after a multi-minute wait.
+
+When the user picks "Request allowlist", give them the request
+template (don't make them assemble it themselves):
+
+| field | value |
+|---|---|
+| GitHub identity | <ask the user for their GH username> |
+| Service | panda-proxy (`panda-proxy.ethpandaops.io`) |
+| Dex issuer | `https://dex.primary.production.platform.ethpandaops.io` |
+| OAuth client ID | `panda-proxy` |
+| Reason | <user's project + team> |
+| Reproducer | `panda auth login --no-browser` returns `bad_verification_code` after entering the device code |
+
+Where to send: EthPandaOps Slack/Discord, or GitHub issue on
+`ethpandaops/panda`. Visible maintainers in the proxy config's
+success-page rules: `samcm`, `mattevans`.
+
+Also stop the local panda server while waiting — it will flap
+because the proxy embedding backend is unreachable without auth:
+
+```bash
+panda server stop
+```
+
 ## Step 4 — Self-host the proxy (alternative path)
 
 For orgs with their own ClickHouse / Prometheus / Loki credentials.
