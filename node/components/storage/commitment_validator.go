@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/integrity"
@@ -74,6 +75,64 @@ type CommitmentDomainValidator struct {
 	// path (which has its own existing log line). Bootstrap-path
 	// callers leave this nil to suppress duplicate logs.
 	Logger log.Logger
+
+	// PausedCache is optional. When set, ValidateStep memoizes the
+	// LoadCommitmentRoot result for files that hit the partial-block
+	// pause path. On the publisher's race window (commitment lands
+	// before the matching block .seg reaches Advertisable), each
+	// sweep retries; with the cache, retries skip the heavyweight
+	// read+decode+invariants chain and re-check only the
+	// blockSegAdvertisableForBlock gate. Cleared on successful
+	// validation. Nil → cache disabled (behaviour unchanged from
+	// before this field existed).
+	PausedCache *PausedCommitmentCache
+}
+
+// PausedCommitmentCache memoizes the read+decode+invariants result of
+// commitment validation across paused retries. Concurrency-safe.
+// Production wiring (storage Provider) constructs one and injects via
+// CommitmentDomainValidator.PausedCache; tests can leave it nil.
+type PausedCommitmentCache struct {
+	mu sync.Mutex
+	m  map[string]integrity.CommitmentRootInfo
+}
+
+// NewPausedCommitmentCache returns an empty cache.
+func NewPausedCommitmentCache() *PausedCommitmentCache {
+	return &PausedCommitmentCache{m: make(map[string]integrity.CommitmentRootInfo)}
+}
+
+// Get returns the cached info and whether the entry exists.
+func (c *PausedCommitmentCache) Get(name string) (integrity.CommitmentRootInfo, bool) {
+	if c == nil {
+		return integrity.CommitmentRootInfo{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	info, ok := c.m[name]
+	return info, ok
+}
+
+// Put records info for name (overwriting any prior entry).
+func (c *PausedCommitmentCache) Put(name string, info integrity.CommitmentRootInfo) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m[name] = info
+}
+
+// Forget clears the entry for name. Called when validation passes
+// (no longer paused) or when external state changes invalidate the
+// cached info.
+func (c *PausedCommitmentCache) Forget(name string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, name)
 }
 
 // Name implements validation.StepValidator.
@@ -101,13 +160,22 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	}
 	defer tx.Rollback()
 
-	stepSize := tx.Debug().StepSize()
-	endTxNum := toStep * stepSize
-	startTxNum := fromStep * stepSize
-
-	info, err := integrity.LoadCommitmentRoot(ctx, tx, v.BlockReader, startTxNum, endTxNum)
-	if err != nil {
-		return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
+	// Cache hit on a previously-paused file: skip the heavyweight
+	// read+decode+invariants and re-check only the gate that's
+	// expected to change between sweeps (block .seg reaching
+	// Advertisable). Cache stays valid for the file's lifetime at
+	// LifecycleIndexed — once it advances, the lifecycle dispatch
+	// won't call us again on this name.
+	info, cached := v.PausedCache.Get(files[0].Name)
+	if !cached {
+		stepSize := tx.Debug().StepSize()
+		endTxNum := toStep * stepSize
+		startTxNum := fromStep * stepSize
+		var err error
+		info, err = integrity.LoadCommitmentRoot(ctx, tx, v.BlockReader, startTxNum, endTxNum)
+		if err != nil {
+			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
+		}
 	}
 
 	if !info.PartialBlock() {
@@ -121,9 +189,12 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		// docs/plans/20260510-partial-block-validation-model.md.
 		// validation.ErrPause is treated as transient by the lifecycle
 		// dispatch — no quarantine tick.
+		v.PausedCache.Put(files[0].Name, info)
 		return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
 			info.BlockNum, info.TxNum, info.BlockMaxTxNum, fromStep, toStep, validation.ErrPause)
 	}
+	// Validation passed — drop any prior pause-cache entry.
+	v.PausedCache.Forget(files[0].Name)
 
 	if v.Inventory != nil {
 		v.Inventory.RegisterStepBlockBoundary(toStep, info.BlockNum)

@@ -577,6 +577,7 @@ func (p *Provider) Initialize(deps Deps) error {
 				BlockReader: p.BlockReader,
 				Inventory:   deps.Inventory,
 				Logger:      logger, // emits "binding registered source=lifecycle"
+				PausedCache: NewPausedCommitmentCache(),
 			})
 		}
 		p.LifecycleDriver = &lifecycle.Driver{

@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -176,4 +177,34 @@ func TestSeedLatestCommitmentBinding_EmptyInventoryIsNoOp(t *testing.T) {
 	seedLatestCommitmentBinding(context.Background(), inv, v, nil)
 	require.Empty(t, v.fired)
 	require.Empty(t, inv.StepBlockBoundaries())
+}
+
+// TestPausedCommitmentCache_GetPutForget exercises the cache's basic
+// contract.
+func TestPausedCommitmentCache_GetPutForget(t *testing.T) {
+	t.Parallel()
+	c := NewPausedCommitmentCache()
+
+	_, ok := c.Get("missing.kv")
+	require.False(t, ok)
+
+	c.Put("a.kv", integrity.CommitmentRootInfo{TxNum: 8970, BlockNum: 25049601, BlockMaxTxNum: 1234567890})
+	got, ok := c.Get("a.kv")
+	require.True(t, ok)
+	require.Equal(t, uint64(25049601), got.BlockNum)
+
+	c.Forget("a.kv")
+	_, ok = c.Get("a.kv")
+	require.False(t, ok)
+}
+
+// TestPausedCommitmentCache_NilSafe verifies the nil receiver no-ops
+// (the cache is optional; tests/tools without one must not crash).
+func TestPausedCommitmentCache_NilSafe(t *testing.T) {
+	t.Parallel()
+	var c *PausedCommitmentCache
+	_, ok := c.Get("any")
+	require.False(t, ok)
+	c.Put("any", integrity.CommitmentRootInfo{})
+	c.Forget("any")
 }
