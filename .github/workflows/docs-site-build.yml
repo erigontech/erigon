@@ -1,0 +1,53 @@
+name: Docs Site Build
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Defensive guard — skip silently if docs/site/ is absent (e.g. branches
+      # that predate the Docusaurus migration) or if the Python scripts aren't
+      # present yet (partial migration state).
+      - name: Check docs/site prerequisites are present
+        id: guard
+        run: |
+          if [ -f docs/site/package.json ] && [ -f docs/site/package-lock.json ] && [ -d docs/site/scripts ] && [ -f docs/site/scripts/generate-llms.py ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "docs/site prerequisites not found — skipping build"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.guard.outputs.present == 'true'
+        with:
+          python-version: '3.11'
+
+      - name: Verify llms.txt artifacts are up to date
+        if: steps.guard.outputs.present == 'true'
+        run: |
+          python3 docs/site/scripts/generate-llms.py --check
+          python3 -m unittest discover docs/site/scripts -v
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.present == 'true'
+        with:
+          node-version: '20.x'
+          cache: npm
+          cache-dependency-path: docs/site/package-lock.json
+
+      - run: npm ci
+        if: steps.guard.outputs.present == 'true'
+        working-directory: docs/site
+
+      - run: npm run typecheck
+        if: steps.guard.outputs.present == 'true'
+        working-directory: docs/site
+
+      - run: npm run build
+        if: steps.guard.outputs.present == 'true'
+        working-directory: docs/site
