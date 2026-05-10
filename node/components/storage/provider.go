@@ -45,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/app/event"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/lifecycle"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -85,6 +87,19 @@ type Provider struct {
 	// AND Config.Snapshot.LifecycleDrivenByStorage is true. Stopped
 	// via Provider.Stop. Nil otherwise.
 	LifecycleDriver *lifecycle.Driver
+
+	// eventBus + Orchestrator + InitialStateReady are constructed
+	// together in Initialize when storage owns the lifecycle. The
+	// channel is exposed so backend.go can plumb it into
+	// cfg.Snapshot.InitialStateReady; the bus + orchestrator stay
+	// internal. NOTE: until the framework wires sentry/downloader
+	// to a shared bus, the orchestrator's input events
+	// (PeerManifestReceived / DownloadComplete) never arrive, so
+	// InitialStateReady will not fire in production today — see
+	// memory/shared-bus-wiring-todo.md.
+	eventBus          event.EventBus
+	Orchestrator      *flow.Orchestrator
+	InitialStateReady <-chan struct{}
 
 	logger log.Logger
 }
@@ -590,17 +605,33 @@ func (p *Provider) Initialize(deps Deps) error {
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
 		}
+
+		// Flow orchestrator. NOTE: validation.Chain (per-file) for the
+		// orchestrator's RecordFile path is a separate construction
+		// from batchChain (per-step) used by the lifecycle driver
+		// above; flow.New uses the unvalidated inventoryStorage
+		// adapter for now. Wiring a per-file chain is a follow-up.
+		p.eventBus = event.NewEventBus(nil)
+		p.InitialStateReady = flow.InitialStateReadyChannel(p.eventBus)
+		p.Orchestrator = flow.New(p.eventBus, deps.Inventory, logger)
+		if err := p.Orchestrator.Start(ctx); err != nil {
+			p.LifecycleDriver.Stop() // unwind partial init
+			return fmt.Errorf("storage: start orchestrator: %w", err)
+		}
 	}
 
 	return nil
 }
 
-// Stop releases the storage component's runtime resources. Currently
-// only the lifecycle driver needs explicit shutdown; other resources
-// (DB, BlockRetire, etc.) follow the framework's existing lifecycle.
-// Multi-call safe — Driver.Stop is idempotent.
+// Stop releases the storage component's runtime resources. The
+// lifecycle driver and the flow orchestrator both need explicit
+// shutdown; other resources (DB, BlockRetire, etc.) follow the
+// framework's existing lifecycle. Multi-call safe.
 func (p *Provider) Stop() {
 	if p.LifecycleDriver != nil {
 		p.LifecycleDriver.Stop()
+	}
+	if p.Orchestrator != nil {
+		_ = p.Orchestrator.Close()
 	}
 }

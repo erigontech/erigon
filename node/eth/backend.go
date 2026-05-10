@@ -1029,6 +1029,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	config.Snapshot.InitialStateReady = backend.components.Storage.InitialStateReady
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder

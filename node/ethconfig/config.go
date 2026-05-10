@@ -158,6 +158,15 @@ type BlocksFreezing struct {
 	// Set by the backend when P2PManifest is enabled. Nil otherwise.
 	ManifestReady <-chan struct{}
 
+	// InitialStateReady is closed when the storage component's flow
+	// orchestrator publishes flow.InitialStateReady (header chain +
+	// state at snapshot tip is in place). Plumbed into staged-sync's
+	// OtterSync gate so stages 2-6 run concurrently with the
+	// historical-tail download. Set by backend.go from
+	// storage.Provider.InitialStateReady when LifecycleDrivenByStorage
+	// is enabled. Nil otherwise.
+	InitialStateReady <-chan struct{}
+
 	// LifecycleDrivenByStorage cuts over file-import orchestration
 	// (BuildMissedIndices, BuildMissedAccessors) from the stage loop
 	// to the storage component's lifecycle driver. Defaults false:
