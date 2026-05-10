@@ -469,3 +469,51 @@ func TestFindPartialBlockCommitmentsWithoutCoverage(t *testing.T) {
 		require.Nil(t, FindPartialBlockCommitmentsWithoutCoverage(nil))
 	})
 }
+
+// TestApplyV2Manifest verifies the combined consumer gate: uncovered
+// partial-blocks are skipped, mismatched anchors don't apply, the rest
+// are stamped onto the inventory.
+func TestApplyV2Manifest(t *testing.T) {
+	t.Parallel()
+
+	publisherRoot := [32]byte{0xab, 0xcd}
+	publisher := snapshotinv.NewInventory()
+	require.NoError(t, publisher.AddFile(newCommitmentEntry(snapshotinv.Anchors{
+		Root: publisherRoot, AtBlock: 25049601, AtTxNum: 99, IsPartialBlock: true,
+	})))
+	manifestWithCoverage := GenerateV2(publisher)
+	manifestWithCoverage.Blocks = map[string]string{
+		"v1.1-025040-025050-headers.seg": "h",
+	}
+
+	t.Run("partial_with_coverage_applies", func(t *testing.T) {
+		consumer := snapshotinv.NewInventory()
+		require.NoError(t, consumer.AddFile(newCommitmentEntry(snapshotinv.Anchors{})))
+		res, err := ApplyV2Manifest(consumer, manifestWithCoverage, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.UncoveredPartial)
+		require.Empty(t, res.MismatchedAnchors)
+		require.Equal(t, 1, res.Applied)
+	})
+
+	t.Run("partial_without_coverage_skipped", func(t *testing.T) {
+		manifest := GenerateV2(publisher) // no Blocks → uncovered
+		consumer := snapshotinv.NewInventory()
+		require.NoError(t, consumer.AddFile(newCommitmentEntry(snapshotinv.Anchors{})))
+		res, err := ApplyV2Manifest(consumer, manifest, nil)
+		require.NoError(t, err)
+		require.Len(t, res.UncoveredPartial, 1)
+		require.Equal(t, 0, res.Applied, "uncovered partial-block must not apply")
+	})
+
+	t.Run("mismatched_anchor_rejected", func(t *testing.T) {
+		consumer := snapshotinv.NewInventory()
+		require.NoError(t, consumer.AddFile(newCommitmentEntry(snapshotinv.Anchors{})))
+		res, err := ApplyV2Manifest(consumer, manifestWithCoverage, func(uint64) ([32]byte, error) {
+			return [32]byte{0xff}, nil
+		})
+		require.NoError(t, err)
+		require.Len(t, res.MismatchedAnchors, 1)
+		require.Equal(t, 0, res.Applied)
+	})
+}

@@ -424,6 +424,64 @@ func ApplyV2AnchorsToInventory(inv *snapshotinv.Inventory, manifest *ChainTomlV2
 	return applied, mismatches, nil
 }
 
+// V2ApplyResult is the aggregate outcome of applying a V2 manifest to
+// a local inventory: counts of anchors applied, partial-block entries
+// skipped because the manifest lacked block coverage, and entries
+// rejected because their ProofRoot disagreed with the chain header's
+// stateRoot.
+type V2ApplyResult struct {
+	Applied           int
+	UncoveredPartial  []PartialBlockWithoutCoverage
+	MismatchedAnchors []MismatchedAnchor
+}
+
+// ApplyV2Manifest is the consumer-side combined gate. Callers that own
+// an inventory + a BlockReader (storage Provider in production) parse
+// the manifest, then call this to (a) skip partial-block commitments
+// whose AtBlock isn't covered by any block .seg in the same manifest,
+// (b) cross-check ProofRoot against header.stateRoot for the rest,
+// (c) stamp validated anchors onto matching FileEntries.
+//
+// Skipped + mismatched entries are returned for caller logging/alert;
+// neither category gets its anchors applied.
+func ApplyV2Manifest(inv *snapshotinv.Inventory, manifest *ChainTomlV2, headerRoot HeaderStateRootFn) (V2ApplyResult, error) {
+	var res V2ApplyResult
+	if inv == nil || manifest == nil {
+		return res, nil
+	}
+	res.UncoveredPartial = FindPartialBlockCommitmentsWithoutCoverage(manifest)
+	skip := make(map[string]struct{}, len(res.UncoveredPartial))
+	for _, u := range res.UncoveredPartial {
+		skip[u.Name] = struct{}{}
+	}
+	// Filter: a stripped-down manifest with the uncovered-partial
+	// files removed, so ApplyV2AnchorsToInventory doesn't stamp them.
+	filtered := *manifest
+	if len(skip) > 0 {
+		filtered.Domains = make(map[string]*DomainManifest, len(manifest.Domains))
+		for name, dm := range manifest.Domains {
+			if dm == nil {
+				continue
+			}
+			files := dm.Files
+			out := make([]DomainFileEntry, 0, len(files))
+			for _, f := range files {
+				if _, drop := skip[f.Name]; drop {
+					continue
+				}
+				out = append(out, f)
+			}
+			fc := *dm
+			fc.Files = out
+			filtered.Domains[name] = &fc
+		}
+	}
+	applied, mismatches, err := ApplyV2AnchorsToInventory(inv, &filtered, headerRoot)
+	res.Applied = applied
+	res.MismatchedAnchors = mismatches
+	return res, err
+}
+
 // MismatchedAnchor reports a file whose manifest-published ProofRoot
 // disagrees with the chain header's stateRoot for AtBlock. The
 // publisher's claim cannot be trusted for this file; consumer must not
