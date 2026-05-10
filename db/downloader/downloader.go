@@ -129,6 +129,12 @@ type Downloader struct {
 	// SetInventory by production wiring (backend.go).
 	inventory *storagesnapshot.Inventory
 
+	// lastV2InfoHash is the info-hash of the most recent V2 sidecar
+	// generation. PublishLocalChainToml re-asserts this on the ENR
+	// even when content didn't change so the V1 enrUpdater call
+	// inside PublishChainToml doesn't leave the ENR pointing at V1.
+	lastV2InfoHash [20]byte
+
 	// onPeerWithChainTomlDiscovered is called whenever the legacy
 	// chain.toml discovery loop finds a peer advertising a chain-toml
 	// ENR entry. Production wiring (backend.go) plugs in a function
@@ -496,18 +502,43 @@ func (d *Downloader) PublishLocalChainToml() error {
 		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
 	}
 
-	// V2 sidecar: only emit a new generation when the V1 content
-	// actually changed. RollingV2Publisher.Publish writes a fresh
-	// chain.v2.<seq>.toml every call regardless of content; firing
-	// on every PublishLocalChainToml call (including no-op ENR
-	// re-advertisements) churns the ENR seq number and degrades
-	// discv5 propagation to peers.
-	if contentChanged && d.inventory != nil {
-		if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
-			d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
+	// V2 sidecar: emit a new generation only when V1 content actually
+	// changed (RollingV2Publisher.Publish writes a fresh
+	// chain.v2.<seq>.toml every call — firing on every no-op
+	// PublishLocalChainToml churns ENR seq and degrades discv5
+	// propagation). On no-op republishes re-assert the last V2
+	// info-hash so the ENR doesn't drift back to V1 (PublishChainToml
+	// above unconditionally pointed enrUpdater at V1).
+	if d.inventory != nil {
+		if contentChanged {
+			if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
+				d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
+			}
+		} else {
+			d.lock.RLock()
+			lastV2 := d.lastV2InfoHash
+			updater := d.enrUpdater
+			d.lock.RUnlock()
+			if updater != nil && lastV2 != ([20]byte{}) {
+				updater(enr.ChainToml{
+					AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
+					KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
+					InfoHash:            lastV2,
+				})
+			}
 		}
 	}
 	return nil
+}
+
+// authoritativeBlocksFromCfg returns the chain config's ExpectBlocks
+// for use in the ENR ChainToml entry. Returns 0 when the chain isn't
+// known.
+func authoritativeBlocksFromCfg(chainName string) uint64 {
+	if cfg, known := snapcfg.KnownCfg(chainName); known {
+		return cfg.ExpectBlocks
+	}
+	return 0
 }
 
 // SetInventory wires the storage component's inventory so that every
@@ -555,6 +586,9 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
 	}
+	d.lock.Lock()
+	d.lastV2InfoHash = hash
+	d.lock.Unlock()
 	d.logger.Info("[chaintoml] published v2 manifest", "infoHash", hash.HexString())
 	return nil
 }
