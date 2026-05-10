@@ -216,9 +216,16 @@ func TestFlushToUpdates_LiveAccount_EmitsFullUpdate(t *testing.T) {
 }
 
 // TestApplyWrites_IncarnationPath verifies that an IncarnationPath write
-// from the apply pipeline is captured into the calcAccountState. This is
-// the channel through which the executor signals "this account had a
-// non-zero pre-block incarnation" alongside SelfDestructPath=true.
+// captured before SelfDestructPath does NOT survive the SD: the SD case
+// zeros all account fields (Balance/Nonce/CodeHash/Incarnation) so
+// FlushToUpdates routes into the EIP-161 DeleteUpdate branch, matching
+// serial's DomainDel behavior of removing the leaf for a pure SD.
+//
+// The previous expectation (Incarnation preserved → zero-account UPDATE
+// flags) was based on a misreading of serial — empirically serial emits
+// DeleteUpdate for a pure SD-of-pre-existing-contract, not a zero-account
+// leaf with retained incarnation. TestRecreateAndRewind (block 3 SD)
+// fails under the old expectation.
 func TestApplyWrites_IncarnationPath(t *testing.T) {
 	cs := newTestCalcState()
 	addr := accounts.InternAddress([20]byte{0xc1})
@@ -231,17 +238,20 @@ func TestApplyWrites_IncarnationPath(t *testing.T) {
 
 	acc, ok := cs.accounts[addr]
 	require.True(t, ok, "ensureAccount should have created an entry")
-	assert.Equal(t, uint64(1), acc.Incarnation, "IncarnationPath write must populate Incarnation")
 	assert.True(t, acc.Deleted, "SelfDestructPath=true must set Deleted")
+	assert.Equal(t, uint64(0), acc.Incarnation, "SelfDestructPath must zero Incarnation (matches serial's DomainDel removing the leaf)")
+	assert.True(t, acc.Balance.IsZero(), "SelfDestructPath must zero Balance")
+	assert.Equal(t, uint64(0), acc.Nonce, "SelfDestructPath must zero Nonce")
+	assert.Equal(t, [32]byte(empty.CodeHash), acc.CodeHash, "SelfDestructPath must reset CodeHash")
 
 	updates := newTestUpdates()
 	cs.FlushToUpdates(updates)
 	keyVal := addr.Value()
 	got := lookupKeyUpdate(t, updates, string(keyVal[:]))
 	assert.Equal(t,
-		commitment.BalanceUpdate|commitment.NonceUpdate|commitment.CodeUpdate,
+		commitment.DeleteUpdate,
 		got.Flags,
-		"Deleted+Incarnation>0 routes through the zero-account UPDATE branch")
+		"Deleted+isAllZero routes through the EIP-161 DeleteUpdate branch (matches serial's DomainDel)")
 }
 
 // TestApplyWrites_BalancePathClearsDeleted verifies that a non-empty
