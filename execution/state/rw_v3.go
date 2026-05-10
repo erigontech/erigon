@@ -634,6 +634,15 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 }
 
 func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	// MIRROR-OF: LightCollector.DeleteAccount — kept symmetric so that
+	// future searches for one find the other. Both collectors emit only
+	// SelfDestructPath; the IncarnationPath needed by the parallel
+	// commitment calculator for the SD-of-pre-existing-contract case is
+	// emitted via IBS.Selfdestruct's versionWritten (intra_block_state.go
+	// around line 1430), not via either DeleteAccount. If a future caller
+	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
+	// pre-existing contract, both implementations would need an
+	// IncarnationPath emit here.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 
 	c.rs.accountsMutex.Lock()

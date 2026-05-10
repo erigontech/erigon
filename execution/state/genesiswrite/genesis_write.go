@@ -334,12 +334,16 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	ctx := context.Background()
 
 	// some users creating > 1Gb custom genesis by `erigon init`.
-	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
-	// so a 2 TB reservation immediately exhausts the pagefile when parallel goroutines open
-	// multiple databases (e.g. during test runs). On Linux/macOS the reservation is backed by
-	// sparse files with copy-on-write, so 2 TB is harmless.
-	// 1 GB is plenty for any practical genesis block; the CI pagefile minimum is 8 GB.
-	genesisMapSize := 2 * datasize.TB
+	// On Windows, MDBX file-mappings are backed by the paging file for their
+	// full map size, so a large reservation immediately exhausts the pagefile
+	// when parallel goroutines open multiple databases. On Linux/macOS the
+	// reservation is sparse, but each open env still eats from the process's
+	// finite virtual address space (~128 TB on x86-64) — enough to matter
+	// when many EngineApiTester instances are alive in one process. 16 GB
+	// keeps headroom for outsized custom genesis allocations while letting
+	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
+	// 8 GB.
+	genesisMapSize := 16 * datasize.GB
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
 	}
