@@ -24,6 +24,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // DefaultSweepInterval is the cadence at which the driver scans the
@@ -378,6 +380,10 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		}
 		logger.Debug("[storage-lifecycle] dispatch OnIndexing", "name", e.Name)
 		if err := d.OnIndexing(ctx, e); err != nil {
+			if errors.Is(err, validation.ErrPause) {
+				logger.Debug("[storage-lifecycle] OnIndexing paused (transient)", "name", e.Name, "err", err)
+				return
+			}
 			logger.Debug("[storage-lifecycle] OnIndexing failed", "name", e.Name, "err", err)
 			d.recordFailure(e.Name, "OnIndexing", logger)
 		} else {
@@ -389,6 +395,15 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 		}
 		logger.Debug("[storage-lifecycle] dispatch OnValidation", "name", e.Name)
 		if err := d.OnValidation(ctx, e); err != nil {
+			if errors.Is(err, validation.ErrPause) {
+				// Pause is the validator's defensive "wait for some
+				// other piece of state to land" signal — neither
+				// progress nor failure. Don't tick the per-file
+				// quarantine counter, and don't clear prior real
+				// failures either. Next sweep retries.
+				logger.Debug("[storage-lifecycle] OnValidation paused (transient)", "name", e.Name, "err", err)
+				return
+			}
 			logger.Debug("[storage-lifecycle] OnValidation failed", "name", e.Name, "err", err)
 			d.recordFailure(e.Name, "OnValidation", logger)
 		} else {

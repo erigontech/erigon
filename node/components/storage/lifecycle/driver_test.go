@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 func TestDriver_StartStopIsClean(t *testing.T) {
@@ -194,3 +196,66 @@ var errOnIndexing = errSentinel("simulated indexing failure")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+// TestDriver_PauseDoesNotQuarantine verifies that a handler returning
+// validation.ErrPause does NOT advance the per-file quarantine counter.
+// Real-world driver: the partial-block commitment validator pauses
+// until the matching block .seg is at LifecycleAdvertisable; on a
+// publisher just past retire that race window can span multiple
+// sweeps. A naive quarantine would falsely retire the commitment
+// before the block .seg catches up.
+func TestDriver_PauseDoesNotQuarantine(t *testing.T) {
+	inv := snapshot.NewInventory()
+	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+		Name: "v2.0-commitment.0-1.kv", Domain: snapshot.DomainCommitment,
+		Local: true, State: snapshot.LifecycleIndexed,
+	}))
+
+	var calls atomic.Int32
+	d := &Driver{
+		Inv: inv,
+		// Validator pauses every sweep — the block .seg never lands.
+		OnValidation: func(_ context.Context, _ *snapshot.FileEntry) error {
+			calls.Add(1)
+			return fmt.Errorf("partial-block pause: %w", validation.ErrPause)
+		},
+		QuarantineThreshold: 3,
+	}
+
+	// Sweep many more times than the threshold. A non-pause error
+	// would quarantine after 3 calls; pauses must not.
+	for i := 0; i < 10; i++ {
+		d.Sweep(context.Background(), nil)
+	}
+
+	require.Equal(t, int32(10), calls.Load(),
+		"every sweep must dispatch — pause must not skip via quarantine")
+	require.False(t, d.isQuarantined("v2.0-commitment.0-1.kv"),
+		"pause errors must NOT advance the quarantine counter")
+}
+
+// TestDriver_NonPauseErrorStillQuarantines confirms non-pause errors
+// continue to quarantine normally — pause is the exception, not the
+// new default.
+func TestDriver_NonPauseErrorStillQuarantines(t *testing.T) {
+	inv := snapshot.NewInventory()
+	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+		Name: "bad.kv", Domain: snapshot.DomainAccounts,
+		Local: true, State: snapshot.LifecycleIndexed,
+	}))
+
+	d := &Driver{
+		Inv: inv,
+		OnValidation: func(_ context.Context, _ *snapshot.FileEntry) error {
+			return errSentinel("real failure, not pause")
+		},
+		QuarantineThreshold: 3,
+	}
+
+	for i := 0; i < 3; i++ {
+		d.Sweep(context.Background(), nil)
+	}
+
+	require.True(t, d.isQuarantined("bad.kv"),
+		"3 non-pause failures at threshold=3 must quarantine")
+}

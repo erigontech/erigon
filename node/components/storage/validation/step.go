@@ -25,6 +25,25 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
+// ErrPause is the sentinel error a validator returns when the file
+// CANNOT be validated yet but the failure is transient — typically
+// "wait for some other piece of state to land". Lifecycle dispatch
+// treats this as "no progress, retry later" and does NOT increment
+// the per-file failure counter that drives quarantine.
+//
+// Concrete use: CommitmentDomainValidator returns an error wrapping
+// ErrPause when a partial-block commitment lacks its matching block
+// .seg at LifecycleAdvertisable. Without ErrPause, the lifecycle's
+// quarantine policy would tick on every retry and falsely quarantine
+// the commitment after a few sweeps even though the pause is the
+// designed defensive behaviour. Persistent (non-pause) failures
+// continue to quarantine normally.
+//
+// Validators wrap this with context: fmt.Errorf("partial-block
+// commitment for block %d: %w", blockNum, validation.ErrPause).
+// Dispatch detects via errors.Is.
+var ErrPause = errors.New("validator paused; retry on next sweep")
+
 // StepValidator runs across the grouped set of files for one batch
 // (a step group, a block-range group, or any other coherent set the
 // retire / merge cycle produces). It receives the file list at

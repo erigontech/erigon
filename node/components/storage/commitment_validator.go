@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // CommitmentDomainValidator is the Stage-2 batch validator: when a
@@ -236,8 +237,12 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		// IsPartialBlock=true; rely on consumer-side replay-verify
 		// or trust). See design-gap memory.
 		if !blockSegAdvertisableForBlock(v.Inventory, blockNum) {
-			return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d))",
-				blockNum, txNum, blockMaxTxNum, fromStep, toStep)
+			// Wrap validation.ErrPause so lifecycle dispatch
+			// recognises this as transient and does NOT tick the
+			// per-file quarantine counter. The block .seg lifecycle
+			// catching up is normal operation.
+			return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
+				blockNum, txNum, blockMaxTxNum, fromStep, toStep, validation.ErrPause)
 		}
 	}
 
