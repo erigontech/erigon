@@ -357,6 +357,16 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
+	// After unwind the canonical commitment-domain values are rolled
+	// back; any cached entries for keys touched in the unwind window
+	// now hold stale bytes vs the post-unwind canonical state. Drop
+	// those specifically — the rest of the cache (including pinned
+	// branches whose keys weren't in the changeset) stays warm.
+	if sd.branchCache != nil && changeset != nil {
+		for _, diff := range changeset[kv.CommitmentDomain] {
+			sd.branchCache.Invalidate([]byte(diff.Key))
+		}
+	}
 }
 
 func (sd *SharedDomains) Trace() bool {
