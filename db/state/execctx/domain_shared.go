@@ -168,6 +168,16 @@ type SharedDomains struct {
 	// May be nil for test setups whose AggTx doesn't implement
 	// commitment.BranchCacheProvider.
 	branchCache *commitment.BranchCache
+
+	// adaptivePinController owns the policy that decides which
+	// contracts get pinned based on observed miss pressure. nil when
+	// branchCache is nil or when the adaptive layer is disabled. The
+	// controller's miss callback is wired onto branchCache via Bind
+	// during EnableParaTrieDB; OnBlockComplete fires from sd.Flush.
+	// Uses sd.txNum as the "block tick" for cooldown semantics — Flush
+	// is per-batch so the controller's tick maps to batches not blocks,
+	// but cooldown thresholds are tunable to compensate.
+	adaptivePinController *commitment.AdaptivePinController
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -208,6 +218,19 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	}
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
+
+	// Construct the adaptive pin controller alongside the cache. The
+	// controller observes per-contract miss pressure and decides
+	// promotions/extensions/demotions; without binding (deferred to
+	// EnableParaTrieDB so the db is available for the reader path)
+	// the controller is inert.
+	if branchCache != nil && !dbg.EnvBool("DISABLE_ADAPTIVE_PIN", false) {
+		sd.adaptivePinController = commitment.NewAdaptivePinController(
+			branchCache,
+			commitment.DefaultAdaptivePinControllerConfig(),
+			logger,
+		)
+	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -742,13 +765,34 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	// the local sd.mem value (during the lock) or the cached/MDBX value
 	// (after release). No window where cache is stale vs MDBX.
 	if sd.branchCache != nil {
-		return sd.mem.FlushWithCallback(ctx, tx, kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
+		if err := sd.mem.FlushWithCallback(ctx, tx, kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
 			if len(v) == 0 {
 				sd.branchCache.Invalidate(k)
 				return
 			}
 			sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
-		})
+		}); err != nil {
+			return err
+		}
+		// Adaptive controller hook: now that the cache reflects this
+		// batch's writes, decide promotions / extensions / demotions
+		// for the contracts whose miss pressure crossed thresholds.
+		// The reader uses the in-flight Flush tx so pre-cache reads
+		// see the just-committed bytes (the tx's own writes are
+		// visible to itself).
+		if sd.adaptivePinController != nil {
+			if ttx, ok := tx.(kv.TemporalTx); ok {
+				reader := func(prefix []byte) ([]byte, uint64, bool, error) {
+					v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
+					if err != nil {
+						return nil, 0, false, err
+					}
+					return v, uint64(step), len(v) > 0, nil
+				}
+				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
+			}
+		}
+		return nil
 	}
 	return sd.mem.Flush(ctx, tx)
 }
@@ -1165,7 +1209,8 @@ func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sd.sdCtx.EnableParaTrieDB(db)
 
-	// Trigger trunk-preload here (not from NewSharedDomains) so:
+	// Stage-init is the right firing point for both the env-driven
+	// forced preload AND the adaptive controller's bind:
 	//  (a) we have a kv.TemporalRoDB to spawn an own-tx preload goroutine
 	//      with — avoids the cgo-pointer panic that the earlier shared-tx
 	//      attempt produced.
@@ -1177,11 +1222,24 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 	if sd.branchCache == nil || !sd.branchCache.TryClaimPreload() {
 		return
 	}
-	pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", "")
-	if pinList == "" {
-		return
+
+	// Operator-override path: PIN_CONTRACT_TRUNKS forces specific
+	// contracts to be pinned regardless of adaptive policy. Runs
+	// first so its pin set is in place before the controller binds.
+	if pinList := dbg.EnvString("PIN_CONTRACT_TRUNKS", ""); pinList != "" {
+		triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
 	}
-	triggerTrunkPreload(context.Background(), sd.branchCache, db, pinList, sd.logger)
+
+	// Bind the adaptive controller to the cache so it starts
+	// observing miss pressure for un-forced contracts. The reader
+	// for promote/extend preloads is constructed per-call from the
+	// in-flight Flush tx (see SD.Flush).
+	if sd.adaptivePinController != nil {
+		sd.adaptivePinController.Bind()
+		sd.logger.Info("[adaptive-pin] enabled",
+			"max_promoted", commitment.DefaultAdaptivePinControllerConfig().MaxPromotedContracts,
+			"per_contract_max_mb", commitment.DefaultAdaptivePinControllerConfig().PerContractMaxBudgetBytes/(1<<20))
+	}
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
