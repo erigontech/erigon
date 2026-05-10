@@ -24,6 +24,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newCommitmentEntry builds the commitment-domain FileEntry used
+// across the V2 anchor tests. Only the Anchors vary; everything
+// else (name, step range, torrent hash, local/trust) is fixed
+// boilerplate.
+func newCommitmentEntry(a snapshotinv.Anchors) *snapshotinv.FileEntry {
+	return &snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+		Anchors: a,
+	}
+}
+
 func TestDetectVersion(t *testing.T) {
 	// V1: no version field.
 	v1 := []byte(`"v1.0-000000-000500-headers.seg" = "abc123"` + "\n")
@@ -346,23 +359,14 @@ func TestParseChainTomlAutoV1V2(t *testing.T) {
 func TestApplyV2AnchorsToInventory(t *testing.T) {
 	publisher := snapshotinv.NewInventory()
 	publisherRoot := [32]byte{0xd1, 0xe5, 0x56, 0x19}
-	require.NoError(t, publisher.AddFile(&snapshotinv.FileEntry{
-		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
-		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
-		Local: true, Trust: snapshotinv.TrustVerified,
-		Anchors: snapshotinv.Anchors{
-			Root: publisherRoot, AtBlock: 12345, AtTxNum: 99999, IsPartialBlock: true,
-		},
-	}))
+	require.NoError(t, publisher.AddFile(newCommitmentEntry(snapshotinv.Anchors{
+		Root: publisherRoot, AtBlock: 12345, AtTxNum: 99999, IsPartialBlock: true,
+	})))
 	manifest := GenerateV2(publisher)
 
 	// Local consumer inventory has the matching file but no anchors yet.
 	consumer := snapshotinv.NewInventory()
-	require.NoError(t, consumer.AddFile(&snapshotinv.FileEntry{
-		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
-		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
-		Local: true, Trust: snapshotinv.TrustVerified,
-	}))
+	require.NoError(t, consumer.AddFile(newCommitmentEntry(snapshotinv.Anchors{})))
 
 	// No cross-check: anchors apply unconditionally.
 	applied, mismatches, err := ApplyV2AnchorsToInventory(consumer, manifest, nil)
@@ -388,11 +392,7 @@ func TestApplyV2AnchorsToInventory(t *testing.T) {
 
 	// Mismatch: chain reports a different stateRoot — entry rejected.
 	consumer2 := snapshotinv.NewInventory()
-	require.NoError(t, consumer2.AddFile(&snapshotinv.FileEntry{
-		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
-		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
-		Local: true, Trust: snapshotinv.TrustVerified,
-	}))
+	require.NoError(t, consumer2.AddFile(newCommitmentEntry(snapshotinv.Anchors{})))
 	chainRoot := [32]byte{0xff, 0xff, 0xff, 0xff}
 	applied3, mismatches3, err := ApplyV2AnchorsToInventory(consumer2, manifest, func(b uint64) ([32]byte, error) {
 		return chainRoot, nil
