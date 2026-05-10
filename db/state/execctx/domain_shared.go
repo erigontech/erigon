@@ -999,13 +999,15 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 // Own-tx async sidesteps both. Caller must guarantee fire-once via
 // BranchCache.TryClaimPreload (the only call site does this).
 func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCache, db kv.TemporalRoDB, pinList string, logger log.Logger) {
-	// Default 67 covers depths 64-67 = ~16+256+4096 ≈ 4.4K branches max
-	// per contract for a fully-saturated subtree. Override via
-	// PIN_TRUNK_MAX_DEPTH for sweep experiments.
-	maxDepth := 67
-	if v := dbg.EnvInt("PIN_TRUNK_MAX_DEPTH", 67); v >= 64 {
-		maxDepth = v
+	// RAM budget for the per-contract pin tier. Default 32 MiB covers
+	// a fully-saturated d=68 trunk (~70K branches × ~200 B) with
+	// headroom; depth reached is emergent from trie shape + budget.
+	// Override via PIN_TRUNK_RAM_BUDGET_MB for sweep experiments.
+	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", 32)
+	if ramBudgetMB <= 0 {
+		ramBudgetMB = 32
 	}
+	ramBudgetBytes := ramBudgetMB << 20
 	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
 	var hashes [][]byte
 	for _, hexStr := range strings.Split(pinList, ",") {
@@ -1021,7 +1023,7 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 		}
 		hashes = append(hashes, h)
 	}
-	logger.Info("[trunk-preload] hashes parsed", "count", len(hashes), "max_depth", maxDepth)
+	logger.Info("[trunk-preload] hashes parsed", "count", len(hashes), "ram_budget_mb", ramBudgetMB)
 	if len(hashes) == 0 {
 		return
 	}
@@ -1047,7 +1049,7 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 		for i, h := range hashes {
 			started := time.Now()
 			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
-			n, err := commitment.PreloadContractTrunk(h, maxDepth, reader, branchCache, logger)
+			n, err := commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
 			took := time.Since(started)
 			if err != nil {
 				logger.Warn("[trunk-preload] failed",
