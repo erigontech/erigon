@@ -43,10 +43,14 @@ type pathDepth struct {
 // per-block extensions (additional budget while the contract stays
 // hot), instead of burst-loading the full budget at promotion time.
 //
+// Tracks its pinned prefixes so callers can Invalidate the contract's
+// pin set on demotion (PinnedPrefixes returns the slice).
+//
 // Caller MUST NOT use the same instance from multiple goroutines.
 type ContractTrunkPreload struct {
 	contractHash    []byte
 	queue           []pathDepth
+	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
@@ -121,6 +125,12 @@ func (p *ContractTrunkPreload) Run(
 		}
 
 		cache.PinEntry(prefix, v, step, "preload-trunk")
+		// Copy prefix because nibbles.HexToCompact may return a slice
+		// over a reused buffer; we need a stable handle for later
+		// Invalidate on demotion.
+		prefixCopy := make([]byte, len(prefix))
+		copy(prefixCopy, prefix)
+		p.pinnedPrefixes = append(p.pinnedPrefixes, prefixCopy)
 		chunkUsedBytes += entryCost
 		chunkPinned++
 		if head.depth > p.maxDepthReached {
@@ -168,6 +178,15 @@ func (p *ContractTrunkPreload) QueueRemaining() int { return len(p.queue) }
 
 // MaxDepthReached returns the deepest trie depth pinned so far.
 func (p *ContractTrunkPreload) MaxDepthReached() int { return p.maxDepthReached }
+
+// PinnedPrefixes returns the prefix slices this preload has added to
+// the cache so far. The adaptive controller uses this to Invalidate
+// the contract's pin set on demotion. The returned slice aliases
+// internal storage; do not mutate.
+func (p *ContractTrunkPreload) PinnedPrefixes() [][]byte { return p.pinnedPrefixes }
+
+// ContractHash returns the contract this preload targets.
+func (p *ContractTrunkPreload) ContractHash() []byte { return p.contractHash }
 
 // PreloadContractTrunk runs the full BFS preload for a contract in a
 // single call, bounded by ramBudgetBytes. Convenience wrapper around
