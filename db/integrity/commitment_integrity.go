@@ -120,22 +120,37 @@ func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br servi
 	return nil
 }
 
-type commitmentRootInfo struct {
-	rootHash      common.Hash
-	blockNum      uint64
-	txNum         uint64
-	blockMinTxNum uint64
-	blockMaxTxNum uint64
+// CommitmentRootInfo carries the recorded state-root + consensus
+// coordinates from a commitment file's KeyCommitmentState entry, plus
+// the block's txnum range so callers can decide whether the file is
+// block-aligned or partial-block.
+type CommitmentRootInfo struct {
+	RootHash      common.Hash
+	BlockNum      uint64
+	TxNum         uint64
+	BlockMinTxNum uint64
+	BlockMaxTxNum uint64
 }
 
-func (info commitmentRootInfo) PartialBlock() bool {
-	return commitment.IsPartialBlock(info.txNum, info.blockMaxTxNum)
+func (info CommitmentRootInfo) PartialBlock() bool {
+	return commitment.IsPartialBlock(info.TxNum, info.BlockMaxTxNum)
 }
 
-func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, logger log.Logger) (commitmentRootInfo, error) {
-	var info commitmentRootInfo
-	startTxNum := f.StartRootNum()
-	endTxNum := f.EndRootNum()
+// LoadCommitmentRoot reads KeyCommitmentState for the txnum range
+// [startTxNum, endTxNum), decodes (rootHash, blockNum, txNum), and
+// runs the basic-consistency invariants (range containment, txNum
+// not zero, root not empty, txNum lies within the block's
+// [min, max] range, recorded blockNum is the containing block).
+//
+// Does NOT compare against header.Root — callers handle that
+// themselves so they can branch on PartialBlock() (skip / pause /
+// verify). Used by both the integrity tool (`erigon seg integrity`)
+// and the publisher-side commitment validator.
+func LoadCommitmentRoot(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, startTxNum, endTxNum uint64) (CommitmentRootInfo, error) {
+	var info CommitmentRootInfo
+	if endTxNum == 0 {
+		return info, fmt.Errorf("%w: endTxNum is zero", ErrIntegrity)
+	}
 	maxTxNum := endTxNum - 1
 	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
 	if err != nil {
@@ -144,21 +159,24 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if !ok {
 		return info, fmt.Errorf("%w: commitment root not found", ErrIntegrity)
 	}
-	if start != startTxNum {
-		return info, fmt.Errorf("%w: commitment root not found with same startTxNum: %d != %d", ErrIntegrity, start, startTxNum)
+	// Containment, not strict equality: merged commitment files
+	// keep only the LATEST state, so the file's data range narrows
+	// while the merged-name range stays wide.
+	if start < startTxNum {
+		return info, fmt.Errorf("%w: commitment file startTxNum %d below step start %d", ErrIntegrity, start, startTxNum)
 	}
-	if end != endTxNum {
-		return info, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
+	if end > endTxNum {
+		return info, fmt.Errorf("%w: commitment file endTxNum %d past step end %d", ErrIntegrity, end, endTxNum)
 	}
 	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 	if err != nil {
 		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
-	if txNum >= endTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum is gte endTxNum: %d >= %d", ErrIntegrity, txNum, endTxNum)
+	if txNum >= end {
+		return info, fmt.Errorf("%w: commitment root txNum is gte fileEnd: %d >= %d", ErrIntegrity, txNum, end)
 	}
-	if txNum < startTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
+	if txNum < start {
+		return info, fmt.Errorf("%w: commitment root txNum is lt fileStart: %d < %d", ErrIntegrity, txNum, start)
 	}
 	txNumReader := br.TxnumReader()
 	blockMinTxNum, err := txNumReader.Min(ctx, tx, blockNum)
@@ -182,25 +200,48 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if rootHash == (common.Hash{}) {
 		return info, fmt.Errorf("%w: commitment root is empty", ErrIntegrity)
 	}
-	info.rootHash, info.blockNum, info.txNum, info.blockMinTxNum, info.blockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
-	if info.PartialBlock() {
-		logger.Info("[integrity] CommitmentRoot skipping partial block", "file", filepath.Base(f.Fullpath()), "blockNum", blockNum, "txNum", txNum, "blockMinTxNum", blockMinTxNum, "blockMaxTxNum", blockMaxTxNum)
-		return info, nil
+	info.RootHash, info.BlockNum, info.TxNum, info.BlockMinTxNum, info.BlockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
+	return info, nil
+}
+
+// VerifyCommitmentMatchesHeader checks that info.RootHash equals the
+// canonical block-header stateRoot for info.BlockNum. Caller is
+// responsible for skipping this on partial-block commitments
+// (info.PartialBlock()): mid-block state has no consensus header
+// anchor and would always mismatch.
+func VerifyCommitmentMatchesHeader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, info CommitmentRootInfo) error {
+	h, err := br.HeaderByNumber(ctx, tx, info.BlockNum)
+	if err != nil {
+		return err
 	}
-	h, err := br.HeaderByNumber(ctx, tx, blockNum)
+	if h == nil {
+		return fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, info.BlockNum)
+	}
+	if h.Root != info.RootHash {
+		return fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, info.BlockNum, h.Root, info.RootHash)
+	}
+	return nil
+}
+
+func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, logger log.Logger) (CommitmentRootInfo, error) {
+	info, err := LoadCommitmentRoot(ctx, tx, br, f.StartRootNum(), f.EndRootNum())
 	if err != nil {
 		return info, err
 	}
-	if h == nil {
-		return info, fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, blockNum)
+	if info.PartialBlock() {
+		logger.Info("[integrity] CommitmentRoot skipping partial block",
+			"file", filepath.Base(f.Fullpath()),
+			"blockNum", info.BlockNum, "txNum", info.TxNum,
+			"blockMinTxNum", info.BlockMinTxNum, "blockMaxTxNum", info.BlockMaxTxNum)
+		return info, nil
 	}
-	if h.Root != rootHash {
-		return info, fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, blockNum, h.Root, rootHash)
+	if err := VerifyCommitmentMatchesHeader(ctx, tx, br, info); err != nil {
+		return info, err
 	}
 	return info, nil
 }
 
-func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
+func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info CommitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum() - 1
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
@@ -215,17 +256,17 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	if latestTxNum > maxTxNum {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, latestTxNum, maxTxNum)
 	}
-	if latestTxNum > info.blockMaxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, latestTxNum, info.blockMaxTxNum)
+	if latestTxNum > info.BlockMaxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, latestTxNum, info.BlockMaxTxNum)
 	}
-	if latestTxNum < info.blockMinTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, latestTxNum, info.blockMinTxNum)
+	if latestTxNum < info.BlockMinTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, latestTxNum, info.BlockMinTxNum)
 	}
 	if latestTxNum == 0 {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
 	if info.PartialBlock() {
-		logger.Info("[integrity] CommitmentRoot skipping sd partial block", "file", filepath.Base(f.Fullpath()), "blockNum", info.blockNum, "txNum", info.txNum, "blockMinTxNum", info.blockMinTxNum, "blockMaxTxNum", info.blockMaxTxNum)
+		logger.Info("[integrity] CommitmentRoot skipping sd partial block", "file", filepath.Base(f.Fullpath()), "blockNum", info.BlockNum, "txNum", info.TxNum, "blockMinTxNum", info.BlockMinTxNum, "blockMaxTxNum", info.BlockMaxTxNum)
 		return sd, nil
 	}
 	rootHashBytes, err := sd.GetCommitmentCtx().Trie().RootHash()
@@ -233,31 +274,31 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	rootHash := common.Hash(rootHashBytes)
-	if rootHash != info.rootHash {
-		return nil, fmt.Errorf("%w: commitment root does not match verified root for block %d: %s != %s", ErrIntegrity, info.blockNum, rootHash, info.rootHash)
+	if rootHash != info.RootHash {
+		return nil, fmt.Errorf("%w: commitment root does not match verified root for block %d: %s != %s", ErrIntegrity, info.BlockNum, rootHash, info.RootHash)
 	}
 	return sd, nil
 }
 
-func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info CommitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
 		if trace {
-			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
+			logger.Trace("[integrity] CommitmentRoot", "key", common.Address(k), "blockNum", info.BlockNum, "file", filepath.Base(f.Fullpath()))
 		}
 	}
-	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
+	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.BlockMinTxNum, info.TxNum+1, 0, nil /* no pre-built index */, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
 	logger.Info("[integrity] CommitmentRoot recomputing", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "", nil /* commitProgress */)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.BlockNum, info.TxNum, "", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
 	recomputed := common.Hash(recomputedBytes)
-	if recomputed != info.rootHash {
-		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.rootHash)
+	if recomputed != info.RootHash {
+		return fmt.Errorf("%w: recomputed root does not match verified root: %s != %s", ErrIntegrity, recomputed, info.RootHash)
 	}
 	logger.Info("[integrity] CommitmentRoot recomputed matches", "root", recomputed, "touches", touches, "file", filepath.Base(f.Fullpath()))
 	return nil

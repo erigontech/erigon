@@ -22,10 +22,9 @@ import (
 	"sort"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
 )
@@ -102,143 +101,40 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	}
 	defer tx.Rollback()
 
-	// The step covers txnum range [FromStep*S, ToStep*S). Look up the
-	// latest commitment state at-or-before maxTxNum = ToStep*S - 1.
 	stepSize := tx.Debug().StepSize()
 	endTxNum := toStep * stepSize
-	if endTxNum == 0 {
-		return fmt.Errorf("commitment step has zero ToStep — invalid step key")
-	}
-	maxTxNum := endTxNum - 1
+	startTxNum := fromStep * stepSize
 
-	val, ok, fileStart, fileEnd, err := tx.Debug().GetLatestFromFiles(
-		kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	info, err := integrity.LoadCommitmentRoot(ctx, tx, v.BlockReader, startTxNum, endTxNum)
 	if err != nil {
-		return fmt.Errorf("read KeyCommitmentState: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("KeyCommitmentState not found for step [%d, %d)",
-			fromStep, toStep)
+		return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
 	}
 
-	// Verify the file's data range is contained within the step's
-	// nominal txnum range. Strict equality is wrong because Erigon
-	// MERGES commitment files: a merged file named e.g.
-	// "v2.0-commitment.8960-8962.kv" carries only the LATEST
-	// commitment state (older states are superseded by merge), so
-	// its internal data range is narrower than the merged-name range
-	// — fileStart can sit at the start of the LATER step instead of
-	// at the merge-name's nominal start. The relevant invariant is
-	// containment, not equality.
-	expectedStart := fromStep * stepSize
-	if fileStart < expectedStart {
-		return fmt.Errorf("commitment file startTxNum %d is below step start %d (step [%d, %d))",
-			fileStart, expectedStart, fromStep, toStep)
-	}
-	if fileEnd > endTxNum {
-		return fmt.Errorf("commitment file endTxNum %d is past step end %d (step [%d, %d))",
-			fileEnd, endTxNum, fromStep, toStep)
-	}
-
-	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(val)
-	if err != nil {
-		return fmt.Errorf("decode KeyCommitmentState: %w", err)
-	}
-	if len(rootHashBytes) == 0 {
-		return fmt.Errorf("decoded commitment root is empty for step [%d, %d)",
-			fromStep, toStep)
-	}
-
-	// Sanity: txNum lies within the file's declared range.
-	if txNum >= fileEnd {
-		return fmt.Errorf("commitment txNum %d is gte fileEnd %d (step [%d, %d))",
-			txNum, fileEnd, fromStep, toStep)
-	}
-	if txNum < fileStart {
-		return fmt.Errorf("commitment txNum %d is lt fileStart %d (step [%d, %d))",
-			txNum, fileStart, fromStep, toStep)
-	}
-
-	// Block-membership check: the txNum recorded in the commitment
-	// state must lie within the block range that the commitment
-	// claims (blockNum). Erigon writes commitment files at STEP
-	// boundaries (txNum == fileEnd-1), and step boundaries cut
-	// mid-block in the typical case — so an over-strict
-	// "txNum == blockMaxTxNum" assertion would reject every
-	// well-formed commitment. The right invariant is: the recorded
-	// blockNum must be the block whose [minTxNum, maxTxNum] range
-	// includes the recorded txNum.
-	txNumReader := v.BlockReader.TxnumReader()
-	containingBlock, ok, err := txNumReader.FindBlockNum(ctx, tx, txNum)
-	if err != nil {
-		return fmt.Errorf("FindBlockNum(txNum=%d): %w", txNum, err)
-	}
-	if !ok {
-		return fmt.Errorf("no block contains txNum=%d (step [%d, %d), recorded blockNum=%d)",
-			txNum, fromStep, toStep, blockNum)
-	}
-	if containingBlock != blockNum {
-		return fmt.Errorf("commitment recorded blockNum=%d but txNum=%d lives in block %d (step [%d, %d))",
-			blockNum, txNum, containingBlock, fromStep, toStep)
-	}
-
-	// Block-aligned commitments cross-check rootHash against
-	// header.stateRoot directly; partial-block commitments (the
-	// typical retire-step output) have no consensus anchor for
-	// mid-block state, so they pause until the matching block .seg
-	// is Advertisable for replay-verify. See
-	// docs/plans/20260510-partial-block-validation-model.md.
-	if len(rootHashBytes) != 32 {
-		return fmt.Errorf("commitment rootHash is %d bytes, want 32 (step [%d, %d))",
-			len(rootHashBytes), fromStep, toStep)
-	}
-	var rootArr [32]byte
-	copy(rootArr[:], rootHashBytes)
-
-	blockMaxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return fmt.Errorf("TxnumReader.Max(blockNum=%d): %w", blockNum, err)
-	}
-	isPartialBlock := commitment.IsPartialBlock(txNum, blockMaxTxNum)
-
-	if !isPartialBlock {
-		// Block-aligned: direct cryptographic check closes the
-		// state-loop. The commitment's recorded end-of-block state
-		// MUST equal the consensus-committed header.stateRoot.
-		header, err := v.BlockReader.HeaderByNumber(ctx, tx, blockNum)
-		if err != nil {
-			return fmt.Errorf("HeaderByNumber(blockNum=%d): %w", blockNum, err)
+	if !info.PartialBlock() {
+		if err := integrity.VerifyCommitmentMatchesHeader(ctx, tx, v.BlockReader, info); err != nil {
+			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
 		}
-		if header == nil {
-			return fmt.Errorf("HeaderByNumber(blockNum=%d) returned nil header (step [%d, %d))",
-				blockNum, fromStep, toStep)
-		}
-		if header.Root != rootArr {
-			return fmt.Errorf("commitment rootHash %x disagrees with block %d header.stateRoot %x (step [%d, %d))",
-				rootArr, blockNum, header.Root, fromStep, toStep)
-		}
-	} else if !blockSegAdvertisableForBlock(v.Inventory, blockNum) {
-		// Pause (validation.ErrPause is treated as transient by the
-		// lifecycle dispatch — no quarantine tick).
+	} else if !blockSegAdvertisableForBlock(v.Inventory, info.BlockNum) {
+		// Block-aligned commitments cross-check against header.stateRoot;
+		// partial-block commitments pause until the matching block .seg
+		// is Advertisable for replay-verify. See
+		// docs/plans/20260510-partial-block-validation-model.md.
+		// validation.ErrPause is treated as transient by the lifecycle
+		// dispatch — no quarantine tick.
 		return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
-			blockNum, txNum, blockMaxTxNum, fromStep, toStep, validation.ErrPause)
+			info.BlockNum, info.TxNum, info.BlockMaxTxNum, fromStep, toStep, validation.ErrPause)
 	}
 
-	// All checks passed — register the (step, block) binding for
-	// downstream consumers (block→step mapping in PopulateFromName,
-	// orchestrator policy decisions) AND stamp the cryptographic
-	// anchors onto the FileEntry so they reach the V2 manifest via
-	// chaintoml_v2.GenerateV2.
 	if v.Inventory != nil {
-		v.Inventory.RegisterStepBlockBoundary(toStep, blockNum)
+		v.Inventory.RegisterStepBlockBoundary(toStep, info.BlockNum)
 		v.Inventory.SetAnchors(files[0].Name, snapshot.Anchors{
-			Root:           rootArr,
-			AtBlock:        blockNum,
-			AtTxNum:        txNum,
-			IsPartialBlock: isPartialBlock,
+			Root:           info.RootHash,
+			AtBlock:        info.BlockNum,
+			AtTxNum:        info.TxNum,
+			IsPartialBlock: info.PartialBlock(),
 		})
 	}
-	logBindingRegistered(v.Logger, "lifecycle", files[0].Name, toStep, &blockNum)
+	logBindingRegistered(v.Logger, "lifecycle", files[0].Name, toStep, &info.BlockNum)
 	return nil
 }
 
