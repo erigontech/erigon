@@ -469,7 +469,8 @@ func (d *Downloader) PublishLocalChainToml() error {
 	}
 
 	newBytes, _ := LoadChainToml(d.snapDir())
-	if !bytes.Equal(oldBytes, newBytes) {
+	contentChanged := !bytes.Equal(oldBytes, newBytes)
+	if contentChanged {
 		oldLines := bytes.Count(oldBytes, []byte("\n"))
 		newLines := bytes.Count(newBytes, []byte("\n"))
 		d.logger.Info("[chaintoml] regenerated",
@@ -483,14 +484,14 @@ func (d *Downloader) PublishLocalChainToml() error {
 	if err := d.seedChainTomlTorrent(); err != nil {
 		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
 	}
-	// V2 sidecar: emit a fresh chain.v2.<seq>.toml whose info-hash
-	// becomes the ENR ChainToml advertisement. Without this, every
-	// PublishLocalChainToml call would leave the ENR pointing at the
-	// V1 chain.toml info-hash and consumer-side manifest_exchange
-	// rejects "not a chain.v2.<seq>.toml sidecar". Inventory is set
-	// in production by SetInventory; nil in tests/tools that don't
-	// run the storage component.
-	if d.inventory != nil {
+
+	// V2 sidecar: only emit a new generation when the V1 content
+	// actually changed. RollingV2Publisher.Publish writes a fresh
+	// chain.v2.<seq>.toml every call regardless of content; firing
+	// on every PublishLocalChainToml call (including no-op ENR
+	// re-advertisements) churns the ENR seq number and degrades
+	// discv5 propagation to peers.
+	if contentChanged && d.inventory != nil {
 		if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
 			d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
 		}
