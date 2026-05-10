@@ -165,6 +165,7 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
+
 // SetBranchCache attaches the same BranchCache instance to the root trie
 // and all 16 mounts. Sharing one cache across mounts is correct under the
 // concurrency contract (branch_cache.go): mounts partition the prefix

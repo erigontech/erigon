@@ -119,7 +119,7 @@ var (
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
+	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
 	// The original default was NumCPU()*8 with the rationale "io-bound, more
 	// workers drive more concurrent I/O." Our measurements (cold-cgroup 6c
 	// vs unconstrained 12c on the SSTORE-bloat bench) show read_bytes

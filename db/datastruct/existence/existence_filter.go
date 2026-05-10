@@ -80,6 +80,7 @@ func (b *Filter) AddHash(hash uint64) error {
 	b.filter.AddHash(hash)
 	return nil
 }
+
 // Process-cumulative counters of ContainsHash outcomes.
 // True = "probably present" (filter does not short-circuit, lookup proceeds).
 // False = "definitely not present" (filter short-circuits the lookup).
