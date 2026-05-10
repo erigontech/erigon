@@ -1129,7 +1129,7 @@ func (d *Downloader) addedFirstDownloader(
 				// Should this error be returned instead?
 				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
 			}
-		} else {
+		} else if !errors.Is(err, context.Canceled) {
 			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
 		}
 	}
