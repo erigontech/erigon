@@ -72,6 +72,18 @@ type SnapshotsCfg struct {
 	// defaults false. See ethconfig.BlocksFreezing.LifecycleDrivenByStorage
 	// for the operator-facing flag.
 	lifecycleDrivenByStorage bool
+
+	// initialStateReady is the orchestrator's "minimal-set ready"
+	// signal. When lifecycleDrivenByStorage is true AND this channel
+	// is non-nil, OtterSync skips its own SyncSnapshots calls
+	// entirely (storage owns download) and waits on this channel
+	// before resuming with file-open / agg-reload bookkeeping. The
+	// downstream stages (BlockHashes/Senders/Execution/...) can then
+	// run concurrently with the long-tail historical download still
+	// in progress. Set via SetInitialStateReady by production wiring
+	// (backend.go) when the storage orchestrator is constructed.
+	// Defaults nil — existing callers see no behaviour change.
+	initialStateReady <-chan struct{}
 }
 
 // SetLifecycleDrivenByStorage opts the stage out of driving
@@ -85,6 +97,16 @@ type SnapshotsCfg struct {
 // that don't run the storage component leave it false (the default).
 func (cfg *SnapshotsCfg) SetLifecycleDrivenByStorage(b bool) {
 	cfg.lifecycleDrivenByStorage = b
+}
+
+// SetInitialStateReady installs the orchestrator's minimal-set-ready
+// channel. With it set (and LifecycleDrivenByStorage=true), OtterSync
+// skips its own download calls and waits on this channel instead.
+// Production wiring constructs and sets this when the storage
+// orchestrator comes up; tests/tools that don't run the storage
+// component leave it nil.
+func (cfg *SnapshotsCfg) SetInitialStateReady(ch <-chan struct{}) {
+	cfg.initialStateReady = ch
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -186,7 +208,17 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Bounded wait: if discovery never succeeds (no peers with chain-toml ENR,
 	// unreachable info-hash, etc.) we fall through to the centralized preverified
 	// registry rather than stalling the sync indefinitely.
-	const manifestReadyTimeout = 5 * time.Minute
+	//
+	// 2 minutes balances two costs: too short and we fall through to
+	// preverified before devp2p has even established staticpeer connections
+	// (observed 2026-05-07 multi-consumer fleet test: 30s timeout fired
+	// before publisher's RLPx handshake completed under host CPU
+	// contention). Too long and a fresh consumer with no reachable
+	// publisher waits unnecessarily before falling back. With the forced
+	// discv5-ping-on-connect fix, the actual ENR-Resolve latency once
+	// devp2p IS connected is sub-second; the budget is dominated by the
+	// devp2p connection establishment itself.
+	const manifestReadyTimeout = 2 * time.Minute
 	if cfg.manifestReady != nil {
 		log.Info(fmt.Sprintf("[%s] Waiting for P2P manifest discovery (timeout %s)...", s.LogPrefix(), manifestReadyTimeout))
 		select {
@@ -202,10 +234,24 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
-	// How do we get to the real Downloader if we need? Get the stack trace.
-	//panic("here")
-
-	if err := snapshotsync.SyncSnapshots(
+	// Storage-owned download: when the orchestrator drives the
+	// lifecycle, OtterSync delegates download entirely. We skip both
+	// SyncSnapshots calls and instead wait on the orchestrator's
+	// initialStateReady signal before proceeding to the post-download
+	// bookkeeping (file open, agg reload). Stages 2-6 then run
+	// concurrently with whatever historical-tail download remains, per
+	// the V2 architectural target (gap (d) in
+	// .claude/plans/time-to-get-back-generic-mist.md).
+	storageDriven := cfg.lifecycleDrivenByStorage && cfg.initialStateReady != nil
+	if storageDriven {
+		log.Info(fmt.Sprintf("[%s] Storage owns download — waiting on initialStateReady", s.LogPrefix()))
+		select {
+		case <-cfg.initialStateReady:
+			log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, proceeding", s.LogPrefix()))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	} else if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
 		"header-chain",
@@ -239,23 +285,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.SyncSnapshots(
-		ctx,
-		s.LogPrefix(),
-		"remaining snapshots",
-		false, /*headerChain=*/
-		cfg.blobs,
-		cfg.caplinState,
-		cfg.prune,
-		cstate,
-		tx,
-		cfg.blockReader,
-		cfg.chainConfig,
-		cfg.snapshotDownloader,
-		cfg.syncConfig,
-		agg.StepSize(),
-	); err != nil {
-		return err
+	if !storageDriven {
+		if err := snapshotsync.SyncSnapshots(
+			ctx,
+			s.LogPrefix(),
+			"remaining snapshots",
+			false, /*headerChain=*/
+			cfg.blobs,
+			cfg.caplinState,
+			cfg.prune,
+			cstate,
+			tx,
+			cfg.blockReader,
+			cfg.chainConfig,
+			cfg.snapshotDownloader,
+			cfg.syncConfig,
+			agg.StepSize(),
+		); err != nil {
+			return err
+		}
 	}
 
 	if cfg.afterDownload != nil {

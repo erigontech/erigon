@@ -17,6 +17,16 @@ download set when the operator opts in, and adds per-step batch
 validation that publishes a step's minimum subset before the rest
 of the step lands.
 
+**Scope expectation**: this is the storage-component correctness
+PR. It makes the lifecycle drive files end-to-end and chain.toml
+reflect current local state. It does **not** by itself deliver the
+"Erigon reliably starts fast from clean" headline — peer discovery
+latency remains the next user-visible bottleneck and is closed by
+a named follow-on PR (see *Before this is release-ready* below).
+The two PRs together deliver the headline; this one alone delivers
+the storage-side prerequisite without which the discovery work
+points consumers at stale manifests.
+
 End-to-end:
 
   - **Hoodi V2 path**: 10 min 25 s time-to-tip (post-§5e
@@ -176,8 +186,69 @@ New plan docs under `docs/plans/`:
 - `20260504-publisher-restart-chaintoml-bug.md` — publisher
   restart-correctness bug and fix candidates (separate small PR).
 
+## Before this is release-ready
+
+This PR delivers the storage-component correctness — the lifecycle
+drives files end-to-end, chain.toml regenerates with current local
+content, the bridge between lifecycle advancement and torrent
+seeding fires with the right paths. Operationally, with a known
+publisher reachable, fresh consumers go from disk-empty to chain-tip
+on V2 in minutes once peer discovery completes.
+
+**Peer discovery itself is the next user-visible bottleneck and is
+not addressed here.** When download time was hours, the 5-minute
+`manifestReady` discovery wait was hidden in the noise. Now that
+download time is minutes, the discovery wait is the dominant visible
+startup phase for a fresh consumer — the user-perceived "Erigon
+sits there searching the network and seems to do nothing" failure
+mode. Closing that gap is what makes the headline claim *Erigon
+reliably starts fast from clean, irrespective of download size*
+true. It needs:
+
+1. **Persistent known-publisher cache.** Every successful chain-toml
+   acquisition writes the source node ID + chain-toml ENR to
+   `<datadir>/snapshots/known-publishers.json`. On boot the consumer
+   parallel-`Resolve`s the cache (capped concurrency 16); the first
+   to return a fresh chain-toml ENR is the bootstrap. Eliminates the
+   discovery wait for any consumer that has run before. ~150 LOC.
+
+2. **Distance-diversified discv5 crawler** for the cold-start path.
+   Per ethresear.ch *Crawling the Ethereum discv5 network fast*
+   (50k ENRs / 55s benchmark): for each seed peer, send one
+   `Findnode(seed, []uint{256, 255, ..., 240})` request — 16
+   distance buckets per packet. Stream the responses through an ENR
+   filter that yields chain-toml-bearing nodes only. Stop on first
+   hit (fresh consumer needs ONE publisher, not the enumeration of
+   the whole network). Hard 10s budget; on exhaustion fall back to
+   preverified with an explicit log line, not silent timeout.
+   ~400 LOC.
+
+3. **DID-anchored direct Resolve.** When publisher DID + trust roots
+   land (separate PR per `docs/plans/20260504-publisher-did-ucan.md`),
+   the consumer derives publisher node IDs from its trust roots and
+   `Resolve`s them directly — no cache, no crawl. The bootstrap path
+   becomes O(trust-roots) regardless of network size.
+
+Acceptance criterion for "release-ready" — *fresh consumer finds a
+publisher and starts downloading within 10 seconds when a publisher
+is reachable in its devp2p neighbourhood; explicit fall-back to
+preverified within 30 seconds when none is reachable*. The current
+5-minute passive-scan timeout is what this replaces.
+
+The follow-on PR is mechanically independent of this one (no shared
+files except the `NodeSource` wiring at `backend.go`) but
+operationally chained — this PR's correctness fixes have to land
+first because the discovery work is finding peers that publish a
+chain.toml that's actually current. With the chain.toml stuck at
+its DownloadSnapshots-time content (the pre-this-PR behaviour),
+finding the publisher faster doesn't help — it points the consumer
+at a stale manifest.
+
 ## What's NOT in scope (follow-up)
 
+- **Discv5 fast publisher discovery (cache + crawler + DID-anchored
+  Resolve).** The dominant remaining startup-latency item — see the
+  *Before this is release-ready* section above.
 - **Mainnet performance measurement.** The PR gate. 10-min
   time-to-tip needs to be reproduced on Ethereum mainnet.
 - **Block-file step-unit rewrite using the (step, block)
@@ -300,33 +371,92 @@ New plan docs under `docs/plans/`:
        bootstrap inventory so the block-step wait gate can
        release.
 
-  **What's still gating the V2 architectural advantage**: on a
-  fresh publisher datadir, two subtle paths aren't yet flowing
-  through the lifecycle, so the bridge subscriber doesn't fire:
+  **Lifecycle-completes-the-chain fixes (2026-05-06)**: the prior
+  publisher 5 run reached tip but emitted `0 advance-to-Advertisable
+  / 0 step advanced / 0 block-range advanced` — the lifecycle was
+  wired but not actually driving files through to the bridge
+  subscriber. Six gaps surfaced and were closed in-session, with
+  deterministic integration tests covering each:
 
-    - Bootstrap commitment files don't exist on a fresh datadir,
-      so the binding seeder has nothing to seed.
-    - `discoverNewFiles` only scans the top-level snap-dir;
-      state files in `domain/` / `history/` / `accessor/`
-      subdirs aren't picked up by the lifecycle, so commitment
-      files never go through the per-step batch hook either.
+    1. **State files in subdirs flow through lifecycle.**
+       `Driver.discoverNewFiles` now walks `domain/`, `history/`,
+       `idx/`, `accessor/` (was: top-level only). `.ef` added to
+       primary extensions. (`node/components/storage/lifecycle/driver.go`)
+    2. **Single-seam path layout.** New
+       `snapshot.PathForName` / `RelPathForName` /
+       `SubdirForName` — idempotent (handles bare basenames and
+       already-relative names from the legacy retire path). The
+       single seam every layout-aware caller goes through.
+       (`node/components/storage/snapshot/metadata.go`)
+    3. **`AllFilesPresent` finds state files at their actual
+       subdir locations** (was: stat-ing `snapDir/{name}`, missing
+       state files at `snapDir/domain/{name}` etc).
+       (`node/components/storage/validation/step.go`)
+    4. **Bridge subscriber translates basenames before `Seed`** —
+       sends `domain/foo.kv` to the downloader (was: bare `foo.kv`,
+       BuildTorrentIfNeed couldn't find it). Idempotent against
+       legacy-path-prefixed names (no `idx/idx/` double-prefix).
+       (`node/components/storage/provider.go`)
+    5. **`CommitmentDomainValidator`: block-membership instead of
+       end-of-block.** Erigon writes commitments at step boundaries
+       (txNum = stepEnd-1), and step boundaries normally cut
+       mid-block — so the strict `txNum == blockMaxTxNum` check
+       rejected every well-formed commitment. Replaced with
+       `FindBlockNum(txNum) == recordedBlockNum`.
+       (`node/components/storage/commitment_validator.go`)
+    6. **Bootstrap binding seeder iterates candidates descending.**
+       Sorts commitment files by ToStep descending; tries each
+       until one validates (was: try latest only, give up on
+       failure). Extracted a narrow `stepValidator` interface so
+       the iteration logic is unit-testable without a real DB.
+    7. **`GenerateChainToml` scans state subdirs.** Was: top-level
+       only. Now walks `domain/` / `history/` / `idx/` /
+       `accessor/`, emitting names with subdir prefix (matching
+       what consumers already expect from the preverified-merge
+       path). (`db/downloader/chaintoml.go`)
 
-  Result: the LIFECYCLE path doesn't currently complete the chain
-  to LifecycleAdvertisable on a fresh publisher, but **retire's
-  old `seeder.Seed(ctx, mergedFileNames)` path still fires and
-  the chain.toml does grow via that route** (publisher 5 mainnet
-  run: 7389 → 7392 entries during catch-up to tip). So the
-  publisher still ends up with a slightly fresher manifest than
-  preverified-only, just via the legacy code path rather than the
-  shiny new lifecycle.
+  **Run5 evidence (2026-05-06 ~17:14 onwards)** — same datadir as
+  publisher 5, restarted with the fixes:
 
-  The wires landed are correct + idempotent + non-regressive.
-  The full lifecycle-driven V2 exec-reduction advantage emerges
-  once the lifecycle covers state files (a separate follow-up
-  PR, not in scope here). Today's wires sit dormant for fresh
-  publishers; they activate once `discoverNewFiles` sees state
-  files, OR when retire produces a fresh commitment that the
-  bootstrap seeder can pick up on subsequent restart.
+    - bootstrap binding seeded successfully:
+      `seeded bootstrap commitment binding name=v2.0-commitment.8704-8960.kv toStep=8960`
+      (was: 11 candidates rejected, no binding registered).
+    - chain.toml grew from 647284 b / 7392 lines (baseline) to
+      650081 b / 7427 lines (+35 entries) within the first 100 s
+      of run5 — the state-subdir torrents are now in the
+      published manifest.
+    - Bridge subscriber fired without errors (no `idx/idx/` double-
+      prefix; correct subdir-prefixed names like
+      `domain/v2.0-accounts.8960-8961.kv`).
+    - Per-step batch validation continued advancing state-file
+      step groups (accounts/storage/code/commitment domains)
+      through `Indexed → Advertisable`.
+
+  **Tests added in-session**:
+    - `node/components/integration/snapshot/scenarios/publisher_flow_test.go`
+      (new file) — 4 deterministic tests covering disk-scan /
+      binding / bridge / state-subdir flow at the storage-component
+      level. Failures reproducible in seconds (vs the multi-hour
+      mainnet runs that originally surfaced the gaps).
+    - `db/downloader/chaintoml_test.go` —
+      `TestGenerateChainToml_IncludesStateSubdirs` and
+      `TestGenerateChainToml_MissingSubdirIsNotAnError`.
+    - `node/components/storage/commitment_validator_test.go` —
+      three new tests for `seedLatestCommitmentBinding`'s
+      candidate-iteration logic (descending order, fall-through
+      on rejection, empty-inventory no-op).
+    - `node/components/storage/snapshot/step_test.go` —
+      `TestRelPathForName_Idempotent` and
+      `TestPathForName_Idempotent`.
+
+  **Pre-startup block-file path** (intentional, not a gap):
+  pre-existing block files come in via the legacy retire
+  callback at `provider.go:230-234`, which adds them with
+  `Advertisable: true` directly — bypassing the lifecycle's
+  per-step validation. They were already validated by the prior
+  retire run that produced them; the lifecycle gate covers NEW
+  retire output post-startup. Both paths converge into the same
+  inventory state.
 
   Hoodi reference numbers from
   `docs/plans/20260502-min-time-to-tip-target.md`:

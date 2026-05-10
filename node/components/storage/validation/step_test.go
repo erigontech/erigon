@@ -27,11 +27,21 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
+// Helper: write a file at the canonical Erigon layout for its kind
+// (.kv → domain/, .kvi → accessor/, .seg → top-level, etc.). Mirrors
+// snapshot.PathForName so tests stay aligned with production paths.
+func writeAt(t *testing.T, snapDir, name string) {
+	t.Helper()
+	path := snapshot.PathForName(snapDir, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
+}
+
 func TestAllFilesPresent_AcceptsExistingFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kvi"), []byte("y"), 0o644))
+	writeAt(t, dir, "a.kv")
+	writeAt(t, dir, "a.kvi")
 
 	files := []*snapshot.FileEntry{
 		{Name: "a.kv", Local: true},
@@ -44,7 +54,7 @@ func TestAllFilesPresent_AcceptsExistingFiles(t *testing.T) {
 func TestAllFilesPresent_RejectsMissingFile(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
+	writeAt(t, dir, "a.kv")
 	// a.kvi missing.
 
 	files := []*snapshot.FileEntry{
@@ -60,7 +70,7 @@ func TestAllFilesPresent_RejectsMissingFile(t *testing.T) {
 func TestAllFilesPresent_SkipsNonLocalFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.kv"), []byte("x"), 0o644))
+	writeAt(t, dir, "a.kv")
 
 	files := []*snapshot.FileEntry{
 		{Name: "a.kv", Local: true},

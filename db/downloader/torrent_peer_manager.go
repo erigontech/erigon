@@ -44,13 +44,19 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 // Run starts the peer management loop. It should be called in a goroutine.
 func (m *TorrentPeerManager) Run(ctx context.Context) {
 	// Initial delay to let P2P establish connections.
+	// Tightened from 10s to 2s — the forced discv5 ping-on-connect
+	// makes ENR records (with bt port) available within sub-second
+	// of devp2p handshake.
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(10 * time.Second):
+	case <-time.After(2 * time.Second):
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	// 5s ticker (was 30s) — when a new peer joins, we want them added
+	// to all torrents fast, especially with sparse fleets where one
+	// new peer could be the only source for some files.
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -65,6 +71,17 @@ func (m *TorrentPeerManager) Run(ctx context.Context) {
 }
 
 // sync scans the current DevP2P peer set and updates the torrent peer set.
+//
+// On each cycle we (1) record any newly-discovered peers, (2) drop any
+// peers that have left the DevP2P set, and (3) re-publish the entire
+// known-peer list to ALL currently-tracked torrents. The re-publish step
+// matters because torrents are added to the client at different times
+// (chain.toml is applied incrementally, post-tip retire keeps producing
+// new torrents). A peer discovered at sync N must still get added to a
+// torrent that joins the client at sync N+M; tracking only "new peer"
+// transitions misses the symmetric "new torrent" case. anacrolix
+// dedupes on (peer-id, torrent) pairs, so re-publishing existing peers
+// is idempotent — no extra connections, no double-counting.
 func (m *TorrentPeerManager) sync() {
 	ns := m.nodeSourceFn()
 	if ns == nil {
@@ -95,16 +112,11 @@ func (m *TorrentPeerManager) sync() {
 				Trusted: true,
 			}
 			m.knownPeers[id] = btPeerInfo{addr: pi}
-			m.mu.Unlock()
-
-			// Add this peer to all active torrents.
-			m.addPeerToAllTorrents(pi)
 			m.logger.Debug("[bt-peers] added torrent peer from ENR",
 				"node", id.TerminalString(),
 				"addr", fmt.Sprintf("%s:%d", ip, bt))
-		} else {
-			m.mu.Unlock()
 		}
+		m.mu.Unlock()
 	}
 
 	// Remove peers that are no longer in the DevP2P peer set.
@@ -116,13 +128,19 @@ func (m *TorrentPeerManager) sync() {
 				"node", id.TerminalString())
 		}
 	}
-	m.mu.Unlock()
-}
 
-// addPeerToAllTorrents adds the given peer to all currently active torrents.
-func (m *TorrentPeerManager) addPeerToAllTorrents(pi torrent.PeerInfo) {
-	for _, t := range m.client.Torrents() {
-		t.AddPeers([]torrent.PeerInfo{pi})
+	// Re-publish every still-known peer to every current torrent. Picks
+	// up torrents added since each peer's first-discovery sync.
+	pis := make([]torrent.PeerInfo, 0, len(m.knownPeers))
+	for _, info := range m.knownPeers {
+		pis = append(pis, info.addr)
+	}
+	m.mu.Unlock()
+
+	if len(pis) > 0 {
+		for _, t := range m.client.Torrents() {
+			t.AddPeers(pis)
+		}
 	}
 }
 

@@ -73,3 +73,107 @@ func TestCommitmentDomainValidator_Name(t *testing.T) {
 	v := CommitmentDomainValidator{}
 	require.Equal(t, "commitment_domain_state_at_end", v.Name())
 }
+
+// fakeStepValidator simulates the per-file accept/reject pattern of
+// CommitmentDomainValidator without the DB infrastructure. Used to
+// exercise seedLatestCommitmentBinding's candidate-iteration logic.
+type fakeStepValidator struct {
+	// acceptStep is the ToStep value the validator accepts; everything
+	// else returns an error. Mirrors the production case where some
+	// commitment files (e.g. mid-block written ones) are rejected.
+	acceptStep uint64
+	// fired is the names the validator was actually invoked on, in
+	// order — lets tests assert iteration order.
+	fired []string
+	// onAccept (optional) registers a binding when validation passes,
+	// mirroring the real CommitmentDomainValidator's side effect.
+	onAccept func(toStep uint64)
+}
+
+func (f *fakeStepValidator) ValidateStep(_ context.Context, files []*snapshot.FileEntry) error {
+	if len(files) == 0 {
+		return nil
+	}
+	f.fired = append(f.fired, files[0].Name)
+	if files[0].ToStep == f.acceptStep {
+		if f.onAccept != nil {
+			f.onAccept(files[0].ToStep)
+		}
+		return nil
+	}
+	return errStepRejected
+}
+
+var errStepRejected = simpleErr("rejected")
+
+type simpleErr string
+
+func (e simpleErr) Error() string { return string(e) }
+
+// TestSeedLatestCommitmentBinding_FallsBackThroughCandidates exercises
+// the candidate-iteration logic: bootstrap seeder must try commitment
+// files in descending ToStep order and stop at the first one that
+// validates. On the 2026-05-06 mainnet publisher run, the latest two
+// commitment files were rejected (mid-block written) and the third
+// passed — without the fallback no binding got registered, so the
+// block-step wait gate stayed closed for every block file.
+func TestSeedLatestCommitmentBinding_FallsBackThroughCandidates(t *testing.T) {
+	t.Parallel()
+
+	inv := snapshot.NewInventory()
+	for _, e := range []*snapshot.FileEntry{
+		{Domain: snapshot.DomainCommitment, FromStep: 0, ToStep: 256, Name: "v1.1-commitment.0-256.kv"},
+		{Domain: snapshot.DomainCommitment, FromStep: 256, ToStep: 512, Name: "v1.1-commitment.256-512.kv"},
+		{Domain: snapshot.DomainCommitment, FromStep: 512, ToStep: 768, Name: "v1.1-commitment.512-768.kv"},
+	} {
+		require.NoError(t, inv.AddFile(e))
+	}
+
+	v := &fakeStepValidator{
+		acceptStep: 512, // middle candidate accepts
+		onAccept: func(toStep uint64) {
+			inv.RegisterStepBlockBoundary(toStep, 100_000)
+		},
+	}
+	seedLatestCommitmentBinding(context.Background(), inv, v, nil)
+
+	// Iteration is descending by ToStep: 768 (rejected) → 512 (accepted).
+	// 256 must NOT be tried because 512 succeeded.
+	require.Equal(t,
+		[]string{"v1.1-commitment.512-768.kv", "v1.1-commitment.256-512.kv"},
+		v.fired,
+		"seeder should iterate descending and stop on first success")
+	require.Len(t, inv.StepBlockBoundaries(), 1,
+		"successful candidate registers exactly one binding")
+}
+
+// TestSeedLatestCommitmentBinding_AllCandidatesFail: when no candidate
+// validates, the seeder must NOT register any binding (block-step gate
+// stays closed; lifecycle's normal flow is responsible for producing a
+// fresh commitment).
+func TestSeedLatestCommitmentBinding_AllCandidatesFail(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+		Domain: snapshot.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v1.1-commitment.0-256.kv",
+	}))
+
+	v := &fakeStepValidator{acceptStep: 9999} // matches nothing in inventory
+	seedLatestCommitmentBinding(context.Background(), inv, v, nil)
+
+	require.Empty(t, inv.StepBlockBoundaries(),
+		"no binding should be registered when every candidate fails")
+}
+
+// TestSeedLatestCommitmentBinding_EmptyInventoryIsNoOp: a fresh
+// consumer datadir has no commitment files yet — seeder must
+// short-circuit cleanly.
+func TestSeedLatestCommitmentBinding_EmptyInventoryIsNoOp(t *testing.T) {
+	t.Parallel()
+	inv := snapshot.NewInventory()
+	v := &fakeStepValidator{}
+	seedLatestCommitmentBinding(context.Background(), inv, v, nil)
+	require.Empty(t, v.fired)
+	require.Empty(t, inv.StepBlockBoundaries())
+}

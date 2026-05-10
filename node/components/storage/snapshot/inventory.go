@@ -137,6 +137,30 @@ type FileEntry struct {
 	// Empty Dependencies means no dependent files are required —
 	// the entry can advance directly to LifecycleIndexed once Local.
 	Dependencies []string
+
+	// ProofRoot is the recorded state-trie root for the snapshot at this
+	// file's end. Populated by validators (e.g. the commitment-domain
+	// state-root validator) for files that record a root — primarily
+	// commitment-domain primaries. The 32-byte root is stored raw; the
+	// chain.toml manifest renders it hex-encoded. Empty (all-zero) when
+	// no root has been recorded for this file.
+	ProofRoot [32]byte
+
+	// AtBlock and AtTxNum are the consensus coordinates of the recorded
+	// ProofRoot. AtBlock is the block whose execution produced the root;
+	// AtTxNum is the txnum at which the root was recorded. Together they
+	// position the proof in the chain timeline so consumers can cross-
+	// reference against the block header's stateRoot.
+	AtBlock uint64
+	AtTxNum uint64
+
+	// IsPartialBlock is true when AtTxNum < the block's max txnum, i.e.
+	// the file's last recorded txn is inside AtBlock, not at its boundary.
+	// Consumers MUST NOT treat partial-block files as a valid snapshot-tip
+	// state (the Phase 5 gap-f wall lived exactly here: a partial-block
+	// commitment was loaded as if it were a tip, and consumer exec failed
+	// because intermediate txns of the boundary block hadn't been applied).
+	IsPartialBlock bool
 }
 
 // Range returns the StepRange for this file entry.
@@ -551,6 +575,63 @@ func (inv *Inventory) MarkAdvertisable(name string) bool {
 				applyStateToFlags(e, LifecycleAdvertisable)
 				changed = true
 			}
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
+		}
+	}
+	inv.mu.Unlock()
+	return false
+}
+
+// SetAnchors records the step-header cryptographic anchors on a file
+// entry. Returns true when the entry was found and at least one field
+// changed. Notifies subscribers on change so any consumer watching the
+// inventory sees the anchors land.
+//
+// Used by the chain.toml V2 application path: when a V2 manifest carries
+// step-header anchors (ProofRoot/AtBlock/AtTxNum/IsPartialBlock) for a
+// given file, they're stamped onto the local FileEntry here. Validators
+// and consumers downstream can then cross-check ProofRoot against the
+// chain's block-header stateRoot for AtBlock without re-parsing the
+// manifest.
+func (inv *Inventory) SetAnchors(name string, root [32]byte, atBlock, atTxNum uint64, isPartialBlock bool) bool {
+	apply := func(e *FileEntry) bool {
+		changed := false
+		if e.ProofRoot != root {
+			e.ProofRoot = root
+			changed = true
+		}
+		if e.AtBlock != atBlock {
+			e.AtBlock = atBlock
+			changed = true
+		}
+		if e.AtTxNum != atTxNum {
+			e.AtTxNum = atTxNum
+			changed = true
+		}
+		if e.IsPartialBlock != isPartialBlock {
+			e.IsPartialBlock = isPartialBlock
+			changed = true
+		}
+		return changed
+	}
+	inv.mu.Lock()
+	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
+		if e := findByName(slice, name); e != nil {
+			changed := apply(e)
+			inv.mu.Unlock()
+			if changed {
+				inv.notify(ChangeSet{Files: []string{name}})
+			}
+			return changed
+		}
+	}
+	for _, entries := range inv.domains {
+		if e := findByName(entries, name); e != nil {
+			changed := apply(e)
 			inv.mu.Unlock()
 			if changed {
 				inv.notify(ChangeSet{Files: []string{name}})

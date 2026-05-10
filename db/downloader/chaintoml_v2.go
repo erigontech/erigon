@@ -18,9 +18,11 @@ package downloader
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon/db/snaptype"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/pelletier/go-toml/v2"
 )
@@ -94,6 +96,32 @@ type DomainFileEntry struct {
 	Kind  string `toml:"kind,omitempty"`
 	Hash  string `toml:"hash"`
 	Trust string `toml:"trust"`
+
+	// ProofRoot is the hex-encoded state-trie root recorded inside this
+	// file (currently populated for commitment-domain primaries — the
+	// `state` key carries this for every step boundary regardless of
+	// pruning mode). Empty when the file records no root.
+	//
+	// Closes the cryptographic chain that ties state to blocks: a
+	// consumer can verify ProofRoot against its own block header's
+	// stateRoot for AtBlock — using only block headers, no snapshot
+	// data — before downloading the file.
+	ProofRoot string `toml:"proof_root,omitempty"`
+
+	// AtBlock is the block whose execution produced ProofRoot. Together
+	// with AtTxNum it positions the proof in the chain timeline.
+	AtBlock uint64 `toml:"at_block,omitempty"`
+
+	// AtTxNum is the txnum at which ProofRoot was recorded.
+	AtTxNum uint64 `toml:"at_tx_num,omitempty"`
+
+	// IsPartialBlock is true when AtTxNum < the block's max txnum — the
+	// file's last record is mid-block. Consumers MUST NOT treat such
+	// files as a valid snapshot-tip state. (Phase 5 gap-f wall lived
+	// exactly here: a partial-block commitment loaded as if it were a
+	// tip, intermediate txns of the boundary block unapplied, exec
+	// failed at the first transaction with a stale account.)
+	IsPartialBlock bool `toml:"is_partial_block,omitempty"`
 }
 
 // CaplinFileEntry is a single caplin beacon-archive file. Same shape as
@@ -186,13 +214,24 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			if kind == "" {
 				kind = KindKVName
 			}
-			dm.Files = append(dm.Files, DomainFileEntry{
+			entry := DomainFileEntry{
 				Name:  f.Name,
 				Range: [2]uint64{r.From, r.To},
 				Kind:  kind,
 				Hash:  fmt.Sprintf("%x", f.TorrentHash),
 				Trust: f.Trust.String(),
-			})
+			}
+			// Carry the per-file step-header anchors when the validator
+			// has populated them. Zero ProofRoot means no validator has
+			// recorded a root for this file — emit nothing rather than
+			// a bogus all-zero hash.
+			if f.ProofRoot != ([32]byte{}) {
+				entry.ProofRoot = fmt.Sprintf("%x", f.ProofRoot)
+				entry.AtBlock = f.AtBlock
+				entry.AtTxNum = f.AtTxNum
+				entry.IsPartialBlock = f.IsPartialBlock
+			}
+			dm.Files = append(dm.Files, entry)
 		}
 
 		// Sort files deterministically: by range[0], then range[1], then kind.
@@ -298,6 +337,160 @@ func DetectVersion(data []byte) int {
 		return 1 // no version field → V1
 	}
 	return header.Version
+}
+
+// HeaderStateRootFn looks up the consensus block-header stateRoot for
+// a given block number. Used by ApplyV2AnchorsToInventory's optional
+// cross-check: if provided, every entry's ProofRoot must equal the
+// stateRoot the chain committed at AtBlock. Pass nil to skip the
+// cross-check (still applies anchors). Returning an error from the
+// callback is treated as a lookup failure — the entry is skipped, not
+// rejected, since the consumer may not yet have the header for AtBlock.
+type HeaderStateRootFn func(blockNum uint64) (root [32]byte, err error)
+
+// ApplyV2AnchorsToInventory walks the manifest's domain files and stamps
+// step-header anchors (ProofRoot/AtBlock/AtTxNum/IsPartialBlock) onto
+// matching FileEntries in inv via SetAnchors. Returns the count of
+// entries updated.
+//
+// When headerRoot is non-nil, every entry's ProofRoot is verified
+// against the stateRoot the chain header records for AtBlock. A
+// mismatch is reported via the returned mismatches list — the entry's
+// anchors are NOT applied. Lookup errors (chain not yet at AtBlock) are
+// silent: the anchors are skipped this pass and can be re-applied later.
+//
+// Files in Blocks/Meta/Salt/Caplin sections carry no anchors today, so
+// they're untouched. Anchors in V2 are emitted only on domain files
+// (currently the commitment domain — that's where the state-key sits).
+//
+// MismatchedAnchor names a file whose published ProofRoot disagrees
+// with the chain header — pinpoints where the publisher's manifest
+// claim diverges from consensus.
+func ApplyV2AnchorsToInventory(inv *snapshotinv.Inventory, manifest *ChainTomlV2, headerRoot HeaderStateRootFn) (applied int, mismatches []MismatchedAnchor, err error) {
+	if inv == nil || manifest == nil {
+		return 0, nil, nil
+	}
+	for _, dm := range manifest.Domains {
+		if dm == nil {
+			continue
+		}
+		for _, f := range dm.Files {
+			if f.ProofRoot == "" {
+				continue
+			}
+			rootBytes, decErr := hex.DecodeString(f.ProofRoot)
+			if decErr != nil {
+				return applied, mismatches, fmt.Errorf("decoding ProofRoot for %s: %w", f.Name, decErr)
+			}
+			if len(rootBytes) != 32 {
+				return applied, mismatches, fmt.Errorf("ProofRoot for %s is %d bytes, want 32", f.Name, len(rootBytes))
+			}
+			var root [32]byte
+			copy(root[:], rootBytes)
+
+			if headerRoot != nil {
+				chainRoot, lookupErr := headerRoot(f.AtBlock)
+				if lookupErr == nil && chainRoot != root {
+					mismatches = append(mismatches, MismatchedAnchor{
+						Name:       f.Name,
+						AtBlock:    f.AtBlock,
+						Manifest:   root,
+						ChainState: chainRoot,
+					})
+					continue
+				}
+			}
+
+			if inv.SetAnchors(f.Name, root, f.AtBlock, f.AtTxNum, f.IsPartialBlock) {
+				applied++
+			}
+		}
+	}
+	return applied, mismatches, nil
+}
+
+// MismatchedAnchor reports a file whose manifest-published ProofRoot
+// disagrees with the chain header's stateRoot for AtBlock. The
+// publisher's claim cannot be trusted for this file; consumer must not
+// advertise it.
+type MismatchedAnchor struct {
+	Name       string
+	AtBlock    uint64
+	Manifest   [32]byte
+	ChainState [32]byte
+}
+
+// PartialBlockWithoutCoverage names a manifest entry that the publisher
+// flagged as partial-block (IsPartialBlock=true) but for which the
+// same manifest lacks any block .seg covering AtBlock. The consumer
+// cannot replay-verify across the partial boundary without that block
+// data, so the file must NOT be treated as a usable snapshot tip
+// until the manifest catches up — typically the publisher's next
+// republish will include the missing block .seg once its lifecycle
+// completes.
+type PartialBlockWithoutCoverage struct {
+	Name    string
+	AtBlock uint64
+}
+
+// FindPartialBlockCommitmentsWithoutCoverage scans the manifest for
+// partial-block commitments whose AtBlock is NOT covered by any block
+// .seg in the same manifest. Mirror of the publisher-side
+// blockSegAdvertisableForBlock check (commitment_validator.go), but
+// against a discovered manifest instead of the local lifecycle: the
+// consumer trusts a partial-block commitment as a usable snapshot tip
+// only when the publisher has bundled the matching block data in the
+// same manifest generation. Files in the returned list represent
+// "abnormal" manifest states the consumer should refuse to load —
+// either the publisher is mid-republish (transient) or its lifecycle
+// is in an unusual state (operational signal).
+//
+// Block file ranges are parsed from m.Blocks names (e.g.
+// "v1.1-025040-025050-headers.seg" → [25_040_000, 25_050_000)).
+//
+// Pure function; no inventory or chain-reader needed. Empty result
+// means the manifest is self-consistent for partial-block tips.
+func FindPartialBlockCommitmentsWithoutCoverage(m *ChainTomlV2) []PartialBlockWithoutCoverage {
+	if m == nil {
+		return nil
+	}
+	type blockRange struct{ from, to uint64 }
+	var ranges []blockRange
+	for name := range m.Blocks {
+		// ParseFileName populates From/To even when ok=false (the ok
+		// signal requires the file's Type to be registered via
+		// freezeblocks init). For range-only logic we tolerate
+		// ok=false as long as From < To.
+		info, _, _ := snaptype.ParseFileName("", name)
+		if info.From >= info.To {
+			continue
+		}
+		ranges = append(ranges, blockRange{from: info.From, to: info.To})
+	}
+
+	var out []PartialBlockWithoutCoverage
+	for _, dm := range m.Domains {
+		if dm == nil {
+			continue
+		}
+		for _, f := range dm.Files {
+			if !f.IsPartialBlock {
+				continue
+			}
+			covered := false
+			for _, r := range ranges {
+				if f.AtBlock >= r.from && f.AtBlock < r.to {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				out = append(out, PartialBlockWithoutCoverage{Name: f.Name, AtBlock: f.AtBlock})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
 }
 
 // DomainCoverage extracts the step ranges from a V2 domain manifest.

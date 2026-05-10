@@ -29,7 +29,36 @@
 // ordering and timing invariants each event family is expected to satisfy.
 package flow
 
-import "github.com/erigontech/erigon/node/components/storage/snapshot"
+import (
+	"sync"
+
+	"github.com/erigontech/erigon/node/app/event"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
+)
+
+// InitialStateReadyChannel returns a channel that closes the first time
+// InitialStateReady is published on bus. Subscribes via SubscribeOnce
+// so the handler self-removes after firing.
+//
+// Used by production wiring (backend.go) to bridge the bus event into
+// the staged-sync OtterSync gate (SnapshotsCfg.SetInitialStateReady) —
+// staged sync waits on the channel; when storage signals
+// minimal-set-ready the channel closes and stages 2-6 unblock.
+//
+// If the subscription itself fails (programmer error in the bus
+// implementation), the returned channel is closed immediately so the
+// caller doesn't block forever.
+func InitialStateReadyChannel(bus event.BusSubscriber) <-chan struct{} {
+	ch := make(chan struct{})
+	var once sync.Once
+	closeOnce := func() { once.Do(func() { close(ch) }) }
+	if err := bus.SubscribeOnce(func(InitialStateReady) {
+		closeOnce()
+	}); err != nil {
+		closeOnce()
+	}
+	return ch
+}
 
 // --- Inventory events ---
 

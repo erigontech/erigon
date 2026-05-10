@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"strings"
 	"testing"
 
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -239,4 +240,231 @@ func TestIsCanonicalFile(t *testing.T) {
 
 	// Non-canonical: misaligned.
 	require.False(t, isCanonicalFile(snapshotinv.StepRange{From: 100, To: 1124}))
+}
+
+// TestV2StepHeaderRoundTrip verifies that the step-header anchors
+// (ProofRoot / AtBlock / AtTxNum / IsPartialBlock) on a FileEntry flow
+// into the manifest, survive marshal+parse, and stay zero/empty for
+// files that the validator hasn't populated yet.
+func TestV2StepHeaderRoundTrip(t *testing.T) {
+	inv := snapshotinv.NewInventory()
+
+	// Block file — no step-header anchors apply (lives in Blocks section, not Domains).
+	inv.AddFile(&snapshotinv.FileEntry{
+		Name:        "v1.1-000000-000500-headers.seg",
+		TorrentHash: [20]byte{0x01},
+		Local:       true, Trust: snapshotinv.TrustVerified,
+	})
+
+	// Commitment file with the validator-populated step-header anchors —
+	// represents a typical post-validation state.
+	commitmentRoot := [32]byte{0xd1, 0xe5, 0x56, 0x19, 0xbb, 0x21, 0x05, 0xd1}
+	inv.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name:        "v2.0-commitment.0-256.kv",
+		TorrentHash: [20]byte{0x02},
+		Local:       true, Trust: snapshotinv.TrustVerified,
+		ProofRoot:      commitmentRoot,
+		AtBlock:        12345,
+		AtTxNum:        99999999,
+		IsPartialBlock: true,
+	})
+
+	// Accounts file — no step-header anchors yet (the state-trie
+	// validator only records on the commitment domain in this iteration).
+	inv.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 256,
+		Name:        "v2.0-accounts.0-256.kv",
+		TorrentHash: [20]byte{0x03},
+		Local:       true, Trust: snapshotinv.TrustVerified,
+	})
+
+	manifest := GenerateV2(inv)
+	bytes, err := MarshalV2(manifest)
+	require.NoError(t, err)
+
+	parsed, err := ParseV2(bytes)
+	require.NoError(t, err)
+
+	// Find the commitment file in the parsed manifest.
+	commitmentDM := parsed.Domains["commitment"]
+	require.NotNil(t, commitmentDM, "commitment domain should be in manifest")
+	require.Len(t, commitmentDM.Files, 1)
+	cf := commitmentDM.Files[0]
+
+	// Step-header anchors round-tripped intact.
+	require.Equal(t, "d1e55619bb2105d1000000000000000000000000000000000000000000000000", cf.ProofRoot)
+	require.Equal(t, uint64(12345), cf.AtBlock)
+	require.Equal(t, uint64(99999999), cf.AtTxNum)
+	require.True(t, cf.IsPartialBlock, "commitment file should be marked partial-block")
+
+	// Accounts file in the same domain group should have NO step-header
+	// anchors — empty/zero on round-trip, not bogus all-zero hashes.
+	accountsDM := parsed.Domains["accounts"]
+	require.NotNil(t, accountsDM)
+	require.Len(t, accountsDM.Files, 1)
+	require.Empty(t, accountsDM.Files[0].ProofRoot, "accounts file without populated root must marshal to empty ProofRoot, not zero hash")
+	require.Zero(t, accountsDM.Files[0].AtBlock)
+	require.Zero(t, accountsDM.Files[0].AtTxNum)
+	require.False(t, accountsDM.Files[0].IsPartialBlock)
+}
+
+// TestParseChainTomlAutoV1V2 verifies that the consumer's auto-detect
+// parser (parseChainTomlAuto) routes V1 + V2 input into the same flat
+// name -> hash map shape the merge path consumes. Step-header anchors
+// are intentionally dropped at this layer — they need an inventory-aware
+// application path to land on local FileEntries.
+func TestParseChainTomlAutoV1V2(t *testing.T) {
+	v1 := []byte("\"v1.1-000000-000500-headers.seg\" = \"aabb\"\n\"v1.1-000000-000500-bodies.seg\" = \"ccdd\"\n")
+	out, err := parseChainTomlAuto(v1)
+	require.NoError(t, err)
+	require.Equal(t, "aabb", out["v1.1-000000-000500-headers.seg"])
+	require.Equal(t, "ccdd", out["v1.1-000000-000500-bodies.seg"])
+
+	inv := snapshotinv.NewInventory()
+	inv.AddFile(&snapshotinv.FileEntry{
+		Name: "v1.1-000000-000500-headers.seg", TorrentHash: [20]byte{0x01},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	inv.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	v2bytes, err := MarshalV2(GenerateV2(inv))
+	require.NoError(t, err)
+
+	out2, err := parseChainTomlAuto(v2bytes)
+	require.NoError(t, err)
+	require.Equal(t, "01"+strings.Repeat("00", 19), out2["v1.1-000000-000500-headers.seg"])
+	require.Equal(t, "02"+strings.Repeat("00", 19), out2["v2.0-commitment.0-256.kv"])
+}
+
+// TestApplyV2AnchorsToInventory verifies the consumer-side anchor
+// plumbing: a V2 manifest's step-header anchors land on matching local
+// FileEntries via SetAnchors, and the optional cross-check rejects
+// entries whose ProofRoot disagrees with the chain header's stateRoot.
+func TestApplyV2AnchorsToInventory(t *testing.T) {
+	publisher := snapshotinv.NewInventory()
+	publisherRoot := [32]byte{0xd1, 0xe5, 0x56, 0x19}
+	require.NoError(t, publisher.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+		ProofRoot: publisherRoot, AtBlock: 12345, AtTxNum: 99999, IsPartialBlock: true,
+	}))
+	manifest := GenerateV2(publisher)
+
+	// Local consumer inventory has the matching file but no anchors yet.
+	consumer := snapshotinv.NewInventory()
+	require.NoError(t, consumer.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	}))
+
+	// No cross-check: anchors apply unconditionally.
+	applied, mismatches, err := ApplyV2AnchorsToInventory(consumer, manifest, nil)
+	require.NoError(t, err)
+	require.Empty(t, mismatches)
+	require.Equal(t, 1, applied)
+
+	files := consumer.AllDomainFiles(snapshotinv.DomainCommitment)
+	require.Len(t, files, 1)
+	require.Equal(t, publisherRoot, files[0].ProofRoot)
+	require.Equal(t, uint64(12345), files[0].AtBlock)
+	require.Equal(t, uint64(99999), files[0].AtTxNum)
+	require.True(t, files[0].IsPartialBlock)
+
+	// With matching cross-check: still applies (idempotent).
+	applied2, mismatches2, err := ApplyV2AnchorsToInventory(consumer, manifest, func(b uint64) ([32]byte, error) {
+		require.Equal(t, uint64(12345), b)
+		return publisherRoot, nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, mismatches2)
+	require.Equal(t, 0, applied2, "second pass with same values is a no-op")
+
+	// Mismatch: chain reports a different stateRoot — entry rejected.
+	consumer2 := snapshotinv.NewInventory()
+	require.NoError(t, consumer2.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
+		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	}))
+	chainRoot := [32]byte{0xff, 0xff, 0xff, 0xff}
+	applied3, mismatches3, err := ApplyV2AnchorsToInventory(consumer2, manifest, func(b uint64) ([32]byte, error) {
+		return chainRoot, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, applied3, "mismatched anchor must not be applied")
+	require.Len(t, mismatches3, 1)
+	require.Equal(t, "v2.0-commitment.0-256.kv", mismatches3[0].Name)
+	require.Equal(t, uint64(12345), mismatches3[0].AtBlock)
+	require.Equal(t, publisherRoot, mismatches3[0].Manifest)
+	require.Equal(t, chainRoot, mismatches3[0].ChainState)
+
+	files2 := consumer2.AllDomainFiles(snapshotinv.DomainCommitment)
+	require.Len(t, files2, 1)
+	require.Equal(t, [32]byte{}, files2[0].ProofRoot, "rejected entry must keep zero anchors")
+}
+
+// TestFindPartialBlockCommitmentsWithoutCoverage mirrors the
+// publisher-side defensive pause: a partial-block commitment is only
+// usable as a snapshot tip when the same manifest carries the block
+// .seg covering AtBlock. The consumer refuses to load entries the
+// publisher hasn't bundled with their block data.
+func TestFindPartialBlockCommitmentsWithoutCoverage(t *testing.T) {
+	t.Parallel()
+
+	makeManifest := func(commitFile DomainFileEntry, blockFiles map[string]string) *ChainTomlV2 {
+		m := &ChainTomlV2{
+			Version: ChainTomlV2Version,
+			Blocks:  blockFiles,
+			Domains: map[string]*DomainManifest{
+				"commitment": {Files: []DomainFileEntry{commitFile}},
+			},
+		}
+		return m
+	}
+
+	commitPartial := DomainFileEntry{
+		Name: "v2.0-commitment.0-256.kv", Hash: "ab", Trust: "verified",
+		Range: [2]uint64{0, 256}, Kind: KindKVName,
+		ProofRoot: "ab", AtBlock: 25049601, AtTxNum: 99, IsPartialBlock: true,
+	}
+	commitWhole := DomainFileEntry{
+		Name: "v2.0-commitment.0-256.kv", Hash: "ab", Trust: "verified",
+		Range: [2]uint64{0, 256}, Kind: KindKVName,
+		ProofRoot: "ab", AtBlock: 25049601, AtTxNum: 99, IsPartialBlock: false,
+	}
+
+	t.Run("partial_with_block_coverage_passes", func(t *testing.T) {
+		m := makeManifest(commitPartial, map[string]string{
+			"v1.1-025040-025050-headers.seg": "h",
+			"v1.1-025040-025050-bodies.seg":  "b",
+		})
+		require.Empty(t, FindPartialBlockCommitmentsWithoutCoverage(m))
+	})
+
+	t.Run("partial_without_block_coverage_flagged", func(t *testing.T) {
+		m := makeManifest(commitPartial, map[string]string{
+			"v1.1-025030-025040-headers.seg": "h",
+		})
+		got := FindPartialBlockCommitmentsWithoutCoverage(m)
+		require.Len(t, got, 1)
+		require.Equal(t, "v2.0-commitment.0-256.kv", got[0].Name)
+		require.Equal(t, uint64(25049601), got[0].AtBlock)
+	})
+
+	t.Run("non_partial_never_flagged", func(t *testing.T) {
+		// Even with no block coverage at all, a non-partial commitment
+		// is fine — block-aligned commitments don't need replay.
+		m := makeManifest(commitWhole, map[string]string{})
+		require.Empty(t, FindPartialBlockCommitmentsWithoutCoverage(m))
+	})
+
+	t.Run("nil_manifest_safe", func(t *testing.T) {
+		require.Nil(t, FindPartialBlockCommitmentsWithoutCoverage(nil))
+	})
 }

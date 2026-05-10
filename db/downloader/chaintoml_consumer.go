@@ -16,6 +16,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -29,6 +30,49 @@ func ParseChainToml(tomlBytes []byte) (map[string]string, error) {
 		m = make(map[string]string)
 	}
 	return m, nil
+}
+
+// parseChainTomlAuto detects V1 vs V2 format and returns a flat
+// name -> hash map either way. V2 step-header anchors (ProofRoot,
+// AtBlock, AtTxNum, IsPartialBlock) are NOT carried through this map;
+// they require an inventory-aware application path that takes a
+// BlockReader so ProofRoot can be cross-checked against the local
+// block header's stateRoot at advertise time. That path is the
+// follow-up to this format-detection landing.
+func parseChainTomlAuto(tomlBytes []byte) (map[string]string, error) {
+	if DetectVersion(tomlBytes) >= ChainTomlV2Version {
+		manifest, err := ParseV2(tomlBytes)
+		if err != nil {
+			return nil, err
+		}
+		return flattenV2Manifest(manifest), nil
+	}
+	return ParseChainToml(tomlBytes)
+}
+
+// flattenV2Manifest collects every file in a V2 manifest into a single
+// name -> hash map, the shape the legacy merge path consumes. Step
+// anchors are dropped — see parseChainTomlAuto for the rationale.
+func flattenV2Manifest(m *ChainTomlV2) map[string]string {
+	out := make(map[string]string, len(m.Blocks)+len(m.Meta)+len(m.Salt)+len(m.Caplin))
+	for k, v := range m.Blocks {
+		out[k] = v
+	}
+	for k, v := range m.Meta {
+		out[k] = v
+	}
+	for k, v := range m.Salt {
+		out[k] = v
+	}
+	for _, dm := range m.Domains {
+		for _, f := range dm.Files {
+			out[f.Name] = f.Hash
+		}
+	}
+	for _, c := range m.Caplin {
+		out[c.Name] = c.Hash
+	}
+	return out
 }
 
 // BuildTomlFromMap produces deterministic TOML bytes from a name -> hash map.
@@ -61,6 +105,95 @@ func MergeChainToml(existing, discovered map[string]string) (merged map[string]s
 		}
 	}
 	return merged, newCount
+}
+
+// RetiredClassification reports the fate of a chain.toml entry that
+// the publisher has dropped on republish.
+//
+// MergedOut entries had their step coverage absorbed into a larger
+// file in the new manifest — same Type, range superset. The download
+// manager should cancel the in-flight torrent-add for these and let
+// the new merged file's torrent-add (which fires from the standard
+// "applied new entries" path) take over.
+//
+// Removed entries have no range-superset in the new manifest. The
+// publisher genuinely retracted them; the download manager must drop
+// any in-flight torrent-add and not retry.
+//
+// Quarantine policy: validation failures on retired entries (either
+// class) MUST NOT escalate the failure count — the file's chain.toml
+// basis has been retracted. The caller is responsible for skipping
+// quarantine on these names.
+type RetiredClassification struct {
+	MergedOut []string
+	Removed   []string
+}
+
+// ClassifyRetiredEntries returns the classification of entries that
+// appear in old but not in new (retired by the publisher's republish).
+// Entries that exist in both, or only in new, are not part of the
+// classification.
+//
+// Algorithm: for each retired entry, parse its name into (Type, From,
+// To). Search new for an entry with the same Type whose range
+// [from, to) is a superset (from <= retired.From AND to >= retired.To).
+// If found: merged-out. If not: removed. Entries whose names don't
+// parse cleanly (e.g. salt files, config files) are conservatively
+// classified as Removed — without range info we can't claim a merge.
+//
+// This is a pure function over the maps; the caller wires the
+// classification into the download manager (cancel obsolete
+// torrent-adds) and quarantine policy. (gap (e) per
+// .claude/plans/time-to-get-back-generic-mist.md.)
+func ClassifyRetiredEntries(old, new map[string]string) RetiredClassification {
+	type rangeKey struct {
+		from uint64
+		to   uint64
+	}
+	// Keyed on TypeString (e.g. "accounts", "commitment", "bodies") —
+	// the parsed snaptype.Type is nil for E3 state files because their
+	// type names aren't in the E2 ParseEnum registry, so it can't tell
+	// "accounts" apart from "commitment" by Type alone.
+	newByType := make(map[string][]rangeKey, len(new))
+	for name := range new {
+		// ParseFileName populates TypeString and From/To even when
+		// ok=false (the ok signal requires the type to be registered
+		// in snaptype's enum, which holds for state files but not
+		// for block types in every import graph). We accept the
+		// fields if TypeString is non-empty AND From < To.
+		info, _, _ := snaptype.ParseFileName("", name)
+		if info.TypeString == "" || info.From >= info.To {
+			continue
+		}
+		newByType[info.TypeString] = append(newByType[info.TypeString], rangeKey{info.From, info.To})
+	}
+
+	var result RetiredClassification
+	for name := range old {
+		if _, stillThere := new[name]; stillThere {
+			continue
+		}
+		info, _, _ := snaptype.ParseFileName("", name)
+		if info.TypeString == "" || info.From >= info.To {
+			result.Removed = append(result.Removed, name)
+			continue
+		}
+		merged := false
+		for _, candidate := range newByType[info.TypeString] {
+			if candidate.from <= info.From && candidate.to >= info.To {
+				merged = true
+				break
+			}
+		}
+		if merged {
+			result.MergedOut = append(result.MergedOut, name)
+		} else {
+			result.Removed = append(result.Removed, name)
+		}
+	}
+	sort.Strings(result.MergedOut)
+	sort.Strings(result.Removed)
+	return result
 }
 
 // CompareChainToml compares local and discovered chain.toml maps.
@@ -189,7 +322,7 @@ func (a ipPortAddr) String() string {
 // Returns the count of newly-added entries (relative to the previous
 // registry state).
 func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir string, bootstrapFromPreverified bool) (int, error) {
-	discovered, err := ParseChainToml(discoveredToml)
+	discovered, err := parseChainTomlAuto(discoveredToml)
 	if err != nil {
 		return 0, err
 	}
@@ -244,11 +377,14 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 //   - Acquiring mode: merges discovered entries into the preverified registry (before initial sync)
 //   - Verify mode: compares discovered entries against local manifest (after initial sync)
 func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName string) {
-	// Initial delay to let P2P establish connections
+	// Initial delay to let P2P establish connections.
+	// Tightened from 30s to 5s after the forced discv5-ping-on-connect
+	// fix made ENR delivery sub-second; a longer wait here was just
+	// dominant-loop latency for the V2 startup case.
 	select {
 	case <-ctx.Done():
 		return
-	case <-time.After(30 * time.Second):
+	case <-time.After(5 * time.Second):
 	}
 
 	// Re-publish existing chain.toml ENR entry now that P2P is likely running.
@@ -260,7 +396,10 @@ func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName str
 		d.logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
+	// 10s ticker (was 30s) — chain.toml discovery is now the dominant
+	// startup phase for V2 consumers, so freshness-checking cadence
+	// should match the seconds-scale latency we now expect end-to-end.
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {

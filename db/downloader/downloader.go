@@ -377,6 +377,18 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 			if !ok {
 				return nil
 			}
+			// Skip chain.toml's own torrent — it's special-cased
+			// (info-hash discovered via ENR, body fetched on demand,
+			// not a snapshot torrent). Adding it here causes the
+			// collision tracked in #20615 and forced AddTorrentsFromDisk
+			// to be gated for LifecycleDrivenByStorage. With the
+			// exclusion, the function is safe to run in that mode and
+			// is needed there — the storage-driven lifecycle populates
+			// the inventory but does not separately load .torrent
+			// files into the seeding client.
+			if name == ChainTomlFileName || strings.HasPrefix(name, "chain.v2.") || strings.HasSuffix(name, ".ucan.bin") {
+				return nil
+			}
 			t, complete, new, err := d.addTorrentIfComplete(name)
 			if err != nil {
 				err = fmt.Errorf("adding torrent for %v: %w", path, err)
@@ -428,8 +440,36 @@ func (d *Downloader) PublishLocalChainToml() error {
 	updater := d.enrUpdater
 	d.lock.RUnlock()
 
-	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, updater); err != nil {
+	// Capture before-state so we can log a positive "regenerated"
+	// signal with delta. Without this, every regeneration looks the
+	// same in logs whether it changed bytes or not — which makes
+	// confirming the bridge subscriber actually grew the manifest
+	// during multi-day tests guesswork. Read errors are fine here:
+	// nil oldBytes means the file didn't exist, len = 0.
+	oldBytes, _ := LoadChainToml(d.snapDir())
+
+	// Build the validation gate: only files the torrent client is
+	// actually ready to serve get advertised. Disk-walk gives us
+	// names; this gives us "we can serve it." Architectural rule:
+	// validate before advertise.
+	servable := make(map[metainfo.Hash]struct{})
+	for _, t := range d.torrentClient.Torrents() {
+		servable[t.InfoHash()] = struct{}{}
+	}
+
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, servable, updater); err != nil {
 		return err
+	}
+
+	newBytes, _ := LoadChainToml(d.snapDir())
+	if !bytes.Equal(oldBytes, newBytes) {
+		oldLines := bytes.Count(oldBytes, []byte("\n"))
+		newLines := bytes.Count(newBytes, []byte("\n"))
+		d.logger.Info("[chaintoml] regenerated",
+			"entries", newLines,
+			"delta-entries", newLines-oldLines,
+			"bytes", len(newBytes),
+			"delta-bytes", len(newBytes)-len(oldBytes))
 	}
 
 	// Seed the chain.toml torrent so other nodes can download it by info-hash.

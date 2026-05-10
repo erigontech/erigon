@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
@@ -105,7 +104,7 @@ func (a AllFilesPresent) ValidateStep(_ context.Context, files []*snapshot.FileE
 		if !f.Local {
 			continue
 		}
-		path := filepath.Join(a.SnapDir, f.Name)
+		path := snapshot.PathForName(a.SnapDir, f.Name)
 		if _, err := os.Stat(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("file %q marked Local but missing on disk", f.Name)

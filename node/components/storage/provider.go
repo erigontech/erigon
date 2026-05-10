@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 
@@ -320,10 +321,99 @@ func (p *Provider) Initialize(deps Deps) error {
 		sub, unsub := inv.Subscribe()
 		go func() {
 			defer unsub()
+
+			// alreadySeeded tracks names we've handed to the downloader
+			// to avoid re-Seeding on every periodic scan (Seed is
+			// idempotent at the downloader level, but the periodic
+			// scan would still walk the whole inventory and fan out
+			// hundreds of no-op RPC calls).
+			alreadySeeded := make(map[string]struct{})
+
+			// scanAndSeed walks the inventory and Seeds every entry
+			// with Local=true that hasn't yet been handed to the
+			// downloader. The architectural rule (per docs) is that
+			// every node seeds every file it knows about; the
+			// inventory is the authoritative source of truth for what
+			// the node knows, so the bridge enumerates it directly
+			// rather than relying on ChangeSet replay alone.
+			//
+			// ChangeSet-driven seeding alone is insufficient because
+			// the inventory's Subscribe() channel is buffered at 16,
+			// and discoverNewFiles fires hundreds of AddFile events
+			// in a startup burst — the overflow drops silently. The
+			// periodic re-scan catches anything ChangeSets dropped
+			// AND covers the startup ordering case where the bridge
+			// goroutine starts before discoverNewFiles populates the
+			// inventory.
+			scanAndSeed := func() (republished bool) {
+				if config.Snapshot.NoDownloader {
+					return
+				}
+				var toSeed []string
+				visit := func(e *snapshot.FileEntry) {
+					if e == nil || !e.Local {
+						return
+					}
+					relPath := snapshot.RelPathForName(e.Name)
+					if _, seen := alreadySeeded[relPath]; seen {
+						return
+					}
+					alreadySeeded[relPath] = struct{}{}
+					toSeed = append(toSeed, relPath)
+				}
+				for _, domain := range []snapshot.Domain{
+					snapshot.DomainAccounts, snapshot.DomainStorage,
+					snapshot.DomainCode, snapshot.DomainCommitment,
+				} {
+					for _, e := range inv.AllDomainFiles(domain) {
+						visit(e)
+					}
+				}
+				for _, e := range inv.BlockFiles() {
+					visit(e)
+				}
+				for _, e := range inv.MetaFiles() {
+					visit(e)
+				}
+				for _, e := range inv.SaltFiles() {
+					visit(e)
+				}
+				if len(toSeed) == 0 {
+					return
+				}
+				p.logger.Info("[snapshots] inventory scan seed", "count", len(toSeed))
+				if err := downloaderClient.Seed(ctx, toSeed); err != nil {
+					p.logger.Warn("[snapshots] inventory scan seed", "err", err, "count", len(toSeed))
+					// Roll back so the next scan retries.
+					for _, n := range toSeed {
+						delete(alreadySeeded, n)
+					}
+					return
+				}
+				if deps.RepublishChainToml != nil {
+					if err := deps.RepublishChainToml(); err != nil {
+						p.logger.Warn("[snapshots] re-publish chain.toml after scan seed", "err", err)
+					}
+				}
+				return true
+			}
+
+			// Periodic ticker re-scans the inventory every 10s. This
+			// is the safety-net for the buffered-ChangeSet drop case
+			// AND the timing case where this goroutine started before
+			// the lifecycle driver populated the inventory. 10s
+			// matches the chaintoml discovery cadence — V2 startup
+			// is dominated by what these tickers do.
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+
+			scanAndSeed()
 			for {
 				select {
 				case <-ctx.Done():
 					return
+				case <-ticker.C:
+					scanAndSeed()
 				case cs, ok := <-sub:
 					if !ok {
 						return
@@ -335,7 +425,18 @@ func (p *Provider) Initialize(deps Deps) error {
 							continue
 						}
 						if state == snapshot.LifecycleAdvertisable {
-							toSeed = append(toSeed, name)
+							// Translate inventory basename into the
+							// snap-dir-relative form the downloader
+							// expects (e.g. "domain/foo.kv"). Without
+							// this BuildTorrentIfNeed joins root +
+							// basename and fails to find state files
+							// that live in subdirs.
+							relPath := snapshot.RelPathForName(name)
+							if _, seen := alreadySeeded[relPath]; seen {
+								continue
+							}
+							alreadySeeded[relPath] = struct{}{}
+							toSeed = append(toSeed, relPath)
 						}
 					}
 					if len(toSeed) == 0 {
@@ -346,8 +447,16 @@ func (p *Provider) Initialize(deps Deps) error {
 					}
 					if err := downloaderClient.Seed(ctx, toSeed); err != nil {
 						p.logger.Warn("[snapshots] post-advance Seed", "err", err)
+						for _, n := range toSeed {
+							delete(alreadySeeded, n)
+						}
 						continue
 					}
+					// Positive-confirmation signal — without this the only
+					// way to know the bridge subscriber actually fired (vs
+					// the legacy retire callback) is to grep Debug-level
+					// torrent logs. Critical for the multi-day fleet test.
+					p.logger.Info("[snapshots] post-advance seeded", "files", len(toSeed), "names", toSeed)
 					if deps.RepublishChainToml != nil {
 						if err := deps.RepublishChainToml(); err != nil {
 							p.logger.Warn("[snapshots] re-publish chain.toml after seed", "err", err)
@@ -467,6 +576,7 @@ func (p *Provider) Initialize(deps Deps) error {
 				DB:          p.ChainDB,
 				BlockReader: p.BlockReader,
 				Inventory:   deps.Inventory,
+				Logger:      logger, // emits "binding registered source=lifecycle"
 			})
 		}
 		p.LifecycleDriver = &lifecycle.Driver{

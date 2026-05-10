@@ -23,49 +23,94 @@ func ChainTomlPath(snapDir string) string {
 	return filepath.Join(snapDir, ChainTomlFileName)
 }
 
-// GenerateChainToml scans all .torrent files in snapDir, extracts their info-hashes,
-// and produces a deterministic TOML representation (sorted name = "hash" pairs).
-// The output is byte-identical across nodes with the same set of .torrent files.
-func GenerateChainToml(snapDir string) ([]byte, error) {
-	torrentDir := snapDir
-	entries, err := os.ReadDir(torrentDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading snap dir: %w", err)
-	}
+// chainTomlScanSubdirs lists the snap-dir subdirectories whose .torrent
+// files belong in chain.toml alongside top-level (block) torrents.
+// Mirrors the snapshot.SubdirForName layout — see node/components/
+// storage/snapshot/metadata.go. Kept as a local list to avoid a
+// downloader→snapshot import (db/downloader is below node/components
+// in the layering).
+var chainTomlScanSubdirs = []string{"domain", "history", "idx", "accessor"}
 
+// GenerateChainToml scans .torrent files in snapDir AND its state
+// subdirs (domain/, history/, idx/, accessor/), extracts their
+// info-hashes, and produces a deterministic TOML representation
+// (sorted name = "hash" pairs). The output is byte-identical across
+// nodes with the same set of .torrent files.
+//
+// Names for state torrents are emitted with their subdir prefix
+// (e.g. "domain/foo.kv") — matching what consumers already expect
+// from the preverified-merge path and what the downloader's Seed /
+// Delete calls already use.
+//
+// **Validation gate**: when servable is non-nil, only entries whose
+// info-hash is in the set are included. The map should reflect the
+// torrent client's actual seedable set (built by the caller from
+// `client.Torrents()`). The disk walk gives us NAMES; servable gives
+// us "we can actually serve this". Without the gate, chain.toml
+// advertises files we have on disk but haven't yet loaded into the
+// seeding client — peers connect, ask for pieces, and find nothing.
+// The architectural rule per docs is "validate before advertise"; the
+// gate is what enforces it at the chain.toml regen seam.
+//
+// servable=nil disables the gate (legacy behaviour), used by tests
+// and pre-V2 callers. Production calls from PublishLocalChainToml
+// always pass a non-nil set built from the live torrent client.
+func GenerateChainToml(snapDir string, servable map[metainfo.Hash]struct{}) ([]byte, error) {
 	type entry struct {
 		name string
 		hash string
 	}
 	var items []entry
 
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".torrent") {
-			continue
-		}
-
-		// Exclude chain.toml's own torrent from the manifest — otherwise the
-		// manifest becomes self-referential: regenerating chain.toml changes
-		// the torrent hash, which changes chain.toml, which changes the hash…
-		// Consumers should discover chain.toml's info-hash via the ENR entry,
-		// not through the manifest itself.
-		if e.Name() == ChainTomlFileName+".torrent" {
-			continue
-		}
-
-		fPath := filepath.Join(torrentDir, e.Name())
-		mi, err := metainfo.LoadFromFile(fPath)
+	collect := func(dirPath, namePrefix string) error {
+		entries, err := os.ReadDir(dirPath)
 		if err != nil {
-			continue // skip unreadable torrent files
+			if os.IsNotExist(err) {
+				return nil // missing subdir is normal on a fresh datadir
+			}
+			return err
 		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".torrent") {
+				continue
+			}
+			// Exclude chain.toml's own torrent from the manifest —
+			// otherwise the manifest becomes self-referential.
+			if namePrefix == "" && e.Name() == ChainTomlFileName+".torrent" {
+				continue
+			}
+			fPath := filepath.Join(dirPath, e.Name())
+			mi, err := metainfo.LoadFromFile(fPath)
+			if err != nil {
+				continue // skip unreadable torrent files
+			}
+			infoHash := mi.HashInfoBytes()
+			// Validation gate: skip entries the torrent client isn't
+			// ready to serve yet. See doc on this function.
+			if servable != nil {
+				if _, ok := servable[infoHash]; !ok {
+					continue
+				}
+			}
+			dataName := strings.TrimSuffix(e.Name(), ".torrent")
+			if namePrefix != "" {
+				dataName = namePrefix + "/" + dataName
+			}
+			items = append(items, entry{
+				name: dataName,
+				hash: hex.EncodeToString(infoHash[:]),
+			})
+		}
+		return nil
+	}
 
-		// The data file name is the torrent file name without .torrent suffix.
-		dataName := strings.TrimSuffix(e.Name(), ".torrent")
-		infoHash := mi.HashInfoBytes()
-		items = append(items, entry{
-			name: dataName,
-			hash: hex.EncodeToString(infoHash[:]),
-		})
+	if err := collect(snapDir, ""); err != nil {
+		return nil, fmt.Errorf("reading snap dir: %w", err)
+	}
+	for _, sub := range chainTomlScanSubdirs {
+		if err := collect(filepath.Join(snapDir, sub), sub); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", sub, err)
+		}
 	}
 
 	// Sort by name for deterministic output.
@@ -159,9 +204,10 @@ func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorr
 // chain rollout's seed to peers. When false (regular V2 nodes), the
 // published manifest = local files only — preverified is invisible to
 // the network. See completion plan §5b.
-func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, bootstrapFromPreverified bool, enrUpdater func(enr.ChainToml)) error {
-	// Start from local .torrent files.
-	tomlBytes, err := GenerateChainToml(snapDir)
+func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, bootstrapFromPreverified bool, servable map[metainfo.Hash]struct{}, enrUpdater func(enr.ChainToml)) error {
+	// Start from local .torrent files. servable filters to only those
+	// the torrent client is ready to seed (validation gate).
+	tomlBytes, err := GenerateChainToml(snapDir, servable)
 	if err != nil {
 		return fmt.Errorf("generating chain.toml: %w", err)
 	}

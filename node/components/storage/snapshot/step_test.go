@@ -278,6 +278,62 @@ func TestPopulateFromName_NilOrEmpty(t *testing.T) {
 	require.False(t, PopulateFromName(&FileEntry{}))
 }
 
+// TestRelPathForName_Idempotent: the inventory mixes basenames and
+// already-relative names (disk-scan path uses basenames; legacy
+// retire OnFilesChange uses subdir-prefixed names). RelPathForName
+// must converge both forms on the same output, otherwise the bridge
+// subscriber double-prefixes (idx/idx/foo.ef) and the downloader
+// fails to find the file.
+func TestRelPathForName_Idempotent(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in, want string
+	}{
+		// Domain primaries + their in-domain accessors all live in domain/.
+		{"v1.1-commitment.0-256.kv", "domain/v1.1-commitment.0-256.kv"},
+		{"domain/v1.1-commitment.0-256.kv", "domain/v1.1-commitment.0-256.kv"}, // already relative
+		{"v2.0-accounts.0-256.kvi", "domain/v2.0-accounts.0-256.kvi"},
+		{"v2.0-accounts.0-256.kvei", "domain/v2.0-accounts.0-256.kvei"},
+		{"v2.0-accounts.0-256.bt", "domain/v2.0-accounts.0-256.bt"},
+		// Idx + history primaries.
+		{"v3.0-logaddrs.8956-8958.ef", "idx/v3.0-logaddrs.8956-8958.ef"},
+		{"idx/v3.0-logaddrs.8956-8958.ef", "idx/v3.0-logaddrs.8956-8958.ef"}, // already relative
+		{"v2.0-accounts.8956-8957.v", "history/v2.0-accounts.8956-8957.v"},
+		{"history/v2.0-accounts.8956-8957.v", "history/v2.0-accounts.8956-8957.v"},
+		// History accessors (.vi) live in accessor/.
+		{"v1.1-code.0-256.vi", "accessor/v1.1-code.0-256.vi"},
+		{"accessor/v1.1-code.0-256.vi", "accessor/v1.1-code.0-256.vi"},
+		// Top-level (block files + singletons).
+		{"v1.1-025020-025030-headers.seg", "v1.1-025020-025030-headers.seg"},
+		{"erigondb.toml", "erigondb.toml"},
+	} {
+		require.Equal(t, tc.want, RelPathForName(tc.in), "input=%q", tc.in)
+		// Double-application is also idempotent.
+		require.Equal(t, tc.want, RelPathForName(RelPathForName(tc.in)), "double-call input=%q", tc.in)
+	}
+}
+
+// TestPathForName_Idempotent: same idempotency property for the
+// snap-dir-joined form used by AllFilesPresent.
+func TestPathForName_Idempotent(t *testing.T) {
+	t.Parallel()
+	const root = "/snap"
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{"foo.kv", "/snap/domain/foo.kv"},
+		{"domain/foo.kv", "/snap/domain/foo.kv"},
+		{"foo.kvi", "/snap/domain/foo.kvi"},
+		{"foo.bt", "/snap/domain/foo.bt"},
+		{"foo.ef", "/snap/idx/foo.ef"},
+		{"idx/foo.ef", "/snap/idx/foo.ef"},
+		{"foo.vi", "/snap/accessor/foo.vi"},
+		{"foo.seg", "/snap/foo.seg"},
+	} {
+		require.Equal(t, tc.want, PathForName(root, tc.in), "input=%q", tc.in)
+	}
+}
+
 func TestAdvanceStep_ZeroKeyNoOp(t *testing.T) {
 	t.Parallel()
 	inv := NewInventory()

@@ -22,7 +22,7 @@ func TestChainTomlPath(t *testing.T) {
 
 func TestGenerateChainToml_EmptyDir(t *testing.T) {
 	snapDir := t.TempDir()
-	toml, err := GenerateChainToml(snapDir)
+	toml, err := GenerateChainToml(snapDir, nil)
 	require.NoError(t, err)
 	assert.Empty(t, toml)
 }
@@ -34,7 +34,7 @@ func TestGenerateChainToml_WithTorrents(t *testing.T) {
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 	createTestTorrent(t, snapDir, "v1-000000-000500-bodies.seg")
 
-	toml, err := GenerateChainToml(snapDir)
+	toml, err := GenerateChainToml(snapDir, nil)
 	require.NoError(t, err)
 
 	tomlStr := string(toml)
@@ -47,16 +47,108 @@ func TestGenerateChainToml_WithTorrents(t *testing.T) {
 	assert.Less(t, bodiesIdx, headersIdx, "entries should be sorted alphabetically")
 }
 
+func TestGenerateChainToml_IncludesStateSubdirs(t *testing.T) {
+	snapDir := t.TempDir()
+	for _, sub := range chainTomlScanSubdirs {
+		require.NoError(t, os.MkdirAll(filepath.Join(snapDir, sub), 0o755))
+	}
+
+	// Top-level block torrent.
+	createTestTorrent(t, snapDir, "v1.1-000000-000500-headers.seg")
+	// State torrents in their canonical subdirs (mirroring Erigon's
+	// snapshot layout — see snapshot.SubdirForName).
+	createTestTorrentInSubdir(t, snapDir, "domain", "v2.0-accounts.0-256.kv")
+	createTestTorrentInSubdir(t, snapDir, "history", "v2.0-accounts.0-256.v")
+	createTestTorrentInSubdir(t, snapDir, "idx", "v3.0-accounts.0-256.ef")
+	createTestTorrentInSubdir(t, snapDir, "accessor", "v1.1-code.0-256.vi")
+
+	toml, err := GenerateChainToml(snapDir, nil)
+	require.NoError(t, err)
+	tomlStr := string(toml)
+
+	// Block torrent emitted bare (no subdir prefix).
+	assert.Contains(t, tomlStr, `"v1.1-000000-000500-headers.seg"`)
+	// State torrents emitted with subdir prefix.
+	assert.Contains(t, tomlStr, `"domain/v2.0-accounts.0-256.kv"`)
+	assert.Contains(t, tomlStr, `"history/v2.0-accounts.0-256.v"`)
+	assert.Contains(t, tomlStr, `"idx/v3.0-accounts.0-256.ef"`)
+	assert.Contains(t, tomlStr, `"accessor/v1.1-code.0-256.vi"`)
+}
+
+func TestGenerateChainToml_MissingSubdirIsNotAnError(t *testing.T) {
+	snapDir := t.TempDir()
+	// No subdirs created — only top-level. Used to emulate a fresh
+	// datadir on a consumer-only node that hasn't retired any state.
+	createTestTorrent(t, snapDir, "v1.1-000000-000500-headers.seg")
+
+	toml, err := GenerateChainToml(snapDir, nil)
+	require.NoError(t, err,
+		"missing state subdirs must not error — fresh consumer datadir is a valid case")
+	assert.Contains(t, string(toml), "v1.1-000000-000500-headers.seg")
+}
+
+// TestGenerateChainToml_ServableGate: when a servable filter is
+// passed, only entries whose info-hash is in the set get into the
+// output. This is the "validate before advertise" gate — it stops
+// the publisher from announcing files in chain.toml that haven't
+// yet been loaded into the torrent client (and therefore can't be
+// served to peers).
+func TestGenerateChainToml_ServableGate(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+
+	// Three torrents on disk; only one will be in the servable set.
+	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
+	createTestTorrent(t, snapDir, "v1-000000-000500-bodies.seg")
+	createTestTorrent(t, snapDir, "v1-000500-001000-headers.seg")
+
+	// Build a "servable" set containing only the second file's hash.
+	miPath := filepath.Join(snapDir, "v1-000000-000500-bodies.seg.torrent")
+	mi, err := metainfo.LoadFromFile(miPath)
+	require.NoError(t, err)
+	servable := map[metainfo.Hash]struct{}{
+		mi.HashInfoBytes(): {},
+	}
+
+	toml, err := GenerateChainToml(snapDir, servable)
+	require.NoError(t, err)
+	tomlStr := string(toml)
+
+	// Only the bodies entry should appear; headers entries should be
+	// filtered out because their info-hashes aren't in the servable set.
+	assert.Contains(t, tomlStr, `"v1-000000-000500-bodies.seg"`)
+	assert.NotContains(t, tomlStr, `"v1-000000-000500-headers.seg"`,
+		"file with disk-side .torrent but NOT in servable set must be excluded")
+	assert.NotContains(t, tomlStr, `"v1-000500-001000-headers.seg"`,
+		"file with disk-side .torrent but NOT in servable set must be excluded")
+}
+
+// TestGenerateChainToml_EmptyServableSetFiltersAll: a non-nil but
+// empty servable set means "the torrent client has nothing loaded
+// yet" — chain.toml should be empty even if disk has .torrent files.
+func TestGenerateChainToml_EmptyServableSetFiltersAll(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
+	createTestTorrent(t, snapDir, "v1-000000-000500-bodies.seg")
+
+	servable := map[metainfo.Hash]struct{}{} // non-nil but empty
+	toml, err := GenerateChainToml(snapDir, servable)
+	require.NoError(t, err)
+	assert.Empty(t, toml,
+		"empty servable set means no advertisable files; chain.toml must be empty")
+}
+
 func TestGenerateChainToml_Deterministic(t *testing.T) {
 	snapDir := t.TempDir()
 
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 	createTestTorrent(t, snapDir, "v1-000000-000500-bodies.seg")
 
-	toml1, err := GenerateChainToml(snapDir)
+	toml1, err := GenerateChainToml(snapDir, nil)
 	require.NoError(t, err)
 
-	toml2, err := GenerateChainToml(snapDir)
+	toml2, err := GenerateChainToml(snapDir, nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, toml1, toml2, "GenerateChainToml should produce identical output for same inputs")
@@ -164,7 +256,7 @@ func TestPublishChainToml(t *testing.T) {
 		receivedENR = ct
 	}
 
-	err := PublishChainToml(snapDir, torrentFS, "", false, updater)
+	err := PublishChainToml(snapDir, torrentFS, "", false, nil, updater)
 	require.NoError(t, err)
 
 	// Verify chain.toml was created.
@@ -184,7 +276,7 @@ func TestPublishChainToml_NilUpdater(t *testing.T) {
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 
 	// Should not panic with nil updater.
-	err := PublishChainToml(snapDir, torrentFS, "", false, nil)
+	err := PublishChainToml(snapDir, torrentFS, "", false, nil, nil)
 	require.NoError(t, err)
 }
 
@@ -201,4 +293,95 @@ func createTestTorrent(t *testing.T, snapDir, name string) {
 	tf := NewAtomicTorrentFS(snapDir)
 	_, err = BuildTorrentIfNeed(t.Context(), name, snapDir, tf)
 	require.NoError(t, err)
+}
+
+// createTestTorrentInSubdir creates a fake data file and its .torrent
+// inside subdir of snapDir (e.g. "domain/foo.kv"). Used by tests that
+// exercise the subdir-aware GenerateChainToml path.
+func createTestTorrentInSubdir(t *testing.T, snapDir, subdir, name string) {
+	t.Helper()
+	relName := subdir + "/" + name
+	dataPath := filepath.Join(snapDir, subdir, name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(dataPath), 0o755))
+	require.NoError(t, os.WriteFile(dataPath, []byte("test data for "+relName), 0o644))
+	tf := NewAtomicTorrentFS(snapDir)
+	_, err := BuildTorrentIfNeed(t.Context(), relName, snapDir, tf)
+	require.NoError(t, err)
+}
+
+// TestClassifyRetiredEntries verifies the publisher-republish
+// reconciliation: when files in old aren't in new, they're classified
+// as MergedOut (a new entry of same type covers their range as a
+// superset) or Removed (no superset exists).
+func TestClassifyRetiredEntries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("merged_out_state_files", func(t *testing.T) {
+		// Three small commitment step files in old, replaced by one
+		// merged file covering all three steps in new.
+		old := map[string]string{
+			"v2.0-commitment.0-1.kv":         "aa",
+			"v2.0-commitment.1-2.kv":         "bb",
+			"v2.0-commitment.2-3.kv":         "cc",
+			"v2.0-accounts.0-3.kv":           "dd", // unchanged
+			"v1.1-000000-000500-headers.seg": "ee", // unchanged block
+		}
+		newM := map[string]string{
+			"v2.0-commitment.0-3.kv":         "ff", // merged
+			"v2.0-accounts.0-3.kv":           "dd",
+			"v1.1-000000-000500-headers.seg": "ee",
+		}
+		got := ClassifyRetiredEntries(old, newM)
+		require.Equal(t, []string{
+			"v2.0-commitment.0-1.kv",
+			"v2.0-commitment.1-2.kv",
+			"v2.0-commitment.2-3.kv",
+		}, got.MergedOut)
+		require.Empty(t, got.Removed)
+	})
+
+	t.Run("removed_no_superset", func(t *testing.T) {
+		// A file simply dropped — no merged file in new covers its
+		// range.
+		old := map[string]string{
+			"v2.0-commitment.0-1.kv": "aa",
+			"v2.0-accounts.0-1.kv":   "bb",
+		}
+		newM := map[string]string{
+			"v2.0-accounts.0-1.kv": "bb",
+		}
+		got := ClassifyRetiredEntries(old, newM)
+		require.Empty(t, got.MergedOut)
+		require.Equal(t, []string{"v2.0-commitment.0-1.kv"}, got.Removed)
+	})
+
+	t.Run("unchanged_entries_not_classified", func(t *testing.T) {
+		old := map[string]string{"v2.0-commitment.0-1.kv": "aa"}
+		newM := map[string]string{"v2.0-commitment.0-1.kv": "aa"}
+		got := ClassifyRetiredEntries(old, newM)
+		require.Empty(t, got.MergedOut)
+		require.Empty(t, got.Removed)
+	})
+
+	t.Run("only_in_new_ignored", func(t *testing.T) {
+		// New entries that weren't in old are not part of the
+		// classification — they're handled by the existing
+		// "applied new entries" path.
+		old := map[string]string{}
+		newM := map[string]string{"v2.0-commitment.0-1.kv": "aa"}
+		got := ClassifyRetiredEntries(old, newM)
+		require.Empty(t, got.MergedOut)
+		require.Empty(t, got.Removed)
+	})
+
+	t.Run("unparseable_name_treated_as_removed", func(t *testing.T) {
+		// A name we can't parse loses the merge claim
+		// conservatively — without range info we can't promise a
+		// merged file covers it. Defaults to Removed.
+		old := map[string]string{"random-config.toml": "aa"}
+		newM := map[string]string{}
+		got := ClassifyRetiredEntries(old, newM)
+		require.Empty(t, got.MergedOut)
+		require.Equal(t, []string{"random-config.toml"}, got.Removed)
+	})
 }
