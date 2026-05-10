@@ -446,6 +446,8 @@ func (c *BranchCache) GetWithOrigin(prefix []byte) (data []byte, origin string, 
 	var entry *branchCacheEntry
 	if isRootPrefix(prefix) {
 		entry = c.root.Load()
+	} else if pinnedEntry, pinnedOk := c.pinned.Get(prefix); pinnedOk {
+		entry = pinnedEntry
 	} else {
 		entry, ok = c.tail.Get(prefix)
 		if !ok {
@@ -470,26 +472,39 @@ func (c *BranchCache) MarkDirty(prefix []byte) {
 	}
 }
 
-// Invalidate removes the entry at prefix entirely. Use when the caller
-// knows the canonical store has changed and the cached entry should not
-// be served at all (vs MarkDirty which keeps the entry but blocks
-// PutIfClean overwrites).
+// Invalidate removes the entry at prefix entirely from whichever tier
+// holds it. Use when the caller knows the canonical store has changed
+// and the cached entry should not be served at all (vs MarkDirty which
+// keeps the entry but blocks PutIfClean overwrites).
+//
+// Pinned-tier note: Invalidate does delete from the pinned tier. The
+// usual lifecycle for pinned entries is in-place refresh via Put on
+// SD.Flush (so pin survives every-block writes); Invalidate is the
+// escape hatch for events where the pinned bytes must be discarded
+// outright (unwind, fork-validation reset, manual demotion).
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
 		return
 	}
+	c.pinned.Delete(prefix)
 	c.tail.Delete(prefix)
 }
 
-// Clear empties the cache and resets stats counters. Use on Reset /
-// fork-validation paths to ensure stale entries from one trie root are
-// not served against a different root.
+// Clear empties the cache and resets stats counters across ALL tiers
+// (root, pinned, LRU tail). Use on Reset / fork-validation paths to
+// ensure stale entries from one trie root are not served against a
+// different root. After Clear, the pinned tier is empty; callers
+// using trunk preload need to re-issue PreloadContractTrunk to
+// repopulate it.
 func (c *BranchCache) Clear() {
 	c.root.Store(nil)
+	c.pinned = maphash.NewMap[*branchCacheEntry]()
 	c.tail.Purge()
 	c.rootHits.Store(0)
 	c.rootMisses.Store(0)
+	c.pinnedHits.Store(0)
+	c.pinnedMisses.Store(0)
 	c.tailHits.Store(0)
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
