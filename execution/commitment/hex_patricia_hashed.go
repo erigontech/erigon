@@ -2994,25 +2994,6 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
-// verifyBranchCache, when true, makes branchFromCacheOrDB cross-check
-// every BranchCache hit against ctx.Branch and record a divergence on
-// the cache when the bytes disagree. Off by default — gate via env
-// BRANCH_CACHE_VERIFY=true. Use during cross-block-cache-lifetime
-// investigations to localise a bad cached entry to the read site
-// instead of waiting for the downstream wrong-trie-root to surface
-// many blocks later.
-var verifyBranchCache = dbg.EnvBool("BRANCH_CACHE_VERIFY", false)
-
-// disableBranchCacheReads forces branchFromCacheOrDB to skip the L2
-// BranchCache read path — every read goes to ctx.Branch (sd.mem →
-// MDBX). Cache writes (CollectUpdate.Put, branchFromCacheOrDB.Put on
-// L3 fallback) still fire so verify-mode can keep comparing cache vs
-// canonical. Use to A/B test correctness with-cache vs without-cache
-// without recompiling. Confirmed in 2026-05-06 investigation that
-// flipping this distinguishes "cache holds bad data" (bench passes
-// further) from "deeper compute bug" (bench fails at the same block).
-var disableBranchCacheReads = dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false)
-
 // branchFromCacheOrDB reads branch data via ctx.Branch, which goes
 // through sd.mem -> sd.parent.mem -> aggregator-scope BranchCache ->
 // MDBX. The HPH-side warmup cache layer that used to sit above this

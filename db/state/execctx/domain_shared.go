@@ -210,12 +210,6 @@ func NewSharedDomainsWithTrieVariant(ctx context.Context, tx kv.TemporalTx, logg
 	if p, ok := tx.AggTx().(commitment.BranchCacheProvider); ok {
 		branchCache = p.BranchCache()
 	}
-	// DISABLE_BRANCH_CACHE_READS gates the cache out for A/B benchmarking.
-	// When set, sd.branchCache stays nil so sd.GetLatest skips the cache
-	// layer entirely and every CommitmentDomain read goes to MDBX.
-	if dbg.EnvBool("DISABLE_BRANCH_CACHE_READS", false) {
-		branchCache = nil
-	}
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp, branchCache)
 
@@ -647,8 +641,8 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 // the parent SD's mem, and direct MDBX via tx.GetLatest) and returns
 // the bytes from each. Read-only, intended for divergence-detection
 // diagnostics — pinpoints which layer holds bytes that disagree with
-// the BranchCache when verifyBranchCache is on. Bytes are copied so
-// the caller can hold them past tx lifetime.
+// the BranchCache. Bytes are copied so the caller can hold them past
+// tx lifetime.
 func (sd *SharedDomains) ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
 	if v, _, ok := sd.mem.GetLatest(domain, key); ok {
 		memOk = true

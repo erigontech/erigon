@@ -39,19 +39,19 @@ var (
 	mxPreloadBytesTotal           = metrics.GetOrCreateCounter("commitment_trunk_preload_bytes_total")
 )
 
-// publishPinnedGauge updates the pinned-entries gauge from the cache's
-// current size. Called from PublishMetrics; cheap so safe to call
-// frequently.
-func (c *BranchCache) publishPinnedGauge() {
-	mxPinnedEntries.SetUint64(uint64(c.pinned.Len()))
-}
-
 // PublishMetrics snapshots the cache's current counters into the
-// Prometheus registry. Call periodically from the host (e.g. once per
-// SD.Flush) to keep metrics fresh — atomic counter loads are cheap
-// but not free, so a one-call-per-batch cadence avoids hot-path cost.
+// Prometheus registry. Counters are monotonic-add so the cache tracks
+// last-published values internally and emits deltas. Gauges Set
+// absolute. Call periodically from the host (e.g. once per SD.Flush);
+// the once-per-batch cadence avoids hot-path cost.
 func (c *BranchCache) PublishMetrics() {
-	mxPinnedHits.SetUint64(c.pinnedHits.Load())
-	mxPinnedMisses.SetUint64(c.pinnedMisses.Load())
-	c.publishPinnedGauge()
+	hits := c.pinnedHits.Load()
+	misses := c.pinnedMisses.Load()
+	if delta := hits - c.lastPublishedPinnedHits.Swap(hits); delta > 0 {
+		mxPinnedHits.AddUint64(delta)
+	}
+	if delta := misses - c.lastPublishedPinnedMisses.Swap(misses); delta > 0 {
+		mxPinnedMisses.AddUint64(delta)
+	}
+	mxPinnedEntries.SetUint64(uint64(c.pinned.Len()))
 }
