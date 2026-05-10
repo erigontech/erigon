@@ -86,7 +86,19 @@ type Aggregator struct {
 	disableHistory         bool
 	collateAndBuildWorkers int  // minimize amount of background workers by default
 	mergeWorkers           int  // usually 1
-	lockWorkersEditing     bool // allow changing #workers for merge/collate/build
+	lockWorkersEditing     bool // allow changing #workers for merge/collate/build (read/write under workersMu)
+	// workersMu serializes all Set*Workers writes against each other and
+	// against the LockWorkersEditing/UnlockWorkersEditing toggle. It does
+	// NOT need to be held during long-running operations like buildFiles —
+	// the convention is: long ops set lockWorkersEditing=true (under mu)
+	// before doing concurrent reads of the per-domain CompressorCfg, then
+	// clear it after. Set*Workers acquires mu, checks the flag, and skips
+	// the writes if true. The combination of the mutex (provides
+	// happens-before) and the flag (suppresses writes during reads)
+	// eliminates the data race that the previous implementation tripped
+	// when ExecV3's PresetChainTipConcurrency raced with a background
+	// buildFiles goroutine reading InvertedIndex.CompressorCfg.
+	workersMu sync.Mutex
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -594,18 +606,24 @@ func (a *Aggregator) closeDirtyFiles() {
 
 func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
 	a.collateAndBuildWorkers = i
 }
 func (a *Aggregator) SetMergeWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
 	a.mergeWorkers = i
 }
 func (a *Aggregator) SetCompressWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
@@ -625,6 +643,8 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 }
 
 func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
 	if a.lockWorkersEditing {
 		return
 	}
@@ -691,8 +711,23 @@ func (a *Aggregator) PresetOfflineExecution() {
 	a.SetMergeWorkers(dbg.MergeWorkers) // compression and accessors: support parallel-building means we don't need multiple `merge_workers` usually
 }
 
-func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
-func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
+// LockWorkersEditing makes subsequent Set*Workers calls a no-op until
+// UnlockWorkersEditing is called. Pair with `defer a.UnlockWorkersEditing()`
+// at the start of any operation that reads per-domain CompressorCfg
+// concurrently with the chain-tip-driven worker reconfiguration in
+// ExecV3 — the toggle prevents Set*Workers from mutating
+// CompressorCfg.Workers under the readers' feet.
+func (a *Aggregator) LockWorkersEditing() {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
+	a.lockWorkersEditing = true
+}
+
+func (a *Aggregator) UnlockWorkersEditing() {
+	a.workersMu.Lock()
+	defer a.workersMu.Unlock()
+	a.lockWorkersEditing = false
+}
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
@@ -842,6 +877,14 @@ func (sf AggV3StaticFiles) CleanupOnError() {
 var errStepNotReady = errors.New("step not ready")
 
 func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
+	// Pin worker counts for the duration of buildFiles. The collate /
+	// build phases below read per-domain/per-II CompressorCfg.Workers
+	// directly (passed by-value into seg.NewCompressor); without this
+	// guard, ExecV3's chain-tip-driven Set*Workers calls would race
+	// with those reads.
+	a.LockWorkersEditing()
+	defer a.UnlockWorkersEditing()
+
 	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
