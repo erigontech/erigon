@@ -1234,13 +1234,15 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 // Own-tx async sidesteps both. Caller must guarantee fire-once via
 // BranchCache.TryClaimPreload (the only call site does this).
 func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCache, db kv.TemporalRoDB, pinList string, logger log.Logger) {
-	// RAM budget for the per-contract pin tier. Default 32 MiB covers
-	// a fully-saturated d=68 trunk (~70K branches × ~200 B) with
-	// headroom; depth reached is emergent from trie shape + budget.
-	// Override via PIN_TRUNK_RAM_BUDGET_MB for sweep experiments.
-	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", 32)
+	// RAM budget per contract. 64 MiB is the perf knee on the
+	// SSTORE-bloat workload — covers the structural d=68 saturation
+	// (~70K branches) plus most-shared d=69 branches, beyond which
+	// marginal returns drop sharply (256 MiB sweep showed −2 ms TEST
+	// took for +35 s preload). Override via PIN_TRUNK_RAM_BUDGET_MB
+	// for tuning on different workload classes.
+	ramBudgetMB := dbg.EnvInt("PIN_TRUNK_RAM_BUDGET_MB", 64)
 	if ramBudgetMB <= 0 {
-		ramBudgetMB = 32
+		ramBudgetMB = 64
 	}
 	ramBudgetBytes := ramBudgetMB << 20
 	logger.Info("[trunk-preload] entering", "pin_list_raw", pinList)
