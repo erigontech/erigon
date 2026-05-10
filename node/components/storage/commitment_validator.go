@@ -199,7 +199,7 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	if err != nil {
 		return fmt.Errorf("TxnumReader.Max(blockNum=%d): %w", blockNum, err)
 	}
-	isPartialBlock := txNum < blockMaxTxNum
+	isPartialBlock := commitment.IsPartialBlock(txNum, blockMaxTxNum)
 
 	if !isPartialBlock {
 		// Block-aligned: direct cryptographic check closes the
@@ -231,16 +231,34 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	// chaintoml_v2.GenerateV2.
 	if v.Inventory != nil {
 		v.Inventory.RegisterStepBlockBoundary(toStep, blockNum)
-		v.Inventory.SetAnchors(files[0].Name, rootArr, blockNum, txNum, isPartialBlock)
+		v.Inventory.SetAnchors(files[0].Name, snapshot.Anchors{
+			Root:           rootArr,
+			AtBlock:        blockNum,
+			AtTxNum:        txNum,
+			IsPartialBlock: isPartialBlock,
+		})
 	}
-	if v.Logger != nil {
-		v.Logger.Info("[storage] binding registered",
-			"source", "lifecycle",
-			"name", files[0].Name,
-			"toStep", toStep,
-			"block", blockNum)
-	}
+	logBindingRegistered(v.Logger, "lifecycle", files[0].Name, toStep, &blockNum)
 	return nil
+}
+
+// logBindingRegistered emits the canonical (step, block) binding log
+// with a source tag. Used by both the lifecycle-path validator and
+// the bootstrap-seeder; multi-day fleet tests grep one signal for
+// both. block is a pointer because the bootstrap caller doesn't
+// always know it (it's resolved lazily via the validator's side
+// effect on Inventory).
+func logBindingRegistered(logger log.Logger, source, name string, toStep uint64, block *uint64) {
+	if logger == nil {
+		return
+	}
+	if block != nil {
+		logger.Info("[storage] binding registered",
+			"source", source, "name", name, "toStep", toStep, "block", *block)
+		return
+	}
+	logger.Info("[storage] binding registered",
+		"source", source, "name", name, "toStep", toStep)
 }
 
 // blockSegAdvertisableForBlock reports whether some block-domain
@@ -329,18 +347,7 @@ func seedLatestCommitmentBinding(ctx context.Context, inv *snapshot.Inventory, v
 			lastFailed = candidate
 			continue
 		}
-		if logger != nil {
-			// Mirrors the lifecycle-path binding-registered log
-			// shape so multi-day fleet tests can grep one signal
-			// for both sources. The bootstrap log identifies
-			// itself with source=bootstrap; the lifecycle log
-			// (commitment_validator.go ValidateStep) uses
-			// source=lifecycle.
-			logger.Info("[storage] binding registered",
-				"source", "bootstrap",
-				"name", candidate.Name,
-				"toStep", candidate.ToStep)
-		}
+		logBindingRegistered(logger, "bootstrap", candidate.Name, candidate.ToStep, nil)
 		return
 	}
 

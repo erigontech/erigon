@@ -138,29 +138,41 @@ type FileEntry struct {
 	// the entry can advance directly to LifecycleIndexed once Local.
 	Dependencies []string
 
-	// ProofRoot is the recorded state-trie root for the snapshot at this
-	// file's end. Populated by validators (e.g. the commitment-domain
-	// state-root validator) for files that record a root — primarily
-	// commitment-domain primaries. The 32-byte root is stored raw; the
-	// chain.toml manifest renders it hex-encoded. Empty (all-zero) when
-	// no root has been recorded for this file.
-	ProofRoot [32]byte
+	// Anchors is the cryptographic step-header for this file: state-trie
+	// root + consensus coordinates (block, txNum) + a flag for mid-block
+	// commitments. Populated by validators (commitment domain) and
+	// emitted into the V2 manifest's DomainFileEntry. IsZero() reports
+	// whether no root has been recorded.
+	Anchors Anchors
+}
 
-	// AtBlock and AtTxNum are the consensus coordinates of the recorded
-	// ProofRoot. AtBlock is the block whose execution produced the root;
-	// AtTxNum is the txnum at which the root was recorded. Together they
-	// position the proof in the chain timeline so consumers can cross-
-	// reference against the block header's stateRoot.
+// Anchors is the cryptographic step-header for a file: a state-trie
+// root tied to consensus block coordinates. Carried on FileEntry,
+// emitted into the V2 manifest, used by the consumer-side coverage
+// check. See docs/plans/20260510-partial-block-validation-model.md.
+type Anchors struct {
+	// Root is the recorded state-trie root for the snapshot at this
+	// file's end. The 32-byte root is stored raw; the chain.toml
+	// manifest renders it hex-encoded.
+	Root [32]byte
+
+	// AtBlock is the block whose execution produced Root. AtTxNum is
+	// the txnum at which Root was recorded. Together they position the
+	// proof in the chain timeline so consumers can cross-reference
+	// against the block header's stateRoot.
 	AtBlock uint64
 	AtTxNum uint64
 
 	// IsPartialBlock is true when AtTxNum < the block's max txnum, i.e.
-	// the file's last recorded txn is inside AtBlock, not at its boundary.
-	// Consumers MUST NOT treat partial-block files as a valid snapshot-tip
-	// state (the Phase 5 gap-f wall lived exactly here: a partial-block
-	// commitment was loaded as if it were a tip, and consumer exec failed
-	// because intermediate txns of the boundary block hadn't been applied).
+	// the file's last recorded txn is inside AtBlock, not at its
+	// boundary. Consumers MUST NOT treat partial-block files as a
+	// valid snapshot-tip state.
 	IsPartialBlock bool
+}
+
+// IsZero reports whether no anchor has been recorded.
+func (a Anchors) IsZero() bool {
+	return a.Root == [32]byte{} && a.AtBlock == 0 && a.AtTxNum == 0 && !a.IsPartialBlock
 }
 
 // Range returns the StepRange for this file entry.
@@ -587,36 +599,15 @@ func (inv *Inventory) MarkAdvertisable(name string) bool {
 }
 
 // SetAnchors records the step-header cryptographic anchors on a file
-// entry. Returns true when the entry was found and at least one field
-// changed. Notifies subscribers on change so any consumer watching the
-// inventory sees the anchors land.
-//
-// Used by the chain.toml V2 application path: when a V2 manifest carries
-// step-header anchors (ProofRoot/AtBlock/AtTxNum/IsPartialBlock) for a
-// given file, they're stamped onto the local FileEntry here. Validators
-// and consumers downstream can then cross-check ProofRoot against the
-// chain's block-header stateRoot for AtBlock without re-parsing the
-// manifest.
-func (inv *Inventory) SetAnchors(name string, root [32]byte, atBlock, atTxNum uint64, isPartialBlock bool) bool {
+// entry. Returns true when the entry was found and any field changed.
+// Notifies subscribers on change.
+func (inv *Inventory) SetAnchors(name string, a Anchors) bool {
 	apply := func(e *FileEntry) bool {
-		changed := false
-		if e.ProofRoot != root {
-			e.ProofRoot = root
-			changed = true
+		if e.Anchors == a {
+			return false
 		}
-		if e.AtBlock != atBlock {
-			e.AtBlock = atBlock
-			changed = true
-		}
-		if e.AtTxNum != atTxNum {
-			e.AtTxNum = atTxNum
-			changed = true
-		}
-		if e.IsPartialBlock != isPartialBlock {
-			e.IsPartialBlock = isPartialBlock
-			changed = true
-		}
-		return changed
+		e.Anchors = a
+		return true
 	}
 	inv.mu.Lock()
 	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {

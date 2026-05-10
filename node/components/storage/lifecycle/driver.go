@@ -217,9 +217,7 @@ func (d *Driver) run(ctx context.Context, sub <-chan snapshot.ChangeSet, interva
 			// Clear failure / quarantine for the named files so a fresh
 			// ChangeSet can re-trigger dispatch — the underlying state
 			// changed, the previous failure may no longer apply.
-			for _, name := range cs.Files {
-				d.clearFailure(name)
-			}
+			d.clearFailures(cs.Files)
 			d.Sweep(ctx, logger)
 		case <-ticker.C:
 			d.Sweep(ctx, logger)
@@ -449,6 +447,24 @@ func (d *Driver) clearFailure(name string) {
 	defer d.mu.Unlock()
 	delete(d.failures, name)
 	delete(d.quarantined, name)
+}
+
+// clearFailures bulk-clears under one lock acquisition. Short-circuits
+// when there are no failures recorded — the common case on healthy
+// publishers, where ChangeSet traffic is high but failures are rare.
+func (d *Driver) clearFailures(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.failures) == 0 && len(d.quarantined) == 0 {
+		return
+	}
+	for _, name := range names {
+		delete(d.failures, name)
+		delete(d.quarantined, name)
+	}
 }
 
 // isQuarantined returns whether the named file is currently quarantined.

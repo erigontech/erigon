@@ -264,10 +264,9 @@ func TestV2StepHeaderRoundTrip(t *testing.T) {
 		Name:        "v2.0-commitment.0-256.kv",
 		TorrentHash: [20]byte{0x02},
 		Local:       true, Trust: snapshotinv.TrustVerified,
-		ProofRoot:      commitmentRoot,
-		AtBlock:        12345,
-		AtTxNum:        99999999,
-		IsPartialBlock: true,
+		Anchors: snapshotinv.Anchors{
+			Root: commitmentRoot, AtBlock: 12345, AtTxNum: 99999999, IsPartialBlock: true,
+		},
 	})
 
 	// Accounts file — no step-header anchors yet (the state-trie
@@ -351,7 +350,9 @@ func TestApplyV2AnchorsToInventory(t *testing.T) {
 		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
 		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
 		Local: true, Trust: snapshotinv.TrustVerified,
-		ProofRoot: publisherRoot, AtBlock: 12345, AtTxNum: 99999, IsPartialBlock: true,
+		Anchors: snapshotinv.Anchors{
+			Root: publisherRoot, AtBlock: 12345, AtTxNum: 99999, IsPartialBlock: true,
+		},
 	}))
 	manifest := GenerateV2(publisher)
 
@@ -371,10 +372,10 @@ func TestApplyV2AnchorsToInventory(t *testing.T) {
 
 	files := consumer.AllDomainFiles(snapshotinv.DomainCommitment)
 	require.Len(t, files, 1)
-	require.Equal(t, publisherRoot, files[0].ProofRoot)
-	require.Equal(t, uint64(12345), files[0].AtBlock)
-	require.Equal(t, uint64(99999), files[0].AtTxNum)
-	require.True(t, files[0].IsPartialBlock)
+	require.Equal(t, publisherRoot, files[0].Anchors.Root)
+	require.Equal(t, uint64(12345), files[0].Anchors.AtBlock)
+	require.Equal(t, uint64(99999), files[0].Anchors.AtTxNum)
+	require.True(t, files[0].Anchors.IsPartialBlock)
 
 	// With matching cross-check: still applies (idempotent).
 	applied2, mismatches2, err := ApplyV2AnchorsToInventory(consumer, manifest, func(b uint64) ([32]byte, error) {
@@ -406,7 +407,7 @@ func TestApplyV2AnchorsToInventory(t *testing.T) {
 
 	files2 := consumer2.AllDomainFiles(snapshotinv.DomainCommitment)
 	require.Len(t, files2, 1)
-	require.Equal(t, [32]byte{}, files2[0].ProofRoot, "rejected entry must keep zero anchors")
+	require.True(t, files2[0].Anchors.IsZero(), "rejected entry must keep zero anchors")
 }
 
 // TestFindPartialBlockCommitmentsWithoutCoverage mirrors the

@@ -3378,6 +3378,15 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	return nil
 }
 
+// IsPartialBlock reports whether a commitment file's recorded txNum
+// lies inside (not at the end of) its block — i.e. the file ends mid-
+// block. Used by validator + integrity paths to decide whether the
+// rootHash can be checked directly against header.stateRoot
+// (block-aligned) or needs replay-verification (partial-block).
+func IsPartialBlock(txNum, blockMaxTxNum uint64) bool {
+	return txNum < blockMaxTxNum
+}
+
 func HexTrieExtractStateRoot(enc []byte) ([]byte, uint64, uint64, error) {
 	if len(enc) < 18 { // 8*2+2
 		return nil, 0, 0, fmt.Errorf("invalid state length %x (min %d expected)", len(enc), 18)

@@ -129,7 +129,7 @@ type commitmentRootInfo struct {
 }
 
 func (info commitmentRootInfo) PartialBlock() bool {
-	return info.txNum < info.blockMaxTxNum
+	return commitment.IsPartialBlock(info.txNum, info.blockMaxTxNum)
 }
 
 func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, logger log.Logger) (commitmentRootInfo, error) {

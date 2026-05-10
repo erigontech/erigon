@@ -225,11 +225,11 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			// has populated them. Zero ProofRoot means no validator has
 			// recorded a root for this file — emit nothing rather than
 			// a bogus all-zero hash.
-			if f.ProofRoot != ([32]byte{}) {
-				entry.ProofRoot = fmt.Sprintf("%x", f.ProofRoot)
-				entry.AtBlock = f.AtBlock
-				entry.AtTxNum = f.AtTxNum
-				entry.IsPartialBlock = f.IsPartialBlock
+			if !f.Anchors.IsZero() {
+				entry.ProofRoot = fmt.Sprintf("%x", f.Anchors.Root)
+				entry.AtBlock = f.Anchors.AtBlock
+				entry.AtTxNum = f.Anchors.AtTxNum
+				entry.IsPartialBlock = f.Anchors.IsPartialBlock
 			}
 			dm.Files = append(dm.Files, entry)
 		}
@@ -339,6 +339,21 @@ func DetectVersion(data []byte) int {
 	return header.Version
 }
 
+// decodeHash32 parses a 64-char hex string into a 32-byte array.
+// Returns a descriptive error on length or hex-decode failure.
+func decodeHash32(s string) ([32]byte, error) {
+	var out [32]byte
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return out, fmt.Errorf("decode hex: %w", err)
+	}
+	if len(b) != 32 {
+		return out, fmt.Errorf("got %d bytes, want 32", len(b))
+	}
+	copy(out[:], b)
+	return out, nil
+}
+
 // HeaderStateRootFn looks up the consensus block-header stateRoot for
 // a given block number. Used by ApplyV2AnchorsToInventory's optional
 // cross-check: if provided, every entry's ProofRoot must equal the
@@ -378,15 +393,10 @@ func ApplyV2AnchorsToInventory(inv *snapshotinv.Inventory, manifest *ChainTomlV2
 			if f.ProofRoot == "" {
 				continue
 			}
-			rootBytes, decErr := hex.DecodeString(f.ProofRoot)
-			if decErr != nil {
-				return applied, mismatches, fmt.Errorf("decoding ProofRoot for %s: %w", f.Name, decErr)
+			root, err := decodeHash32(f.ProofRoot)
+			if err != nil {
+				return applied, mismatches, fmt.Errorf("ProofRoot for %s: %w", f.Name, err)
 			}
-			if len(rootBytes) != 32 {
-				return applied, mismatches, fmt.Errorf("ProofRoot for %s is %d bytes, want 32", f.Name, len(rootBytes))
-			}
-			var root [32]byte
-			copy(root[:], rootBytes)
 
 			if headerRoot != nil {
 				chainRoot, lookupErr := headerRoot(f.AtBlock)
@@ -401,7 +411,12 @@ func ApplyV2AnchorsToInventory(inv *snapshotinv.Inventory, manifest *ChainTomlV2
 				}
 			}
 
-			if inv.SetAnchors(f.Name, root, f.AtBlock, f.AtTxNum, f.IsPartialBlock) {
+			if inv.SetAnchors(f.Name, snapshotinv.Anchors{
+				Root:           root,
+				AtBlock:        f.AtBlock,
+				AtTxNum:        f.AtTxNum,
+				IsPartialBlock: f.IsPartialBlock,
+			}) {
 				applied++
 			}
 		}
