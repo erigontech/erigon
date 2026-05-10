@@ -315,11 +315,22 @@ func (a ipPortAddr) String() string {
 //     docs/plans/20260502-app-integration-completion.md §5b.
 //
 // Returns the count of newly-added entries (relative to the previous
-// registry state).
-func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir string, bootstrapFromPreverified bool) (int, error) {
+// registry state) plus a RetiredClassification of entries that
+// disappeared between the previous registry and the new merged set
+// (publisher-republish-after-merge case). Caller is responsible for
+// dropping torrent-adds for the retired names.
+func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir string, bootstrapFromPreverified bool) (int, RetiredClassification, error) {
+	var retired RetiredClassification
 	discovered, err := parseChainTomlAuto(discoveredToml)
 	if err != nil {
-		return 0, err
+		return 0, retired, err
+	}
+
+	current := make(map[string]string)
+	if cfg, known := snapcfg.KnownCfg(networkName); known {
+		for _, item := range cfg.Preverified.Items {
+			current[item.Name] = item.Hash
+		}
 	}
 
 	var merged map[string]string
@@ -327,24 +338,10 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 
 	if bootstrapFromPreverified {
 		// Bootstrap mode: preverified is the merge base; discovered adds.
-		existing := make(map[string]string)
-		if cfg, known := snapcfg.KnownCfg(networkName); known {
-			for _, item := range cfg.Preverified.Items {
-				existing[item.Name] = item.Hash
-			}
-		}
-		merged, newCount = MergeChainToml(existing, discovered)
+		merged, newCount = MergeChainToml(current, discovered)
 	} else {
 		// V2-only mode: discovered IS the registry. preverified ignored.
 		merged = discovered
-		// newCount is the delta vs the current registry — important so
-		// the caller's "no new entries → skip" optimisation still works.
-		current := make(map[string]string)
-		if cfg, known := snapcfg.KnownCfg(networkName); known {
-			for _, item := range cfg.Preverified.Items {
-				current[item.Name] = item.Hash
-			}
-		}
 		for k, v := range discovered {
 			if existing, ok := current[k]; !ok || existing != v {
 				newCount++
@@ -352,19 +349,21 @@ func ApplyDiscoveredChainToml(networkName string, discoveredToml []byte, snapDir
 		}
 	}
 
-	if newCount == 0 && bootstrapFromPreverified {
+	retired = ClassifyRetiredEntries(current, merged)
+
+	if newCount == 0 && bootstrapFromPreverified && len(retired.MergedOut) == 0 && len(retired.Removed) == 0 {
 		// Bootstrap mode preserves the optimisation — nothing changed.
-		return 0, nil
+		return 0, retired, nil
 	}
 
 	mergedToml := BuildTomlFromMap(merged)
 	snapcfg.SetToml(networkName, mergedToml, false)
 
 	if err := SaveChainToml(snapDir, mergedToml); err != nil {
-		return newCount, fmt.Errorf("saving merged chain.toml: %w", err)
+		return newCount, retired, fmt.Errorf("saving merged chain.toml: %w", err)
 	}
 
-	return newCount, nil
+	return newCount, retired, nil
 }
 
 // chainTomlDiscoveryLoop is the background loop that discovers chain.toml from P2P peers.
@@ -460,10 +459,28 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		return
 	}
 
-	newCount, err := ApplyDiscoveredChainToml(networkName, tomlBytes, d.snapDir(), d.cfg.BootstrapFromPreverified)
+	newCount, retired, err := ApplyDiscoveredChainToml(networkName, tomlBytes, d.snapDir(), d.cfg.BootstrapFromPreverified)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to apply chain.toml", "err", err)
 		return
+	}
+
+	// Drop torrent-adds for entries the publisher retired since the
+	// previous manifest. MergedOut entries: download progress is
+	// salvaged via the merged file's torrent (added by the
+	// "applied new entries" path). Removed entries: retracted by the
+	// publisher; cancel without retry. Without this the consumer
+	// keeps retrying 404s on files that no longer exist, eventually
+	// stalling the download (Phase 5, 2026-05-08, gap (e)).
+	dropped := len(retired.MergedOut) + len(retired.Removed)
+	for _, names := range [][]string{retired.MergedOut, retired.Removed} {
+		for _, name := range names {
+			d.DropTorrentByName(name)
+		}
+	}
+	if dropped > 0 {
+		d.logger.Info("[chaintoml] retired entries dropped",
+			"mergedOut", len(retired.MergedOut), "removed", len(retired.Removed))
 	}
 
 	if newCount > 0 {
