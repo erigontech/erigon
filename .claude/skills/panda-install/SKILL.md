@@ -20,6 +20,32 @@ MCP integration use the same local server.
 - They need this on a new server (it's per-host: each server runs its
   own local Panda server pointing at the shared hosted proxy).
 
+## Step 1 — Choose install mode (REQUIRED PROMPT)
+
+Before any install action, ask the user via `AskUserQuestion` which
+mode they want — the answer drives every later step:
+
+| option | when to choose |
+|---|---|
+| **Hosted proxy** | User has an EthPandaOps-allowlisted GitHub identity. Easiest path. |
+| **Self-hosted proxy** | User's org has its own ClickHouse / Prometheus / Loki credentials and prefers not to depend on the EthPandaOps proxy. |
+| **Skip the proxy step** | Just install the CLI for now; configure later. |
+
+Question to ask:
+
+```
+header: "Panda mode"
+question: "Which Panda install mode do you want?"
+options:
+  - Hosted proxy (recommended, requires EthPandaOps GitHub allowlist)
+  - Self-hosted proxy (org has own ClickHouse/Prometheus/Loki credentials)
+  - Skip proxy step (install CLI only)
+```
+
+If "Hosted proxy" → continue to step 2.
+If "Self-hosted proxy" → ask the credential prompts in step 4.
+If "Skip" → install the CLI only, skip `panda init`.
+
 ## Pre-flight checks
 
 ```bash
@@ -44,57 +70,127 @@ is on PATH:
 echo $PATH | grep -q "$HOME/.local/bin" || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 ```
 
-## Initialize (hosted proxy mode)
+## Step 3 — Initialize (hosted proxy mode)
+
+Run interactively in foreground (NOT via `run_in_background` — the
+OAuth flow needs the user to copy a URL):
 
 ```bash
 panda init
 ```
 
-This is **interactive**:
+This:
 1. Pulls the panda Docker images (~500 MB).
 2. Writes a default config at `~/.config/panda/config.yaml`.
-3. Opens a browser for GitHub OAuth against `panda-proxy.ethpandaops.io`.
+3. Prints a GitHub OAuth URL — opens browser if a display is
+   available, else prints a device-flow URL the user opens from any
+   browser.
 4. Starts the local panda server on port 2480.
 
-The OAuth flow needs:
-- A GitHub account that's been allowlisted by EthPandaOps for the
-  hosted proxy. If the user isn't on the allowlist, the auth step
-  fails — they'll need to coordinate with EthPandaOps.
-- A browser. If running on a headless server, the `panda init` flow
-  prints a URL the user can open from any machine; the callback is
-  device-flow style.
+**REQUIRED PROMPT during OAuth** — when `panda init` prints the
+device-flow URL + code, use `AskUserQuestion`:
 
-## Self-host the proxy (alternative — for orgs with their own credentials)
+```
+header: "GitHub OAuth"
+question: "Open the URL printed above in any browser, sign in with
+the GitHub account allowlisted by EthPandaOps, and paste the code
+panda showed. Press Continue once panda confirms 'auth complete'."
+options:
+  - Continue (auth completed in browser)
+  - Cancel (skip OAuth — Panda will not have proxy access)
+```
 
-If the org has its own ClickHouse/Prometheus/Loki credentials and
-prefers not to depend on the hosted proxy:
+If the OAuth fails (user not allowlisted, network issue), `panda init`
+exits non-zero. Fall back to step 4 (self-hosted) or surface to the
+user with a coordination ask:
+
+```
+header: "EthPandaOps allowlist needed"
+question: "Panda OAuth failed — your GitHub identity may not be on
+the EthPandaOps allowlist. Coordinate access by:"
+options:
+  - I'll request allowlist access (re-run this skill once granted)
+  - Switch to self-hosted proxy (provide my own credentials)
+  - Stop — install CLI only, configure later
+```
+
+## Step 4 — Self-host the proxy (alternative path)
+
+For orgs with their own ClickHouse / Prometheus / Loki credentials.
+
+**REQUIRED PROMPT — gather credentials structurally** via
+`AskUserQuestion`. Multiple questions in one batch:
+
+```
+question: "Which datasources do you want to configure on the
+self-hosted proxy?"
+multiSelect: true
+header: "Datasources"
+options:
+  - ClickHouse (e.g. Xatu)
+  - Prometheus
+  - Loki
+  - Ethereum node (RPC)
+
+question: "Provide the ClickHouse host:port (leave empty if N/A)"
+header: "ClickHouse host"
+options:
+  - localhost:8443
+  - clickhouse.internal:8443
+  (user will likely select Other and supply their host)
+
+question: "ClickHouse credentials — username only here; ask for the
+password separately to keep it off the question prompt"
+header: "ClickHouse user"
+options:
+  - default
+  - readonly
+```
+
+For SECRETS (passwords, tokens), do NOT use `AskUserQuestion` (it logs
+to telemetry). Instead, prompt the user to set environment variables
+and reference them in the config:
 
 ```bash
-mkdir -p ~/panda-proxy && cat > ~/panda-proxy/proxy-config.yaml <<'EOF'
+echo 'export CH_PASSWORD="..."' >> ~/.bashrc       # user does this
+echo 'export PROM_PASSWORD="..."' >> ~/.bashrc     # if using Prometheus
+echo 'export LOKI_PASSWORD="..."' >> ~/.bashrc     # if using Loki
+```
+
+Then write the proxy config that references the env vars:
+
+```bash
+mkdir -p ~/panda-proxy && cat > ~/panda-proxy/proxy-config.yaml <<EOF
 server:
   listen_addr: ":18081"
 auth:
   mode: none
 clickhouse:
   - name: my-cluster
-    host: "<host>"
-    port: 8443
-    database: default
-    username: "<user>"
-    password: "<pass>"
+    host: "${CH_HOST:-localhost}"
+    port: ${CH_PORT:-8443}
+    database: ${CH_DB:-default}
+    username: "${CH_USER:-default}"
+    password: "${CH_PASSWORD}"
     secure: true
 EOF
 
 docker run -d --name panda-proxy -p 18081:18081 \
+  -e CH_PASSWORD -e PROM_PASSWORD -e LOKI_PASSWORD \
   -v ~/panda-proxy/proxy-config.yaml:/config/proxy-config.yaml:ro \
   --entrypoint /app/panda-proxy \
   ethpandaops/panda:server-latest \
   --config /config/proxy-config.yaml
 ```
 
-Point the panda CLI at it via `~/.config/panda/config.yaml` (set
-`proxy.url` to `http://localhost:18081`). Then `panda init` skips the
-OAuth flow.
+Point the panda CLI at it via `~/.config/panda/config.yaml`:
+
+```yaml
+proxy:
+  url: "http://localhost:18081"
+```
+
+Then `panda init` skips the OAuth flow.
 
 See [proxy-config.example.yaml](https://github.com/ethpandaops/panda/blob/master/proxy-config.example.yaml)
 for the full schema (Prometheus, Loki, ethnodes too).
