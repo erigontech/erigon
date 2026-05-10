@@ -101,6 +101,12 @@ type Provider struct {
 	Orchestrator      *flow.Orchestrator
 	InitialStateReady <-chan struct{}
 
+	// pausedCommitmentCache is the partial-block-pause cache shared
+	// by CommitmentDomainValidator. Held here so the ChangeSet
+	// subscriber can drop entries for files that get retired before
+	// the cache map accumulates dead names.
+	pausedCommitmentCache *PausedCommitmentCache
+
 	logger log.Logger
 }
 
@@ -437,6 +443,12 @@ func (p *Provider) Initialize(deps Deps) error {
 					for _, name := range cs.Files {
 						state, exists := inv.LifecycleState(name)
 						if !exists {
+							// File removed from the inventory (merge or
+							// retraction). Drop dead entries from caches
+							// so they don't accumulate over long-running
+							// publisher uptime.
+							delete(alreadySeeded, snapshot.RelPathForName(name))
+							p.pausedCommitmentCache.Forget(name)
 							continue
 						}
 						if state == snapshot.LifecycleAdvertisable {
@@ -587,6 +599,10 @@ func (p *Provider) Initialize(deps Deps) error {
 		// are available (tools / tests may construct a Provider
 		// without them).
 		if p.ChainDB != nil && p.BlockReader != nil {
+			// Order matters: header chain runs before commitment so the
+			// commitment partial-block pause's blockNum lookup is on a
+			// chain whose continuity is already verified.
+			p.pausedCommitmentCache = NewPausedCommitmentCache()
 			batchChain = append(batchChain,
 				HeaderChainValidator{DB: p.ChainDB, BlockReader: p.BlockReader},
 				TxRootValidator{DB: p.ChainDB, BlockReader: p.BlockReader},
@@ -595,7 +611,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					BlockReader: p.BlockReader,
 					Inventory:   deps.Inventory,
 					Logger:      logger,
-					PausedCache: NewPausedCommitmentCache(),
+					PausedCache: p.pausedCommitmentCache,
 				},
 				ReceiptRootValidator{
 					DB:          p.ChainDB,
@@ -615,14 +631,13 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
 		}
 
-		// Flow orchestrator. NOTE: validation.Chain (per-file) for the
-		// orchestrator's RecordFile path is a separate construction
-		// from batchChain (per-step) used by the lifecycle driver
-		// above; flow.New uses the unvalidated inventoryStorage
-		// adapter for now. Wiring a per-file chain is a follow-up.
 		p.eventBus = event.NewEventBus(nil)
 		p.InitialStateReady = flow.InitialStateReadyChannel(p.eventBus)
-		p.Orchestrator = flow.New(p.eventBus, deps.Inventory, logger)
+		p.Orchestrator = flow.NewWithStorage(
+			p.eventBus,
+			flow.NewInventoryStorage(deps.Inventory, validation.DefaultStage1ChainWithDisk(snapDir), snapDir),
+			logger,
+		)
 		if err := p.Orchestrator.Start(ctx); err != nil {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)

@@ -172,9 +172,7 @@ type Anchors struct {
 }
 
 // IsZero reports whether no anchor has been recorded.
-func (a Anchors) IsZero() bool {
-	return a.Root == [32]byte{} && a.AtBlock == 0 && a.AtTxNum == 0 && !a.IsPartialBlock
-}
+func (a Anchors) IsZero() bool { return a == Anchors{} }
 
 // Range returns the StepRange for this file entry.
 func (f *FileEntry) Range() StepRange {

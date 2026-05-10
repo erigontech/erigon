@@ -141,10 +141,8 @@ type RetiredClassification struct {
 // parse cleanly (e.g. salt files, config files) are conservatively
 // classified as Removed — without range info we can't claim a merge.
 //
-// This is a pure function over the maps; the caller wires the
-// classification into the download manager (cancel obsolete
-// torrent-adds) and quarantine policy. (gap (e) per
-// .claude/plans/time-to-get-back-generic-mist.md.)
+// Pure function; caller wires the classification into the download
+// manager (cancel obsolete torrent-adds) and quarantine policy.
 func ClassifyRetiredEntries(old, new map[string]string) RetiredClassification {
 	type rangeKey struct {
 		from uint64
@@ -466,12 +464,8 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	}
 
 	// Drop torrent-adds for entries the publisher retired since the
-	// previous manifest. MergedOut entries: download progress is
-	// salvaged via the merged file's torrent (added by the
-	// "applied new entries" path). Removed entries: retracted by the
-	// publisher; cancel without retry. Without this the consumer
-	// keeps retrying 404s on files that no longer exist, eventually
-	// stalling the download (Phase 5, 2026-05-08, gap (e)).
+	// previous manifest. Without this the consumer keeps retrying
+	// 404s on files that no longer exist on the publisher.
 	dropped := len(retired.MergedOut) + len(retired.Removed)
 	for _, names := range [][]string{retired.MergedOut, retired.Removed} {
 		for _, name := range names {

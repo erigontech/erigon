@@ -117,10 +117,7 @@ type DomainFileEntry struct {
 
 	// IsPartialBlock is true when AtTxNum < the block's max txnum — the
 	// file's last record is mid-block. Consumers MUST NOT treat such
-	// files as a valid snapshot-tip state. (Phase 5 gap-f wall lived
-	// exactly here: a partial-block commitment loaded as if it were a
-	// tip, intermediate txns of the boundary block unapplied, exec
-	// failed at the first transaction with a stale account.)
+	// files as a valid snapshot-tip state.
 	IsPartialBlock bool `toml:"is_partial_block,omitempty"`
 }
 
