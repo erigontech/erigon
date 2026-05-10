@@ -865,6 +865,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
+
+	if existing := acRo.TxNumsInFiles(kv.CommitmentDomain); existing > 0 {
+		skipped := 0
+		for _, r := range ranges {
+			if existing >= r.to {
+				skipped++
+			}
+		}
+		logger.Info("[commitment_rebuild] resume: existing commitment files cover up to txNum",
+			"txNum", existing, "rangesToSkip", skipped, "rangesTotal", len(ranges))
+	}
+
 	start := time.Now()
 
 	var totalKeysCommitted uint64
@@ -975,7 +987,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
-			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
 			if concurrent {
 				domains.EnableParaTrieDB(rwDb)
 			}

@@ -53,6 +53,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExecSerialFlag,
 	&utils.ExecNoMergeFlag,
 	&utils.ExecNoPruneFlag,
+	&utils.ExecNoBackgroundMaintenanceFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,

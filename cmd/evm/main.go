@@ -131,6 +131,20 @@ var (
 		Name:  "noreturndata",
 		Usage: "disable return data output",
 	}
+	RunFlag = cli.StringFlag{
+		Name:  "run",
+		Value: ".*",
+		Usage: "Run only those tests matching the regular expression.",
+	}
+	WorkersFlag = cli.IntFlag{
+		Name:  "workers",
+		Value: 0,
+		Usage: "Number of workers to execute tests in parallel (0 means use the command's defaul)",
+	}
+	JSONOutputFlag = cli.BoolFlag{
+		Name:  "jsonout",
+		Usage: "Output results as JSON array instead of human-readable format",
+	}
 )
 
 var stateTransitionCommand = cli.Command{
@@ -187,6 +201,7 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineXTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}

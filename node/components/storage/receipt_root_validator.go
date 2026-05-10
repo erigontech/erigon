@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -91,7 +92,11 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		return nil
 	}
 
-	if err := integrity.ReceiptRootIntegrityRange(ctx, fromBlock, toBlock, v.DB, v.BlockReader, true /* failFast */); err != nil {
+	sc, err := integrity.NewSamplerCfg(0, 1.0) // verify every block in the step's coverage
+	if err != nil {
+		return fmt.Errorf("sampler cfg: %w", err)
+	}
+	if err := integrity.CheckRCacheRootAtBlkRange(ctx, sc, v.DB, v.BlockReader, v.ChainConfig, fromBlock, toBlock, true /* failFast */, log.Root()); err != nil {
 		return fmt.Errorf("receipt step [%d, %d) blocks [%d, %d]: %w", fromStep, toStep, fromBlock, toBlock, err)
 	}
 	return nil

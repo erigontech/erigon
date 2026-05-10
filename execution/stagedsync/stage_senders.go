@@ -56,9 +56,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
+	readAheader     *exec.BlockReadAheader
 }
 
-func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, readAheader *exec.BlockReadAheader) SendersCfg {
 	const sendersBatchSize = 1000
 	return SendersCfg{
 		batchSize:       sendersBatchSize,
@@ -68,6 +69,7 @@ func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHal
 		chainConfig:     chainCfg,
 		hd:              hd,
 		blockReader:     blockReader,
+		readAheader:     readAheader,
 	}
 }
 
@@ -167,7 +169,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 				// Check if block is complete
 				if pb.received == pb.txCount {
-					exec.AddSendersToGlobalReadAheader(pb.senders, pb.hash)
+					cfg.readAheader.AddSenders(pb.senders, pb.hash)
 					if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(j.blockIndex)+1, pb.hash), pb.senders); err != nil {
 						pendingMu.Unlock()
 						errCh <- senderRecoveryError{err: err}
@@ -238,7 +240,7 @@ Loop:
 			continue
 		}
 
-		body, ok := exec.ReadBodyWithTransactionsFromGlobalReadAheader(blockHash)
+		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
 		if body == nil || !ok {
 			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
 				return err

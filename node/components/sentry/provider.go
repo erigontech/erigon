@@ -143,7 +143,8 @@ type Config struct {
 	// tests or when the node hasn't wired Events yet.
 	Events *shards.Events
 
-	Logger log.Logger
+	Logger  log.Logger
+	Disable bool
 }
 
 // Provider is the Sentry component's runtime state. After Initialize, the
@@ -220,6 +221,10 @@ func (p *Provider) Configure(cfg Config) {
 //
 // Initialize does NOT start background goroutines — call Start for that.
 func (p *Provider) Initialize(ctx context.Context) error {
+	if p.cfg.Disable {
+		p.buildStatusAndExecutionP2P()
+		return nil
+	}
 	if len(p.cfg.P2P.SentryAddr) > 0 {
 		// External sentry: dial each address, collect the clients.
 		for _, addr := range p.cfg.P2P.SentryAddr {
