@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -33,13 +32,6 @@ import (
 var (
 	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
-
-	// logCacheFingerprint, when true, makes ComputeCommitment emit a
-	// "[cache-fp]" log line at end-of-block with (block, root, fp,
-	// divergences). Diff two builds' logs offline to localise the first
-	// block at which their BranchCache states diverge. Off by default —
-	// gate via env BRANCH_CACHE_FINGERPRINT=true.
-	logCacheFingerprint = dbg.EnvBool("BRANCH_CACHE_FINGERPRINT", false)
 )
 
 type sd interface {
@@ -326,100 +318,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
 
-		// Per-block BranchCache fingerprint — gated by BRANCH_CACHE_FINGERPRINT
-		// env. Emit a single log line of (block, root, cache_fp, divergences)
-		// so two builds running the same workload can be diffed offline to
-		// localise the first block at which their caches diverge. See
-		// commitment.BranchCache.Fingerprint for the hash semantics.
-		// took + keys exposed at Info so the calculator's per-block compute
-		// time is visible without enabling debug logs (used by the
-		// snapshot-vs-mdbx perf-equivalence investigation to attribute
-		// the gap inside newPayload).
-		if logCacheFingerprint {
-			if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-				if bc := hph.BranchCache(); bc != nil {
-					// Skip/load/reset counters are process-cumulative; the
-					// per-block delta requires subtracting consecutive lines.
-					// Used to answer: "what fraction of computeCellHash calls
-					// actually fetched the underlying value vs reused a
-					// memoized stateHash?"
-					load, skipped, reset, diskSto, diskAcc := commitment.SkipLoadResetCounters()
-					hasStoMiss := commitment.HasStorageMissCount()
-					xfTrue, xfFalse := existence.ContainsHashStats()
-					ssIns, ssUpd, ssDel, _ := commitment.SstoreClassificationCounts()
-					wHit, wEmpty := commitment.WarmerBranchOutcomeStats()
-					// Per-domain file-read counts: lets us decompose the
-					// aggregate `files=N` from [domain reads] into Commitment
-					// (branch reads), Storage (value loads), Account, Code.
-					// All cumulative; deltas via successive lines.
-					var aFiles, sFiles, cFiles, mFiles int64
-					var aUniq, sUniq, cUniq, mUniq int64
-					var mLens [10]int64
-					if m := sdc.sharedDomains.Metrics(); m != nil {
-						m.RLock()
-						if d := m.Domains[kv.AccountsDomain]; d != nil {
-							aFiles = d.FileReadCount
-							aUniq = d.UniqueFileReadCount
-						}
-						if d := m.Domains[kv.StorageDomain]; d != nil {
-							sFiles = d.FileReadCount
-							sUniq = d.UniqueFileReadCount
-						}
-						if d := m.Domains[kv.CodeDomain]; d != nil {
-							cFiles = d.FileReadCount
-							cUniq = d.UniqueFileReadCount
-						}
-						if d := m.Domains[kv.CommitmentDomain]; d != nil {
-							mFiles = d.FileReadCount
-							mUniq = d.UniqueFileReadCount
-							mLens = d.UniqueLenBuckets
-						}
-						m.RUnlock()
-					}
-					// commLens shows depth distribution. Buckets within the storage
-					// subtree (33B+) are sub-divided to distinguish per-contract
-					// storage trunk (33B / 34-36B) from leaf-parent depths
-					// (45-64B). See state_changeset.go UniqueLenBuckets.
-					commLens := fmt.Sprintf(
-						"1B:%d|2-4B:%d|5-8B:%d|9-16B:%d|17-32B:%d|33B:%d|34-36B:%d|37-44B:%d|45-64B:%d|>64B:%d",
-						mLens[0], mLens[1], mLens[2], mLens[3], mLens[4],
-						mLens[5], mLens[6], mLens[7], mLens[8], mLens[9])
-					pinHits, pinMisses, pinEntries := bc.PinnedStats()
-					log.Info("[commitment][cache-fp]",
-						"block", blockNum,
-						"root", hex.EncodeToString(rootHash),
-						"fp", fmt.Sprintf("%016x", bc.Fingerprint()),
-						"divergences", bc.VerifyDivergences(),
-						"took", took,
-						"keys", common.PrettyCounter(updateCount),
-						"load", load,
-						"skipped", skipped,
-						"reset", reset,
-						"disk_sto", diskSto,
-						"disk_acc", diskAcc,
-						"has_sto_miss", hasStoMiss,
-						"xf_true", xfTrue,
-						"xf_false", xfFalse,
-						"ss_ins", ssIns,
-						"ss_upd", ssUpd,
-						"ss_del", ssDel,
-						"w_hit", wHit,
-						"w_empty", wEmpty,
-						"files_acc", aFiles,
-						"files_sto", sFiles,
-						"files_code", cFiles,
-						"files_comm", mFiles,
-						"uniq_acc", aUniq,
-						"uniq_sto", sUniq,
-						"uniq_code", cUniq,
-						"uniq_comm", mUniq,
-						"comm_lens", commLens,
-						"pin_hit", pinHits,
-						"pin_miss", pinMisses,
-						"pin_count", pinEntries)
-				}
-			}
-		}
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()

@@ -200,6 +200,12 @@ type BranchCache struct {
 	// when no callback is installed.
 	onMiss atomic.Pointer[MissCallback]
 
+	// Last-published Prometheus counter snapshots. PublishMetrics
+	// emits the delta between current and last so the monotonic
+	// counters track real activity per Flush, not snapshot absolutes.
+	lastPublishedPinnedHits   atomic.Uint64
+	lastPublishedPinnedMisses atomic.Uint64
+
 	// preloadClaimed is set the first time TryClaimPreload is called.
 	// Used by the trunk-preload trigger (PIN_CONTRACT_TRUNKS hook in
 	// SharedDomains construction) so the preload goroutine fires

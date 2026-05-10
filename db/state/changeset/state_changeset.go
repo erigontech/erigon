@@ -18,7 +18,6 @@ package changeset
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"strings"
@@ -28,18 +27,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// logTrunkProbe is set by TRUNK_PROBE=true to log the keccak256 hash of
-// each contract whose storage subtree root (depth-64 commitment prefix,
-// 33 bytes) is read from the file layer for the first time. The bytes
-// after the 0x00 flag byte ARE the contract's keccak256(addr), which
-// is what PIN_CONTRACT_TRUNKS expects in its hex form.
-var logTrunkProbe = dbg.EnvBool("TRUNK_PROBE", false)
 
 type StateChangeSet struct {
 	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
@@ -638,13 +629,6 @@ func (dm *DomainMetrics) UpdateFileReadsUnique(domain kv.Domain, key []byte, sta
 	domainKey := domain.String() + ":" + string(key)
 	_, alreadySeen := dm.seenFileReads.LoadOrStore(domainKey, struct{}{})
 	bucket := lenBucket(len(key))
-
-	// Trunk-probe log: depth-64 commitment prefix on first sight.
-	// Format key as 0x00 || keccak256(addr); the trailing 32 bytes are
-	// the value to feed to PIN_CONTRACT_TRUNKS for that contract.
-	if logTrunkProbe && !alreadySeen && bucket == 5 && domain == kv.CommitmentDomain && len(key) == 33 && key[0] == 0x00 {
-		log.Info("[trunk-probe] new depth-64 commitment prefix", "contract_hash", hex.EncodeToString(key[1:33]))
-	}
 
 	dm.Lock()
 	defer dm.Unlock()
