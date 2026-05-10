@@ -792,6 +792,9 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
 			}
 		}
+		// Refresh pinned-tier gauges once per Flush — once-per-batch
+		// cadence avoids per-lookup cost in the hot read path.
+		sd.branchCache.PublishMetrics()
 		return nil
 	}
 	return sd.mem.Flush(ctx, tx)
