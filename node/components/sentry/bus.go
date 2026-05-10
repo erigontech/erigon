@@ -216,6 +216,9 @@ func (p *Provider) EnablePeerEventAutoWire(ctx context.Context) (execp2p.Unregis
 
 	observer := func(msg *sentryproto.PeerEvent) {
 		peerID := execp2p.PeerIdFromH512(msg.PeerId)
+		if p.logger != nil {
+			p.logger.Info("[sentry] PeerEvent observer fired", "eventID", msg.EventId.String(), "peerID", peerID.String()[:16])
+		}
 		switch msg.EventId {
 		case sentryproto.PeerEvent_Connect:
 			// PeerEvent_Connect arrives via the sentry gRPC stream;

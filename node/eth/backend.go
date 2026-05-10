@@ -452,15 +452,26 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		DBEventNotifier:  backend.notifications.Events,
 		DownloaderClient: backend.downloaderClient,
 		RepublishChainToml: func() error {
-			// Re-publish the publisher's chain.toml after retire/merge
-			// produces fresh snapshot files (called from
-			// OnFilesChange). nil-safe — no-ops on consumer-only
+			// Re-publish chain.toml after retire/merge produces fresh
+			// snapshot files (called from OnFilesChange). Emits both
+			// V1 (legacy chain.toml) and V2 (chain.v2.<seq>.toml
+			// sidecar) so consumers running manifest_exchange.Provider
+			// can fetch a usable manifest by info-hash. The ENR's
+			// ChainToml info-hash points to V2 (V2 is published last,
+			// its enrUpdater wins). nil-safe — no-ops on consumer-only
 			// nodes whose downloader isn't a publisher.
 			if backend.components == nil || backend.components.Downloader == nil ||
 				backend.components.Downloader.Downloader == nil {
 				return nil
 			}
-			return backend.components.Downloader.Downloader.PublishLocalChainToml()
+			dl := backend.components.Downloader.Downloader
+			if err := dl.PublishLocalChainToml(); err != nil {
+				return err
+			}
+			if backend.components.Storage != nil {
+				return dl.PublishLocalChainTomlV2(backend.components.Storage.Inventory)
+			}
+			return nil
 		},
 		Inventory:            inv,
 		Aggregator:           agg,

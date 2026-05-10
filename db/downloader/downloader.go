@@ -479,6 +479,36 @@ func (d *Downloader) PublishLocalChainToml() error {
 	return nil
 }
 
+// PublishLocalChainTomlV2 emits the next chain.v2.<seq>.toml generation
+// from the supplied inventory and updates the ENR ChainToml entry to
+// the V2 info-hash. Required so consumers running the V2 manifest
+// exchange path (manifest_exchange.Provider → flow.PeerManifestReceived
+// → orchestrator → InitialStateReady) can fetch a peer manifest by
+// its V2 sidecar info-hash. Without this, peers' ENRs only point to
+// the legacy chain.toml info-hash whose torrent is named "chain.toml"
+// (V1) and manifest_exchange rejects with "not a chain.v2.<seq>.toml
+// sidecar".
+//
+// nil-safe: no-ops with nil inventory or nil downloader.
+func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) error {
+	if d == nil || inv == nil {
+		return nil
+	}
+	d.lock.RLock()
+	updater := d.enrUpdater
+	d.lock.RUnlock()
+	authoritativeBlocks := uint64(0)
+	if cfg, known := snapcfg.KnownCfg(d.cfg.ChainName); known {
+		authoritativeBlocks = cfg.ExpectBlocks
+	}
+	hash, err := PublishChainTomlV2(d.snapDir(), d.torrentFS, inv, authoritativeBlocks, updater)
+	if err != nil {
+		return fmt.Errorf("publishing chain.toml.v2: %w", err)
+	}
+	d.logger.Info("[chaintoml] published v2 manifest", "infoHash", hash.HexString())
+	return nil
+}
+
 // seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
 func (d *Downloader) seedChainTomlTorrent() error {
 	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
