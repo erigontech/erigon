@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -272,6 +273,11 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 // ExpandShortenedKeysInBranch — the same code path the live read side uses
 // to materialise plain keys.
 //
+// Account+storage file lookup happens here (not at the call site) so pure
+// key-encoding conversions (squeeze axis unchanged) don't need account/storage
+// files at all — useful when the datadir was produced by a partial rebuild
+// where commitment ranges don't align with account/storage ranges.
+//
 // KeyCommitmentState rows have no embedded plain keys; both directions are
 // effectively pass-through on their value, so the caller does not need a
 // state-value carve-out.
@@ -279,11 +285,23 @@ func buildValueTransformer(
 	detectedSqueezed, targetSqueezed bool,
 	commitmentRo *DomainRoTx,
 	accounts, storage *DomainRoTx,
-	af, sf *FilesItem,
 	rng MergeRange,
+	startTxNum, endTxNum uint64,
+	stepFrom, stepTo kv.Step,
+	srcPath string,
 ) (valueTransformer, error) {
 	if detectedSqueezed == targetSqueezed {
 		return nil, nil
+	}
+	af, err := accounts.rawLookupFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w (accounts step %d-%d): %w",
+			srcPath, errRangeMatch, stepFrom, stepTo, err)
+	}
+	sf, err := storage.rawLookupFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return nil, fmt.Errorf("%q: %w (storage step %d-%d): %w",
+			srcPath, errRangeMatch, stepFrom, stepTo, err)
 	}
 	if !detectedSqueezed && targetSqueezed {
 		vt, err := commitmentRo.commitmentValTransformDomain(rng, accounts, storage, af, sf)
@@ -339,6 +357,12 @@ func convertCommitmentFile(
 ) (sizeDelta datasize.ByteSize, deltaPct float32, err error) {
 	st, err := detectFileState(at, file, 48)
 	if err != nil {
+		// A file with only the state row (no non-state samples) has no branches
+		// to re-encode on either axis. Treat as already-in-target so the
+		// orchestrator skips it instead of aborting Phase 1 on every other file.
+		if errors.Is(err, errNoNonStateSamples) {
+			return 0, 0, errSkip
+		}
 		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
 	}
 	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == opts.TargetSqueeze {
@@ -358,20 +382,13 @@ func convertCommitmentFile(
 	accountsRo := at.d[kv.AccountsDomain]
 	storageRo := at.d[kv.StorageDomain]
 
-	af, err := accountsRo.rawLookupFileByRange(startTxNum, endTxNum)
-	if err != nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w (accounts step %d-%d): %w",
-			file.Fullpath(), errRangeMatch, stepFrom, stepTo, err)
-	}
-	sf, err := storageRo.rawLookupFileByRange(startTxNum, endTxNum)
-	if err != nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w (storage step %d-%d): %w",
-			file.Fullpath(), errRangeMatch, stepFrom, stepTo, err)
-	}
-
 	kxform := keyXform(st.keysV2, opts.TargetNibblesV2)
 	rng := MergeRange{name: "convert", needMerge: true, from: startTxNum, to: endTxNum}
-	vt, err := buildValueTransformer(st.squeezed, opts.TargetSqueeze, commitmentRo, accountsRo, storageRo, af, sf, rng)
+	// Account+storage files are only needed when the squeeze axis changes (the
+	// value transformer dereferences/expands plain-key offsets). For pure key-
+	// encoding conversions, skip the lookups so the converter still works on
+	// datadirs where commitment ranges don't align with account/storage ranges.
+	vt, err := buildValueTransformer(st.squeezed, opts.TargetSqueeze, commitmentRo, accountsRo, storageRo, rng, startTxNum, endTxNum, stepFrom, stepTo, file.Fullpath())
 	if err != nil {
 		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
 	}
@@ -390,7 +407,16 @@ func convertCommitmentFile(
 	wal := batch.domainWriters[kv.CommitmentDomain]
 	defer wal.Close()
 
-	reader := commitmentRo.dataReader(src.decompressor)
+	// Sub-threshold (steps < DomainMinStepsToCompress) commitment files are
+	// written uncompressed by the merge path (see merge.go:431). Reading them
+	// with the domain's configured Compression would feed compressed-key
+	// decoding against raw bytes — mirror SqueezeCommitmentFiles' logic and
+	// pick the correct codec from the source file's step span.
+	srcCompression := commitmentRo.d.Compression
+	if src.StepCount(stepSize) < DomainMinStepsToCompress {
+		srcCompression = seg.CompressNone
+	}
+	reader := seg.NewReader(src.decompressor.MakeGetter(), srcCompression)
 	reader.Reset(0)
 
 	totalForFile := at.KeyCountInFiles(kv.CommitmentDomain, startTxNum, endTxNum)

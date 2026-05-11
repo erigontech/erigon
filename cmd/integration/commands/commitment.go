@@ -501,13 +501,21 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
 	agg.DisableAllDependencies()
+	// commitmentValTransformDomain (the squeeze path's value transformer)
+	// short-circuits to pass-through when the live runtime flag is false.
+	// Force-enable it for the duration of the converter run so --squeeze=true
+	// works regardless of the operator's current schema config. Matches the
+	// pattern in RebuildCommitmentFiles / RebuildCommitmentFilesWithHistory.
+	if opts.TargetSqueeze {
+		agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	}
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()
 	// Don't defer acRo.MadvNormal().DisableReadAhead(): ConvertCommitmentFiles
 	// calls agg.ReloadFiles() in Phase 5 which closes the decompressors acRo
-	// references. Calling MadvNormal on those after return would dereference
-	// freed mmap handles.
+	// references. The deferred Close itself is safe (refcount decrement +
+	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }

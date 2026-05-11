@@ -406,6 +406,11 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	}
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
+	// commitmentValTransformDomain short-circuits to pass-through when the live
+	// runtime flag is false. Flip it on so TargetSqueeze:true actually fires —
+	// otherwise the orchestrator silently no-ops on the squeeze axis and the
+	// "root unchanged" assertion below holds trivially.
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	// Compute the commitment root via the pre-conversion files.
 	rootBefore := computeCommitmentRoot(t, db)
@@ -428,6 +433,16 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	convErr := state.ConvertCommitmentFiles(t.Context(), at, opts, log.New())
 	rwTx.Rollback() // safe: ReloadFiles already invalidated at internally
 	require.NoError(t, convErr)
+
+	// Verify the squeeze actually fired: at least one promoted file must
+	// contain a sub-10B embedded plain-key field. Without this check the
+	// "root unchanged" assertion below would also pass when the value codec
+	// silently no-oped (e.g. ReplaceKeysInValues=false in the fixture).
+	newKVsForSqueezeCheck, gErr := filepath.Glob(filepath.Join(snapDir, "*-commitment.*.kv"))
+	require.NoError(t, gErr)
+	require.NotEmpty(t, newKVsForSqueezeCheck)
+	require.True(t, anyFileHasSqueezedField(t, agg, newKVsForSqueezeCheck),
+		"orchestrator with TargetSqueeze=true must produce at least one short plain-key field somewhere")
 
 	// Phase 3 invariant: every original commitment-named file is now in backup.
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
@@ -466,6 +481,34 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	rootAfter := computeCommitmentRoot(t, db)
 	require.Equal(t, rootBefore, rootAfter,
 		"commitment root must be unchanged across squeeze conversion")
+}
+
+// anyFileHasSqueezedField returns true if any non-state branch value in any of
+// the supplied .kv files contains an embedded plain-key reference shorter than
+// binary.MaxVarintLen64 (10 bytes) — the on-disk marker the read side keys off
+// to detect squeezed values.
+func anyFileHasSqueezedField(t *testing.T, agg *state.Aggregator, paths []string) bool {
+	t.Helper()
+	for _, p := range paths {
+		keys, vals := readKVFile(t, agg, p)
+		for i, v := range vals {
+			if bytes.Equal(keys[i], commitmentdb.KeyCommitmentState) || len(v) == 0 {
+				continue
+			}
+			found := false
+			_, perr := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				if len(key) < binary.MaxVarintLen64 {
+					found = true
+				}
+				return nil, nil
+			})
+			require.NoError(t, perr)
+			if found {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // computeCommitmentRoot opens a fresh tx and computes the commitment root via
@@ -516,6 +559,10 @@ func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
 	}
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
+	// Enable ReplaceKeysInValues so the squeeze axis actually fires in both
+	// directions; without it the squeeze→unsqueezed leg of the round-trip is
+	// a silent no-op and byte equality holds for the wrong reason.
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	snapDir := agg.Dirs().SnapDomain
 	origFiles := snapshotCommitmentFiles(t, snapDir)
@@ -523,6 +570,13 @@ func TestConvertCommitmentFiles_RoundTripComposed(t *testing.T) {
 
 	// Forward: V1+unsqueezed → V2+squeezed.
 	runOrchestrator(t, db, state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: true})
+
+	// Confirm the squeeze leg actually fired before re-running in reverse;
+	// otherwise the byte-equal assertion below would be a tautology.
+	postFwd, gErr := filepath.Glob(filepath.Join(snapDir, "*-commitment.*.kv"))
+	require.NoError(t, gErr)
+	require.True(t, anyFileHasSqueezedField(t, agg, postFwd),
+		"forward leg must produce at least one squeezed plain-key field")
 
 	// Clear backup between passes; Phase 1 pre-flight refuses to overwrite.
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
