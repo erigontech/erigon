@@ -369,6 +369,20 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if pe.reachedMaxBlock.Load() {
 						return nil
 					}
+					// Clean exit even without the reachedMaxBlock flag: the exec loop
+					// can exit through `rws.ResultCh closed` / `rws.Drain returned closed`
+					// (execLoopExitCheck) for a single-block fork-validation batch where
+					// the result heap empties before the main loop reaches the
+					// execLoopShouldExit precedence check. In that path nobody flips
+					// reachedMaxBlock, even though every block in [startBlockNum, maxBlockNum]
+					// has been applied. Returning ErrLoopExhausted here makes the stage
+					// loop report "has more work" and the engine API surfaces "unexpected
+					// state step has more work" (TestEngineApiEmptyBlockProduction and the
+					// engine-API cluster). When the applied range is complete, treat it as
+					// a clean batch end.
+					if lastBlockResult.BlockNum >= pe.maxBlockNum && len(applyLoopMissingBlocks(txResultBlocks, appliedBlocks)) == 0 {
+						return nil
+					}
 					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 				}
 				switch applyResult := applyResult.(type) {
