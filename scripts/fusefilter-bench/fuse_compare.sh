@@ -102,38 +102,56 @@ echo "$ERIGON_PID" > "$PIDFILE"
 echo "    erigon PID=$ERIGON_PID"
 
 # ---------- 3a. Discover the working metrics endpoint ---------- #
-# Try a list of candidate paths and pick the first one that returns 2xx with
-# content matching the Prometheus exposition format. This shields the script
-# from path changes between erigon versions (e.g. /debug/metrics/prometheus
-# vs /metrics vs /debug/metrics).
-echo "==> waiting for metrics endpoint on ${METRICS_HOST}:${METRICS_PORT}"
+# Erigon may bind to IPv4-only (0.0.0.0), IPv6-only ([::]), or both, and the
+# metrics path may differ between versions. Try the cartesian product of
+# candidate hosts × paths until one returns Prometheus-shaped content.
+#
+# Observed gotcha: with --metrics.addr=0.0.0.0 erigon sometimes ends up bound
+# to [::]:6061 and the kernel won't accept an IPv4 connection to 127.0.0.1
+# unless net.ipv6.bindv6only=0. `curl 0.0.0.0:port` works around it via the
+# kernel's "connect-to-0.0.0.0 means 127.0.0.1" quirk; `localhost` resolves to
+# both IPv4 and IPv6 so curl falls through to whichever socket is live.
+CANDIDATE_HOSTS=(127.0.0.1 localhost 0.0.0.0 ::1)
+CANDIDATE_PATHS=(/debug/metrics/prometheus /debug/metrics /metrics)
+
+probe_metrics_endpoint() {
+  local host path url code
+  for host in "${CANDIDATE_HOSTS[@]}"; do
+    for path in "${CANDIDATE_PATHS[@]}"; do
+      if [[ "$host" == "::1" ]]; then
+        url="http://[${host}]:${METRICS_PORT}${path}"
+      else
+        url="http://${host}:${METRICS_PORT}${path}"
+      fi
+      code=$(curl -sS -m 2 -o /tmp/fuse_probe.$$ -w '%{http_code}' "$url" 2>/dev/null || echo 000)
+      if [[ "$code" == "200" ]] && grep -aq '^# HELP\|^# TYPE\|^process_resident_memory_bytes' /tmp/fuse_probe.$$ 2>/dev/null; then
+        rm -f /tmp/fuse_probe.$$ 2>/dev/null || true
+        echo "$url"
+        return 0
+      fi
+    done
+  done
+  rm -f /tmp/fuse_probe.$$ 2>/dev/null || true
+  return 1
+}
+
+echo "==> probing metrics endpoint (port $METRICS_PORT, 60s upfront budget)"
 METRICS_URL=""
 for ((wait_s=0; wait_s<60; wait_s++)); do
-  for path in /debug/metrics/prometheus /debug/metrics /metrics; do
-    url="http://${METRICS_HOST}:${METRICS_PORT}${path}"
-    code=$(curl -sS -m 2 -o /tmp/fuse_probe.$$ -w '%{http_code}' "$url" 2>/dev/null || echo 000)
-    if [[ "$code" == "200" ]] && grep -q '^# HELP\|^# TYPE\|^process_resident_memory_bytes' /tmp/fuse_probe.$$ 2>/dev/null; then
-      METRICS_URL="$url"
-      echo "    metrics live at $METRICS_URL (after ${wait_s}s)"
-      break 2
-    fi
-  done
+  if url=$(probe_metrics_endpoint); then
+    METRICS_URL="$url"
+    echo "    metrics live at $METRICS_URL (after ${wait_s}s)"
+    break
+  fi
   if ! kill -0 "$ERIGON_PID" 2>/dev/null; then
     echo "    erigon exited before metrics came up (PID $ERIGON_PID gone)" >&2
     break
   fi
   sleep 1
 done
-rm -f /tmp/fuse_probe.$$ 2>/dev/null || true
 if [[ -z "$METRICS_URL" ]]; then
-  echo "    !! metrics endpoint never came up. Tried:"
-  echo "       http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics/prometheus"
-  echo "       http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics"
-  echo "       http://${METRICS_HOST}:${METRICS_PORT}/metrics"
-  echo "    quick manual check:"
-  echo "       curl -v http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics/prometheus"
-  echo "       ss -ltnp | grep $METRICS_PORT"
-  echo "    proceeding without metrics polling (CSV will stay empty)."
+  echo "    metrics not up in 60s — poller will keep retrying lazily."
+  echo "    manual check: curl -v http://0.0.0.0:${METRICS_PORT}/debug/metrics/prometheus  /  ss -ltnp | grep $METRICS_PORT"
 fi
 
 # ---------- 4. Metrics poller (background) ---------- #
@@ -146,9 +164,28 @@ echo "    poller log: $POLLER_LOG"
 START_UNIX=$(date +%s)
 
 poller() {
+  # Disable strict-mode in the poller. The outer script runs with `set -euo pipefail`;
+  # in the poller we'd rather log a single bad sample (e.g. transient metrics blip,
+  # awk match failure, transient curl error) than have the entire loop die silently.
+  set +e
+  # Send stderr of every command in this function to a debug log so any unexpected
+  # failure leaves a trace; otherwise the function could exit on a hidden non-zero
+  # status with no signal.
+  exec 2>>"$POLLER_LOG"
   local pid=$1
   local first=1
   while kill -0 "$pid" 2>/dev/null; do
+    # Late-binding: if upfront discovery didn't find a URL, keep trying every
+    # tick. Once found, latch it (subsequent ticks reuse the discovered URL).
+    if [[ -z "$METRICS_URL" ]]; then
+      if METRICS_URL=$(probe_metrics_endpoint); then
+        printf '[%s] late discovery: %s\n' "$(date +%H:%M:%S)" "$METRICS_URL" >> "$POLLER_LOG"
+      else
+        sleep "$POLL_INTERVAL"
+        continue
+      fi
+    fi
+
     local body http_code curl_err
     # Capture body + HTTP status + curl stderr separately so we can diagnose
     # any failure mode (connection refused, timeout, wrong path, empty body).
@@ -193,12 +230,8 @@ poller() {
     sleep "$POLL_INTERVAL"
   done
 }
-if [[ -n "$METRICS_URL" ]]; then
-  poller "$ERIGON_PID" &
-  POLLER_PID=$!
-else
-  POLLER_PID=""
-fi
+poller "$ERIGON_PID" &
+POLLER_PID=$!
 
 # ---------- 5. Hard-timeout watchdog ---------- #
 # Use SIGTERM rather than SIGINT — empirically erigon under nohup doesn't react
