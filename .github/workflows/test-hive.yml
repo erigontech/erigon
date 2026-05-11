@@ -185,20 +185,24 @@ jobs:
           fi
           echo "All tests passed successfully."
 
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
       - name: Remove Hive directory
         run: |
           echo "Removing the Hive directory..."
           rm -rf hive
         if: always()
 
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
+        # Use `-f` not `-af` so tagged base images (`golang:*-trixie`,
+        # `ghcr.io/...`, etc.) stay cached locally for the next job — re-pulling
+        # them on every run is a major source of transient ghcr.io / Docker Hub
+        # timeouts. Dangling layers from prior `--no-cache` builds still get pruned.
         run: |
-          echo "Pruning docker..."
-          docker system prune -af --volumes
+          echo "Force-removing this job's containers..."
+          if [ -n "$(docker ps -aq)" ]; then
+            docker rm -f $(docker ps -aq) || true
+          fi
+          echo "Pruning dangling images, networks, build cache, and unused volumes..."
+          docker system prune -f --volumes
         if: always()
 
       # In the merge queue, cancel the run on first failure so the gate

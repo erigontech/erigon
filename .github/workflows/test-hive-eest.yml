@@ -69,20 +69,18 @@ jobs:
             max-failures: 579
     steps:
       - name: Clean docker system
+        # Use `-f` not `-af` so tagged base images (`ghcr.io/astral-sh/uv:*`,
+        # `golang:*-trixie`, ...) stay cached locally between jobs. Re-pulling
+        # them on every run is a major source of transient ghcr.io / Docker Hub
+        # timeouts. Dangling layers from prior `--no-cache` builds still get
+        # pruned.
         run: |
-          echo "Force stopping and removing all containers..."
+          echo "Force-removing any leftover containers from previous jobs..."
           if [ -n "$(docker ps -aq)" ]; then
-            docker kill $(docker ps -aq) || true
             docker rm -f $(docker ps -aq) || true
           fi
-          echo "Pruning all images..."
-          docker image prune -af || true
-          if [ -n "$(docker images -aq)" ]; then
-            echo "Force removing all images..."
-            docker rmi -f $(docker images -aq) || true
-          fi
-          echo "Pruning docker system..."
-          docker system prune -af --volumes
+          echo "Pruning dangling images, networks, build cache, and unused volumes..."
+          docker system prune -f --volumes
       - name: Checkout Erigon meta
         uses: actions/checkout@v6
         with:
@@ -224,26 +222,22 @@ jobs:
           fi
           echo "All tests passed successfully."
 
-
-
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)
       - name: Remove Hive directory
         run: |
           echo "Removing the Hive directory..."
           rm -rf hive
         if: always()
 
-      # This step is not required UNTIL the github-managed runners are dismissed in favor of self-hosted ones (which is planned)
-      # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
+        # Use `-f` not `-af` so tagged base images stay cached locally for the
+        # next job (see "Clean docker system" above for the full rationale).
         run: |
-          echo "Stopping and removing all containers..."
-          docker rm -f $(docker ps -aq) || true
-          echo "Removing all images..."
-          docker rmi -f $(docker images -aq) || true
-          echo "Pruning docker..."
-          docker system prune -af --volumes
+          echo "Force-removing this job's containers..."
+          if [ -n "$(docker ps -aq)" ]; then
+            docker rm -f $(docker ps -aq) || true
+          fi
+          echo "Pruning dangling images, networks, build cache, and unused volumes..."
+          docker system prune -f --volumes
         if: always()
 
       # In the merge queue, cancel the run on first failure so the gate
