@@ -87,8 +87,8 @@ func HexNibblesToCompactBytes(key []byte) []byte {
 	return buf
 }
 
-// uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
-func uncompactNibbles(key []byte) []byte {
+// UncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
+func UncompactNibbles(key []byte) []byte {
 	if len(key) == 0 {
 		return nil
 	}

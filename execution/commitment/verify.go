@@ -49,7 +49,7 @@ func VerifyBranchHashes(
 	// The branch node identified by N nibbles was folded at depth = N + 1,
 	// because the branch stores children one level deeper than its prefix path.
 	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
-	nibbles := uncompactNibbles(branchKey)
+	nibbles := UncompactNibbles(branchKey)
 	if HasTerm(nibbles) {
 		nibbles = nibbles[:len(nibbles)-1]
 	}

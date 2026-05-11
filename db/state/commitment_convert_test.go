@@ -216,3 +216,105 @@ func TestDetectSqueezeState_EmptyValuesSkipped(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, squeezed)
 }
+
+// nibblePaths covers the keyXform fixtures: a handful of distinct nibble paths
+// of different lengths and parities. Empty path is the trivial case; odd/even
+// parities exercise both branches of the V2 codec.
+func nibblePaths() [][]byte {
+	return [][]byte{
+		{},
+		{0xa},
+		{0x2, 0xf},
+		{0x2, 0xf, 0xb},
+		{0x2, 0xf, 0xb, 0x3},
+		{0x0, 0x0, 0x0, 0x0},
+		{0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb, 0xc},
+		{0xf, 0xe, 0xd, 0xc, 0xb}, // odd length
+	}
+}
+
+func TestXform_KeyXform_V1ToV1_Passthrough(t *testing.T) {
+	xf := keyXform(false, false)
+	for _, p := range nibblePaths() {
+		k := commitment.HexNibblesToCompactBytes(p)
+		got, err := xf(k)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(k, got), "V1→V1 pass-through must return identity bytes")
+	}
+}
+
+func TestXform_KeyXform_V2ToV2_Passthrough(t *testing.T) {
+	xf := keyXform(true, true)
+	for _, p := range nibblePaths() {
+		k := nibbles.EncodeKeyV2(p)
+		got, err := xf(k)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(k, got), "V2→V2 pass-through must return identity bytes")
+	}
+}
+
+func TestXform_KeyXform_V1ToV2(t *testing.T) {
+	xf := keyXform(false, true)
+	for _, p := range nibblePaths() {
+		v1 := commitment.HexNibblesToCompactBytes(p)
+		got, err := xf(v1)
+		require.NoError(t, err)
+		// Asserting on the round-trip rather than the encoded bytes keeps the
+		// test stable against any future change to the V1/V2 byte layout: a V1
+		// key, transformed to V2, must V2-decode to the same nibble path the
+		// V1 key encoded.
+		decoded, err := nibbles.DecodeKeyV2(got)
+		require.NoError(t, err, "V1→V2 output must decode as canonical V2")
+		require.Equal(t, p, decoded, "V1→V2 must preserve the nibble path")
+	}
+}
+
+func TestXform_KeyXform_V2ToV1(t *testing.T) {
+	xf := keyXform(true, false)
+	for _, p := range nibblePaths() {
+		v2 := nibbles.EncodeKeyV2(p)
+		got, err := xf(v2)
+		require.NoError(t, err)
+		// Same round-trip strategy: V2 → V1 → re-encode V1 → byte-equal V1.
+		// HexNibblesToCompactBytes is deterministic and canonical for the
+		// no-terminator paths we use, so re-encoding closes the loop.
+		want := commitment.HexNibblesToCompactBytes(p)
+		require.True(t, bytes.Equal(want, got),
+			"V2→V1 must reproduce HexNibblesToCompactBytes(%x): got %x, want %x", p, got, want)
+	}
+}
+
+func TestXform_KeyXform_V1V2_RoundTrip(t *testing.T) {
+	// Composed round-trip: V1 → V2 → V1 must be byte-equal to the starting V1.
+	v1ToV2 := keyXform(false, true)
+	v2ToV1 := keyXform(true, false)
+	for _, p := range nibblePaths() {
+		start := commitment.HexNibblesToCompactBytes(p)
+		mid, err := v1ToV2(start)
+		require.NoError(t, err)
+		end, err := v2ToV1(mid)
+		require.NoError(t, err)
+		require.True(t, bytes.Equal(start, end),
+			"V1→V2→V1 round-trip differs for path %x: start=%x end=%x", p, start, end)
+	}
+}
+
+func TestXform_KeyXform_V2ToV1_ErrorPropagates(t *testing.T) {
+	// Corrupt the parity byte → DecodeKeyV2 returns ErrV2KeyParity.
+	bad := nibbles.EncodeKeyV2([]byte{1, 2, 3, 4})
+	bad[len(bad)-1] = 0x05
+	xf := keyXform(true, false)
+	_, err := xf(bad)
+	require.Error(t, err, "V2→V1 must propagate DecodeKeyV2 errors")
+}
+
+func TestXform_BuildValueTransformer_PassThrough(t *testing.T) {
+	// Matching axes return a nil transformer; dumpStepRangeToPath treats nil
+	// as "value pass-through", so no closure allocation is needed.
+	for _, sq := range []bool{false, true} {
+		vt, err := buildValueTransformer(sq, sq, nil, nil, nil, nil, nil, MergeRange{})
+		require.NoError(t, err)
+		require.Nil(t, vt,
+			"buildValueTransformer(detected=%v, target=%v) with matching axes must return nil", sq, sq)
+	}
+}

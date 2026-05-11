@@ -226,6 +226,87 @@ func sampleViaBT(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, err
 	return out, nil
 }
 
+// keyXform returns the per-pair key transform for the requested
+// (detected, target) (V1/V2) combination. The four cases are:
+//
+//	V1 → V1  pass-through
+//	V1 → V2  nibbles.EncodeKeyV2(commitment.UncompactNibbles(k))
+//	V2 → V1  commitment.HexNibblesToCompactBytes(nibbles.DecodeKeyV2(k))
+//	V2 → V2  pass-through
+//
+// V2 encoding panics on malformed input (path length > 128 or nibble > 0x0F).
+// The V1→V2 path is preceded by UncompactNibbles whose output is bounded by
+// the source bytes; V2→V1 is preceded by DecodeKeyV2 which itself rejects
+// non-canonical input. If a path-length > 128 still slips through, EncodeKeyV2
+// panics — this is intentional: a corrupt source file should fail loudly
+// rather than silently emit garbage.
+func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
+	switch {
+	case detectedV2 == targetV2:
+		return func(k []byte) ([]byte, error) { return k, nil }
+	case !detectedV2 && targetV2:
+		return func(k []byte) ([]byte, error) {
+			return nibbles.EncodeKeyV2(commitment.UncompactNibbles(k)), nil
+		}
+	default: // detectedV2 && !targetV2
+		return func(k []byte) ([]byte, error) {
+			decoded, err := nibbles.DecodeKeyV2(k)
+			if err != nil {
+				return nil, fmt.Errorf("keyXform V2→V1: DecodeKeyV2(%x): %w", k, err)
+			}
+			return commitment.HexNibblesToCompactBytes(decoded), nil
+		}
+	}
+}
+
+// buildValueTransformer returns the valueTransformer for the requested
+// (detected, target) squeeze-axis combination, or nil when both match
+// (pass-through; the dump path treats nil as a no-op).
+//
+//	unsqueezed → unsqueezed  nil
+//	unsqueezed → squeezed    commitment.commitmentValTransformDomain(rng, …)
+//	squeezed   → unsqueezed  closure around ExpandShortenedKeysInBranch
+//	squeezed   → squeezed    nil
+//
+// The unsqueezed→squeezed path delegates to the existing read-side machinery
+// in domain_committed.go so the converter writes the same on-disk format the
+// live system produces. The squeezed→unsqueezed direction calls
+// ExpandShortenedKeysInBranch — the same code path the live read side uses
+// to materialise plain keys.
+//
+// KeyCommitmentState rows have no embedded plain keys; both directions are
+// effectively pass-through on their value, so the caller does not need a
+// state-value carve-out.
+func buildValueTransformer(
+	detectedSqueezed, targetSqueezed bool,
+	commitmentRo *DomainRoTx,
+	accounts, storage *DomainRoTx,
+	af, sf *FilesItem,
+	rng MergeRange,
+) (valueTransformer, error) {
+	if detectedSqueezed == targetSqueezed {
+		return nil, nil
+	}
+	if !detectedSqueezed && targetSqueezed {
+		vt, err := commitmentRo.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+		if err != nil {
+			return nil, fmt.Errorf("buildValueTransformer unsqueezed→squeezed: %w", err)
+		}
+		return vt, nil
+	}
+	// squeezed → unsqueezed
+	return func(val []byte, startTxNum, endTxNum uint64) ([]byte, error) {
+		if len(val) == 0 {
+			return val, nil
+		}
+		expanded, err := ExpandShortenedKeysInBranch(val, accounts, storage, af, sf, startTxNum, endTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("buildValueTransformer squeezed→unsqueezed: %w", err)
+		}
+		return expanded, nil
+	}, nil
+}
+
 func sampleViaStride(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
 	reader := dt.dataReader(fi.decompressor)
 	// Count pairs by a fast pass. The seg layer doesn't expose pair count

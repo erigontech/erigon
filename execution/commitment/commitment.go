@@ -1165,7 +1165,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 }
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
-	uncompactedBranchKey := uncompactNibbles(branchKey)
+	uncompactedBranchKey := UncompactNibbles(branchKey)
 	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}
