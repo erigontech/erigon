@@ -25,6 +25,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -664,7 +665,16 @@ func (s *Sync) publishNewBlock(ctx context.Context, block *types.Block) {
 		return
 	}
 
-	s.p2pService.PublishNewBlock(block, td)
+	td256, overflow := uint256.FromBig(td)
+	if overflow {
+		s.logger.Warn(syncLogPrefix("TD overflows uint256, dropping new block publish"),
+			"blockNum", block.NumberU64(),
+			"blockHash", block.Hash(),
+		)
+		return
+	}
+
+	s.p2pService.PublishNewBlock(block, *td256)
 }
 
 func (s *Sync) handleBridgeOnForkChange(ctx context.Context, ccb *CanonicalChainBuilder, oldTip *types.Header) error {

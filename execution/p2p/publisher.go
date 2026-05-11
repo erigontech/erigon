@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -58,7 +57,7 @@ type Publisher struct {
 	tasks         chan publishTask
 }
 
-func (p Publisher) PublishNewBlock(block *types.Block, td *big.Int) {
+func (p Publisher) PublishNewBlock(block *types.Block, td uint256.Int) {
 	p.enqueueTask(publishTask{
 		taskType: newBlockPublishTask,
 		block:    block,
@@ -124,18 +123,9 @@ func (p Publisher) processPublishTask(ctx context.Context, t publishTask) {
 }
 
 func (p Publisher) processNewBlocksPublishTask(ctx context.Context, t publishTask) {
-	td256, overflow := uint256.FromBig(t.td)
-	if overflow {
-		p.logger.Warn(
-			"[p2p-publisher] TD overflows uint256, dropping new block publish",
-			"blockNum", t.block.NumberU64(),
-			"blockHash", t.block.Hash(),
-		)
-		return
-	}
 	newBlockPacket := eth.NewBlockPacket{
 		Block: t.block,
-		TD:    *td256,
+		TD:    t.td,
 	}
 
 	peers := p.peerTracker.ListPeersMayMissBlockHash(t.block.Hash())
@@ -207,7 +197,7 @@ func (p Publisher) processNewBlockHashesPublishTask(ctx context.Context, t publi
 type publishTask struct {
 	taskType         publishTaskType
 	block            *types.Block
-	td               *big.Int
+	td               uint256.Int
 	blockRangeUpdate *eth.BlockRangeUpdatePacket
 }
 
