@@ -24,7 +24,7 @@ def format_bytes(b: int) -> str:
     if b >= 1_000_000_000_000:
         return f"{b / 1_000_000_000_000:.2f} TB"
     if b >= 1_000_000_000:
-        return f"{round(b / 1_000_000_000)} GB"
+        return f"{b / 1_000_000_000:.2f} GB"
     return f"{round(b / 1_000_000)} MB"
 
 
