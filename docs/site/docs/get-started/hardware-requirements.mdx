@@ -31,17 +31,17 @@ The amount of disk space recommended and RAM you need depends on the [sync mode]
 <TabItem value="ethereum-mainnet" label="Ethereum mainnet">
 | Sync Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | {diskSizes?.networks?.[mainnet]?.[archive]?.display ?? '—'} | 4 TB | 32 GB | 64 GB |
-| Full (Default) | {diskSizes?.networks?.[mainnet]?.[full]?.display ?? '—'} | 2 TB | 16 GB | 32 GB |
-| Minimal | {diskSizes?.networks?.[mainnet]?.[minimal]?.display ?? '—'} | 1 TB | 16 GB | 64 GB |
+| Archive | {diskSizes?.networks?.['mainnet']?.['archive']?.display ?? '—'} | 4 TB | 32 GB | 64 GB |
+| Full (Default) | {diskSizes?.networks?.['mainnet']?.['full']?.display ?? '—'} | 2 TB | 16 GB | 32 GB |
+| Minimal | {diskSizes?.networks?.['mainnet']?.['minimal']?.display ?? '—'} | 1 TB | 16 GB | 64 GB |
 
 </TabItem>
 <TabItem value="gnosis-chain" label="Gnosis Chain">
 | **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | {diskSizes?.networks?.[gnosis]?.[archive]?.display ?? '—'} | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | {diskSizes?.networks?.[gnosis]?.[full]?.display ?? '—'}    | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | {diskSizes?.networks?.[gnosis]?.[minimal]?.display ?? '—'} | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | {diskSizes?.networks?.['gnosis']?.['archive']?.display ?? '—'} | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | {diskSizes?.networks?.['gnosis']?.['full']?.display ?? '—'}    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | {diskSizes?.networks?.['gnosis']?.['minimal']?.display ?? '—'} | 500 GB                      | 8 GB               | 16 GB                 |
 </TabItem>
 <TabItem value="polygon" label="Polygon">
 :::warning
