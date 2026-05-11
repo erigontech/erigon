@@ -231,6 +231,12 @@ jobs:
       - name: Prune docker
         # Use `-f` not `-af` so tagged base images stay cached locally for the
         # next job (see "Clean docker system" above for the full rationale).
+        # Then evict tagged images whose upstream build timestamp is older than
+        # 720h (30d) to bound tag drift — e.g. old `golang:1.24-*` left over
+        # after the repo bumps to `1.25-*`. Frequently-rebuilt upstream tags
+        # (golang, debian, ghcr.io/astral-sh/uv, ...) get a fresh creation
+        # timestamp on each rebuild and stay cached; truly stale tags get
+        # reclaimed without needing a separate maintenance job.
         run: |
           echo "Force-removing this job's containers..."
           if [ -n "$(docker ps -aq)" ]; then
@@ -238,6 +244,8 @@ jobs:
           fi
           echo "Pruning dangling images, networks, build cache, and unused volumes..."
           docker system prune -f --volumes
+          echo "Evicting tagged images older than 720h (30d) to bound tag drift..."
+          docker image prune -a -f --filter "until=720h" || true
         if: always()
 
       # In the merge queue, cancel the run on first failure so the gate
