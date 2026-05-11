@@ -2983,9 +2983,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
 	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
 	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	//
+	// Mirror the validated-incarnation filter the SelfDestructPath case
+	// applies below (w.Version.Incarnation != incarnation → skip). Without
+	// this guard a stale SelfDestructPath=true entry from a non-validated
+	// incarnation would mark the address as SD'd and drop the real
+	// account-field writes from the validated incarnation — even though the
+	// stale SelfDestructPath entry itself gets filtered out further down.
 	sdSet := make(map[accounts.Address]bool)
 	for _, w := range writes {
-		if w.Path == state.SelfDestructPath {
+		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
 			if v, ok := w.Val.(bool); ok && v {
 				sdSet[w.Address] = true
 			}
