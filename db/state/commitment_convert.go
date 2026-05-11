@@ -28,8 +28,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -492,6 +494,306 @@ func commitmentFileSizeDelta(origPath, newPath string) (datasize.ByteSize, float
 		pct = 100.0 * float32(oi.Size()-ni.Size()) / float32(oi.Size())
 	}
 	return delta, pct, nil
+}
+
+// ConvertCommitmentFiles re-encodes every commitment .kv file in the datadir to
+// the target (squeeze, nibblesV2) state described by opts. It runs five
+// sequential phases:
+//
+//  1. Convert all: detect each file's current state, transform key+value as
+//     needed, and emit the result into <datadir>/snapshots/rebuild/domain/.
+//     Originals in snapshots/domain/ are untouched. Files already in target
+//     state are skipped (no output).
+//  2. Pre-swap check: verify every converted file produced its full set of
+//     accessor siblings (.kvi / .bt / .kvei per the commitment domain config).
+//  3. Backup originals: mkdir snapshots/backup/domains/ and mv every related
+//     original (.kv plus its accessor and .torrent siblings) into it.
+//  4. Promote: mv snapshots/rebuild/domain/* into snapshots/domain/, then
+//     rmdir the rebuild tree.
+//  5. Reload aggregator + emit revert instruction: agg.ReloadFiles() drops
+//     mmap handles on the now-gone originals and rescans snapshots/domain/.
+//
+// Phase 1 must complete for every file before Phase 2 begins — no per-file
+// interleaving with backup/promote. If anything fails in Phase 1 the caller
+// recovers by deleting snapshots/rebuild/; nothing in snapshots/domain/ has
+// been touched yet.
+//
+// IMPORTANT: agg.ReloadFiles() in Phase 5 invalidates the AggregatorRoTx
+// passed in via at. The caller must not use at after a successful return; it
+// should rollback its transaction and open a fresh one against the reloaded
+// aggregator if it needs to keep working.
+//
+// Pre-flight refuses to run if snapshots/backup/domains/ is non-empty (a
+// prior conversion's backup is still in place) and wipes a leftover
+// snapshots/rebuild/domain/ from a prior crashed run.
+func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
+	files := at.Files(kv.CommitmentDomain)
+	if len(files) == 0 {
+		logger.Info("[commitment_convert] no commitment files to convert")
+		return nil
+	}
+
+	dirs := at.Dirs()
+	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+
+	if err := preflightBackupDir(backupDir); err != nil {
+		return err
+	}
+	if err := preflightRebuildDir(rebuildDir, logger); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(rebuildDir, 0o755); err != nil {
+		return fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
+	}
+
+	// Phase 1: convert all.
+	processedFiles, skippedFiles, totalSizeDelta, err := convertPhase1(ctx, at, files, rebuildDir, opts, logger)
+	if err != nil {
+		return err
+	}
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, sizeDelta=%s",
+		processedFiles, skippedFiles, len(files), totalSizeDelta.HR()))
+
+	if processedFiles == 0 {
+		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
+			logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
+		}
+		cleanupRebuildParent(filepath.Dir(rebuildDir), logger)
+		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
+		return nil
+	}
+
+	// Phase 2: pre-swap check — identify converted files and verify every
+	// expected accessor sibling landed in rebuildDir.
+	convertedFiles, err := convertPhase2(at, files, rebuildDir)
+	if err != nil {
+		return err
+	}
+	if len(convertedFiles) != processedFiles {
+		return fmt.Errorf("[commitment_convert] phase 2 mismatch: %d converted, %d found in rebuild dir",
+			processedFiles, len(convertedFiles))
+	}
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
+
+	// Phase 3: backup originals.
+	movedToBackup, err := convertPhase3(dirs.SnapDomain, backupDir, convertedFiles, at.StepSize())
+	if err != nil {
+		return err
+	}
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 3 backup: %d files moved to %s",
+		movedToBackup, backupDir))
+
+	// Phase 4: promote rebuilt files into snapshots/domain/.
+	promoted, err := convertPhase4(rebuildDir, dirs.SnapDomain)
+	if err != nil {
+		return err
+	}
+	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
+		logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
+	}
+	cleanupRebuildParent(filepath.Dir(rebuildDir), logger)
+	logger.Info(fmt.Sprintf("[commitment_convert] phase 4 promote: %d files moved to %s",
+		promoted, dirs.SnapDomain))
+
+	// Phase 5: reload aggregator.
+	if reloadErr := at.a.ReloadFiles(); reloadErr != nil {
+		return fmt.Errorf("[commitment_convert] phase 5 ReloadFiles: %w", reloadErr)
+	}
+
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] DONE. converted %d files. Originals preserved at:\n    %s\nTo revert this conversion:\n    rm snapshots/domain/*-commitment.* && mv snapshots/backup/domains/* snapshots/domain/ && restart erigon",
+		processedFiles, backupDir))
+	return nil
+}
+
+// preflightBackupDir refuses to start if the backup dir already exists with
+// content. A non-empty backup means a prior conversion's originals are still
+// there and a second pass would silently overwrite them.
+func preflightBackupDir(backupDir string) error {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("[commitment_convert] pre-flight: check backup dir %s: %w", backupDir, err)
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf(
+			"[commitment_convert] pre-flight: backup dir %s already exists with %d entries; "+
+				"refuse to overwrite a prior conversion's backup (rm -rf %s and retry)",
+			backupDir, len(entries), backupDir)
+	}
+	return nil
+}
+
+// preflightRebuildDir wipes a leftover rebuild dir from a prior crashed run.
+// A crashed Phase 1 leaves partial outputs in rebuildDir; deleting them is
+// safe because snapshots/domain/ was never touched.
+func preflightRebuildDir(rebuildDir string, logger log.Logger) error {
+	entries, err := os.ReadDir(rebuildDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("[commitment_convert] pre-flight: check rebuild dir %s: %w", rebuildDir, err)
+	}
+	if len(entries) > 0 {
+		logger.Info("[commitment_convert] pre-flight: wiping leftover rebuild dir",
+			"path", rebuildDir, "entries", len(entries))
+	}
+	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
+		return fmt.Errorf("[commitment_convert] pre-flight: wipe rebuild dir %s: %w", rebuildDir, rmErr)
+	}
+	return nil
+}
+
+// convertPhase1 runs convertCommitmentFile against every visible commitment
+// file in sequence, writing outputs into rebuildDir. errSkip is caught
+// (counted as skipped, not as error); any other error aborts.
+func convertPhase1(
+	ctx context.Context,
+	at *AggregatorRoTx,
+	files VisibleFiles,
+	rebuildDir string,
+	opts ConvertOpts,
+	logger log.Logger,
+) (processedFiles, skippedFiles int, totalSizeDelta datasize.ByteSize, err error) {
+	N := len(files)
+	for i, f := range files {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return processedFiles, skippedFiles, totalSizeDelta, ctxErr
+		}
+		progressPrefix := fmt.Sprintf("(%d/%d files, %.1f%% overall)",
+			i+1, N, 100.0*float32(i)/float32(N))
+		delta, _, convErr := convertCommitmentFile(ctx, at, f, rebuildDir, opts, progressPrefix, logger)
+		if errors.Is(convErr, errSkip) {
+			skippedFiles++
+			logger.Info(fmt.Sprintf("[commitment_convert] phase 1 skip %s (already in target state) %s",
+				filepath.Base(f.Fullpath()), progressPrefix))
+			continue
+		}
+		if convErr != nil {
+			return processedFiles, skippedFiles, totalSizeDelta, fmt.Errorf(
+				"[commitment_convert] phase 1 file %s: %w (cleanup: rm -rf %s)",
+				f.Fullpath(), convErr, rebuildDir)
+		}
+		processedFiles++
+		totalSizeDelta += delta
+	}
+	return processedFiles, skippedFiles, totalSizeDelta, nil
+}
+
+// convertPhase2 walks the visible commitment files and returns the subset that
+// produced output in rebuildDir, verifying that every expected accessor
+// sibling (per the commitment domain's Accessors config) is also present.
+func convertPhase2(at *AggregatorRoTx, files VisibleFiles, rebuildDir string) ([]VisibleFile, error) {
+	stepSize := at.StepSize()
+	commitmentRo := at.d[kv.CommitmentDomain]
+	d := commitmentRo.d
+	converted := make([]VisibleFile, 0, len(files))
+	for _, f := range files {
+		stepFrom := kv.Step(f.StartRootNum() / stepSize)
+		stepTo := kv.Step(f.EndRootNum() / stepSize)
+		newKVPath := d.kvNewFilePathIn(rebuildDir, stepFrom, stepTo)
+		if _, statErr := os.Stat(newKVPath); statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("[commitment_convert] phase 2 stat %s: %w", newKVPath, statErr)
+		}
+		// Per-config accessor siblings must also exist.
+		if d.Accessors.Has(statecfg.AccessorHashMap) {
+			p := d.kviAccessorNewFilePathIn(rebuildDir, stepFrom, stepTo)
+			if _, statErr := os.Stat(p); statErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] phase 2 missing .kvi at %s: %w", p, statErr)
+			}
+		}
+		if d.Accessors.Has(statecfg.AccessorBTree) {
+			p := d.kvBtAccessorNewFilePathIn(rebuildDir, stepFrom, stepTo)
+			if _, statErr := os.Stat(p); statErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] phase 2 missing .bt at %s: %w", p, statErr)
+			}
+		}
+		if d.Accessors.Has(statecfg.AccessorExistence) {
+			p := d.kvExistenceIdxNewFilePathIn(rebuildDir, stepFrom, stepTo)
+			if _, statErr := os.Stat(p); statErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] phase 2 missing .kvei at %s: %w", p, statErr)
+			}
+		}
+		converted = append(converted, f)
+	}
+	return converted, nil
+}
+
+// convertPhase3 moves the original .kv, accessor siblings, and torrent siblings
+// for every converted file from snapshots/domain/ into backupDir. The glob
+// pattern matches every file whose basename is "*-commitment.<from>-<to>.*",
+// covering .kv / .bt / .kvi / .kvei plus all four .torrent variants.
+func convertPhase3(snapDomain, backupDir string, convertedFiles []VisibleFile, stepSize uint64) (int, error) {
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		return 0, fmt.Errorf("[commitment_convert] phase 3 mkdir backup %s: %w", backupDir, err)
+	}
+	moved := 0
+	for _, f := range convertedFiles {
+		stepFrom := kv.Step(f.StartRootNum() / stepSize)
+		stepTo := kv.Step(f.EndRootNum() / stepSize)
+		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%d-%d.*", stepFrom, stepTo))
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return moved, fmt.Errorf("[commitment_convert] phase 3 glob %s: %w", pattern, err)
+		}
+		for _, src := range matches {
+			dst := filepath.Join(backupDir, filepath.Base(src))
+			if renameErr := os.Rename(src, dst); renameErr != nil {
+				return moved, fmt.Errorf("[commitment_convert] phase 3 mv %s -> %s: %w",
+					src, dst, renameErr)
+			}
+			moved++
+		}
+	}
+	return moved, nil
+}
+
+// convertPhase4 moves every regular file in rebuildDir into snapDomain. The
+// caller deletes rebuildDir afterwards.
+func convertPhase4(rebuildDir, snapDomain string) (int, error) {
+	entries, err := os.ReadDir(rebuildDir)
+	if err != nil {
+		return 0, fmt.Errorf("[commitment_convert] phase 4 read rebuild dir %s: %w", rebuildDir, err)
+	}
+	moved := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		src := filepath.Join(rebuildDir, e.Name())
+		dst := filepath.Join(snapDomain, e.Name())
+		if renameErr := os.Rename(src, dst); renameErr != nil {
+			return moved, fmt.Errorf("[commitment_convert] phase 4 mv %s -> %s: %w",
+				src, dst, renameErr)
+		}
+		moved++
+	}
+	return moved, nil
+}
+
+// cleanupRebuildParent removes the rebuild/ parent dir if it's empty (i.e. we
+// just emptied the only child snapshots/rebuild/domain/). Failure is logged
+// but non-fatal — a stray empty rebuild/ directory is harmless.
+func cleanupRebuildParent(parent string, logger log.Logger) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	if len(entries) != 0 {
+		return
+	}
+	if rmErr := dir.RemoveAll(parent); rmErr != nil {
+		logger.Warn("[commitment_convert] failed to remove empty rebuild parent", "path", parent, "err", rmErr)
+	}
 }
 
 func sampleViaStride(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
