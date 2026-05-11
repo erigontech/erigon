@@ -186,6 +186,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				if newHighestBlockProcessed < block.Block.Slot {
 					newHighestBlockProcessed = block.Block.Slot
 				}
+				err = nil
 				continue
 			}
 			// Return an error if block processing fails
@@ -299,6 +300,7 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 
 	// Always start from the current finalized checkpoint
 	downloader.SetHighestProcessedSlot(currentSlot.Load())
+	downloader.SetMinSlot(startSlot)
 
 	// Set the function to process downloaded blocks
 	downloader.SetProcessFunction(func(initialHighestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (newHighestSlotProcessed uint64, err error) {

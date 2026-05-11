@@ -146,20 +146,35 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		panic(err)
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
-	stateHash, err := anchorState.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-	anchorHeader.Root = stateHash
-	// Fix GLOAS checkpoint sync: persist the filled-in Root back to the actual state
-	// so that transitionSlot won't re-compute HashSSZ() (which may return a different
-	// value after DumpBeaconStateOnDisk mutates the internal merkle cache).
-	// Only do this for GLOAS+: in GLOAS, BlockRoot() uses the stored Root directly
-	// when non-zero, so both NewForkGraphDisk and NewForkChoiceStore see the same
-	// anchorRoot. Pre-GLOAS always re-derives via HashSSZ(), so mutating the header
-	// here would make the second BlockRoot() call return a different value.
-	if anchorState.Version() >= clparams.GloasVersion && anchorState.LatestBlockHeader().Root == [32]byte{} && anchorState.Slot() > 0 {
-		anchorState.SetLatestBlockHeader(&anchorHeader)
+	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
+		// GLOAS checkpoint/anchor sync fix: the first transitionSlot for this
+		// anchor needs to record the correct state root (computed with
+		// LatestBlockHeader.Root == zero) into stateRoots. Two cases arise:
+		//
+		// Fresh checkpoint sync: Root is zero per spec (process_block_header
+		// zeroes it). We compute HashSSZ with Root=0 (the correct value),
+		// fill in Root, and cache it as PreviousStateRoot.
+		//
+		// Restart from disk: a previous run already filled in Root and
+		// serialized the state. Root is now that same correct hash (the one
+		// originally computed with Root=0). HashSSZ would return a different
+		// (wrong) value because Root is non-zero, so we must NOT recompute;
+		// instead we use the stored Root directly as PreviousStateRoot.
+		if anchorHeader.Root == [32]byte{} {
+			stateHash, err := anchorState.HashSSZ()
+			if err != nil {
+				panic(err)
+			}
+			anchorHeader.Root = stateHash
+			anchorState.SetLatestBlockHeader(&anchorHeader)
+			anchorState.SetPreviousStateRoot(stateHash)
+		} else {
+			anchorState.SetPreviousStateRoot(anchorHeader.Root)
+		}
+	} else {
+		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
+			panic(err)
+		}
 	}
 
 	farthestExtendingPath[anchorRoot] = true

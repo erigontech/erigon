@@ -16,7 +16,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const CheckpointHttpTimeout = 60 * time.Second
+const (
+	CheckpointHttpTimeout = 60 * time.Second
+
+	// beaconStatePath is the standard Beacon API path for fetching the finalized state.
+	// Users commonly provide just the checkpoint base URL (e.g. https://checkpoint-sync.example.io)
+	// without this suffix, which results in fetching an HTML page instead of SSZ data.
+	beaconStatePath = "/eth/v2/debug/beacon/states/finalized"
+)
 
 // RemoteCheckpointSync is a CheckpointSyncer that fetches the checkpoint state from a remote endpoint.
 type RemoteCheckpointSync struct {
@@ -40,6 +47,8 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 	}
 
 	fetchBeaconState := func(uri string) (*state.CachingBeaconState, error) {
+		uri = normalizeCheckpointURL(uri)
+
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, r.timeout)
 		defer cancel()
 
@@ -60,6 +69,12 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", resp.StatusCode)
 		}
+
+		ct := resp.Header.Get("Content-Type")
+		if ct != "" && !strings.HasPrefix(ct, "application/octet-stream") {
+			return nil, fmt.Errorf("checkpoint sync returned unexpected content-type %q (expected application/octet-stream); verify the URL includes the beacon state API path", ct)
+		}
+
 		marshaled, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("checkpoint sync read failed: %w", err)
@@ -71,8 +86,24 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		}
 
 		epoch := slot / r.beaconConfig.SlotsPerEpoch
+		stateVersion := r.beaconConfig.GetCurrentStateVersion(epoch)
+
+		// Prefer the Eth-Consensus-Version header from the checkpoint server when
+		// available. This is more reliable than deriving the version from the slot
+		// when running against devnets whose custom config may not be fully loaded.
+		if hdr := resp.Header.Get("Eth-Consensus-Version"); hdr != "" {
+			if hdrVersion := cycleDetectVersion(hdr); hdrVersion != stateVersion {
+				log.Info("[Checkpoint Sync] Overriding config-derived version with Eth-Consensus-Version header",
+					"configVersion", stateVersion, "headerVersion", hdrVersion)
+				stateVersion = hdrVersion
+			}
+		}
+
+		log.Info("[Checkpoint Sync] Decoding beacon state",
+			"slot", slot, "epoch", epoch,
+			"stateVersion", stateVersion)
 		beaconState := state.New(r.beaconConfig)
-		err = beaconState.DecodeSSZ(marshaled, int(r.beaconConfig.GetCurrentStateVersion(epoch)))
+		err = beaconState.DecodeSSZ(marshaled, int(stateVersion))
 		if err != nil {
 			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
 		}
@@ -113,6 +144,8 @@ func (r *RemoteCheckpointSync) FetchFinalizedEnvelope(ctx context.Context) (*clt
 }
 
 func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI string) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	stateURI = normalizeCheckpointURL(stateURI)
+
 	// Derive the envelope URL from the state URL.
 	// State:    .../eth/v2/debug/beacon/states/{state_id}
 	// Envelope: .../eth/v1/beacon/execution_payload_envelope/{state_id}
@@ -161,6 +194,16 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 	}
 	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)
 	return envelope, nil
+}
+
+// normalizeCheckpointURL ensures the URL includes the beacon state API path.
+// Users often provide just the base URL (e.g. https://checkpoint-sync.example.io)
+// which serves an HTML landing page instead of SSZ data.
+func normalizeCheckpointURL(uri string) string {
+	if !strings.Contains(uri, "/eth/") {
+		uri = strings.TrimRight(uri, "/") + beaconStatePath
+	}
+	return uri
 }
 
 // cycleDetectVersion maps the Eth-Consensus-Version header to a clparams version.

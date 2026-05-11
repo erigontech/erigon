@@ -47,6 +47,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 	defer timer.Stop()
 
 	byRootAttempts := 0
+	byRangeAttempted := false
 	for len(needed) > 0 {
 		select {
 		case <-ctx.Done():
@@ -57,10 +58,12 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		default:
 		}
 
-		// After a few by-root failures, try by-range if we have block slot info
-		if byRootAttempts >= 3 && len(fullBlocks) > 0 {
+		// Try by-range once after initial by-root attempts as a supplement.
+		// Don't keep retrying by-range — on devnets most peers register the
+		// protocol but return EOF, wasting the entire 30s timeout budget.
+		if byRootAttempts >= 3 && len(fullBlocks) > 0 && !byRangeAttempted {
+			byRangeAttempted = true
 			requestEnvelopesByRange(ctx, r, fullBlocks, received)
-			// Filter out received roots
 			needed = filterReceived(needed, received)
 			if len(needed) == 0 {
 				break
@@ -71,15 +74,13 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		if err != nil {
 			log.Trace("RequestEnvelopesFrantically: by-root error", "err", err)
 			byRootAttempts++
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 			continue
 		}
 		for _, env := range responses {
 			if env.Message == nil {
 				continue
 			}
-			// Only accept envelopes whose BeaconBlockRoot was actually requested.
-			// A malicious peer could respond with envelopes for arbitrary roots.
 			if _, ok := requestedRoots[env.Message.BeaconBlockRoot]; !ok {
 				log.Debug("RequestEnvelopesFrantically: ignoring unsolicited envelope", "root", env.Message.BeaconBlockRoot)
 				continue
@@ -89,7 +90,7 @@ func RequestEnvelopesFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, roots
 		needed = filterReceived(needed, received)
 		if len(needed) > 0 {
 			byRootAttempts++
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 		}
 	}
 	return received, nil

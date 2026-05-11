@@ -51,6 +51,7 @@ type ForwardBeaconDownloader struct {
 	ctx                   context.Context
 	highestSlotProcessed  uint64
 	highestSlotUpdateTime time.Time
+	minSlot               uint64 // earliest requestable slot (e.g. checkpoint anchor)
 	rpc                   *rpc.BeaconRpcP2P
 	process               ProcessFn
 	beaconCfg             *clparams.BeaconChainConfig
@@ -82,10 +83,21 @@ func (f *ForwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
 		return
 	}
 	idx := strings.Index(checkpointSyncURL, "/eth/")
-	if idx < 0 {
-		return
+	if idx >= 0 {
+		f.httpFallbackURL = checkpointSyncURL[:idx]
+	} else {
+		// Accept bare base URL (no /eth/ path).
+		f.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
 	}
-	f.httpFallbackURL = checkpointSyncURL[:idx]
+}
+
+// SetMinSlot sets the earliest slot the downloader may request.
+// After checkpoint sync the state only exists from the anchor slot onward,
+// so the overlap (highestSlotProcessed-2) must not reach below this bound.
+func (f *ForwardBeaconDownloader) SetMinSlot(slot uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.minSlot = slot
 }
 
 // SetHighestProcessedSlot sets the highest processed slot so far.
@@ -145,6 +157,9 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					var reqSlot uint64
 					if f.highestSlotProcessed > 2 {
 						reqSlot = f.highestSlotProcessed - 2
+					}
+					if reqSlot < f.minSlot {
+						reqSlot = f.minSlot
 					}
 					// Request one extra block beyond the batch for GLOAS lookahead:
 					// the extra block lets determineFullGloasRoots check whether the
