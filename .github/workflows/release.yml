@@ -92,14 +92,6 @@ jobs:
           fi
           echo "OK: No existing GitHub Release found for ${RELEASE_VERSION}. Proceeding."
 
-      - name: Generate GitHub App token for git operations
-        id: generate_token_build
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
-        with:
-          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
-          repositories: "erigon"
-
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -107,7 +99,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
-          token: ${{ steps.generate_token_build.outputs.token }}
 
       - name: Check if tag ${{ inputs.release_version }} already exists
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
@@ -690,11 +681,11 @@ jobs:
         echo "=== All artifacts verified OK ==="
 
     - name: Checkout git repository ${{ env.APP_REPO }} at release commit
-      if: ${{ inputs.perform_release }}
+      if: ${{ inputs.perform_release && inputs.release_version != '' }}
       uses: actions/checkout@v6
       with:
         repository: ${{ env.APP_REPO }}
-        fetch-depth: 0
+        fetch-depth: 1
         ref: ${{ needs.build-release.outputs.commit-id }}
         path: 'erigon'
         token: ${{ steps.generate_token.outputs.token }}
@@ -756,6 +747,9 @@ jobs:
           echo ""
           echo "Checksums file: ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
           echo "=== END MANUAL INSTRUCTIONS ==="
+          # Exit non-zero so the job fails and the In-case-of-failure rollback runs
+          # to remove the pushed tag.
+          exit ${GH_EXIT}
         else
           echo "Release draft created successfully."
           gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }}
