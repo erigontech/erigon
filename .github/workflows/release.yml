@@ -694,15 +694,23 @@ jobs:
       if: ${{ inputs.perform_release && inputs.release_version != '' }}
       env:
         RELEASE_VERSION: ${{ inputs.release_version }}
+        BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
       run: |
         cd erigon
         # Re-check just before pushing in case a concurrent release run pushed
-        # the same tag between build-release's check and now.
-        if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
-          echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
+        # the same tag between build-release's check and now. If the tag is
+        # already on remote at this run's build commit, treat it as ours and
+        # continue (idempotent). Anything else is a real collision.
+        REMOTE_SHA=$(git ls-remote --tags origin "${RELEASE_VERSION}" | awk '{print $1}')
+        if [ -n "${REMOTE_SHA}" ]; then
+          if [ "${REMOTE_SHA}" = "${BUILD_COMMIT}" ]; then
+            echo "Tag ${RELEASE_VERSION} already on remote at build commit ${BUILD_COMMIT} — continuing."
+            exit 0
+          fi
+          echo "ERROR: tag ${RELEASE_VERSION} on remote points at ${REMOTE_SHA}, not this build commit ${BUILD_COMMIT}. Exit."
           exit 1
         fi
-        git tag "${RELEASE_VERSION}" "${{ needs.build-release.outputs.commit-id }}"
+        git tag "${RELEASE_VERSION}" "${BUILD_COMMIT}"
         git push origin "${RELEASE_VERSION}"
         echo "Git TAG ${RELEASE_VERSION} created and pushed."
 
@@ -798,13 +806,18 @@ jobs:
           path: 'erigon'
           token: ${{ steps.generate_token_rollback.outputs.token }}
 
-      - name: Rollback - remove git tag ${{ inputs.release_version }} if it exists on remote
+      - name: Rollback - remove git tag ${{ inputs.release_version }} if it points at this run's build commit
+        env:
+          BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
         run: |
           cd erigon
-          if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
-            echo "Tag ${RELEASE_VERSION} exists on remote — removing."
+          REMOTE_SHA=$(git ls-remote --tags origin "${RELEASE_VERSION}" | awk '{print $1}')
+          if [ -z "${REMOTE_SHA}" ]; then
+            echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
+          elif [ -z "${BUILD_COMMIT}" ] || [ "${REMOTE_SHA}" != "${BUILD_COMMIT}" ]; then
+            echo "Tag ${RELEASE_VERSION} on remote points at ${REMOTE_SHA}, not this run's build commit ${BUILD_COMMIT:-<unknown>} — leaving it alone."
+          else
+            echo "Tag ${RELEASE_VERSION} points at this run's build commit — removing."
             git push -d origin "${RELEASE_VERSION}"
             echo "Tag ${RELEASE_VERSION} removed."
-          else
-            echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
           fi
