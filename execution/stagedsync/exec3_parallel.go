@@ -2554,7 +2554,27 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// and resolves account values from the versionMap.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader)
+					// domainStorageKeys: enumerate every storage slot currently
+					// committed for addr (sd.mem + domain files), so a self-destruct
+					// emits the full StoragePath=0 cascade — covers genesis-allocated
+					// and prior-block storage that vm.StorageKeys doesn't see.
+					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+						av := addr.Value()
+						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
+						var keys []accounts.StorageKey
+						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
+							if len(k) >= addrLen+hashLen {
+								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+							}
+							return true, nil
+						}); iterErr != nil {
+							// Non-fatal: fall back to vm.StorageKeys-only. A missed slot
+							// surfaces as a wrong-trie-root, not a silent corruption.
+							pe.logger.Warn("[parallel] domainStorageKeys iterate failed", "addr", av, "err", iterErr)
+						}
+						return keys
+					}
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum))
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -2969,8 +2989,40 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 //
 // The input is blockIO.WriteSet(txIndex) — the raw versionWritten output.
 // The output is ready for applyVersionedWrites and TouchUpdates.
-func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
+//
+// domainStorageKeys, when non-nil, must return every storage slot currently
+// committed for an address (from sd.mem + domain files) — used to emit the
+// full StoragePath=0 cascade when the address self-destructs. vm.StorageKeys
+// alone only covers slots written in the current batch; genesis-allocated or
+// prior-block storage isn't there, so the calc would never delete those slots
+// from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
+// / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
+// the block). Pass nil in unit tests that don't exercise pre-block storage.
+func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
+
+	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
+	// domainStorageKeys (committed before this batch), deduped — the complete
+	// set of storage slots that must be DELETE'd when addr self-destructs.
+	sdStorageSlots := func(addr accounts.Address) []accounts.StorageKey {
+		seen := make(map[accounts.StorageKey]struct{})
+		var out []accounts.StorageKey
+		for _, k := range vm.StorageKeys(addr) {
+			if _, ok := seen[k]; !ok {
+				seen[k] = struct{}{}
+				out = append(out, k)
+			}
+		}
+		if domainStorageKeys != nil {
+			for _, k := range domainStorageKeys(addr) {
+				if _, ok := seen[k]; !ok {
+					seen[k] = struct{}{}
+					out = append(out, k)
+				}
+			}
+		}
+		return out
+	}
 
 	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
 	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
@@ -3022,9 +3074,18 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	for _, w := range writes {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate.
+		// Also drop StoragePath writes: serial's selfdestruct does
+		// DomainDelPrefix(StorageDomain, addr) which wipes ALL slots, so an
+		// SSTORE made after a SELFDESTRUCT in the same TX (pre-Cancun the
+		// account stays live until end-of-TX, so re-entered code can still
+		// SSTORE) is a no-op once the account is removed. The SelfDestructPath
+		// case below re-emits an explicit StoragePath=0 delete for every slot
+		// (sdStorageSlots), so the trie still sees the wipe. Keeping the raw
+		// SSTORE here would race the cascade delete in ApplyWrites' slice order
+		// and sometimes leave a phantom slot (TestCVE2020_26265).
 		if sdSet[w.Address] {
 			switch w.Path {
-			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath:
+			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
 				continue
 			}
 		}
@@ -3034,26 +3095,46 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if w.Version.Incarnation != incarnation {
 				continue
 			}
+			writeVal, _ := w.Val.(uint256.Int)
+			// If addr was self-destructed by an earlier TX in this block, its
+			// storage was wiped — the effective baseline for any slot not
+			// re-written since is 0, regardless of what the versionMap (prior
+			// TX) or the domain (pre-block) still holds. The SD's per-slot
+			// zeroing is only re-emitted into the calc's writeset below, never
+			// flushed back to the versionMap, so without this a resurrect TX
+			// that re-writes a slot to its pre-SD value is wrongly dropped as a
+			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
+			sdTxIdx, sdOk := -1, false
+			if sd := vm.Read(w.Address, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
+				if v, ok := sd.Value().(bool); ok && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
+			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			origin := vm.Read(w.Address, state.StoragePath, w.Key, txIndex)
-			if origin.Status() == state.MVReadResultDone && origin.Value() != nil {
+			originValid := origin.Status() == state.MVReadResultDone && origin.Value() != nil &&
+				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+			if originValid {
 				originVal := origin.Value().(uint256.Int)
-				if writeVal, ok := w.Val.(uint256.Int); ok && writeVal.Eq(&originVal) {
+				if writeVal.Eq(&originVal) {
 					continue // write-back same as prior TX's value — no-op
+				}
+			} else if sdOk {
+				// SD'd earlier with no re-write since — baseline is 0.
+				if writeVal.IsZero() {
+					continue
 				}
 			} else if stateReader != nil {
 				// No prior TX wrote this key — compare against pre-block value.
 				preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
 				if err == nil {
-					if writeVal, ok := w.Val.(uint256.Int); ok {
-						if !found && writeVal.IsZero() {
-							continue // both zero — no-op
-						}
-						if found && writeVal.Eq(&preVal) {
-							continue // same as pre-block — no-op
-						}
+					if !found && writeVal.IsZero() {
+						continue // both zero — no-op
+					}
+					if found && writeVal.Eq(&preVal) {
+						continue // same as pre-block — no-op
 					}
 				}
 			}
@@ -3087,7 +3168,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			destructed, _ := w.Val.(bool)
 			if destructed {
 				filtered = append(filtered, w)
-				for _, slot := range vm.StorageKeys(w.Address) {
+				for _, slot := range sdStorageSlots(w.Address) {
 					filtered = append(filtered, &state.VersionedWrite{
 						Address: w.Address,
 						Path:    state.StoragePath,
@@ -3146,10 +3227,43 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
 		fields := addrFields[addr]
 
+		// If addr was self-destructed by an earlier TX in this block and this
+		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
+		// missing account fields are the post-destruction defaults, NOT the
+		// pre-SD values still sitting in the versionMap. IBS.Selfdestruct only
+		// records SelfDestructPath/BalancePath/IncarnationPath, so a re-creation
+		// via a plain value transfer (no CREATE) leaves the stale pre-SD nonce
+		// and codeHash in the map — reading them back here resurrects a phantom
+		// contract (wrong trie root: TestSelfDestructReceive, TestCVE2020_26265).
+		// If a later TX between the SD and this one re-created addr via CREATE2,
+		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
+		// fall through to the normal versionMap lookup.
+		sdEarlier := false
+		if sd := vm.Read(addr, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
+			if v, ok := sd.Value().(bool); ok && v {
+				sdEarlier = true
+			}
+		}
+
 		// For each missing field, try versionMap then stateReader.
 		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath} {
 			if fields != nil && fields[path] {
 				continue // already in output
+			}
+			if sdEarlier {
+				var val any
+				switch path {
+				case state.BalancePath:
+					val = uint256.Int{}
+				case state.NoncePath:
+					val = uint64(0)
+				case state.IncarnationPath:
+					val = uint64(0)
+				case state.CodeHashPath:
+					val = accounts.EmptyCodeHash
+				}
+				filtered = append(filtered, &state.VersionedWrite{Address: addr, Path: path, Val: val, Version: ver})
+				continue
 			}
 			rr := vm.Read(addr, path, accounts.NilKey, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
@@ -3254,12 +3368,18 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// Check for empty accounts and replace with Delete.
+	// Check for empty accounts and replace with Delete. Only when EIP-161
+	// (SpuriousDragon) is active — before that fork an empty account that's
+	// merely touched (e.g. a 0-value transfer) is created and persists, so
+	// converting it to a delete here would diverge from serial's trie root
+	// (TestEIP161AccountRemoval block 1, pre-SpuriousDragon).
 	emptyAddrs := make(map[accounts.Address]bool)
-	for addr, s := range acctStates {
-		if s.hasBal && s.hasNonce && s.hasCode &&
-			s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
-			emptyAddrs[addr] = true
+	if emptyRemoval {
+		for addr, s := range acctStates {
+			if s.hasBal && s.hasNonce && s.hasCode &&
+				s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
+				emptyAddrs[addr] = true
+			}
 		}
 	}
 
