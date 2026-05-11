@@ -199,8 +199,8 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	return nil
 }
 
-// rcacheHasPostStateForPreByzantium probes the first available pre-Byzantium
-// receipt to check whether RCache was built with PostState support.
+// rcacheHasPostStateForPreByzantium probes a few pre-Byzantium blocks to
+// check whether RCache was built with PostState support.
 func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, fromBlock, byzantiumBlock uint64) bool {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -208,8 +208,12 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 	}
 	defer tx.Rollback()
 
+	const maxProbes = 10
+	probed := 0
+	end := min(fromBlock+maxProbes*10, byzantiumBlock)
+
 	txNumsReader := blockReader.TxnumReader()
-	for blockNum := fromBlock; blockNum < byzantiumBlock; blockNum++ {
+	for blockNum := fromBlock; blockNum < end; blockNum++ {
 		minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return false
@@ -219,7 +223,13 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 		if err != nil || !ok || receipt == nil {
 			continue
 		}
-		return len(receipt.PostState) > 0
+		probed++
+		if len(receipt.PostState) > 0 {
+			return true
+		}
+		if probed >= maxProbes {
+			break
+		}
 	}
 	return false
 }

@@ -476,7 +476,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				blockReceipts = append(blockReceipts, receipt)
 
-				if receipt != nil && !se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) {
+				if receipt != nil && !se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && se.cfg.syncCfg.PersistReceiptsCacheV2 {
 					root, rootErr := se.worker.CommitAndComputeRoot(ctx, txTask.Rules(), txTask.BlockNumber(), txTask.TxNum)
 					if rootErr != nil {
 						return rootErr
