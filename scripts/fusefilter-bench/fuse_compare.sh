@@ -185,9 +185,12 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # ---------- 7. Tail the log so the user can monitor and Ctrl+C ---------- #
-echo "==> tailing log (Ctrl+C to stop the run)"
+# Filter to INFO only. Erigon uses log15-style level prefixes
+# ("INFO[...]", "WARN[...]", "DBUG[...]", "EROR[...]", "TRCE[...]", "CRIT[...]").
+# --line-buffered keeps each line flushed in real time.
+echo "==> tailing log (INFO only — Ctrl+C to stop the run)"
 echo
-tail -F "$LOG" &
+tail -F "$LOG" | grep --line-buffered '^INFO' &
 TAIL_PID=$!
 # Wait for erigon to exit OR user to Ctrl+C.
 wait "$ERIGON_PID" 2>/dev/null || true
