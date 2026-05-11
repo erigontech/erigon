@@ -2984,18 +2984,31 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
 	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
 	//
-	// Mirror the validated-incarnation filter the SelfDestructPath case
-	// applies below (w.Version.Incarnation != incarnation → skip). Without
-	// this guard a stale SelfDestructPath=true entry from a non-validated
-	// incarnation would mark the address as SD'd and drop the real
-	// account-field writes from the validated incarnation — even though the
-	// stale SelfDestructPath entry itself gets filtered out further down.
+	// Two filters applied here:
+	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
+	//      skip the SelfDestructPath case uses below — a stale SelfDestructPath=true
+	//      from a non-validated incarnation must not mark the address as SD'd.
+	//   2. Final-state: pre-Cancun a single tx can SELFDESTRUCT an address and then
+	//      CREATE2-recreate at the same address; IBS emits SelfDestructPath=true
+	//      (from Selfdestruct) followed later by SelfDestructPath=false (from
+	//      CreateAccount, since the recreated object's selfdestructed flag is
+	//      cleared). The address ends ALIVE, so its recreate-time account-field
+	//      writes must survive — only mark sdSet when the LAST SelfDestructPath
+	//      entry for the address (in emission order) is true. applyVersionedWrites
+	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
+	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
+	//      eliminate it; mainnet-rare, but cheap to get right.)
 	sdSet := make(map[accounts.Address]bool)
 	for _, w := range writes {
 		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
-			if v, ok := w.Val.(bool); ok && v {
-				sdSet[w.Address] = true
+			if v, ok := w.Val.(bool); ok {
+				sdSet[w.Address] = v
 			}
+		}
+	}
+	for addr, sd := range sdSet {
+		if !sd {
+			delete(sdSet, addr)
 		}
 	}
 

@@ -640,6 +640,12 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
 	}
 
+	// Fixed lock order (receiver write-lock, then `other` read-lock).
+	// Callers must not interleave reciprocal Merge calls — i.e. never run
+	// a.Merge(b) and b.Merge(a) concurrently, which would deadlock here.
+	// In practice Merge runs single-threaded at stage commit / batch
+	// rollup, so this is a documented assumption rather than an enforced
+	// invariant.
 	sd.pastChangesLock.Lock()
 	other.pastChangesLock.RLock()
 	for key, changeSet := range other.pastChangesAccumulator {

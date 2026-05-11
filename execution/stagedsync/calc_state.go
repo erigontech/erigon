@@ -196,6 +196,20 @@ func (cs *calcState) ensureStorage(addr accounts.Address, key accounts.StorageKe
 //	zeroing here, FlushToUpdates emits StorageUpdate with pre-SD
 //	values and leaves stale storage in the trie (TestRecreateAndRewind
 //	block 4 recreate sees stale storage).
+//
+// Ordering invariant that (1) relies on: when a single tx
+// self-destructs an address and then re-creates it (CREATE2 to the same
+// address — pre-Cancun pattern), IBS emits the SELFDESTRUCT-time writes
+// (SelfDestructPath=true, BalancePath=0, IncarnationPath=preInc) BEFORE
+// the recreate-time writes (BalancePath=newBal, NoncePath=1, CodeHash=…),
+// because the EVM runs the opcodes in that order and versionWritten fires
+// at opcode time. So the recreate's non-zero Balance/Nonce/CodeHash
+// re-clear acc.Deleted after the SD case set it. For SD-only (no recreate)
+// the post-SD BalancePath=0 arrives but is zero, so it does NOT re-clear.
+// For fresh creates (no prior SD in this writeset) acc.Deleted starts
+// false and the conditional is a no-op. (For per-block writesets the calc
+// also relies on this — but blocks aren't single txs; the SD-then-recreate
+// pattern there spans txs, and last-write-wins on acc.Deleted still holds.)
 func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 	for _, w := range writes {
 		if w.Val == nil {
@@ -289,14 +303,17 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 
 		// Three flavours of "Deleted" writeset, distinguished by whether
 		// the account fields actually became zero:
-		//   1. SD of a pre-existing contract: SD zeroes balance (sent to
-		//      beneficiary) and incarnation > 0 in writeset. Serial's
-		//      DomainDel emits the post-SD encoding (zero fields, leaf
-		//      survives because incarnation is preserved in the
-		//      serialised account). Emit zero-account UPDATE.
-		//   2. EIP-161 emptyRemoval of a touched-empty EOA-shaped account:
-		//      all fields zero, incarnation also zero. Serial's DomainDel
-		//      emits truly empty bytes. Emit DeleteUpdate.
+		//   1. (Currently unreachable from production writesets — defensive
+		//      only.) SD-of-pre-existing-contract with incarnation > 0
+		//      retained: ApplyWrites' SelfDestructPath case now zeros
+		//      Incarnation along with Balance/Nonce/CodeHash, so SD always
+		//      lands in case 2 below. This branch stays as a safety net for
+		//      hand-built writesets and future ApplyWrites changes that
+		//      might preserve incarnation; if it fires, emit a zero-account
+		//      UPDATE (matches serial's post-DomainDel encoding when the
+		//      serialised account retains a non-zero incarnation).
+		//   2. SD / EIP-161 emptyRemoval: all fields zero (incarnation too).
+		//      Serial's DomainDel removes the leaf. Emit DeleteUpdate.
 		//   3. Deleted-but-not-empty (defense-in-depth): if the writeset
 		//      has SelfDestructPath=true but balance/nonce/code retain
 		//      non-zero values (e.g. OOG-during-CREATE2 with retained
