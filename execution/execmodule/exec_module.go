@@ -312,8 +312,11 @@ func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.H
 }
 
 func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
-	return rawdb.ReadTd(tx, blockHash, blockNumber)
-
+	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
+	if err != nil || td == nil {
+		return nil, err
+	}
+	return td.ToBig(), nil
 }
 
 func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {

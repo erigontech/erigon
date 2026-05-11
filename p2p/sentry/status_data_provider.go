@@ -240,12 +240,11 @@ func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: ReadTd error at height %d and hash %s: %w", height, hash, err)
 	}
-	td256, err := uint256FromBigInt(td)
-	if err != nil {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty conversion error: %w", err)
+	if td == nil {
+		td = new(uint256.Int)
 	}
 
-	return ChainHead{height, time, hash, minimumBlock, td256}, nil
+	return ChainHead{height, time, hash, minimumBlock, td}, nil
 }
 
 func ReadChainHead(ctx context.Context, db kv.RoDB, minimumBlock uint64) (ChainHead, error) {

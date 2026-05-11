@@ -181,7 +181,7 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td)
+		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td.ToBig())
 	} else {
 		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))
 	}

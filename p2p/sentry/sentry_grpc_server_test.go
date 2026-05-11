@@ -540,13 +540,14 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 	if err != nil {
 		panic(err)
 	}
+	if headTd == nil {
+		headTd = new(uint256.Int)
+	}
 
-	headTd256 := new(uint256.Int)
-	headTd256.SetFromBig(headTd)
 	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
 	s.statusData = &sentryproto.StatusData{
 		NetworkId:       1,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd),
 		BestHash:        gointerfaces.ConvertHashToH256(head.Hash()),
 		MaxBlockHeight:  head.Number.Uint64(),
 		MaxBlockTime:    head.Time,

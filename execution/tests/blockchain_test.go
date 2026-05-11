@@ -139,9 +139,12 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 		if err != nil {
 			return err
 		}
-		tdPre, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
+		td, err := rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
+		}
+		if td != nil {
+			tdPre = td.ToBig()
 		}
 		return nil
 	})
@@ -157,9 +160,12 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 			return err
 		}
 		currentBlock, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
-		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		td, err := rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
+		}
+		if td != nil {
+			tdPost = td.ToBig()
 		}
 		return nil
 	})
@@ -435,7 +441,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	want := new(uint256.Int).AddUint64(&genDiff, uint64(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
 	require.NoError(err)
-	if want.CmpBig(have) != 0 {
+	if want.Cmp(have) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 	// Make sure the canonical chain is the correct one

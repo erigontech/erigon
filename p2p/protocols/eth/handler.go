@@ -83,7 +83,10 @@ func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Has
 	headNumber := rawdb.ReadHeaderNumber(getter, headHash)
 	var td *big.Int
 	if headNumber != nil {
-		td, _ = rawdb.ReadTd(getter, headHash, *headNumber)
+		td256, _ := rawdb.ReadTd(getter, headHash, *headNumber)
+		if td256 != nil {
+			td = td256.ToBig()
+		}
 	}
 	return &NodeInfo{
 		Network:    network,

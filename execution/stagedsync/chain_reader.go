@@ -105,7 +105,10 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 		cr.Logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
-	return td
+	if td == nil {
+		return nil
+	}
+	return td.ToBig()
 }
 
 func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }

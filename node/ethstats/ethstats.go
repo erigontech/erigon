@@ -530,9 +530,13 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 	if err != nil {
 		return err
 	}
+	var tdBig *big.Int
+	if td != nil {
+		tdBig = td.ToBig()
+	}
 
 	// Gather the block details from the header or block chain
-	details := s.assembleBlockStats(block, td)
+	details := s.assembleBlockStats(block, tdBig)
 
 	// Assemble the block report and send it to the server
 	log.Trace("Sending new block to ethstats", "number", details.Number, "hash", details.Hash)
@@ -616,7 +620,11 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 			if err != nil {
 				return err
 			}
-			history[len(history)-1-i] = s.assembleBlockStats(block, td)
+			var tdBig *big.Int
+			if td != nil {
+				tdBig = td.ToBig()
+			}
+			history[len(history)-1-i] = s.assembleBlockStats(block, tdBig)
 			continue
 		}
 		// Ran out of blocks, cut the report short and send

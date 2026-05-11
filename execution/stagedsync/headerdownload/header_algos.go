@@ -29,6 +29,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -942,7 +944,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td = new(big.Int).Add(parentTd, header.Difficulty.ToBig())
+	td = new(big.Int).Add(parentTd.ToBig(), header.Difficulty.ToBig())
 
 	// Now we can decide whether this header will create a change in the canonical head
 	// TODO: Add bor check here if required
@@ -964,7 +966,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+	if err = rawdb.WriteTd(db, hash, blockHeight, *uint256.MustFromBig(td)); err != nil {
 		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 	// skipIndexing=true - because next stages will build indices in-batch (for example StageBlockHash)

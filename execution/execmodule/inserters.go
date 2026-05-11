@@ -20,7 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -84,7 +85,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
 
-		var parentTd *big.Int
+		var parentTd *uint256.Int
 		height := header.Number.Uint64()
 		if height > 0 {
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
@@ -93,14 +94,15 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		} else {
-			parentTd = big.NewInt(0)
+			parentTd = new(uint256.Int)
 		}
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
+		var td uint256.Int
+		td.Add(parentTd, &header.Difficulty)
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}

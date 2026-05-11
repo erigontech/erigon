@@ -29,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 
@@ -287,7 +288,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			if readErr != nil {
 				return fmt.Errorf("read parent TD: %w", readErr)
 			}
-			parentTd = td
+			if td != nil {
+				parentTd = td.ToBig()
+			}
 		} else {
 			parentTd = new(big.Int)
 		}
@@ -297,7 +300,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 				if readErr != nil {
 					return fmt.Errorf("read head TD: %w", readErr)
 				}
-				currentHeadTd = td
+				if td != nil {
+					currentHeadTd = td.ToBig()
+				}
 				currentHeadHash = hash
 				currentHeadNumber = *num
 			}
@@ -329,7 +334,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 					if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
 						return fmt.Errorf("write side-chain header: %w", err)
 					}
-					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), td); err != nil {
+					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), *uint256.MustFromBig(td)); err != nil {
 						return fmt.Errorf("write side-chain TD: %w", err)
 					}
 					if _, err := rawdb.WriteRawBodyIfNotExists(tx, b.Hash(), b.NumberU64(), b.RawBody()); err != nil {

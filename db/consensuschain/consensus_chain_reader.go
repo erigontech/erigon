@@ -85,7 +85,10 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
 		cr.logger.Warn("ReadTd failed", "err", err)
 		return nil
 	}
-	return td
+	if td == nil {
+		return nil
+	}
+	return td.ToBig()
 }
 func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
 func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }

@@ -1644,8 +1644,12 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 			return nil
 		}
 
-		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
-		return err
+		td256, err := rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
+		if err != nil || td256 == nil {
+			return err
+		}
+		currentTD = td256.ToBig()
+		return nil
 	})
 	return currentTD, err
 }
