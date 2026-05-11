@@ -49,6 +49,7 @@ type pathDepth struct {
 // Caller MUST NOT use the same instance from multiple goroutines.
 type ContractTrunkPreload struct {
 	contractHash    []byte
+	contractNibbles []byte // 64 nibbles of contractHash, cached for the bulk range scan (preload_bulk.go)
 	queue           []pathDepth
 	pinnedPrefixes  [][]byte
 	pinned          int
@@ -70,6 +71,7 @@ func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error)
 	}
 	return &ContractTrunkPreload{
 		contractHash:    contractHash,
+		contractNibbles: contractNibbles,
 		queue:           []pathDepth{{path: contractNibbles, depth: 64}},
 		maxDepthReached: 64,
 	}, nil
