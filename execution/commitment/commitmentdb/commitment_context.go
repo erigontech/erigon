@@ -103,6 +103,15 @@ func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.Pend
 	sdc.pendingUpdate = upd
 }
 
+// PeekPendingUpdate returns the current pending update without taking ownership.
+// Returns nil if no pending update is set. Used by the parallel commitment
+// calculator to annotate the pending update with the block hash after a
+// per-block ComputeCommitment, so the next FlushPendingUpdates can route to
+// the exact (BlockNum, BlockHash) past changeset.
+func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.PendingCommitmentUpdate {
+	return sdc.pendingUpdate
+}
+
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
 func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
 	if sdc.pendingUpdate != nil {
