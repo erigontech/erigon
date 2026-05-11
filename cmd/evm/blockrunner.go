@@ -62,11 +62,7 @@ func blockTestCmd(ctx *cli.Context) error {
 
 	if len(path) != 0 {
 		collected := collectFiles(path)
-		workers := ctx.Int(WorkersFlag.Name)
-		if workers <= 0 {
-			workers = 1
-		}
-		results, err := runBlockTestsParallel(ctx, collected, workers)
+		results, err := runBlockTestsParallel(ctx, collected, ctx.Int(WorkersFlag.Name))
 		if err != nil {
 			return err
 		}

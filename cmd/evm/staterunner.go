@@ -86,11 +86,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	path := ctx.Args().First()
 	if len(path) != 0 {
 		collected := collectFiles(path)
-		workers := ctx.Int(WorkersFlag.Name)
-		if workers <= 0 {
-			workers = 1
-		}
-		results, err := runStateTestsParallel(ctx, cfg, collected, workers)
+		results, err := runStateTestsParallel(ctx, cfg, collected, ctx.Int(WorkersFlag.Name))
 		if err != nil {
 			return err
 		}
@@ -192,6 +188,11 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	}
 
 	bench := ctx.Bool(BenchFlag.Name)
+	// Emit the per-test stateRoot line on stderr only when running sequentially.
+	// In parallel mode (workers > 1) the stderr writes from concurrent goroutines
+	// interleave non-deterministically, which defeats differential fuzzing tools
+	// (e.g. goevmlab) that rely on per-test ordering.
+	emitStateRoot := ctx.Int(WorkersFlag.Name) <= 1
 	results := make([]testResult, 0, len(stateTests))
 
 	for key, test := range stateTests {
@@ -219,6 +220,11 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				if statedb != nil {
 					h := common.Hash(root)
 					result.Root = &h
+					if emitStateRoot {
+						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h.Bytes()); printErr != nil {
+							log.Warn("Failed to write to stderr", "err", printErr)
+						}
+					}
 				}
 				if bench {
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {

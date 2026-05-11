@@ -93,13 +93,6 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
 	workers := cliCtx.Int(WorkersFlag.Name)
-	if workers <= 0 {
-		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
-		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
-		// ~4.3GB peak RSS. Higher values barely improve wall time and
-		// values >24 risk MDBX virtual-memory exhaustion.
-		workers = 8
-	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
 	defer cancel()

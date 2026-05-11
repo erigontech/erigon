@@ -138,8 +138,8 @@ var (
 	}
 	WorkersFlag = cli.IntFlag{
 		Name:  "workers",
-		Value: 0,
-		Usage: "Number of workers to execute tests in parallel (0 means use the command's defaul)",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel",
 	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
