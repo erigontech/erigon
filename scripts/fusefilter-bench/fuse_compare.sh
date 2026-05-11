@@ -34,7 +34,7 @@ DATADIR=/erigon-data/chiado_commit_gate
 LOGDIR=/erigon-logs
 METRICS_HOST=127.0.0.1
 METRICS_PORT=6061
-METRICS_URL="http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics/prometheus"
+METRICS_URL=""                  # discovered after erigon starts (step 3a)
 POLL_INTERVAL=3                 # seconds between metric samples
 SHUTDOWN_GRACE=60               # seconds to wait after SIGINT before SIGKILL
 HARD_TIMEOUT_MIN=30             # safety cap — script self-stops after this many minutes if user forgets Ctrl+C
@@ -101,20 +101,69 @@ ERIGON_PID=$!
 echo "$ERIGON_PID" > "$PIDFILE"
 echo "    erigon PID=$ERIGON_PID"
 
+# ---------- 3a. Discover the working metrics endpoint ---------- #
+# Try a list of candidate paths and pick the first one that returns 2xx with
+# content matching the Prometheus exposition format. This shields the script
+# from path changes between erigon versions (e.g. /debug/metrics/prometheus
+# vs /metrics vs /debug/metrics).
+echo "==> waiting for metrics endpoint on ${METRICS_HOST}:${METRICS_PORT}"
+METRICS_URL=""
+for ((wait_s=0; wait_s<60; wait_s++)); do
+  for path in /debug/metrics/prometheus /debug/metrics /metrics; do
+    url="http://${METRICS_HOST}:${METRICS_PORT}${path}"
+    code=$(curl -sS -m 2 -o /tmp/fuse_probe.$$ -w '%{http_code}' "$url" 2>/dev/null || echo 000)
+    if [[ "$code" == "200" ]] && grep -q '^# HELP\|^# TYPE\|^process_resident_memory_bytes' /tmp/fuse_probe.$$ 2>/dev/null; then
+      METRICS_URL="$url"
+      echo "    metrics live at $METRICS_URL (after ${wait_s}s)"
+      break 2
+    fi
+  done
+  if ! kill -0 "$ERIGON_PID" 2>/dev/null; then
+    echo "    erigon exited before metrics came up (PID $ERIGON_PID gone)" >&2
+    break
+  fi
+  sleep 1
+done
+rm -f /tmp/fuse_probe.$$ 2>/dev/null || true
+if [[ -z "$METRICS_URL" ]]; then
+  echo "    !! metrics endpoint never came up. Tried:"
+  echo "       http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics/prometheus"
+  echo "       http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics"
+  echo "       http://${METRICS_HOST}:${METRICS_PORT}/metrics"
+  echo "    quick manual check:"
+  echo "       curl -v http://${METRICS_HOST}:${METRICS_PORT}/debug/metrics/prometheus"
+  echo "       ss -ltnp | grep $METRICS_PORT"
+  echo "    proceeding without metrics polling (CSV will stay empty)."
+fi
+
 # ---------- 4. Metrics poller (background) ---------- #
 # Prometheus exposition is line-oriented `metric_name{labels} value timestamp`.
 # We grep for the exact metric names (no labels on these) and awk out the value.
 echo "ts_unix,ts_iso,elapsed_sec,label,rss_bytes,vsz_bytes,heap_alloc_bytes,heap_inuse_bytes,heap_sys_bytes,sys_bytes,next_gc_bytes,alloc_total_bytes,gc_sys_bytes,goroutines,cpu_seconds" > "$CSV"
+POLLER_LOG="$LOGDIR/poller-${LABEL}-${TS}.log"
+echo "    poller log: $POLLER_LOG"
 
 START_UNIX=$(date +%s)
 
 poller() {
   local pid=$1
+  local first=1
   while kill -0 "$pid" 2>/dev/null; do
-    # Wait briefly for the metrics endpoint to come up on first sample.
-    local body
-    body=$(curl -fsS --max-time 2 "$METRICS_URL" 2>/dev/null || true)
-    if [[ -n "$body" ]]; then
+    local body http_code curl_err
+    # Capture body + HTTP status + curl stderr separately so we can diagnose
+    # any failure mode (connection refused, timeout, wrong path, empty body).
+    body=$(curl -sS -m 3 -w '\n__HTTP__%{http_code}\n' "$METRICS_URL" 2>"$POLLER_LOG.curl_err" || true)
+    curl_err=$(cat "$POLLER_LOG.curl_err" 2>/dev/null || true)
+    http_code=$(printf '%s\n' "$body" | awk -F'__HTTP__' '/__HTTP__/ { print $2; exit }')
+    body=$(printf '%s' "$body" | awk '/__HTTP__/ { exit } { print }')
+
+    if [[ "$first" -eq 1 ]]; then
+      printf '[%s] first probe → http_code=%s body_bytes=%s curl_err=%q\n' \
+        "$(date +%H:%M:%S)" "${http_code:-NONE}" "${#body}" "$curl_err" >> "$POLLER_LOG"
+      first=0
+    fi
+
+    if [[ -n "$body" && "$http_code" =~ ^2 ]]; then
       local now_unix now_iso elapsed
       now_unix=$(date +%s)
       now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -137,12 +186,19 @@ poller() {
         "${rss:-}" "${vsz:-}" "${heap_alloc:-}" "${heap_inuse:-}" "${heap_sys:-}" "${sys:-}" \
         "${next_gc:-}" "${alloc_total:-}" "${gc_sys:-}" "${goroutines:-}" "${cpu:-}" \
         >> "$CSV"
+    else
+      printf '[%s] sample fail: http_code=%s body_bytes=%s curl_err=%q\n' \
+        "$(date +%H:%M:%S)" "${http_code:-NONE}" "${#body}" "$curl_err" >> "$POLLER_LOG"
     fi
     sleep "$POLL_INTERVAL"
   done
 }
-poller "$ERIGON_PID" &
-POLLER_PID=$!
+if [[ -n "$METRICS_URL" ]]; then
+  poller "$ERIGON_PID" &
+  POLLER_PID=$!
+else
+  POLLER_PID=""
+fi
 
 # ---------- 5. Hard-timeout watchdog ---------- #
 # Use SIGTERM rather than SIGINT — empirically erigon under nohup doesn't react
@@ -178,9 +234,9 @@ cleanup() {
       kill -9 "$ERIGON_PID" 2>/dev/null || true
     fi
   fi
-  kill "$POLLER_PID" 2>/dev/null || true
-  kill "$WATCHDOG_PID" 2>/dev/null || true
-  wait "$POLLER_PID" "$WATCHDOG_PID" 2>/dev/null || true
+  [[ -n "${POLLER_PID:-}" ]]   && kill "$POLLER_PID"   2>/dev/null || true
+  [[ -n "${WATCHDOG_PID:-}" ]] && kill "$WATCHDOG_PID" 2>/dev/null || true
+  wait ${POLLER_PID:-} ${WATCHDOG_PID:-} 2>/dev/null || true
   rm -f "$PIDFILE"
 
   echo "==> summary (label=$LABEL)"
@@ -217,5 +273,8 @@ EXIT_WATCH_PID=$!
 
 echo "==> tailing log (INFO only — Ctrl+C to stop the run)"
 echo
-tail -F "$LOG" | grep --line-buffered '^\[INFO\]' || true
+# -a forces grep to treat the input as text. Without it, the first NUL byte in
+# the stream (e.g. raw bytes Caplin/p2p occasionally log) flips grep to
+# "binary file matches" mode and it stops printing matching lines.
+tail -F "$LOG" | grep --line-buffered -a '^\[INFO\]' || true
 kill "$EXIT_WATCH_PID" 2>/dev/null || true
