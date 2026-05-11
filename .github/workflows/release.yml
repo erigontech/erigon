@@ -696,6 +696,8 @@ jobs:
         RELEASE_VERSION: ${{ inputs.release_version }}
       run: |
         cd erigon
+        # Re-check just before pushing in case a concurrent release run pushed
+        # the same tag between build-release's check and now.
         if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
           echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
           exit 1
@@ -752,7 +754,9 @@ jobs:
           exit ${GH_EXIT}
         else
           echo "Release draft created successfully."
-          gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }}
+          # Best-effort: the release is already created, so a transient view
+          # failure must not fail the job and trigger the tag rollback.
+          gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }} || true
         fi
 
 
