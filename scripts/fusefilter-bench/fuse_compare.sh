@@ -52,12 +52,28 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   exit 3
 fi
 
-# ---------- 2. Wipe .kvei and .efi accessor files ---------- #
-echo "==> wiping .kvei and .efi accessor files under $DATADIR"
+# ---------- 2. Wipe chaindata and accessor files ---------- #
+# Removing chaindata/ forces erigon to rebuild the MDBX state DB from snapshots,
+# which in turn triggers re-indexing of .kvei (fusefilter) and .efi accessors —
+# the exact code path under test. Without the chaindata wipe, erigon may serve
+# from cached state and never call into our Build() at all.
 if [[ ! -d "$DATADIR" ]]; then
   echo "datadir does not exist: $DATADIR" >&2
   exit 2
 fi
+
+CHAINDATA="$DATADIR/chaindata"
+echo "==> wiping $CHAINDATA"
+if [[ -d "$CHAINDATA" ]]; then
+  CHAINDATA_SIZE=$(du -sh "$CHAINDATA" 2>/dev/null | awk '{print $1}')
+  echo "    size before: $CHAINDATA_SIZE"
+  rm -rf "$CHAINDATA"
+  echo "    removed."
+else
+  echo "    (already absent)"
+fi
+
+echo "==> wiping .kvei and .efi accessor files under $DATADIR"
 KVEI_COUNT=$(find "$DATADIR" -type f -name '*.kvei' | wc -l | tr -d ' ')
 EFI_COUNT=$(find "$DATADIR" -type f -name '*.efi'  | wc -l | tr -d ' ')
 echo "    found: .kvei=$KVEI_COUNT  .efi=$EFI_COUNT"
@@ -129,11 +145,14 @@ poller "$ERIGON_PID" &
 POLLER_PID=$!
 
 # ---------- 5. Hard-timeout watchdog ---------- #
+# Use SIGTERM rather than SIGINT — empirically erigon under nohup doesn't react
+# to SIGINT sent from this script (works fine when delivered from htop or a
+# parent shell), but SIGTERM triggers the normal graceful-shutdown path.
 watchdog() {
   sleep $((HARD_TIMEOUT_MIN * 60))
   if kill -0 "$ERIGON_PID" 2>/dev/null; then
-    echo "==> hard timeout (${HARD_TIMEOUT_MIN}m) reached — sending SIGINT" >&2
-    kill -INT "$ERIGON_PID" 2>/dev/null || true
+    echo "==> hard timeout (${HARD_TIMEOUT_MIN}m) reached — sending SIGTERM" >&2
+    kill -TERM "$ERIGON_PID" 2>/dev/null || true
   fi
 }
 watchdog &
@@ -146,7 +165,9 @@ cleanup() {
   echo
   echo "==> stopping erigon (PID $ERIGON_PID)..."
   if kill -0 "$ERIGON_PID" 2>/dev/null; then
-    kill -INT "$ERIGON_PID" 2>/dev/null
+    # SIGTERM, not SIGINT — SIGINT under nohup doesn't reach erigon's signal
+    # handler reliably; SIGTERM (same signal htop sends on default kill) does.
+    kill -TERM "$ERIGON_PID" 2>/dev/null
     # Wait up to SHUTDOWN_GRACE seconds for clean shutdown.
     for ((i=0; i<SHUTDOWN_GRACE; i++)); do
       kill -0 "$ERIGON_PID" 2>/dev/null || break
@@ -185,13 +206,16 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # ---------- 7. Tail the log so the user can monitor and Ctrl+C ---------- #
-# Filter to INFO only. Erigon uses log15-style level prefixes
-# ("INFO[...]", "WARN[...]", "DBUG[...]", "EROR[...]", "TRCE[...]", "CRIT[...]").
-# --line-buffered keeps each line flushed in real time.
+# Erigon log lines look like: `[INFO] [05-11|09:49:10.400] message...`
+# Run tail+grep in the foreground: Ctrl+C kills them first, then the EXIT/INT
+# trap stops erigon cleanly. --line-buffered flushes each line immediately.
+#
+# Background watcher: if erigon exits on its own (crash, OOM, completed run),
+# send SIGINT to this script so we don't hang in tail forever.
+( while kill -0 "$ERIGON_PID" 2>/dev/null; do sleep 2; done; kill -TERM $$ 2>/dev/null ) &
+EXIT_WATCH_PID=$!
+
 echo "==> tailing log (INFO only — Ctrl+C to stop the run)"
 echo
-tail -F "$LOG" | grep "INFO" &
-TAIL_PID=$!
-# Wait for erigon to exit OR user to Ctrl+C.
-wait "$ERIGON_PID" 2>/dev/null || true
-kill "$TAIL_PID" 2>/dev/null || true
+tail -F "$LOG" | grep --line-buffered '^\[INFO\]' || true
+kill "$EXIT_WATCH_PID" 2>/dev/null || true
