@@ -52,11 +52,16 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   exit 3
 fi
 
-# ---------- 2. Wipe chaindata and accessor files ---------- #
-# Removing chaindata/ forces erigon to rebuild the MDBX state DB from snapshots,
-# which in turn triggers re-indexing of .kvei (fusefilter) and .efi accessors —
-# the exact code path under test. Without the chaindata wipe, erigon may serve
-# from cached state and never call into our Build() at all.
+# ---------- 2. Wipe chaindata and recsplit accessor files ---------- #
+# The PR's WriterSharded path is reached via recsplit's flushExistenceFilter,
+# which embeds a fusefilter blob inside the recsplit index file (.efi/.kvi/.vi).
+# .kvei is a separate file written by existence.Filter — currently always in
+# bloom-filter mode (useFuse=false everywhere), so deleting it does NOT exercise
+# the PR. The recsplit indexes are what we need to force-rebuild.
+#
+# Removing chaindata/ on top forces erigon to re-execute and re-index from
+# snapshots, which is what triggers BuildMissedAccessors → recsplit → our
+# fusefilter writer.
 if [[ ! -d "$DATADIR" ]]; then
   echo "datadir does not exist: $DATADIR" >&2
   exit 2
@@ -73,11 +78,12 @@ else
   echo "    (already absent)"
 fi
 
-echo "==> wiping .kvei and .efi accessor files under $DATADIR"
-KVEI_COUNT=$(find "$DATADIR" -type f -name '*.kvei' | wc -l | tr -d ' ')
-EFI_COUNT=$(find "$DATADIR" -type f -name '*.efi'  | wc -l | tr -d ' ')
-echo "    found: .kvei=$KVEI_COUNT  .efi=$EFI_COUNT"
-find "$DATADIR" -type f \( -name '*.kvei' -o -name '*.efi' \) -delete
+echo "==> wiping recsplit accessor files (.efi/.kvi/.vi) under $DATADIR"
+EFI_COUNT=$(find "$DATADIR" -type f -name '*.efi' | wc -l | tr -d ' ')
+KVI_COUNT=$(find "$DATADIR" -type f -name '*.kvi' | wc -l | tr -d ' ')
+VI_COUNT=$(find  "$DATADIR" -type f -name '*.vi'  | wc -l | tr -d ' ')
+echo "    found: .efi=$EFI_COUNT  .kvi=$KVI_COUNT  .vi=$VI_COUNT"
+find "$DATADIR" -type f \( -name '*.efi' -o -name '*.kvi' -o -name '*.vi' \) -delete
 echo "    deleted."
 
 # ---------- 3. Launch erigon ---------- #
