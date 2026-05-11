@@ -59,7 +59,7 @@ const MaxLeafSize = 24
 //	0 = byte-array of first-bytes (legacy, no FuseFilter)
 //	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
 //	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
-const ExistenceFilterVersion version.DataStructureVersion = 1
+const ExistenceFilterVersion version.DataStructureVersion = 2
 
 func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
 	if v == 2 {
