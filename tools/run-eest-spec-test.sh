@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs one shard of the spec-test workflow:
+# Runs one shard of the EEST spec-test workflow:
 #
-#     tools/run-spec-test.sh <suite> <fixtures>
+#     tools/run-eest-spec-test.sh <suite> <fixtures>
 #
 #   suite    = statetests | blocktests | enginextests
 #   fixtures = stable     | devnet
@@ -9,12 +9,12 @@
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
 # if no tests ran (unexpected — fixture path bug) or if observed failures
-# exceed SPEC_MAX_FAILURES.
+# exceed EEST_SPEC_MAX_FAILURES.
 #
 # Env overrides:
-#   SPEC_MAX_FAILURES   - failure budget; CI sets via matrix include:
-#   SPEC_WORKERS        - parallel worker count
-#   EVM_BIN             - path to evm binary (default build/bin/evm)
+#   EEST_SPEC_MAX_FAILURES   - failure budget; CI sets via matrix include:
+#   EEST_SPEC_WORKERS        - parallel worker count
+#   EVM_BIN                  - path to evm binary (default build/bin/evm)
 #   ERIGON_EXECUTION_TESTS_TMPDIR - if set, used as TMPDIR; on Darwin we
 #                                   create a ramdisk if unset
 
@@ -37,7 +37,7 @@ esac
 # with cores); enginextests=8 (memory-bound knee documented at
 # cmd/evm/enginexrunner.go:101 — higher values barely help and risk MDBX
 # virtual-memory exhaustion). Failure budgets mirror the values committed in
-# .github/workflows/test-spec.yml's matrix.include: keep them in sync.
+# .github/workflows/test-eest-spec.yml's matrix.include: keep them in sync.
 extra=()
 case "$suite-$fixtures" in
 	statetests-stable)
@@ -53,14 +53,14 @@ case "$suite-$fixtures" in
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
 	enginextests-devnet)
 		# devnet tarball does not currently ship blockchain_tests_engine_x;
-		# the test-spec workflow skips this shard via job-level if:.
+		# the test-eest-spec workflow skips this shard via step-level if:.
 		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
 	*) echo "unknown shard: $suite-$fixtures" >&2; exit 2 ;;
 esac
 
-workers="${SPEC_WORKERS:-$default_workers}"
-max="${SPEC_MAX_FAILURES:-$default_max}"
+workers="${EEST_SPEC_WORKERS:-$default_workers}"
+max="${EEST_SPEC_MAX_FAILURES:-$default_max}"
 evm_bin="${EVM_BIN:-build/bin/evm}"
 
 if [[ ! -x "$evm_bin" ]]; then

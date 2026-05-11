@@ -259,18 +259,19 @@ test-fixtures-cl:
 test-fixtures-eest:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet
 
-# Spec tests: run cmd/evm runners (statetest, blocktest, enginextest) against
-# EEST fixtures. CI defines failure budgets in .github/workflows/test-spec.yml's
-# matrix.include:; local runs use the per-shard fallback defaults baked into
-# tools/run-spec-test.sh. Override either with SPEC_MAX_FAILURES / SPEC_WORKERS.
-SPEC_SHARDS := \
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+# against EEST fixtures. CI defines failure budgets in
+# .github/workflows/test-eest-spec.yml's matrix.include:; local runs use the
+# per-shard fallback defaults baked into tools/run-eest-spec-test.sh. Override
+# either with EEST_SPEC_MAX_FAILURES / EEST_SPEC_WORKERS.
+EEST_SPEC_SHARDS := \
 	statetests-stable statetests-devnet \
 	blocktests-stable blocktests-devnet \
 	enginextests-stable enginextests-devnet
 
-.PHONY: $(addprefix spec-,$(SPEC_SHARDS))
-$(addprefix spec-,$(SPEC_SHARDS)): spec-%: test-fixtures-eest evm
-	@bash tools/run-spec-test.sh $(subst -, ,$*)
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+	@bash tools/run-eest-spec-test.sh $(subst -, ,$*)
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m

@@ -1,4 +1,4 @@
-name: Spec tests
+name: EEST spec tests
 
 on:
   workflow_dispatch:
@@ -9,8 +9,8 @@ defaults:
     shell: bash
 
 jobs:
-  spec-tests:
-    name: spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+  eest-spec-tests:
+    name: eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +42,7 @@ jobs:
           lfs: false
           cleanup-space: true
           ramdisk: true
-          build-cache-extra-key: spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+          build-cache-extra-key: eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
 
       - name: Cache EEST tarballs
         uses: actions/cache@v4
@@ -50,7 +50,7 @@ jobs:
           # Only cache the .tar.gz files; extracted dirs are recreated by
           # tools/test-fixtures.sh on each run from the cached tarballs.
           # Dedicated EEST cache so this workflow doesn't compete with
-          # test-all-erigon.yml's cl_mainnet cache under one key.
+          # test-integration-caplin.yml's cl_mainnet cache under one key.
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz
@@ -65,16 +65,16 @@ jobs:
       # stays so re-enabling is a one-line guard removal once the fixture
       # lands. Job-level `if:` can't see `matrix.*`, so the guard lives on
       # the run step.
-      - name: Run spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+      - name: Run eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
         if: matrix.suite != 'enginextests' || matrix.fixtures != 'devnet'
         env:
-          SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
-          SPEC_WORKERS: ${{ matrix.workers }}
-        run: make spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+          EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
+          EEST_SPEC_WORKERS: ${{ matrix.workers }}
+        run: make eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
 
       - name: Skipped (devnet lacks blockchain_tests_engine_x fixtures)
         if: matrix.suite == 'enginextests' && matrix.fixtures == 'devnet'
-        run: echo "Skipping spec-enginextests-devnet; see workflow comment."
+        run: echo "Skipping eest-spec-enginextests-devnet; see workflow comment."
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
