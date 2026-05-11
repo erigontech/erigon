@@ -313,64 +313,58 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
-	msg, err := toMessage(t.Json.Tx, post, baseFee)
-	if err != nil {
-		return nil, common.Hash{}, 0, err
-	}
-
-	// Prepare the EVM.
-	txContext := protocol.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
-	//blockNum, txNum := header.Number.Uint64(), 1
+	chainRules := buildStateTestRules(config, header)
 
-	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
-	context.GetHash = vmTestBlockHash
-	if baseFee != nil {
-		context.BaseFee.Set(baseFee)
-	}
-	if t.Json.Env.Difficulty != nil {
-		context.Difficulty.Set(t.Json.Env.Difficulty)
-	}
-	if config.IsLondon(0) && t.Json.Env.Random != nil {
-		rnd := common.Hash(t.Json.Env.Random.Bytes32())
-		context.PrevRanDao = &rnd
-		context.Difficulty.Clear()
-	}
+	var blobBaseFee *uint256.Int
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
-		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
+		bf, err := misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
+		if err != nil {
+			return nil, common.Hash{}, 0, err
+		}
+		blobBaseFee = &bf
+	}
+
+	// EEST fixtures carry the signed RLP-encoded tx in `post.txbytes`; running
+	// it through the production AsMessage path means we test real validation
+	// (tx-type-vs-fork from each AsMessage, plus EIP-4844 blob structural rules
+	// in BlobTx.AsMessage). Decode failures and AsMessage failures both surface
+	// here as the tx-apply error: ApplyMessage is skipped but FinalizeTx /
+	// CommitBlock still run so the post-state root reflects the unapplied tx.
+	//
+	// Older in-tree corner-case fixtures only carry the JSON `transaction`
+	// block. None of those exercise pre-fork tx-type rejection, so we build
+	// the Message via toMessage (no validation) and treat construction errors
+	// as fatal.
+	var (
+		msg      protocol.Message
+		applyErr error
+	)
+	if len(post.Tx) > 0 {
+		signer := types.LatestSignerForChainID(config.ChainID)
+		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
+		decodedTx, decodeErr := types.DecodeTransaction(post.Tx)
+		if decodeErr != nil {
+			applyErr = decodeErr
+		} else {
+			msg, applyErr = decodedTx.AsMessage(*signer, baseFee, chainRules)
+		}
+	} else {
+		msg, err = toMessage(t.Json.Tx, post, baseFee)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}
 	}
-	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
-		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	}
 
-	// Execute the message.
-	snapshot := statedb.PushSnapshot()
-	gaspool := new(protocol.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	res, applyErr := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
-	if res != nil {
-		gasUsed = res.ReceiptGasUsed
-	}
-	if applyErr != nil {
-		statedb.RevertToSnapshot(snapshot, applyErr)
-	}
-	statedb.PopSnapshot(snapshot)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	if applyErr == nil {
+		gasUsed, applyErr = t.applyStateTestMessage(statedb, msg, block, header, baseFee, blobBaseFee, config, vmconfig)
 	}
 
-	// Coinbase touch (even for failed txs)
-	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
-
-	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
+	if err = statedb.FinalizeTx(chainRules, w); err != nil {
 		return nil, common.Hash{}, gasUsed, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
+	if err = statedb.CommitBlock(chainRules, w); err != nil {
 		return nil, common.Hash{}, gasUsed, err
 	}
 
@@ -456,6 +450,93 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
+// applyStateTestMessage runs ApplyMessage for a state-test subtest and applies
+// the post-apply coinbase touch. The returned error is the ApplyMessage error,
+// which the test framework may treat as expected (matched against the fixture's
+// ExpectException); it is not a fatal runner error.
+//
+// This is only called when the message was built successfully. For pre-apply
+// rejections (decode/AsMessage failures) the caller skips it: on pre-EIP-158
+// forks a stray coinbase touch would create an empty account that never gets
+// pruned, breaking the post-state root the fixture expects for an unapplied tx.
+func (t *StateTest) applyStateTestMessage(statedb *state.IntraBlockState, msg protocol.Message, block *types.Block, header *types.Header, baseFee, blobBaseFee *uint256.Int, config *chain.Config, vmconfig vm.Config) (uint64, error) {
+	txContext := protocol.NewEVMTxContext(msg)
+	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
+	context.GetHash = vmTestBlockHash
+	if baseFee != nil {
+		context.BaseFee.Set(baseFee)
+	}
+	if blobBaseFee != nil {
+		context.BlobBaseFee = *blobBaseFee
+	}
+	if t.Json.Env.Difficulty != nil {
+		context.Difficulty.Set(t.Json.Env.Difficulty)
+	}
+	if config.IsLondon(0) && t.Json.Env.Random != nil {
+		rnd := common.Hash(t.Json.Env.Random.Bytes32())
+		context.PrevRanDao = &rnd
+		context.Difficulty.Clear()
+	}
+	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+	}
+
+	snapshot := statedb.PushSnapshot()
+	gaspool := new(protocol.GasPool)
+	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	res, applyErr := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	gasUsed := uint64(0)
+	if res != nil {
+		gasUsed = res.ReceiptGasUsed
+	}
+	if applyErr != nil {
+		statedb.RevertToSnapshot(snapshot, applyErr)
+	}
+	statedb.PopSnapshot(snapshot)
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
+		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	}
+	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
+	return gasUsed, applyErr
+}
+
+// buildStateTestRules constructs a chain.Rules for the given state-test header.
+// State tests run a single tx against genesis, so we don't have a full EVM/block
+// context handy when we need rules outside of the apply path (e.g. for
+// FinalizeTx/CommitBlock when the tx is rejected pre-apply).
+func buildStateTestRules(c *chain.Config, header *types.Header) *chain.Rules {
+	num := header.Number.Uint64()
+	t := header.Time
+	chainID := c.ChainID
+	if chainID == nil {
+		chainID = new(big.Int)
+	}
+	return &chain.Rules{
+		ChainID:            new(big.Int).Set(chainID),
+		IsHomestead:        c.IsHomestead(num),
+		IsTangerineWhistle: c.IsTangerineWhistle(num),
+		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsByzantium:        c.IsByzantium(num),
+		IsConstantinople:   c.IsConstantinople(num),
+		IsPetersburg:       c.IsPetersburg(num),
+		IsIstanbul:         c.IsIstanbul(num),
+		IsBerlin:           c.IsBerlin(num),
+		IsLondon:           c.IsLondon(num),
+		IsShanghai:         c.IsShanghai(t),
+		IsCancun:           c.IsCancun(t),
+		IsPrague:           c.IsPrague(t),
+		IsOsaka:            c.IsOsaka(t),
+		IsAmsterdam:        c.IsAmsterdam(t),
+	}
+}
+
+// toMessage builds a protocol.Message directly from the JSON fixture's
+// `transaction` block. It is only used for the in-tree corner-case fixtures
+// that don't carry signed `txbytes` — EEST fixtures go through
+// types.DecodeTransaction + AsMessage instead, which exercises the production
+// validation path. toMessage itself does no fork-vs-tx-type validation;
+// fixtures that depend on this fallback aren't testing that.
 func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
 	var from accounts.Address
@@ -526,13 +607,8 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		if tx.MaxPriorityFeePerGas == nil {
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
-
-		//feeCap = big.Int(*tx.MaxPriorityFeePerGas)
-		//tipCap = big.Int(*tx.MaxFeePerGas)
-
 		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
 		feeCap = big.Int(*tx.MaxFeePerGas)
-
 		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee.ToBig()), &feeCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
@@ -548,7 +624,6 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		blobFeeCap = (*big.Int)(tx.BlobGasFeeCap)
 	}
 
-	// TODO the conversion to int64 then uint64 then new int isn't working!
 	msg := types.NewMessage(
 		from,
 		to,
