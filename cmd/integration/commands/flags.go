@@ -53,6 +53,9 @@ var (
 	resume          bool
 	noHistory       bool
 	syncCfg         = ethconfig.Defaults.Sync
+
+	convertSqueeze   bool
+	convertNibblesV2 bool
 )
 
 func must(err error) {
@@ -118,6 +121,11 @@ func withYes(cmd *cobra.Command) {
 
 func withSqueeze(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withConvertFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
+	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
 }
 
 func withClearCommitment(cmd *cobra.Command) {

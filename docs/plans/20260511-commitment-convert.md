@@ -374,14 +374,14 @@ Error path: if Phase 1 fails for any file, the log line tells the user that orig
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `cmd/integration/commands/flags.go`
 
-- [ ] Add `cmdCommitmentConvert` cobra command in `cmd/integration/commands/commitment.go`, registered as a sibling of `cmdCommitmentRebuild` / `cmdCommitmentPrint`. Body mirrors `cmdCommitmentPrint`: `openDB`, get agg, dispatch to a worker `commitmentConvert(db, ctx, logger, opts)`.
-- [ ] Implement `commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error` — mirrors `printCommitment`'s aggregator setup, then calls `dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)`.
-- [ ] In `flags.go`: add package vars `convertSqueeze`, `convertNibblesV2` (both `bool`, default `false`). Do **not** reuse `withSqueeze` because its default is `true`.
-- [ ] Add helper `withConvertFlags(cmd *cobra.Command)` that registers `--squeeze` and `--nibbles.v2` on the convert subcommand. Use `cmd.Flags().BoolVar(...)` with descriptive help strings stating target-state semantics.
-- [ ] Register the new subcommand under the `commitment` parent (find where `cmdCommitmentRebuild` and `cmdCommitmentPrint` are added — same `AddCommand` block).
-- [ ] Wire `--datadir` and `--chain` via existing helpers (already attached to the parent; no extra work expected).
-- [ ] Build smoke test: `make integration` succeeds; `./build/bin/integration commitment convert --help` shows both flags with default `false`.
-- [ ] No new unit tests for cobra wiring (existing `_test.go` files in the cmd package don't cover registration); the smoke test above is sufficient.
+- [x] Add `cmdCommitmentConvert` cobra command in `cmd/integration/commands/commitment.go`, registered as a sibling of `cmdCommitmentRebuild` / `cmdCommitmentPrint`. Body mirrors `cmdCommitmentPrint`: `openDB`, get agg, dispatch to a worker `commitmentConvert(db, ctx, logger, opts)`.
+- [x] Implement `commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error` — mirrors `printCommitment`'s aggregator setup (`PresetOfflineMerge`, `SetSnapshotBuildSema`, `DisableAllDependencies`, `BeginFilesRo` with `MadvNormal().DisableReadAhead` cleanup), then calls `dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)`. Note: `ConvertCommitmentFiles`' Phase 5 invalidates the `*AggregatorRoTx`; the deferred `acRo.Close()` is still safe because `Close` is idempotent on already-closed/nil state (`aggregator.go:2252`).
+- [x] In `flags.go`: add package vars `convertSqueeze`, `convertNibblesV2` (both `bool`, default `false`). Do **not** reuse `withSqueeze` because its default is `true`.
+- [x] Add helper `withConvertFlags(cmd *cobra.Command)` that registers `--squeeze` and `--nibbles.v2` on the convert subcommand. Use `cmd.Flags().BoolVar(...)` with descriptive help strings stating target-state semantics.
+- [x] Register the new subcommand under the `commitment` parent in the same `init()` block as `cmdCommitmentPrint` (attached with `withChain`, `withDataDir`, `withConfig`, `withConvertFlags`).
+- [x] Wire `--datadir` and `--chain` via existing helpers (already attached above; confirmed in `--help` output).
+- [x] Build smoke test: `make integration` succeeds; `./build/bin/integration commitment convert --help` shows `--squeeze` and `--nibbles.v2` both defaulting to `false`. `make lint` clean.
+- [x] No new unit tests for cobra wiring (existing `_test.go` files in the cmd package don't cover registration); the smoke test above is sufficient.
 
 ### Task 7: Verify acceptance criteria
 

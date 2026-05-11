@@ -122,6 +122,13 @@ func init() {
 	withConfig(cmdCommitmentPrint)
 	commitmentCmd.AddCommand(cmdCommitmentPrint)
 
+	// commitment convert
+	withChain(cmdCommitmentConvert)
+	withDataDir(cmdCommitmentConvert)
+	withConfig(cmdCommitmentConvert)
+	withConvertFlags(cmdCommitmentConvert)
+	commitmentCmd.AddCommand(cmdCommitmentConvert)
+
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
 	cmdCommitmentVisualize.Flags().IntVarP(&visualizeConcurrency, "concurrency", "j", 4, "amount of concurrently processed files")
@@ -448,6 +455,58 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	fmt.Printf("\n%s", str)
 
 	return nil
+}
+
+// integration commitment convert
+var cmdCommitmentConvert = &cobra.Command{
+	Use:   "convert",
+	Short: "Re-encode commitment domain .kv files between squeeze and key-encoding states",
+	Long: `Offline converter that re-encodes existing commitment domain .kv files
+between two independent axes: value squeeze state and key encoding (V1/V2).
+
+Both flags default false. Flag value is the target state, not direction; the
+tool detects the current state of each file and converts only what is needed
+so the operation is idempotent and re-runnable after crashes.
+
+Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
+
+Examples:
+  integration commitment convert --datadir /path/to/datadir --chain mainnet
+  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
+  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		opts := dbstate.ConvertOpts{
+			TargetSqueeze:   convertSqueeze,
+			TargetNibblesV2: convertNibblesV2,
+		}
+		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.PresetOfflineMerge()
+	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
+	agg.DisableAllDependencies()
+
+	acRo := agg.BeginFilesRo()
+	defer acRo.Close()
+	defer acRo.MadvNormal().DisableReadAhead()
+
+	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
 
 // integration commitment visualize
