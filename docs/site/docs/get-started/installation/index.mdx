@@ -1,21 +1,71 @@
 ---
 title: "Installation"
 sidebar_position: 3
+description: "Install Erigon from pre-built binaries, Docker, or source — step-by-step guides for Linux, macOS, and Windows."
 ---
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-export const go = (id) => {
+export const sectionForMethod = {
+  'install-docker':   'all-operating-systems',
+  'install-prebuilt': 'linuxmacos',
+  'install-source':   'linuxmacos',
+  'install-native':   'windows',
+  'install-wsl':      'windows',
+};
+
+export const go = (id, e) => {
+  if (e) e.preventDefault();
   const el = document.getElementById(id);
   if (!el) return;
-  const scroll = () => el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  document.querySelectorAll('details[id^="install-"]').forEach(d => {
+    if (d !== el && d.open) {
+      const s = d.querySelector('summary');
+      if (s) s.click();
+      else d.open = false;
+    }
+  });
+
   if (!el.open) {
-    el.addEventListener('toggle', scroll, { once: true });
-    el.open = true;
-  } else {
-    scroll();
+    const summary = el.querySelector('summary');
+    if (summary) summary.click();
+    else el.open = true;
   }
+
+  const sectionId = sectionForMethod[id];
+  if (sectionId) {
+    history.replaceState(null, '', '#' + sectionId);
+  }
+
+  const resolveTarget = () => {
+    let t = sectionId && document.getElementById(sectionId);
+    if (!t) {
+      let cursor = el.previousElementSibling;
+      while (cursor && !/^H[1-6]$/.test(cursor.tagName)) {
+        cursor = cursor.previousElementSibling;
+      }
+      t = cursor || el;
+    }
+    return t;
+  };
+
+  let lastHeight = document.body.scrollHeight;
+  let stableFrames = 0;
+  let totalFrames = 0;
+  const waitForStableLayout = () => {
+    const h = document.body.scrollHeight;
+    if (h === lastHeight) stableFrames++;
+    else { stableFrames = 0; lastHeight = h; }
+    totalFrames++;
+    if (stableFrames >= 6 || totalFrames >= 90) {
+      resolveTarget().scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      requestAnimationFrame(waitForStableLayout);
+    }
+  };
+  requestAnimationFrame(waitForStableLayout);
 };
 
 
@@ -503,4 +553,4 @@ If you need to connect to Erigon from an external network (e.g., opening a port 
 
 </details>
 
-Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node.
+Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node and confirm it is syncing.

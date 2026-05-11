@@ -17,7 +17,7 @@ The Erigon node software is developed in the [erigontech/erigon](https://github.
    git clone https://github.com/<your-username>/erigon.git
    cd erigon
    ```
-2. Build the project (requires Go 1.24+ and a C++ compiler):
+2. Build the project (requires Go 1.25+ and a C++ compiler):
    ```bash
    make erigon
    ```

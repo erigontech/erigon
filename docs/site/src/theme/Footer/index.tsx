@@ -31,7 +31,7 @@ export default function Footer(): React.ReactElement {
   return (
     <footer style={{background: '#000000', color: '#ffffff', fontFamily: "'Nunito Sans', sans-serif"}}>
       {/* Top section */}
-      <div style={{
+      <div className="footer-top-grid" style={{
         maxWidth: '1280px',
         margin: '0 auto',
         padding: '3.5rem 2rem 2.5rem',
@@ -44,7 +44,7 @@ export default function Footer(): React.ReactElement {
         <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
           <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem'}}>
             <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
-            <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
+            <span style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
           </div>
           <p style={{
             fontSize: '0.875rem',
@@ -154,7 +154,7 @@ export default function Footer(): React.ReactElement {
       <div style={{borderTop: '1px solid rgba(255,255,255,0.08)', margin: '0 2rem'}} />
 
       {/* Bottom bar */}
-      <div style={{
+      <div className="footer-bottom-bar" style={{
         maxWidth: '1280px',
         margin: '0 auto',
         padding: '1.25rem 2rem',

@@ -1,12 +1,12 @@
 ---
 title: "Sync Modes"
-description: "Full, minimal, and archive sync explained — choose the right mode for your use case."
+description: "Full, minimal, blocks, and archive sync explained — choose the right mode for your use case."
 sidebar_position: 2
 ---
 
 # Sync Modes
 
-Erigon 3 supports three prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
+Erigon 3 supports four prune modes that control how much chain history your node retains. Choose based on your use case — most users should run a Full Node.
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                    | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
