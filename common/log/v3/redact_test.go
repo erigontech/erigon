@@ -116,6 +116,38 @@ func TestRedactArgsDatadir(t *testing.T) {
 	}
 }
 
+func TestRedactArgsEthstats(t *testing.T) {
+	// --ethstats=nodename:secret@host:port
+	in1 := []string{"erigon", "--ethstats=mynode:supersecret@stats.example.com:443", "--chain=mainnet"}
+	out1 := RedactArgs(in1)
+	mustContain(t, out1, "--ethstats=<redacted-ethstats>")
+	if strings.Contains(out1, "supersecret") {
+		t.Fatalf("expected ethstats secret to be redacted, got: %s", out1)
+	}
+	if strings.Contains(out1, "mynode") {
+		t.Fatalf("expected ethstats nodename to be redacted, got: %s", out1)
+	}
+	if strings.Contains(out1, "stats.example.com") {
+		t.Fatalf("expected ethstats host to be redacted, got: %s", out1)
+	}
+
+	// --ethstats nodename:secret@host:port (space-separated)
+	in2 := []string{"erigon", "--ethstats", "mynode:supersecret@stats.example.com:443", "--chain=mainnet"}
+	out2 := RedactArgs(in2)
+	mustContain(t, out2, "--ethstats <redacted-ethstats>")
+	if strings.Contains(out2, "supersecret") {
+		t.Fatalf("expected ethstats secret to be redacted, got: %s", out2)
+	}
+
+	// single-dash variant
+	in3 := []string{"erigon", "-ethstats=mynode:supersecret@stats.example.com:443", "--chain=mainnet"}
+	out3 := RedactArgs(in3)
+	mustContain(t, out3, "-ethstats=<redacted-ethstats>")
+	if strings.Contains(out3, "supersecret") {
+		t.Fatalf("expected ethstats secret to be redacted, got: %s", out3)
+	}
+}
+
 // helpers
 func mustContain(t *testing.T, s, sub string) {
 	t.Helper()
