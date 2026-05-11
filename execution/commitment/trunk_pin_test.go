@@ -189,7 +189,7 @@ func TestAdaptivePinController_PromoteOnThreshold(t *testing.T) {
 	}
 
 	// OnBlockComplete should promote the contract.
-	ctrl.OnBlockComplete(context.Background(), 1, fakeReader(false))
+	ctrl.OnBlockComplete(context.Background(), 1, fakeReader(false), nil)
 	require.Len(t, ctrl.PromotedContracts(), 1)
 	require.Equal(t, contractHash, ctrl.PromotedContracts()[0])
 	require.Greater(t, c.PinnedCount(), 0)
@@ -215,17 +215,17 @@ func TestAdaptivePinController_DemoteOnCold(t *testing.T) {
 
 	// Hot block: triggers promotion.
 	_, _, _ = c.Get(prefix)
-	ctrl.OnBlockComplete(context.Background(), 1, fakeReader(false))
+	ctrl.OnBlockComplete(context.Background(), 1, fakeReader(false), nil)
 	require.Len(t, ctrl.PromotedContracts(), 1)
 	pinnedAfterPromote := c.PinnedCount()
 	require.Greater(t, pinnedAfterPromote, 0)
 
 	// Cold blocks: no misses for the contract. After cooldown the
 	// controller demotes and invalidates the pin set.
-	ctrl.OnBlockComplete(context.Background(), 2, fakeReader(false))
+	ctrl.OnBlockComplete(context.Background(), 2, fakeReader(false), nil)
 	require.Len(t, ctrl.PromotedContracts(), 1, "still pinned after 1 cold block")
 
-	ctrl.OnBlockComplete(context.Background(), 3, fakeReader(false))
+	ctrl.OnBlockComplete(context.Background(), 3, fakeReader(false), nil)
 	require.Len(t, ctrl.PromotedContracts(), 0, "demoted after 2 cold blocks")
 	require.Equal(t, 0, c.PinnedCount(), "pin set invalidated on demotion")
 }
