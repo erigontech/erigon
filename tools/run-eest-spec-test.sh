@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Runs one shard of the EEST spec-test workflow:
 #
-#     tools/run-eest-spec-test.sh <suite> <fixtures>
+#     tools/run-eest-spec-test.sh <suite> <fixtures> [gas]
 #
 #   suite    = statetests | blocktests | enginextests
 #   fixtures = stable     | devnet     | benchmark
-#
-# Only enginextests-benchmark is defined for the benchmark fixtures (the
-# eest_benchmark tarball ships per-gas-limit engine_x test workloads).
+#   gas      = 1m | 5m | 10m | 30m | 60m | 100m | 150m  (only for
+#              enginextests-benchmark; each value corresponds to one
+#              for_osaka_at_<NNNN>M/ directory under the engine_x fixtures)
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -23,12 +23,13 @@
 
 set -euo pipefail
 
-if (( $# != 2 )); then
-	echo "usage: $0 <suite> <fixtures>" >&2
+if (( $# < 2 || $# > 3 )); then
+	echo "usage: $0 <suite> <fixtures> [gas]" >&2
 	exit 2
 fi
 suite="$1"
 fixtures="$2"
+gas="${3:-}"
 
 case "$fixtures" in
 	stable)    base=test-fixtures-cache/eest_stable/fixtures ;;
@@ -42,8 +43,14 @@ esac
 # cmd/evm/enginexrunner.go:101 — higher values barely help and risk MDBX
 # virtual-memory exhaustion). Failure budgets mirror the values committed in
 # .github/workflows/test-eest-spec.yml's matrix.include: keep them in sync.
+# enginextests-benchmark is sharded per gas target; everything else is 2-arg.
+shard="$suite-$fixtures"
+if [[ -n "$gas" ]]; then
+	shard="$shard-$gas"
+fi
+
 extra=()
-case "$suite-$fixtures" in
+case "$shard" in
 	statetests-stable)
 		cmd=statetest;    path="$base/state_tests";              default_workers=12; default_max=37 ;;
 	statetests-devnet)
@@ -60,12 +67,34 @@ case "$suite-$fixtures" in
 		# the test-eest-spec workflow skips this shard via step-level if:.
 		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
-	enginextests-benchmark)
-		# workers=1 so the per-test wall-time recorded via --time isn't
-		# noised by sibling goroutines competing for CPU/MDBX.
-		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=1;  default_max=72
-		extra=(--pre-alloc-dir "$path/pre_alloc" --time) ;;
-	*) echo "unknown shard: $suite-$fixtures" >&2; exit 2 ;;
+	enginextests-benchmark-1m   | \
+	enginextests-benchmark-5m   | \
+	enginextests-benchmark-10m  | \
+	enginextests-benchmark-30m  | \
+	enginextests-benchmark-60m  | \
+	enginextests-benchmark-100m | \
+	enginextests-benchmark-150m)
+		# Per-gas-target benchmark shard. workers=1 so the per-test wall-time
+		# recorded via --time isn't noised by sibling goroutines competing
+		# for CPU/MDBX. Default failure budgets per gas target are calibrated
+		# below from observed runs; tighten in follow-ups.
+		# Map "1m" -> "0001M", "150m" -> "0150M" (4-digit zero-padded).
+		gas_num="${gas%m}"
+		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
+		cmd=enginextest
+		path="$base/blockchain_tests_engine_x/$gas_dir"
+		default_workers=1
+		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time)
+		case "$shard" in
+			enginextests-benchmark-1m)   default_max=0 ;;
+			enginextests-benchmark-5m)   default_max=0 ;;
+			enginextests-benchmark-10m)  default_max=0 ;;
+			enginextests-benchmark-30m)  default_max=0 ;;
+			enginextests-benchmark-60m)  default_max=7 ;;
+			enginextests-benchmark-100m) default_max=7 ;;
+			enginextests-benchmark-150m) default_max=59 ;;
+		esac ;;
+	*) echo "unknown shard: $shard" >&2; exit 2 ;;
 esac
 
 workers="${EEST_SPEC_WORKERS:-$default_workers}"

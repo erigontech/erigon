@@ -10,18 +10,24 @@ defaults:
 
 jobs:
   eest-spec-tests:
-    name: eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+    name: eest-spec-${{ matrix.shard }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { suite: statetests,   fixtures: stable, workers: 12, max-allowed-failures: 37 }
-          - { suite: statetests,   fixtures: devnet, workers: 12, max-allowed-failures: 5253 }
-          - { suite: blocktests,   fixtures: stable, workers: 12, max-allowed-failures: 0 }
-          - { suite: blocktests,   fixtures: devnet, workers: 12, max-allowed-failures: 6206 }
-          - { suite: enginextests, fixtures: stable,    workers: 8, max-allowed-failures: 0 }
-          - { suite: enginextests, fixtures: devnet,    workers: 8, max-allowed-failures: 0 }
-          - { suite: enginextests, fixtures: benchmark, workers: 1, max-allowed-failures: 72 }
+          - { shard: statetests-stable,            workers: 12, max-allowed-failures: 37 }
+          - { shard: statetests-devnet,            workers: 12, max-allowed-failures: 5253 }
+          - { shard: blocktests-stable,            workers: 12, max-allowed-failures: 0 }
+          - { shard: blocktests-devnet,            workers: 12, max-allowed-failures: 6206 }
+          - { shard: enginextests-stable,          workers: 8,  max-allowed-failures: 0 }
+          - { shard: enginextests-devnet,          workers: 8,  max-allowed-failures: 0 }
+          - { shard: enginextests-benchmark-1m,    workers: 1,  max-allowed-failures: 0 }
+          - { shard: enginextests-benchmark-5m,    workers: 1,  max-allowed-failures: 0 }
+          - { shard: enginextests-benchmark-10m,   workers: 1,  max-allowed-failures: 0 }
+          - { shard: enginextests-benchmark-30m,   workers: 1,  max-allowed-failures: 0 }
+          - { shard: enginextests-benchmark-60m,   workers: 1,  max-allowed-failures: 7 }
+          - { shard: enginextests-benchmark-100m,  workers: 1,  max-allowed-failures: 7 }
+          - { shard: enginextests-benchmark-150m,  workers: 1,  max-allowed-failures: 59 }
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -43,7 +49,7 @@ jobs:
           lfs: false
           cleanup-space: true
           ramdisk: true
-          build-cache-extra-key: eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+          build-cache-extra-key: eest-spec-${{ matrix.shard }}
 
       - name: Cache EEST tarballs
         uses: actions/cache@v4
@@ -67,15 +73,15 @@ jobs:
       # stays so re-enabling is a one-line guard removal once the fixture
       # lands. Job-level `if:` can't see `matrix.*`, so the guard lives on
       # the run step.
-      - name: Run eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
-        if: matrix.suite != 'enginextests' || matrix.fixtures != 'devnet'
+      - name: Run eest-spec-${{ matrix.shard }}
+        if: matrix.shard != 'enginextests-devnet'
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
-        run: make eest-spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+        run: make eest-spec-${{ matrix.shard }}
 
       - name: Skipped (devnet lacks blockchain_tests_engine_x fixtures)
-        if: matrix.suite == 'enginextests' && matrix.fixtures == 'devnet'
+        if: matrix.shard == 'enginextests-devnet'
         run: echo "Skipping eest-spec-enginextests-devnet; see workflow comment."
 
       - uses: ./.github/actions/cleanup-erigon

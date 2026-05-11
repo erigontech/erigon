@@ -268,7 +268,13 @@ EEST_SPEC_SHARDS := \
 	statetests-stable statetests-devnet \
 	blocktests-stable blocktests-devnet \
 	enginextests-stable enginextests-devnet \
-	enginextests-benchmark
+	enginextests-benchmark-1m \
+	enginextests-benchmark-5m \
+	enginextests-benchmark-10m \
+	enginextests-benchmark-30m \
+	enginextests-benchmark-60m \
+	enginextests-benchmark-100m \
+	enginextests-benchmark-150m
 
 .PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
 $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
