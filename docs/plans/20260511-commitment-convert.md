@@ -283,13 +283,13 @@ Error path: if Phase 1 fails for any file, the log line tells the user that orig
 - Modify: `db/state/domain.go`
 - Modify or create: `db/state/domain_test.go` (existing has tests for collate/build path)
 
-- [ ] In `db/state/domain.go:610`, extract the body of `(d *Domain) dumpStepRangeOnDisk` into a new method: `func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error`.
-- [ ] Inside `dumpStepRangeToPath`: when `dstDir != ""`, use it as the output directory instead of `d.dirs.SnapDomain`. This requires routing `dstDir` into `collateETL` (which currently hardcodes `coll.valuesPath = d.kvNewFilePath(stepFrom, stepTo)`) and into `buildFileRange` so index outputs go to the same directory.
-- [ ] Cleanest factoring: add a private helper `func (d *Domain) kvNewFilePathIn(dstDir string, fromStep, toStep kv.Step) string` that builds the same filename as `kvNewFilePath` but rooted at `dstDir`. `collateETL` and `buildFileRange` take `dstDir` (empty means current behavior) and call the new helper when set.
-- [ ] Skip `d.integrateDirtyFiles(...)` when `integrate == false`. This is the load-bearing change for the converter — without it, the aggregator's view of `snapshots/domain/` would briefly include the files in `rebuild/domain/`.
-- [ ] Make the original `dumpStepRangeOnDisk` a thin wrapper: `return d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, "", true)`. All existing callers (specifically `squeeze.go:1091`) unchanged.
-- [ ] Write a test that calls `dumpStepRangeToPath` with `dstDir = tmpDir, integrate = false`, asserts the `.kv` and indexes land in `tmpDir`, and asserts the aggregator's `at.Files(kv.CommitmentDomain)` view is **unchanged** afterwards (the new file is not visible to readers).
-- [ ] Run `go test ./db/state/... -run TestDumpStepRangeToPath -count=1 -failfast` — must pass before Task 2.
+- [x] In `db/state/domain.go:610`, extract the body of `(d *Domain) dumpStepRangeOnDisk` into a new method: `func (d *Domain) dumpStepRangeToPath(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer, dstDir string, integrate bool) error`.
+- [x] Inside `dumpStepRangeToPath`: when `dstDir != ""`, use it as the output directory instead of `d.dirs.SnapDomain`. `dstDir` is threaded through `collateETL` (sets `coll.valuesPath` via `kvNewFilePathIn`) and `buildFileRange` (uses `kviAccessorNewFilePathIn`, `kvBtAccessorNewFilePathIn`, `kvExistenceIdxNewFilePathIn`).
+- [x] Added 4 `*In` helpers (kv, kvi, kvei, bt) accepting a base directory; original helpers delegate with `""`. Also split `buildHashMapAccessor` into a thin wrapper plus `buildHashMapAccessorAt(ctx, idxPath, …)` so `buildFileRange` can supply an explicit idx path rooted at `dstDir`.
+- [x] Skip `d.integrateDirtyFiles(...)` when `integrate == false`; close the in-memory `StaticFiles` handles via `CleanupOnError()` so they don't leak (on-disk files in `dstDir` remain).
+- [x] Original `dumpStepRangeOnDisk` is now `return d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, "", true)`. Existing caller `squeeze.go:1144` unchanged.
+- [x] `TestDumpStepRangeToPath` in `db/state/domain_test.go` calls `dumpStepRangeToPath` with `dstDir=tmpDir, integrate=false`: asserts `.kv`, `.bt`, `.kvi` land in `tmpDir`; asserts the file does NOT appear in `d.dirs.SnapDomain`; asserts `d.dirtyFiles` count is unchanged (aggregator view stable). The Domain-level dirtyFiles check is the test surface equivalent of the plan's `at.Files(kv.CommitmentDomain)` invariant.
+- [x] Run `go test ./db/state/... -run TestDumpStepRangeToPath -count=1 -failfast` — passes (0.04s).
 
 ### Task 2: Detection helpers
 
