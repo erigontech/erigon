@@ -65,9 +65,11 @@ jobs:
       run: |
         set +e # Disable exit on error
         
-        # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes
+        # Launch the testbed Erigon instance & test its ability to maintain sync for 2 minutes.
+        # Use the freshly built binary so the reference datadir can advance past
+        # blocks that require fixes not yet present in the reference binary.
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-          ${{ env.ERIGON_REFERENCE_DATA_DIR }}/../ $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_REFERENCE_DATA_DIR 120 $TOTAL_TIME_SECONDS Erigon3 $CHAIN
         
         # Capture monitoring script exit status
         test_exit_status=$?
