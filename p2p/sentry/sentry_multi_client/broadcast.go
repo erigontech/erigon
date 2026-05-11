@@ -19,7 +19,6 @@ package sentry_multi_client
 import (
 	"context"
 	"errors"
-	"math/big"
 	"syscall"
 
 	"github.com/holiman/uint256"
@@ -65,21 +64,16 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 	}
 }
 
-func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
+func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td uint256.Int) {
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 
 	if err != nil {
 		log.Error("[p2p] broadcastNewBlock", "err", err)
 	}
 
-	td256, overflow := uint256.FromBig(td)
-	if overflow {
-		log.Error("[p2p] broadcastNewBlock: TD overflows uint256", "blockNum", header.Number.Uint64(), "blockHash", header.Hash())
-		return
-	}
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: block,
-		TD:    *td256,
+		TD:    td,
 	})
 
 	if err != nil {
