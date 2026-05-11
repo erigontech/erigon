@@ -385,22 +385,22 @@ Error path: if Phase 1 fails for any file, the log line tells the user that orig
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] Run full package tests: `go test ./db/state/... -count=1 -failfast`.
-- [ ] Run integration package build: `make integration`.
-- [ ] Run `make lint` until clean (linter is non-deterministic per CLAUDE.md — repeat).
-- [ ] Run `make erigon integration`.
-- [ ] Confirm every requirement from Overview is implemented:
-  - both flags exist with default `false`
-  - target-state semantics (no-op when state matches target)
-  - idempotent re-run
-  - 48 distributed samples via BT ordinal lookup
-  - 5-phase flow: Convert all → Pre-swap check → Backup (mv) → Promote (mv) → Reopen
-  - `dumpStepRangeToPath` reused for write path (with `integrate=false`)
-  - Revert instruction emitted at end of run
-  - Both axes (squeeze, nibbles.v2) work in both directions
-  - `KeyCommitmentState` passed through unchanged
-  - Per-file and overall progress percentages logged
-- [ ] Confirm edge cases land: empty datadir; pre-populated backup (refuse); leftover rebuild dir (wipe + log); range mismatch (abort with offending range).
+- [x] Run full package tests: `go test ./db/state/... -count=1 -failfast` — ok 60.174s, all subpackages green.
+- [x] Run integration package build: `make integration` — built `./build/bin/integration`.
+- [x] Run `make lint` until clean (linter is non-deterministic per CLAUDE.md — repeat). Ran twice, both `0 issues.`.
+- [x] Run `make erigon integration` — both binaries built.
+- [x] Confirm every requirement from Overview is implemented:
+  - both flags exist with default `false` (verified via `integration commitment convert --help`)
+  - target-state semantics (no-op when state matches target) — `convertCommitmentFile` returns `errSkip` when detected == target on both axes; orchestrator's `TestConvertCommitmentFiles_AllAlreadyTarget` confirms.
+  - idempotent re-run — Phase-1 pre-flight refuses non-empty `backup/` and wipes stale `rebuild/`; `errSkip` short-circuit makes second pass over already-converted files a no-op.
+  - 48 distributed samples via BT ordinal lookup (`detectFileState` calls `sampleViaBT` when available, stride fallback otherwise).
+  - 5-phase flow: Convert all → Pre-swap check → Backup (mv) → Promote (mv) → Reopen (`ConvertCommitmentFiles` orchestrator).
+  - `dumpStepRangeToPath` reused for write path with `integrate=false` (verified at convert call site).
+  - Revert instruction emitted at end of run (`[commitment_convert] DONE.` log line in Phase 5).
+  - Both axes (squeeze, nibbles.v2) work in both directions — `TestConvertCommitmentFiles_RoundTripComposed` exercises V1+unsqueezed → V2+squeezed → V1+unsqueezed.
+  - `KeyCommitmentState` passed through unchanged (per-file streaming loop carve-out, both keyXform and state-value paths).
+  - Per-file and overall progress percentages logged (`progressPrefix` + per-file `<file_pct>` in streaming loop ticker).
+- [x] Confirm edge cases land: empty datadir (`TestConvertCommitmentFiles_EmptyDatadir`); pre-populated backup (`TestConvertCommitmentFiles_BackupExists`); leftover rebuild dir (`TestConvertCommitmentFiles_LeftoverRebuild`); range mismatch (covered in `convertCommitmentFile` via `errRangeMatch` — Task 5 documented why not retested at orchestrator level).
 
 ### Task 8: Update documentation and finalize
 
