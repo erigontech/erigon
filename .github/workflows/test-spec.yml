@@ -1,0 +1,81 @@
+name: Spec tests
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  spec-tests:
+    name: spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+    # Skip enginextests-devnet until the devnet tarball ships
+    # blockchain_tests_engine_x/. The non-`_x` `blockchain_tests_engine/`
+    # variant uses a different JSON schema (inline `pre`, no `preHash`)
+    # that the cmd/evm enginextest runner cannot consume. Re-enable by
+    # removing this guard once the fixture lands.
+    if: ${{ !(matrix.suite == 'enginextests' && matrix.fixtures == 'devnet') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { suite: statetests,   fixtures: stable, workers: 12, max-allowed-failures: 37 }
+          - { suite: statetests,   fixtures: devnet, workers: 12, max-allowed-failures: 5253 }
+          - { suite: blocktests,   fixtures: stable, workers: 12, max-allowed-failures: 0 }
+          - { suite: blocktests,   fixtures: devnet, workers: 12, max-allowed-failures: 6206 }
+          - { suite: enginextests, fixtures: stable, workers: 8,  max-allowed-failures: 0 }
+          - { suite: enginextests, fixtures: devnet, workers: 8,  max-allowed-failures: 0 }
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RAMDISK_SIZE_MB: '8192'
+
+    steps:
+      - name: Declare runner
+        run: echo "Runner $RUNNER_NAME"
+
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          submodules: false
+          lfs: false
+          cleanup-space: true
+          ramdisk: true
+          build-cache-extra-key: spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+
+      - name: Cache test-fixtures tarballs
+        uses: actions/cache@v4
+        with:
+          # Same key as test-all-erigon.yml so the two workflows share the
+          # cache: tarballs are downloaded once per OS+manifest-hash and
+          # restored here. Only the .tar.gz files are cached; extraction
+          # happens fresh each run via tools/test-fixtures.sh.
+          path: test-fixtures-cache/*.tar.gz
+          key: test-fixtures-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-${{ runner.os }}-
+
+      - name: Run spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+        env:
+          SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
+          SPEC_WORKERS: ${{ matrix.workers }}
+        run: make spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

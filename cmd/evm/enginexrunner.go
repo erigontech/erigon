@@ -57,6 +57,7 @@ var engineXTestCommand = cli.Command{
 			Usage:    "Directory containing engine-x pre-alloc JSON files",
 			Required: true,
 		},
+		&JSONOutputFlag,
 		&RunFlag,
 		&VerbosityFlag,
 		&WorkersFlag,

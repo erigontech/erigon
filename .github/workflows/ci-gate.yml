@@ -47,6 +47,10 @@ jobs:
     uses: ./.github/workflows/test-all-erigon-race.yml
     secrets: inherit
 
+  spec-tests:
+    uses: ./.github/workflows/test-spec.yml
+    secrets: inherit
+
   hive:
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
@@ -95,6 +99,7 @@ jobs:
       - lint
       - tests
       - race-tests
+      - spec-tests
       - hive
       - hive-eest
       - caplin

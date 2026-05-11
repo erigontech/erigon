@@ -248,6 +248,24 @@ test-fixtures:
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
+## test-fixtures-eest:                 download & extract EEST fixture tarballs only (subset of test-fixtures)
+.PHONY: test-fixtures-eest
+test-fixtures-eest:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet
+
+# Spec tests: run cmd/evm runners (statetest, blocktest, enginextest) against
+# EEST fixtures. CI defines failure budgets in .github/workflows/test-spec.yml's
+# matrix.include:; local runs use the per-shard fallback defaults baked into
+# tools/run-spec-test.sh. Override either with SPEC_MAX_FAILURES / SPEC_WORKERS.
+SPEC_SHARDS := \
+	statetests-stable statetests-devnet \
+	blocktests-stable blocktests-devnet \
+	enginextests-stable enginextests-devnet
+
+.PHONY: $(addprefix spec-,$(SPEC_SHARDS))
+$(addprefix spec-,$(SPEC_SHARDS)): spec-%: test-fixtures-eest evm
+	@bash tools/run-spec-test.sh $(subst -, ,$*)
+
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
