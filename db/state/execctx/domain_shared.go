@@ -783,7 +783,27 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					}
 					return v, uint64(step), len(v) > 0, nil
 				}
-				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
+				var rr commitment.CommitmentRangeReader
+				if dbg.EnvBool("PIN_TRUNK_BULK", true) {
+					rr = func(from, to []byte, yield func(k, v []byte, step uint64) bool) error {
+						it, err := ttx.Debug().RangeLatest(kv.CommitmentDomain, from, to, -1)
+						if err != nil {
+							return err
+						}
+						defer it.Close()
+						for it.HasNext() {
+							k, v, err := it.Next()
+							if err != nil {
+								return err
+							}
+							if !yield(k, v, 0) {
+								return nil
+							}
+						}
+						return nil
+					}
+				}
+				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, rr)
 			}
 		}
 		// Refresh pinned-tier gauges once per Flush — once-per-batch

@@ -173,6 +173,7 @@ func (p *ContractTrunkPreload) LoadBulk(budgetBytes int, rr CommitmentRangeReade
 	}
 	p.pinned += chunkPinned
 	p.usedBytes += chunkBytes
+	p.lastBulkHadMore = p.pinned < len(collected)
 	if logger != nil {
 		logger.Info("[trunk-preload-bulk] scanned", "contract_hash", fmt.Sprintf("%x", p.contractHash),
 			"scanned", len(collected), "pinned_this_call", chunkPinned, "pinned_total", p.pinned,
