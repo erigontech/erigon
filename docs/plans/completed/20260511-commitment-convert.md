@@ -408,9 +408,9 @@ Error path: if Phase 1 fails for any file, the log line tells the user that orig
 - Modify: `docs/plans/20260511-commitment-convert.md` (this file)
 - Possibly modify: `CLAUDE.md` (only if a non-obvious pattern was discovered worth recording)
 
-- [ ] Verify all checkboxes above are marked `[x]`.
-- [ ] Mark any deviations or scope changes inline.
-- [ ] `mkdir -p docs/plans/completed && git mv docs/plans/20260511-commitment-convert.md docs/plans/completed/`.
+- [x] Verify all checkboxes above are marked `[x]`. Tasks 1–7 all `[x]`; only the three Task 8 items remained at start of this iteration.
+- [x] Mark any deviations or scope changes inline. Deviations are already captured at the relevant checkboxes: Task 1 (integrity call sites N/A — project memory cross-ref was stale), Task 3 (`UncompactNibbles` was still private despite being listed as Task 1's job — exported as a Task 3 prerequisite), Task 4 (`ReloadFiles` required instead of `OpenFolder` for round-trip — aggregator mmap cache gotcha), Task 5 (range mismatch not retested at orchestrator level — already covered in `convertCommitmentFile`).
+- [x] `mkdir -p docs/plans/completed && git mv docs/plans/20260511-commitment-convert.md docs/plans/completed/`.
 
 ## Post-Completion
 
