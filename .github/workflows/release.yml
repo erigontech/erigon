@@ -701,7 +701,12 @@ jobs:
         # the same tag between build-release's check and now. If the tag is
         # already on remote at this run's build commit, treat it as ours and
         # continue (idempotent). Anything else is a real collision.
-        REMOTE_SHA=$(git ls-remote --tags origin "${RELEASE_VERSION}" | awk '{print $1}')
+        # Resolve to the commit SHA: annotated tags need the peeled ^{} ref;
+        # lightweight tags expose the commit SHA on the bare ref.
+        REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}^{}" | awk '{print $1}')
+        if [ -z "${REMOTE_SHA}" ]; then
+          REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}" | awk '{print $1}')
+        fi
         if [ -n "${REMOTE_SHA}" ]; then
           if [ "${REMOTE_SHA}" = "${BUILD_COMMIT}" ]; then
             echo "Tag ${RELEASE_VERSION} already on remote at build commit ${BUILD_COMMIT} — continuing."
@@ -811,7 +816,12 @@ jobs:
           BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
         run: |
           cd erigon
-          REMOTE_SHA=$(git ls-remote --tags origin "${RELEASE_VERSION}" | awk '{print $1}')
+          # Resolve to the commit SHA: annotated tags need the peeled ^{} ref;
+          # lightweight tags expose the commit SHA on the bare ref.
+          REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}^{}" | awk '{print $1}')
+          if [ -z "${REMOTE_SHA}" ]; then
+            REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}" | awk '{print $1}')
+          fi
           if [ -z "${REMOTE_SHA}" ]; then
             echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
           elif [ -z "${BUILD_COMMIT}" ] || [ "${REMOTE_SHA}" != "${BUILD_COMMIT}" ]; then
