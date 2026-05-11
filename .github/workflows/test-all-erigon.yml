@@ -47,7 +47,7 @@ jobs:
           ramdisk: true
 
       - name: Cache test-fixtures tarballs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Only cache the .tar.gz files; the extracted dirs are recreated by
           # tools/test-fixtures.sh on each run from the cached tarballs.
