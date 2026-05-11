@@ -190,7 +190,7 @@ trap cleanup INT TERM EXIT
 # --line-buffered keeps each line flushed in real time.
 echo "==> tailing log (INFO only — Ctrl+C to stop the run)"
 echo
-tail -F "$LOG" | grep --line-buffered '^INFO' &
+tail -F "$LOG" | grep "INFO" &
 TAIL_PID=$!
 # Wait for erigon to exit OR user to Ctrl+C.
 wait "$ERIGON_PID" 2>/dev/null || true
