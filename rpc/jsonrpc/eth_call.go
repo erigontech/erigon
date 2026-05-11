@@ -1003,9 +1003,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 				errString = res.Err.Error()
 			}
 			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
+			if args.To != nil {
+				optimizeWarmAddrAndAdjustGas(accessList, to)
+			}
 			if optimizeGas != nil && *optimizeGas {
-				optimizeWarmAddrInAccessList(accessList, *args.From)
-				optimizeWarmAddrInAccessList(accessList, to)
 				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
 				for addr := range tracer.CreatedContracts() {
 					if !tracer.UsedBeforeCreation(addr) {
@@ -1047,4 +1048,23 @@ func optimizeWarmAddrInAccessList(accessList *accessListResult, addr common.Addr
 
 func removeIndex(s types.AccessList, index int) types.AccessList {
 	return append(s[:index], s[index+1:]...)
+}
+
+// optimizeWarmAddrAndAdjustGas removes a zero-slot entry for addr from the access list
+// and subtracts TxAccessListAddressGas from GasUsed. Use for the recipient address:
+// EIP-2929 pre-warms it for free, so an address-only entry is pure intrinsic-gas overhead
+// with no EVM benefit. Entries with storage keys are left untouched.
+func optimizeWarmAddrAndAdjustGas(accessList *accessListResult, addr common.Address) {
+	for i, entry := range *accessList.Accesslist {
+		if entry.Address != addr {
+			continue
+		}
+		if len(entry.StorageKeys) == 0 {
+			if uint64(accessList.GasUsed) >= params.TxAccessListAddressGas {
+				accessList.GasUsed -= hexutil.Uint64(params.TxAccessListAddressGas)
+			}
+			*accessList.Accesslist = removeIndex(*accessList.Accesslist, i)
+		}
+		return
+	}
 }
