@@ -444,15 +444,19 @@ func TestConvertCommitmentFiles_FullFlow(t *testing.T) {
 	require.True(t, anyFileHasSqueezedField(t, agg, newKVsForSqueezeCheck),
 		"orchestrator with TargetSqueeze=true must produce at least one short plain-key field somewhere")
 
-	// Phase 3 invariant: every original commitment-named file is now in backup.
+	// Phase 3 invariant: every backed-up file is a verbatim copy of an
+	// original. The fixture intentionally includes unmerged 1-step subset
+	// files; those fail ValuesPlainKeyReferencingThresholdReached and are
+	// skipped by the converter (left in place under snapshots/domain/), so
+	// backup is a subset — not equal — to origFiles.
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	backupFiles := snapshotCommitmentFiles(t, backupDir)
-	require.Equal(t, len(origFiles), len(backupFiles),
-		"backup must contain every original commitment file")
-	for name, content := range origFiles {
-		got, ok := backupFiles[name]
-		require.True(t, ok, "missing %s in backup", name)
-		require.True(t, bytes.Equal(content, got),
+	require.NotEmpty(t, backupFiles, "at least one squeezeable file must be backed up")
+	require.LessOrEqual(t, len(backupFiles), len(origFiles))
+	for name, content := range backupFiles {
+		orig, ok := origFiles[name]
+		require.Truef(t, ok, "backup contains %s with no matching original", name)
+		require.Truef(t, bytes.Equal(orig, content),
 			"backup content mismatch for %s", name)
 	}
 

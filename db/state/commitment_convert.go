@@ -186,19 +186,29 @@ func detectFileState(at *AggregatorRoTx, file VisibleFile, samples int) (fileSta
 // (O(log N) per sample, no sequential scan); falls back to stride-skip on
 // a sequential seg.Reader if the file has no BT index.
 //
+// Sub-threshold (steps < DomainMinStepsToCompress) commitment files are
+// written uncompressed by the merge path; this constructs the reader with
+// the correct codec for the file's step span so detection reads bytes
+// correctly. Mirrors convertCommitmentFile's codec selection.
+//
 // Returned pairs hold copies of the underlying bytes — the seg/bt buffers
 // are reused on every read.
 func sampleCommitmentFile(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
 	if samples <= 0 {
 		return nil, fmt.Errorf("sampleCommitmentFile: samples must be > 0 (got %d)", samples)
 	}
-	if fi.bindex != nil && !fi.bindex.Empty() {
-		return sampleViaBT(dt, fi, samples)
+	compression := dt.d.Compression
+	if fi.StepCount(dt.d.stepSize) < DomainMinStepsToCompress {
+		compression = seg.CompressNone
 	}
-	return sampleViaStride(dt, fi, samples)
+	reader := seg.NewReader(fi.decompressor.MakeGetter(), compression)
+	if fi.bindex != nil && !fi.bindex.Empty() {
+		return sampleViaBT(reader, fi, samples)
+	}
+	return sampleViaStride(reader, fi, samples)
 }
 
-func sampleViaBT(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
+func sampleViaBT(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledPair, error) {
 	keyCount := fi.bindex.KeyCount()
 	if keyCount == 0 {
 		return nil, nil
@@ -207,7 +217,6 @@ func sampleViaBT(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, err
 	if n > keyCount {
 		n = keyCount
 	}
-	reader := dt.dataReader(fi.decompressor)
 	out := make([]sampledPair, 0, n)
 	for i := uint64(0); i < n; i++ {
 		// distribute samples across the full key space; stride = keyCount/n
@@ -354,7 +363,7 @@ func convertCommitmentFile(
 	opts ConvertOpts,
 	progressPrefix string,
 	logger log.Logger,
-) (sizeDelta datasize.ByteSize, deltaPct float32, err error) {
+) (sizeDelta int64, deltaPct float32, err error) {
 	st, err := detectFileState(at, file, 48)
 	if err != nil {
 		// A file with only the state row (no non-state samples) has no branches
@@ -364,9 +373,6 @@ func convertCommitmentFile(
 			return 0, 0, errSkip
 		}
 		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
-	}
-	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == opts.TargetSqueeze {
-		return 0, 0, errSkip
 	}
 
 	stepSize := at.StepSize()
@@ -378,6 +384,24 @@ func convertCommitmentFile(
 	stepFrom := kv.Step(startTxNum / stepSize)
 	stepTo := kv.Step(endTxNum / stepSize)
 
+	// commitmentValTransformDomain short-circuits to pass-through when the
+	// file's step span doesn't reach the plain-key-referencing threshold
+	// (odd step span — see ValuesPlainKeyReferencingThresholdReached). Such a
+	// file cannot be squeezed; pretend it's already at target on the squeeze
+	// axis so the converter doesn't rewrite it with the same value bytes but
+	// a "squeezed" label, which would break idempotency.
+	effectiveTargetSqueeze := opts.TargetSqueeze
+	if !st.squeezed && opts.TargetSqueeze &&
+		!ValuesPlainKeyReferencingThresholdReached(stepSize, startTxNum, endTxNum) {
+		effectiveTargetSqueeze = false
+		logger.Info(fmt.Sprintf(
+			"[commitment_convert] %s: step span %d-%d below squeeze threshold; squeeze axis treated as already-target",
+			filepath.Base(file.Fullpath()), stepFrom, stepTo))
+	}
+	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze {
+		return 0, 0, errSkip
+	}
+
 	commitmentRo := at.d[kv.CommitmentDomain]
 	accountsRo := at.d[kv.AccountsDomain]
 	storageRo := at.d[kv.StorageDomain]
@@ -388,7 +412,7 @@ func convertCommitmentFile(
 	// value transformer dereferences/expands plain-key offsets). For pure key-
 	// encoding conversions, skip the lookups so the converter still works on
 	// datadirs where commitment ranges don't align with account/storage ranges.
-	vt, err := buildValueTransformer(st.squeezed, opts.TargetSqueeze, commitmentRo, accountsRo, storageRo, rng, startTxNum, endTxNum, stepFrom, stepTo, file.Fullpath())
+	vt, err := buildValueTransformer(st.squeezed, effectiveTargetSqueeze, commitmentRo, accountsRo, storageRo, rng, startTxNum, endTxNum, stepFrom, stepTo, file.Fullpath())
 	if err != nil {
 		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
 	}
@@ -508,8 +532,9 @@ func convertCommitmentFile(
 
 // commitmentFileSizeDelta returns (origSize-newSize) and that delta as a
 // percentage of origSize. Positive values mean the new file is smaller.
-// Mirrors the pattern in SqueezeCommitmentFiles (squeeze.go:156-166).
-func commitmentFileSizeDelta(origPath, newPath string) (datasize.ByteSize, float32, error) {
+// Returns int64 because unsqueeze grows the file, producing a negative delta;
+// uint64 (datasize.ByteSize) would underflow to a huge positive value.
+func commitmentFileSizeDelta(origPath, newPath string) (int64, float32, error) {
 	oi, err := os.Stat(origPath)
 	if err != nil {
 		return 0, 0, err
@@ -518,12 +543,21 @@ func commitmentFileSizeDelta(origPath, newPath string) (datasize.ByteSize, float
 	if err != nil {
 		return 0, 0, err
 	}
-	delta := datasize.ByteSize(oi.Size()) - datasize.ByteSize(ni.Size())
+	delta := oi.Size() - ni.Size()
 	var pct float32
 	if oi.Size() > 0 {
-		pct = 100.0 * float32(oi.Size()-ni.Size()) / float32(oi.Size())
+		pct = 100.0 * float32(delta) / float32(oi.Size())
 	}
 	return delta, pct, nil
+}
+
+// signedByteSizeHR formats a signed byte count with a leading "-" when negative,
+// reusing datasize's human-readable rendering on the absolute value.
+func signedByteSizeHR(n int64) string {
+	if n < 0 {
+		return "-" + datasize.ByteSize(-n).HR()
+	}
+	return datasize.ByteSize(n).HR()
 }
 
 // ConvertCommitmentFiles re-encodes every commitment .kv file in the datadir to
@@ -593,7 +627,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	logger.Info(fmt.Sprintf(
 		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, sizeDelta=%s",
-		processedFiles, skippedFiles, len(files), totalSizeDelta.HR()))
+		processedFiles, skippedFiles, len(files), signedByteSizeHR(totalSizeDelta)))
 
 	if processedFiles == 0 {
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
@@ -698,7 +732,7 @@ func convertPhase1(
 	rebuildDir string,
 	opts ConvertOpts,
 	logger log.Logger,
-) (processedFiles, skippedFiles int, totalSizeDelta datasize.ByteSize, err error) {
+) (processedFiles, skippedFiles int, totalSizeDelta int64, err error) {
 	N := len(files)
 	for i, f := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -834,8 +868,7 @@ func cleanupRebuildParent(parent string, logger log.Logger) {
 	}
 }
 
-func sampleViaStride(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
-	reader := dt.dataReader(fi.decompressor)
+func sampleViaStride(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledPair, error) {
 	// Count pairs by a fast pass. The seg layer doesn't expose pair count
 	// directly through the reader, but decompressor.Count() returns the total
 	// number of words; commitment .kv files are (k, v) word pairs.
