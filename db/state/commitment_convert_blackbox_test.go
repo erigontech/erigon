@@ -19,6 +19,7 @@ package state_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"os"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -202,8 +204,12 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	// Build fixtures with ReplaceKeysInValues=false so the on-disk files start
+	// unsqueezed. Then flip the config flag to true before running the converter
+	// so commitmentValTransformDomain's inner guard lets the squeeze fire.
 	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
 	db, agg := testDbAggregatorWithFiles(t, cfg)
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	rwTx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
@@ -220,13 +226,30 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 	newKVPath := findKVInDir(t, dstDir)
 	require.NotEmpty(t, newKVPath)
 
-	// The new file must show as squeezed under the same detection logic the
-	// orchestrator uses. We re-open the file through a fresh aggregator pointed
-	// at dstDir to do that — but here we shortcut by reading the .kv directly
-	// and asserting that at least one non-state branch has a short (<10B)
-	// embedded plain-key field.
-	_, newVals := readKVFile(t, agg, newKVPath)
+	// Squeezed values contain at least one embedded plain-key field shorter than
+	// binary.MaxVarintLen64 (10 bytes) — the marker the read-side detector
+	// (detectSqueezeState) keys off. Walk every non-state branch in the new
+	// file and assert at least one such short field exists.
+	newKeys, newVals := readKVFile(t, agg, newKVPath)
 	require.NotEmpty(t, newVals)
+	foundShort := false
+	for i, v := range newVals {
+		if bytes.Equal(newKeys[i], commitmentdb.KeyCommitmentState) || len(v) == 0 {
+			continue
+		}
+		_, perr := commitment.BranchData(v).ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			if len(key) < binary.MaxVarintLen64 {
+				foundShort = true
+			}
+			return nil, nil
+		})
+		require.NoError(t, perr)
+		if foundShort {
+			break
+		}
+	}
+	require.True(t, foundShort,
+		"converted file must contain at least one squeezed (<10B) plain-key field")
 }
 
 // TestConvertCommitmentFile_RoundTrip_V1V2 verifies that V1 → V2 → V1 returns

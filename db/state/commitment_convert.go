@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -52,22 +53,10 @@ type fileState struct {
 	squeezed bool
 }
 
-// xformFns groups the per-pair transforms used by the converter pipeline.
-// state is the dispatch hook for KeyCommitmentState (today: pass-through);
-// it lives here so a future iteration can mutate the state blob without
-// touching the main streaming loop.
-type xformFns struct {
-	key   func([]byte) ([]byte, error)
-	state func([]byte, []byte) ([]byte, []byte, error)
-}
-
 // errSkip signals "file is already in the target encoding"; the orchestrator
 // catches this and skips the file without counting it as an error.
-// Mixed-detection, range-mismatch, etc. use fmt.Errorf — never compared.
 var (
 	errSkip              = errors.New("file already in target state")
-	errMixedKeyEncoding  = errors.New("mixed key encoding within file")
-	errMixedSqueezeState = errors.New("mixed squeeze state within file")
 	errRangeMatch        = errors.New("no matching account/storage file for range")
 	errNoNonStateSamples = errors.New("no non-state samples to vote with")
 )
@@ -414,6 +403,11 @@ func convertCommitmentFile(
 	txNumForPut := endTxNum - 1
 	baseName := filepath.Base(file.Fullpath())
 
+	// Value transform is applied here (not in collateETL) so we can (a) carve out
+	// KeyCommitmentState — its value is opaque metadata, not BranchData — and (b)
+	// pass the actual source file range to vt, matching SqueezeCommitmentFiles.
+	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
+	// with a (-1) offset that does not match the source file for stepFrom>0 files.
 	var ki uint64
 	var k, v []byte
 	for reader.HasNext() {
@@ -424,8 +418,9 @@ func convertCommitmentFile(
 		v, _ = reader.Next(v[:0])
 		ki++
 
+		isState := bytes.Equal(k, commitmentdb.KeyCommitmentState)
 		var outKey []byte
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if isState {
 			outKey = append([]byte(nil), k...)
 		} else {
 			tk, kerr := kxform(k)
@@ -433,14 +428,22 @@ func convertCommitmentFile(
 				return 0, 0, fmt.Errorf("convertCommitmentFile %q: keyXform at ki=%d key=%x: %w",
 					file.Fullpath(), ki, k, kerr)
 			}
-			// keyXform may return the input slice itself (pass-through cases) or
-			// a buffer owned by the codec; copy so the next reader.Next does not
-			// stomp it before the etl collector serialises the row.
 			outKey = append([]byte(nil), tk...)
 		}
-		// Copy v too: the wal stores it into an etl buffer; reader.Next will
-		// reuse the underlying slice on the next iteration.
-		if perr := wal.PutWithPrev(outKey, append([]byte(nil), v...), txNumForPut, nil); perr != nil {
+
+		var outVal []byte
+		if !isState && vt != nil {
+			tv, verr := vt(v, startTxNum, endTxNum)
+			if verr != nil {
+				return 0, 0, fmt.Errorf("convertCommitmentFile %q: vt at ki=%d key=%x: %w",
+					file.Fullpath(), ki, k, verr)
+			}
+			outVal = append([]byte(nil), tv...)
+		} else {
+			outVal = append([]byte(nil), v...)
+		}
+
+		if perr := wal.PutWithPrev(outKey, outVal, txNumForPut, nil); perr != nil {
 			return 0, 0, fmt.Errorf("convertCommitmentFile %q: wal put at ki=%d: %w", file.Fullpath(), ki, perr)
 		}
 
@@ -459,7 +462,8 @@ func convertCommitmentFile(
 		}
 	}
 
-	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, dstDir, false); err != nil {
+	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
+	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
 		return 0, 0, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}
 
@@ -527,7 +531,15 @@ func commitmentFileSizeDelta(origPath, newPath string) (datasize.ByteSize, float
 // prior conversion's backup is still in place) and wipes a leftover
 // snapshots/rebuild/domain/ from a prior crashed run.
 func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
-	files := at.Files(kv.CommitmentDomain)
+	// at.Files mixes domain .kv with history .v / .ef when commitment history is
+	// enabled. The converter only handles .kv files; filter the rest out.
+	allFiles := at.Files(kv.CommitmentDomain)
+	files := make(VisibleFiles, 0, len(allFiles))
+	for _, f := range allFiles {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			files = append(files, f)
+		}
+	}
 	if len(files) == 0 {
 		logger.Info("[commitment_convert] no commitment files to convert")
 		return nil

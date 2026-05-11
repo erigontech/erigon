@@ -504,7 +504,10 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()
-	defer acRo.MadvNormal().DisableReadAhead()
+	// Don't defer acRo.MadvNormal().DisableReadAhead(): ConvertCommitmentFiles
+	// calls agg.ReloadFiles() in Phase 5 which closes the decompressors acRo
+	// references. Calling MadvNormal on those after return would dereference
+	// freed mmap handles.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
 }
