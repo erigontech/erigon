@@ -18,10 +18,17 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
 
+	"github.com/c2h5oh/datasize"
+
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -305,6 +312,186 @@ func buildValueTransformer(
 		}
 		return expanded, nil
 	}, nil
+}
+
+// convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
+//
+// It detects the source file's current state, builds the per-pair key and value
+// transformers for the target ConvertOpts, streams every (k, v) pair from the
+// source via the aggregator's compression-aware reader, applies keyXform per
+// pair (state keys pass through), and pushes (newKey, value) into a fresh
+// TemporalMemBatch's commitment-domain wal. The value-side transform is
+// supplied to dumpStepRangeToPath as `vt valueTransformer` so it runs during
+// collation alongside the ETL sort.
+//
+// dstDir must exist; the resulting `.kv` plus per-domain index files (.bt /
+// .kvi / .kvei depending on the commitment-domain config) are written there.
+// The aggregator's view of `snapshots/domain/` is not touched: dumpStepRangeToPath
+// is called with `integrate=false`, so originals remain readable for the entire
+// duration of Phase 1 and a crashed run is recoverable by just deleting dstDir.
+//
+// If the detected state already matches `opts`, returns `errSkip` (a sentinel
+// caught by the orchestrator) without producing any output. Range-mismatch and
+// codec errors are wrapped with the source file's path.
+//
+// `progressPrefix` is built once per file by the orchestrator
+// (e.g. `"(3/12 files, 25.0% overall)"`) and appended verbatim to per-file log
+// lines so no overall-% arithmetic happens inside the conversion loop.
+func convertCommitmentFile(
+	ctx context.Context,
+	at *AggregatorRoTx,
+	file VisibleFile,
+	dstDir string,
+	opts ConvertOpts,
+	progressPrefix string,
+	logger log.Logger,
+) (sizeDelta datasize.ByteSize, deltaPct float32, err error) {
+	st, err := detectFileState(at, file, 48)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
+	}
+	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == opts.TargetSqueeze {
+		return 0, 0, errSkip
+	}
+
+	stepSize := at.StepSize()
+	startTxNum := file.StartRootNum()
+	endTxNum := file.EndRootNum()
+	if endTxNum == 0 || endTxNum < startTxNum {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: invalid range %d..%d", file.Fullpath(), startTxNum, endTxNum)
+	}
+	stepFrom := kv.Step(startTxNum / stepSize)
+	stepTo := kv.Step(endTxNum / stepSize)
+
+	commitmentRo := at.d[kv.CommitmentDomain]
+	accountsRo := at.d[kv.AccountsDomain]
+	storageRo := at.d[kv.StorageDomain]
+
+	af, err := accountsRo.rawLookupFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w (accounts step %d-%d): %w",
+			file.Fullpath(), errRangeMatch, stepFrom, stepTo, err)
+	}
+	sf, err := storageRo.rawLookupFileByRange(startTxNum, endTxNum)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w (storage step %d-%d): %w",
+			file.Fullpath(), errRangeMatch, stepFrom, stepTo, err)
+	}
+
+	kxform := keyXform(st.keysV2, opts.TargetNibblesV2)
+	rng := MergeRange{name: "convert", needMerge: true, from: startTxNum, to: endTxNum}
+	vt, err := buildValueTransformer(st.squeezed, opts.TargetSqueeze, commitmentRo, accountsRo, storageRo, af, sf, rng)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
+	}
+
+	vf, ok := file.(visibleFile)
+	if !ok {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: VisibleFile is not state.visibleFile (got %T)", file.Fullpath(), file)
+	}
+	src := vf.src
+	if src == nil || src.decompressor == nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: source has no decompressor", file.Fullpath())
+	}
+
+	batch := &TemporalMemBatch{}
+	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter()
+	wal := batch.domainWriters[kv.CommitmentDomain]
+	defer wal.Close()
+
+	reader := commitmentRo.dataReader(src.decompressor)
+	reader.Reset(0)
+
+	totalForFile := at.KeyCountInFiles(kv.CommitmentDomain, startTxNum, endTxNum)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// txNumForPut only affects the 8-byte step prefix on the wal entry; collateETL
+	// strips it before applying vt. endTxNum-1 guarantees the encoded step lands
+	// inside [stepFrom, stepTo).
+	txNumForPut := endTxNum - 1
+	baseName := filepath.Base(file.Fullpath())
+
+	var ki uint64
+	var k, v []byte
+	for reader.HasNext() {
+		k, _ = reader.Next(k[:0])
+		if !reader.HasNext() {
+			return 0, 0, fmt.Errorf("convertCommitmentFile %q: truncated at ki=%d (value missing)", file.Fullpath(), ki)
+		}
+		v, _ = reader.Next(v[:0])
+		ki++
+
+		var outKey []byte
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			outKey = append([]byte(nil), k...)
+		} else {
+			tk, kerr := kxform(k)
+			if kerr != nil {
+				return 0, 0, fmt.Errorf("convertCommitmentFile %q: keyXform at ki=%d key=%x: %w",
+					file.Fullpath(), ki, k, kerr)
+			}
+			// keyXform may return the input slice itself (pass-through cases) or
+			// a buffer owned by the codec; copy so the next reader.Next does not
+			// stomp it before the etl collector serialises the row.
+			outKey = append([]byte(nil), tk...)
+		}
+		// Copy v too: the wal stores it into an etl buffer; reader.Next will
+		// reuse the underlying slice on the next iteration.
+		if perr := wal.PutWithPrev(outKey, append([]byte(nil), v...), txNumForPut, nil); perr != nil {
+			return 0, 0, fmt.Errorf("convertCommitmentFile %q: wal put at ki=%d: %w", file.Fullpath(), ki, perr)
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, 0, ctx.Err()
+		case <-logEvery.C:
+			filePct := float32(0)
+			if totalForFile > 0 {
+				filePct = 100.0 * float32(ki) / float32(totalForFile)
+			}
+			logger.Info(fmt.Sprintf(
+				"[commitment_convert] progress %d/%d file=%s (%.1f%% in file) %s",
+				ki, totalForFile, baseName, filePct, progressPrefix))
+		default:
+		}
+	}
+
+	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, dstDir, false); err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
+	}
+
+	newKVPath := commitmentRo.d.kvNewFilePathIn(dstDir, stepFrom, stepTo)
+	delta, pct, err := commitmentFileSizeDelta(file.Fullpath(), newKVPath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("convertCommitmentFile %q: size delta: %w", file.Fullpath(), err)
+	}
+
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] phase 1 file done %s sizeDelta=%.1f%% ki=%d %s",
+		baseName, pct, ki, progressPrefix))
+
+	return delta, pct, nil
+}
+
+// commitmentFileSizeDelta returns (origSize-newSize) and that delta as a
+// percentage of origSize. Positive values mean the new file is smaller.
+// Mirrors the pattern in SqueezeCommitmentFiles (squeeze.go:156-166).
+func commitmentFileSizeDelta(origPath, newPath string) (datasize.ByteSize, float32, error) {
+	oi, err := os.Stat(origPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	ni, err := os.Stat(newPath)
+	if err != nil {
+		return 0, 0, err
+	}
+	delta := datasize.ByteSize(oi.Size()) - datasize.ByteSize(ni.Size())
+	var pct float32
+	if oi.Size() > 0 {
+		pct = 100.0 * float32(oi.Size()-ni.Size()) / float32(oi.Size())
+	}
+	return delta, pct, nil
 }
 
 func sampleViaStride(dt *DomainRoTx, fi *FilesItem, samples int) ([]sampledPair, error) {
