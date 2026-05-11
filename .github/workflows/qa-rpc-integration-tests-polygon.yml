@@ -75,14 +75,13 @@ jobs:
           ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api bor,admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
           echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail erigon.log
           
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
+          if ! kill -0 "$RPC_DAEMON_PID" 2> /dev/null; then
             echo "RpcDaemon failed to start"
             echo "::error::Error detected during tests: RpcDaemon failed to start"
             exit 1
