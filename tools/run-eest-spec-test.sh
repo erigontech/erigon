@@ -4,7 +4,10 @@
 #     tools/run-eest-spec-test.sh <suite> <fixtures>
 #
 #   suite    = statetests | blocktests | enginextests
-#   fixtures = stable     | devnet
+#   fixtures = stable     | devnet     | benchmark
+#
+# Only enginextests-benchmark is defined for the benchmark fixtures (the
+# eest_benchmark tarball ships per-gas-limit engine_x test workloads).
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -28,8 +31,9 @@ suite="$1"
 fixtures="$2"
 
 case "$fixtures" in
-	stable) base=test-fixtures-cache/eest_stable/fixtures ;;
-	devnet) base=test-fixtures-cache/eest_devnet/fixtures ;;
+	stable)    base=test-fixtures-cache/eest_stable/fixtures ;;
+	devnet)    base=test-fixtures-cache/eest_devnet/fixtures ;;
+	benchmark) base=test-fixtures-cache/eest_benchmark/fixtures ;;
 	*) echo "unknown fixtures: $fixtures" >&2; exit 2 ;;
 esac
 
@@ -56,6 +60,11 @@ case "$suite-$fixtures" in
 		# the test-eest-spec workflow skips this shard via step-level if:.
 		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
+	enginextests-benchmark)
+		# workers=1 so the per-test wall-time recorded via --time isn't
+		# noised by sibling goroutines competing for CPU/MDBX.
+		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=1;  default_max=72
+		extra=(--pre-alloc-dir "$path/pre_alloc" --time) ;;
 	*) echo "unknown shard: $suite-$fixtures" >&2; exit 2 ;;
 esac
 

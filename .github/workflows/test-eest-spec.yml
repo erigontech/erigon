@@ -19,8 +19,9 @@ jobs:
           - { suite: statetests,   fixtures: devnet, workers: 12, max-allowed-failures: 5253 }
           - { suite: blocktests,   fixtures: stable, workers: 12, max-allowed-failures: 0 }
           - { suite: blocktests,   fixtures: devnet, workers: 12, max-allowed-failures: 6206 }
-          - { suite: enginextests, fixtures: stable, workers: 8,  max-allowed-failures: 0 }
-          - { suite: enginextests, fixtures: devnet, workers: 8,  max-allowed-failures: 0 }
+          - { suite: enginextests, fixtures: stable,    workers: 8, max-allowed-failures: 0 }
+          - { suite: enginextests, fixtures: devnet,    workers: 8, max-allowed-failures: 0 }
+          - { suite: enginextests, fixtures: benchmark, workers: 1, max-allowed-failures: 72 }
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -54,6 +55,7 @@ jobs:
           path: |
             test-fixtures-cache/eest_stable.tar.gz
             test-fixtures-cache/eest_devnet.tar.gz
+            test-fixtures-cache/eest_benchmark.tar.gz
           key: test-fixtures-eest-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-

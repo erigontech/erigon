@@ -254,10 +254,10 @@ test-fixtures-cl:
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
-## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet)
+## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
 .PHONY: test-fixtures-eest
 test-fixtures-eest:
-	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
 # against EEST fixtures. CI defines failure budgets in
@@ -267,7 +267,8 @@ test-fixtures-eest:
 EEST_SPEC_SHARDS := \
 	statetests-stable statetests-devnet \
 	blocktests-stable blocktests-devnet \
-	enginextests-stable enginextests-devnet
+	enginextests-stable enginextests-devnet \
+	enginextests-benchmark
 
 .PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
 $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
