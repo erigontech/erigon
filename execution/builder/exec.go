@@ -104,6 +104,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	vmConfig := *cfg.vmConfig
 	vmConfig.NoReceipts = false
 	cfg.vmConfig = &vmConfig
+	if cfg.vmConfig.UseGevm {
+		return execBlockGevm(ctx, sd, tx, executionAt, cfg, execCfg, logger)
+	}
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	current := cfg.builderState.BuiltBlock
 

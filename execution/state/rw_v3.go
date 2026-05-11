@@ -23,6 +23,8 @@ import (
 	"slices"
 	"sync"
 
+	gevmstate "github.com/Giulio2002/gevm/state"
+	gevmtypes "github.com/Giulio2002/gevm/types"
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
@@ -875,6 +877,14 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
+	return w.UpdateAccountDataRaw(addressValue, original, account)
+}
+
+func (w *Writer) UpdateAccountDataRaw(addressValue common.Address, original, account *accounts.Account) error {
+	return w.UpdateAccountDataRawWithPrev(addressValue, original, account, nil)
+}
+
+func (w *Writer) UpdateAccountDataRawWithPrev(addressValue common.Address, original, account *accounts.Account, prevVal []byte) error {
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
 		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
@@ -889,7 +899,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
-	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil); err != nil {
+	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, prevVal); err != nil {
 		return err
 	}
 	return nil
@@ -921,6 +931,10 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	//	return err
 	//}
 	addressValue := address.Value()
+	return w.DeleteAccountRaw(addressValue, original)
+}
+
+func (w *Writer) DeleteAccountRaw(addressValue common.Address, original *accounts.Account) error {
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
@@ -942,19 +956,32 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
-	composite := append(addressValue[:], keyValue[:]...)
+	return w.WriteAccountStorageRaw(addressValue, incarnation, keyValue, original, value)
+}
+
+func (w *Writer) WriteAccountStorageRaw(addressValue common.Address, incarnation uint64, keyValue common.Hash, original, value uint256.Int) error {
+	return w.WriteAccountStorageRawWithPrev(addressValue, incarnation, keyValue, original, value, nil)
+}
+
+func (w *Writer) WriteAccountStorageRawWithPrev(addressValue common.Address, incarnation uint64, keyValue common.Hash, original, value uint256.Int, prevVal []byte) error {
+	if original == value {
+		return nil
+	}
+	var composite [20 + 32]byte
+	copy(composite[0:20], addressValue[0:20])
+	copy(composite[20:], keyValue[:])
 	v := value.Bytes()
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
+		fmt.Printf("storage: %x,%x,%x\n", addressValue, keyValue, v)
 	}
 	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
+		return w.tx.DomainDel(kv.StorageDomain, composite[:], w.txNum, prevVal)
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
 	}
 
-	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
+	return w.tx.DomainPut(kv.StorageDomain, composite[:], v, w.txNum, prevVal)
 }
 
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)
@@ -967,6 +994,13 @@ func (w *Writer) CreateContract(address accounts.Address) error {
 		return nil
 	}
 	addressValue := address.Value()
+	return w.CreateContractRaw(addressValue)
+}
+
+func (w *Writer) CreateContractRaw(addressValue common.Address) error {
+	if fastCreate {
+		return nil
+	}
 	if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
 		return err
 	}
@@ -978,6 +1012,7 @@ type ReaderV3 struct {
 	trace       bool
 	tracePrefix string
 	getter      kv.TemporalGetter
+	getHash     func(uint64) (common.Hash, error)
 }
 
 func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
@@ -990,6 +1025,9 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 func (r *ReaderV3) DiscardReadList()                   {}
 func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
 func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
+func (r *ReaderV3) SetBlockHashReader(getHash func(uint64) (common.Hash, error)) {
+	r.getHash = getHash
+}
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -1005,6 +1043,52 @@ func (r *ReaderV3) Trace() bool {
 
 func (r *ReaderV3) TracePrefix() string {
 	return r.tracePrefix
+}
+
+type readerV3Gevm ReaderV3
+
+func (r *ReaderV3) GevmDatabase() gevmstate.Database {
+	return (*readerV3Gevm)(r)
+}
+
+func (r *readerV3Gevm) Basic(address gevmtypes.Address) (gevmstate.AccountInfo, bool, error) {
+	_, acc, err := (*ReaderV3)(r).readAccountDataByValue(common.Address(address))
+	if err != nil || acc == nil {
+		return gevmstate.AccountInfo{}, false, err
+	}
+	return gevmstate.AccountInfo{
+		Balance:     acc.Balance,
+		Nonce:       acc.Nonce,
+		Root:        gevmtypes.B256(acc.Root),
+		Incarnation: acc.Incarnation,
+		CodeHash:    gevmtypes.B256(acc.CodeHash.Value()),
+	}, true, nil
+}
+
+func (r *readerV3Gevm) CodeByHash(hash gevmtypes.B256) (gevmtypes.Bytes, error) {
+	return nil, fmt.Errorf("code-by-hash lookup is unavailable for %x", hash)
+}
+
+func (r *readerV3Gevm) Code(address gevmtypes.Address) (gevmtypes.Bytes, error) {
+	code, err := (*ReaderV3)(r).readAccountCodeByValue(common.Address(address))
+	return gevmtypes.Bytes(code), err
+}
+
+func (r *readerV3Gevm) Storage(address gevmtypes.Address, index uint256.Int) (uint256.Int, error) {
+	value, _, err := (*ReaderV3)(r).readAccountStorageByValue(common.Address(address), common.Hash(gevmtypes.B256FromU256(index)))
+	return value, err
+}
+
+func (r *readerV3Gevm) HasStorage(address gevmtypes.Address) (bool, error) {
+	return (*ReaderV3)(r).hasStorageByValue(common.Address(address))
+}
+
+func (r *readerV3Gevm) BlockHash(number uint64) (gevmtypes.B256, error) {
+	if r.getHash == nil {
+		return gevmtypes.B256Zero, nil
+	}
+	h, err := r.getHash(number)
+	return gevmtypes.B256(h), err
 }
 
 // BlockStateCache provides a block-level state buffer for the parallel
@@ -1390,6 +1474,10 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	if !address.IsNil() {
 		value = address.Value()
 	}
+	return r.hasStorageByValue(value)
+}
+
+func (r *ReaderV3) hasStorageByValue(value common.Address) (bool, error) {
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
 	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
@@ -1409,13 +1497,17 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	if !address.IsNil() {
 		value = address.Value()
 	}
+	return r.readAccountDataByValue(value)
+}
+
+func (r *ReaderV3) readAccountDataByValue(value common.Address) ([]byte, *accounts.Account, error) {
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:])
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, value, r.txNum)
 		}
 		return nil, nil, nil
 	}
@@ -1425,7 +1517,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, value, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
@@ -1435,7 +1527,6 @@ func (r *ReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.
 }
 
 func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	var composite [20 + 32]byte
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
@@ -1444,6 +1535,11 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
+	return r.readAccountStorageByValue(addressValue, keyValue)
+}
+
+func (r *ReaderV3) readAccountStorageByValue(addressValue common.Address, keyValue common.Hash) (uint256.Int, bool, error) {
+	var composite [20 + 32]byte
 	copy(composite[0:20], addressValue[0:20])
 	copy(composite[20:], keyValue[:])
 	enc, _, err := r.getter.GetLatest(kv.StorageDomain, composite[:])
@@ -1459,9 +1555,9 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, addressValue, keyValue, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, addressValue, keyValue, &res, r.txNum, dbg.Stack())
 		}
 	}
 
@@ -1473,13 +1569,17 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if !address.IsNil() {
 		addressValue = address.Value()
 	}
+	return r.readAccountCodeByValue(addressValue)
+}
+
+func (r *ReaderV3) readAccountCodeByValue(addressValue common.Address) ([]byte, error) {
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
 		return nil, err
 	}
 	if r.trace {
 		lenc, cs := printCode(enc)
-		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d, stack: %s\n", r.tracePrefix, address, lenc, cs, r.txNum, dbg.Stack())
+		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d, stack: %s\n", r.tracePrefix, addressValue, lenc, cs, r.txNum, dbg.Stack())
 	}
 	return enc, nil
 }

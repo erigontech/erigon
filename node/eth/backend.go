@@ -859,7 +859,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.BatchSize,
 			chainConfig,
 			backend.engine,
-			&vm.Config{},
+			&vm.Config{UseGevm: config.UseGevm},
 			backend.notifications,
 			config.StateStream,
 			false, /*badBlockHalt*/
@@ -872,7 +872,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.readAheader,
 		),
 		backend.notifications.Events,
-		&vm.Config{},
+		&vm.Config{UseGevm: config.UseGevm},
 		tmpdir,
 		txnProvider,
 		backend.miningSealingQuit,

@@ -278,6 +278,12 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+func WithGevm() Option {
+	return func(opts *options) {
+		opts.useGevm = true
+	}
+}
+
 // WithoutExperimentalBAL disables experimental BAL (and the parallel executor
 // it forces) for tests that exercise patterns the parallel executor doesn't
 // yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
@@ -350,6 +356,7 @@ func WithFcuBackgroundPrune() Option {
 type options struct {
 	stepSize            *uint64
 	experimentalBAL     bool
+	useGevm             bool
 	genesis             *types.Genesis
 	chainConfig         *chain.Config
 	key                 *ecdsa.PrivateKey
@@ -384,6 +391,9 @@ func applyOptions(opts []Option) options {
 				address: {Balance: big.NewInt(1 * common.Ether)},
 			},
 		}
+	}
+	if opt.useGevm && opt.genesis.Config != nil && opt.genesis.Config.AmsterdamTime != nil {
+		opt.useGevm = false
 	}
 	// engine depends on genesis
 	if opt.engine == nil {
@@ -438,6 +448,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
+	cfg.UseGevm = opt.useGevm
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
 	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
@@ -634,7 +645,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.BatchSize,
 			mock.ChainConfig,
 			mock.Engine,
-			&vm.Config{},
+			&vm.Config{UseGevm: opt.useGevm},
 			mock.Notifications,
 			cfg.StateStream,
 			false, /*badBlockHalt*/
@@ -647,7 +658,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			readAheader,
 		),
 		nil, /*notifier*/
-		&vm.Config{},
+		&vm.Config{UseGevm: opt.useGevm},
 		dirs.Tmp,
 		mock.TxPool,
 		miningCancel,
@@ -672,7 +683,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{},
+				&vm.Config{UseGevm: opt.useGevm},
 				mock.Notifications,
 				cfg.StateStream,
 				false, /*badBlockHalt*/

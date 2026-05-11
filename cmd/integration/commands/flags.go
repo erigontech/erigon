@@ -34,6 +34,7 @@ var (
 	batchSizeStr                  string
 	domain                        string
 	reset, noCommit, squeeze, yes bool
+	useGevm                       bool
 	bucket                        string
 	datadirCli, toChaindata       string
 	migration                     string
@@ -99,6 +100,10 @@ func withUnwind(cmd *cobra.Command) {
 }
 func withNoCommit(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "run everything in 1 transaction, but doesn't commit it")
+}
+
+func withUseGevm(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&useGevm, "use-gevm", false, "use GEVM for staged block execution")
 }
 
 func withPruneTo(cmd *cobra.Command) {
@@ -223,6 +228,7 @@ func withStageBase(cmd *cobra.Command) {
 // withTraceFlags applies flags shared by exec-style tracing commands.
 func withTraceFlags(cmd *cobra.Command) {
 	withNoCommit(cmd)
+	withUseGevm(cmd)
 	withBatchSize(cmd)
 	withTxTrace(cmd)
 	withWorkers(cmd)

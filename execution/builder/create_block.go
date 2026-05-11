@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 type BuilderState struct {
@@ -62,6 +63,7 @@ type BuilderCreateBlockCfg struct {
 	builder                BuilderState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
+	vmConfig               *vm.Config
 	blockBuilderParameters *Parameters
 	blockReader            services.FullBlockReader
 }
@@ -70,6 +72,7 @@ func StageBuilderCreateBlockCfg(
 	builder BuilderState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
+	vmConfig *vm.Config,
 	blockBuilderParameters *Parameters,
 	blockReader services.FullBlockReader,
 ) BuilderCreateBlockCfg {
@@ -77,6 +80,7 @@ func StageBuilderCreateBlockCfg(
 		builder:                builder,
 		chainConfig:            chainConfig,
 		engine:                 engine,
+		vmConfig:               vmConfig,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
 	}
@@ -174,19 +178,25 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	header.Extra = cfg.builder.BuilderConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	defer ibs.Release(false)
+	if cfg.vmConfig != nil && cfg.vmConfig.UseGevm {
+		if err = prepareHeaderGevm(chain, header, cfg.engine); err != nil {
+			return err
+		}
+	} else {
+		ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+		defer ibs.Release(false)
 
-	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
-		logger.Error("Failed to prepare header for building",
-			"err", err,
-			"headerNumber", header.Number.Uint64(),
-			"headerRoot", header.Root.String(),
-			"headerParentHash", header.ParentHash.String(),
-			"parentNumber", parent.Number.Uint64(),
-			"parentHash", parent.Hash().String(),
-			"stack", dbg.Stack())
-		return err
+		if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
+			logger.Error("Failed to prepare header for building",
+				"err", err,
+				"headerNumber", header.Number.Uint64(),
+				"headerRoot", header.Root.String(),
+				"headerParentHash", header.ParentHash.String(),
+				"parentNumber", parent.Number.Uint64(),
+				"parentHash", parent.Hash().String(),
+				"stack", dbg.Stack())
+			return err
+		}
 	}
 
 	if cfg.blockBuilderParameters != nil {
@@ -278,6 +288,18 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
 	current.Withdrawals = nil
+	return nil
+}
+
+func prepareHeaderGevm(chain rules.ChainHeaderReader, header *types.Header, engine rules.Engine) error {
+	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if parent == nil {
+		return rules.ErrUnknownAncestor
+	}
+	header.Difficulty = engine.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	if header.Difficulty.IsZero() {
+		header.Nonce = types.BlockNonce{}
+	}
 	return nil
 }
 

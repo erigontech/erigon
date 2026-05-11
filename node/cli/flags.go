@@ -60,6 +60,11 @@ var (
 		Usage: "Limit on the cache for block bodies",
 		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
 	}
+	UseGevmFlag = cli.BoolFlag{
+		Name:  "use-gevm",
+		Usage: "Use GEVM for staged block execution",
+		Value: false,
+	}
 
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
@@ -269,6 +274,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+	cfg.UseGevm = ctx.Bool(UseGevmFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)

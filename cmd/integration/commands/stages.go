@@ -628,7 +628,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
+	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok && !useGevm {
 		dbg.Exec3Parallel = true // default for integration tool
 	}
 	if chainTipMode && noCommit {
@@ -1181,7 +1181,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
-	vmConfig := &vm.Config{}
+	vmConfig := &vm.Config{UseGevm: useGevm}
 
 	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
@@ -1194,6 +1194,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	cfg := ethconfig.Defaults
+	cfg.UseGevm = useGevm
 	if chainTipMode {
 		syncCfg.LoopBlockLimit = 1
 		syncCfg.AlwaysGenerateChangesets = true

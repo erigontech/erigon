@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -57,7 +58,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
-	se.resetWorkers(ctx, se.rs, se.applyTx)
+	if err := se.resetWorkers(ctx, se.rs, se.applyTx); err != nil {
+		return nil, rwTx, err
+	}
+	commitmentProofs := bufio.NewWriterSize(os.Stdout, 256*1024)
+	defer func() { _ = commitmentProofs.Flush() }()
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -197,6 +202,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if err != nil {
 				return nil, rwTx, err
 			}
+			if _, err := fmt.Fprintf(commitmentProofs, "[commitment] processed block=%d txNum=%d rootHash=%x\n", blockNum, inputTxNum-1, rh); err != nil {
+				se.logger.Warn("failed to write commitment proof log", "err", err)
+			}
 
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
@@ -211,6 +219,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
 			se.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", se.logPrefix), "block", blockNum)
+			if err := commitmentProofs.Flush(); err != nil {
+				se.logger.Warn("failed to flush commitment proof log", "err", err)
+			}
 			// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
 			// capture state at exactly N blocks executed. The DB is left as it
 			// was *before* this block was applied so the next run reproduces
@@ -300,6 +311,12 @@ func (se *serialExecutor) LogComplete(stepsInDb float64) {
 }
 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {
+	if se.cfg.vmConfig != nil && se.cfg.vmConfig.UseGevm {
+		if se.taskExecMetrics == nil {
+			se.taskExecMetrics = exec.NewWorkerMetrics()
+		}
+		return se.resetApplyTx(ctx, applyTx)
+	}
 
 	if se.worker == nil {
 		se.taskExecMetrics = exec.NewWorkerMetrics()
@@ -307,6 +324,16 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
 	}
 
+	if err := se.resetApplyTx(ctx, applyTx); err != nil {
+		return err
+	}
+
+	se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
+
+	return nil
+}
+
+func (se *serialExecutor) resetApplyTx(ctx context.Context, applyTx kv.TemporalTx) (err error) {
 	if se.applyTx != applyTx {
 		if se.applyTx != nil {
 			se.applyTx.Rollback()
@@ -323,13 +350,14 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 			se.applyTx = applyTx.(kv.TemporalTx)
 		}
 	}
-
-	se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
-
 	return nil
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+	if se.cfg.vmConfig != nil && se.cfg.vmConfig.UseGevm {
+		return se.executeBlockGevm(ctx, tasks, isInitialCycle)
+	}
+
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 

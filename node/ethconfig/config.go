@@ -238,6 +238,7 @@ type Config struct {
 	StateStream bool
 
 	ExperimentalBAL bool
+	UseGevm         bool
 
 	// URL to connect to Heimdall node
 	HeimdallURL string

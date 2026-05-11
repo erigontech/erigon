@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -223,6 +224,9 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
+	}
+	if os.Getenv("USE_GEVM") == "1" && GevmTesterSupported(config) {
+		mOpts = append(mOpts, execmoduletester.WithGevm())
 	}
 	m := execmoduletester.New(t, mOpts...)
 

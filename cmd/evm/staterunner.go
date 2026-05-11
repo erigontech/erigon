@@ -222,7 +222,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 				}
 				if bench {
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
+						_, _, gasUsed, _, _ := test.RunNoVerify(nil, tx, st, cfg, dirs)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats

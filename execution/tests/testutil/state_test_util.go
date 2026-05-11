@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -53,6 +54,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	gevmadapter "github.com/erigontech/erigon/execution/vm/gevm"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -248,7 +251,7 @@ func (t *StateTest) checkError(subtest StateSubtest, err error) error {
 
 // Run executes a specific subtest and verifies the post-state and logs
 func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, error) {
-	st, root, _, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
+	st, root, _, logsHash, err := t.RunNoVerify(tb, tx, subtest, vmconfig, dirs)
 
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
@@ -266,42 +269,40 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 	if root != common.Hash(post.Root) {
 		return st, root, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(st.Logs()); logs != common.Hash(post.Logs) {
-		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+	if logsHash != common.Hash(post.Logs) {
+		return st, root, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logsHash, post.Logs)
 	}
 	return st, root, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb, post-state root and gas used.
-func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, error) {
+func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest, vmconfig vm.Config, dirs datadir.Dirs) (*state.IntraBlockState, common.Hash, uint64, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
+	if os.Getenv("USE_GEVM") == "1" && GevmTesterSupported(config) {
+		vmconfig.UseGevm = true
+	}
 	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
-	writeBlockNr := readBlockNr + 1
 
 	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
-		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
-
-	r := rpchelper.NewLatestStateReader(tx)
-	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb := state.New(r)
 
 	var baseFee *uint256.Int
 	if config.IsLondon(0) {
@@ -315,7 +316,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
-		return nil, common.Hash{}, 0, err
+		return nil, common.Hash{}, 0, common.Hash{}, err
 	}
 
 	// Prepare the EVM.
@@ -339,9 +340,15 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
-			return nil, common.Hash{}, 0, err
+			return nil, common.Hash{}, 0, common.Hash{}, err
 		}
 	}
+	if vmconfig.UseGevm {
+		return t.runNoVerifyGevm(tx, domains, config, context, msg, post.Tx, blockNum, txNum)
+	}
+	r := rpchelper.NewLatestStateReader(tx)
+	w := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
+	statedb := state.New(r)
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
 		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
@@ -368,19 +375,56 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+		return nil, common.Hash{}, gasUsed, common.Hash{}, err
 	}
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, gasUsed, err
+		return nil, common.Hash{}, gasUsed, common.Hash{}, err
 	}
 
 	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, root, gasUsed, common.Hash{}, fmt.Errorf("ComputeCommitment: %w", err)
 	}
 	// Propagate transaction execution error (e.g. intrinsic gas too low)
-	return statedb, common.BytesToHash(rootBytes), gasUsed, applyErr
+	return statedb, common.BytesToHash(rootBytes), gasUsed, rlpHash(statedb.Logs()), applyErr
+}
+
+func (t *StateTest) runNoVerifyGevm(tx kv.TemporalRwTx, domains *execctx.SharedDomains, config *chain.Config, blockCtx evmtypes.BlockContext, msg protocol.Message, txBytes []byte, blockNum, txNum uint64) (*state.IntraBlockState, common.Hash, uint64, common.Hash, error) {
+	writer := state.NewWriter(domains.AsPutDel(tx), nil, txNum)
+	executor := gevmadapter.NewExecutorForDomains(tx, domains, writer, blockCtx, config, nil)
+	defer executor.Close()
+
+	var (
+		res      evmtypes.ExecutionResult
+		logs     []*types.Log
+		applyErr error
+	)
+	if len(txBytes) > 0 {
+		erigonTx, err := types.DecodeTransaction(txBytes)
+		if err != nil {
+			return nil, common.Hash{}, 0, common.Hash{}, err
+		}
+		signer := types.MakeSigner(config, blockCtx.BlockNumber, blockCtx.Time)
+		res, logs, applyErr = executor.ExecuteTransaction(erigonTx, *signer)
+	} else {
+		res, logs, applyErr = executor.Execute(nil, msg)
+	}
+	gasUsed := res.ReceiptGasUsed
+	if applyErr == nil {
+		applyErr = executor.CommitBlock(blockCtx.Rules(config))
+	}
+
+	var root common.Hash
+	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+	if err != nil {
+		return nil, root, gasUsed, common.Hash{}, fmt.Errorf("ComputeCommitment: %w", err)
+	}
+	return nil, common.BytesToHash(rootBytes), gasUsed, rlpHash(types.Logs(logs)), applyErr
+}
+
+func GevmTesterSupported(config *chain.Config) bool {
+	return config != nil && config.AmsterdamTime == nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {

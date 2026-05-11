@@ -159,7 +159,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 	if err != nil {
 		return nil, err
 	}
-	createCfg := StageBuilderCreateBlockCfg(state, b.chainConfig, b.engine, param, b.blockReader)
+	createCfg := StageBuilderCreateBlockCfg(state, b.chainConfig, b.engine, b.vmConfig, param, b.blockReader)
 	txnProvider := b.txnProvider
 	if param.CustomTxnProvider != nil {
 		txnProvider = param.CustomTxnProvider
