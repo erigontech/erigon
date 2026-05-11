@@ -608,6 +608,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
+    outputs:
+      # Set only when this run actually pushed the tag (not on the idempotent
+      # fast-path where another run already owned it). Gates the rollback so
+      # we never delete a tag we did not push.
+      tag_pushed: ${{ steps.push_tag.outputs.tag_pushed }}
 
     steps:
     - name: Generate GitHub App token for release publishing
@@ -691,6 +696,7 @@ jobs:
         token: ${{ steps.generate_token.outputs.token }}
 
     - name: Create and push git tag ${{ inputs.release_version }}
+      id: push_tag
       if: ${{ inputs.perform_release && inputs.release_version != '' }}
       env:
         RELEASE_VERSION: ${{ inputs.release_version }}
@@ -710,6 +716,8 @@ jobs:
         if [ -n "${REMOTE_SHA}" ]; then
           if [ "${REMOTE_SHA}" = "${BUILD_COMMIT}" ]; then
             echo "Tag ${RELEASE_VERSION} already on remote at build commit ${BUILD_COMMIT} — continuing."
+            # Intentionally do NOT set tag_pushed=true: another run owns this tag,
+            # so the rollback must not delete it on our behalf.
             exit 0
           fi
           echo "ERROR: tag ${RELEASE_VERSION} on remote points at ${REMOTE_SHA}, not this build commit ${BUILD_COMMIT}. Exit."
@@ -717,6 +725,7 @@ jobs:
         fi
         git tag "${RELEASE_VERSION}" "${BUILD_COMMIT}"
         git push origin "${RELEASE_VERSION}"
+        echo "tag_pushed=true" >> "${GITHUB_OUTPUT}"
         echo "Git TAG ${RELEASE_VERSION} created and pushed."
 
     - name: Publish draft of the Release notes with assets in case perform_release is set
@@ -781,15 +790,16 @@ jobs:
   In-case-of-failure:
     name: "Rollback: remove remote git tag if release did not publish successfully"
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
-    # Run whenever the release didn't fully publish — covers failure, cancellation,
-    # and skipped-due-to-upstream cases uniformly. The tag is created only after
-    # release artifacts are verified, but publish-release can still be cancelled
-    # or fail after pushing it.
+    # Run only when publish-release did not succeed AND this run actually pushed
+    # the tag (tag_pushed output set). The tag_pushed gate keeps a concurrent
+    # release run's tag from being deleted when our publish-release fails after
+    # taking the idempotent fast-path.
     if: >-
       always() &&
       inputs.perform_release &&
       inputs.release_version != '' &&
-      needs.publish-release.result != 'success'
+      needs.publish-release.result != 'success' &&
+      needs.publish-release.outputs.tag_pushed == 'true'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
