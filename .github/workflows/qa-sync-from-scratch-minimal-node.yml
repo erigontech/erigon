@@ -121,13 +121,14 @@ jobs:
       - name: Measure disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
         run: |
-          BYTES=$(du -sb $ERIGON_DATA_DIR | awk '{print $1}')
+          set -euo pipefail
+          BYTES=$(du -sb "$ERIGON_DATA_DIR" | awk '{print $1}')
           echo "Disk usage for $CHAIN minimal: ${BYTES} bytes"
           echo "$BYTES" > ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
 
       - name: Upload disk usage
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: disk-usage-${{ env.CHAIN }}-minimal
           path: ${{ github.workspace }}/disk-usage-${{ env.CHAIN }}-minimal.txt
