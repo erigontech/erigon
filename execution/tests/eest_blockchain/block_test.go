@@ -27,6 +27,8 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
+var eestDir = filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_stable", "fixtures")
+
 func TestExecutionSpecBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -37,7 +39,7 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	bt := new(testutil.TestMatcher)
-	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests")
+	dir := filepath.Join(eestDir, "blockchain_tests")
 
 	// Slow tests — split into their own packages for parallelism
 	bt.SkipLoad(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)

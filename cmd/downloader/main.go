@@ -34,7 +34,6 @@ import (
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
-	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
@@ -712,7 +711,7 @@ type hashChange struct{ name, released, local string }
 func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	branch := version.DefaultSnapshotGitBranch
 	url := snapcfg.ChainTomlGitHubURL(branch, chain)
-	body, err := snapcfg.FetchChainToml(ctx, snapshothashes.Github, branch, chain)
+	body, err := snapcfg.FetchChainToml(ctx, snapcfg.Github, branch, chain)
 	if err != nil {
 		return fmt.Errorf("diff: %w", err)
 	}

@@ -23,7 +23,8 @@ func chargeGas(
 	preTxCost uint64,
 ) error {
 	baseFee := header.BaseFee
-	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
+	effectiveGasTip := tx.GetEffectiveGasTip(baseFee)
+	effectiveGasPrice := new(uint256.Int).Add(baseFee, &effectiveGasTip)
 
 	totalGasLimit := preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
 	preCharge := new(uint256.Int).SetUint64(totalGasLimit)
@@ -57,7 +58,8 @@ func refundGas(
 	gasUsed uint64,
 ) error {
 	baseFee := header.BaseFee
-	effectiveGasPrice := new(uint256.Int).Add(baseFee, tx.GetEffectiveGasTip(baseFee))
+	effectiveGasTip := tx.GetEffectiveGasTip(baseFee)
+	effectiveGasPrice := new(uint256.Int).Add(baseFee, &effectiveGasTip)
 	actualGasCost := new(uint256.Int).Mul(effectiveGasPrice, new(uint256.Int).SetUint64(gasUsed))
 
 	totalGasLimit := params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit
