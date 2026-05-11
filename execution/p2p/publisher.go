@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -123,9 +124,18 @@ func (p Publisher) processPublishTask(ctx context.Context, t publishTask) {
 }
 
 func (p Publisher) processNewBlocksPublishTask(ctx context.Context, t publishTask) {
+	td256, overflow := uint256.FromBig(t.td)
+	if overflow {
+		p.logger.Warn(
+			"[p2p-publisher] TD overflows uint256, dropping new block publish",
+			"blockNum", t.block.NumberU64(),
+			"blockHash", t.block.Hash(),
+		)
+		return
+	}
 	newBlockPacket := eth.NewBlockPacket{
 		Block: t.block,
-		TD:    t.td,
+		TD:    *td256,
 	}
 
 	peers := p.peerTracker.ListPeersMayMissBlockHash(t.block.Hash())

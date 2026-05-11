@@ -91,7 +91,7 @@ func TestPublisher(t *testing.T) {
 			PeerId: PeerIdFromUint64(1),
 			Decoded: &eth.NewBlockPacket{
 				Block: block1,
-				TD:    td1,
+				TD:    *uint256.MustFromBig(td1),
 			},
 		})
 		require.Eventually(t, waitPeersMayMissHash(7), time.Second, 5*time.Millisecond)
@@ -99,7 +99,7 @@ func TestPublisher(t *testing.T) {
 			PeerId: PeerIdFromUint64(2),
 			Decoded: &eth.NewBlockPacket{
 				Block: block1,
-				TD:    td1,
+				TD:    *uint256.MustFromBig(td1),
 			},
 		})
 		require.Eventually(t, waitPeersMayMissHash(6), time.Second, 5*time.Millisecond)

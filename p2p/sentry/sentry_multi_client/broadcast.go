@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"syscall"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -71,9 +72,14 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		log.Error("[p2p] broadcastNewBlock", "err", err)
 	}
 
+	td256, overflow := uint256.FromBig(td)
+	if overflow {
+		log.Error("[p2p] broadcastNewBlock: TD overflows uint256", "blockNum", header.Number.Uint64(), "blockHash", header.Hash())
+		return
+	}
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: block,
-		TD:    td,
+		TD:    *td256,
 	})
 
 	if err != nil {

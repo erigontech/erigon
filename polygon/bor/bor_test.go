@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -435,7 +436,7 @@ func TestSendBlock(t *testing.T) {
 
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: sealedBlocks[0],
-		TD:    big.NewInt(1), // This is ignored anyway
+		TD:    *uint256.NewInt(1), // This is ignored anyway
 	})
 
 	if err != nil {

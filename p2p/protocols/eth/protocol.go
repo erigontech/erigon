@@ -302,7 +302,7 @@ type BlockHeadersPacket66 struct {
 // NewBlockPacket is the network packet for the block propagation message.
 type NewBlockPacket struct {
 	Block *types.Block
-	TD    *big.Int
+	TD    uint256.Int
 }
 
 func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
@@ -311,7 +311,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	blockLen := nbp.Block.EncodingSize()
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
-	encodingSize += rlp.BigIntLen(nbp.TD)
+	encodingSize += rlp.Uint256Len(nbp.TD)
 	// prefix
 	var b [32]byte
 	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
@@ -322,7 +322,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
-	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(nbp.TD, w, b[:]); err != nil {
 		return err
 	}
 	return nil
@@ -339,11 +339,9 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode TD
-	var td uint256.Int
-	if err = s.ReadUint256(&td); err != nil {
+	if err = s.ReadUint256(&nbp.TD); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	nbp.TD = td.ToBig()
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
