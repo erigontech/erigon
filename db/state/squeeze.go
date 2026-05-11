@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
@@ -33,6 +34,7 @@ import (
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -316,6 +318,57 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	logger.Info("[squeeze_migration] done", "sizeDelta", sizeDelta.HR(), "files", len(ranges))
 
 	return nil
+}
+
+// ExpandShortenedKeysInBranch expands shortened key references (file offsets) in branch data back
+// to full plain keys by looking them up in the supplied account and storage domain files.
+//
+// This is the read-side counterpart of commitmentValTransformDomain. It assumes the caller has
+// already checked the prerequisites (non-empty branch, not KeyCommitmentState, ReplaceKeysInValues
+// enabled, threshold-reached range): expansion is unconditional. The caller is also responsible
+// for emitting per-key debug metrics; this function intentionally does not so that offline tools
+// like the commitment converter can reuse it without coupling to read-path observability.
+//
+// Plain-keyed entries (address: 20 bytes; address+slot: 52 bytes) are returned as nil so
+// BranchData.ReplacePlainKeys keeps the original bytes. A lookup miss returns an error naming
+// the offending shortened key.
+func ExpandShortenedKeysInBranch(
+	branch commitment.BranchData,
+	accounts, storage *DomainRoTx,
+	accountFile, storageFile *FilesItem,
+	startTxNum, endTxNum uint64,
+) (commitment.BranchData, error) {
+	storageGetter := storage.dataReader(storageFile.decompressor)
+	accountGetter := accounts.dataReader(accountFile.decompressor)
+	logger := log.Root()
+	stepSize := accounts.d.stepSize
+
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil, nil // not a referenced key, keep as is
+			}
+			storagePlainKey, found := storage.lookupByShortenedKey(key, storageGetter)
+			if !found {
+				s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
+			}
+			return storagePlainKey, nil
+		}
+		if len(key) == length.Addr {
+			return nil, nil // not a referenced key, keep as is
+		}
+		apkBuf, found := accounts.lookupByShortenedKey(key, accountGetter)
+		if !found {
+			s0, s1 := startTxNum/stepSize, endTxNum/stepSize
+			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
+		}
+		return apkBuf, nil
+	})
 }
 
 func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string, error) {

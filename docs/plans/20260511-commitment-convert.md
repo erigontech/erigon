@@ -270,12 +270,12 @@ Error path: if Phase 1 fails for any file, the log line tells the user that orig
 - Modify: `db/state/domain_committed.go`
 - Modify or create: `db/state/squeeze_test.go` (existing) or `db/state/domain_committed_test.go`
 
-- [ ] Read `db/state/domain_committed.go` to locate `(*AggregatorRoTx).replaceShortenedKeysInBranch` and identify the inner expansion body (the portion that takes a branchData byte slice, an `af`/`sf` pair, and txNum range and returns the expanded branchData).
-- [ ] Extract the inner body into a new free function in `db/state/squeeze.go`: `func ExpandShortenedKeysInBranch(branch []byte, accountsFile, storageFile *FilesItem, startTxNum, endTxNum uint64) ([]byte, error)` (adjust signature to match what the existing method actually needs).
-- [ ] Update `replaceShortenedKeysInBranch` to delegate to `ExpandShortenedKeysInBranch`. The method becomes a thin shim that pulls `af`/`sf` from the `AggregatorRoTx` and forwards the call.
-- [ ] Update 5 call sites in `db/integrity/commitment_integirty.go` if their signatures shift — per project memory: `checkDerefBranch`, `checkStateCorrespondenceBase`, `checkStateCorrespondenceReverse`, `extractCommitmentRefsToCollectors`, `checkHashVerification`. Likely no change since they call the method, not the inner; verify and leave untouched if so.
-- [ ] Write tests for `ExpandShortenedKeysInBranch` with a synthetic squeezed BranchData and known `af`/`sf` content; assert byte-equal expansion against a hand-rolled expected value.
-- [ ] Run `go test ./db/state/... -run ExpandShortenedKeys -count=1 -failfast` — must pass before Task 1.5.
+- [x] Read `db/state/domain_committed.go` to locate `(*AggregatorRoTx).replaceShortenedKeysInBranch` and identify the inner expansion body (the portion that takes a branchData byte slice, an `af`/`sf` pair, and txNum range and returns the expanded branchData).
+- [x] Extract the inner body into a new free function in `db/state/squeeze.go`: `func ExpandShortenedKeysInBranch(branch commitment.BranchData, accounts, storage *DomainRoTx, accountFile, storageFile *FilesItem, startTxNum, endTxNum uint64) (commitment.BranchData, error)`. Signature carries `*DomainRoTx` for accounts/storage so the function can reuse `lookupByShortenedKey` (which needs the per-domain scratch buffer + logger); same shape `commitmentValTransformDomain` already uses.
+- [x] Update `replaceShortenedKeysInBranch` to delegate to `ExpandShortenedKeysInBranch`. The method keeps all read-path guards (config flag, empty branch, KeyCommitmentState carve-out, files-not-empty, threshold-reached range) and the `branchKeyDerefSpent` metric (semantic shift: per-branch instead of per-key; debug-gated and unused in non-debug builds).
+- [x] Update 5 call sites in `db/integrity/commitment_integirty.go` — N/A: integrity functions (`checkDerefBranch` et al.) use their own `BranchData.ReplacePlainKeys` closure with a `seg.Reader`-backed lookup; they do not call `replaceShortenedKeysInBranch`. Project-memory cross-ref was stale; no edits needed.
+- [x] Write tests for `ExpandShortenedKeysInBranch`. Added `TestExpandShortenedKeysInBranch_ReadPath` in `db/state/squeeze_test.go`: builds squeezed commitment files via existing `testDbAggregatorWithFiles` + `SqueezeCommitmentFiles`, walks every non-state branch via the public read path (`DebugGetLatestFromFiles`), and asserts each expanded BranchData (a) `.Validate(branchKey)`s and (b) has only plain (20-byte / 52-byte) embedded keys. Direct in-package testing was rejected because `db/state` tests cannot import `db/kv/temporal` (import cycle).
+- [x] Run `go test ./db/state/... -run ExpandShortenedKeys -count=1 -failfast` — passes (2.5s).
 
 ### Task 1.5: Factor `dumpStepRangeOnDisk` to accept a destination directory
 
