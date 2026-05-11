@@ -713,7 +713,6 @@ jobs:
         GH_REPO: ${{ github.repository }}
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
-        GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo "Artifact $archive compressed"; done
@@ -722,8 +721,10 @@ jobs:
         ls -lah *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
         echo "=================================="
         set +e
+        # --target is omitted: --verify-tag requires the tag to already exist
+        # (created above at the build commit), and GitHub ignores target_commitish
+        # for existing tags.
         gh release create \
-          --target ${GITHUB_RELEASE_TARGET} \
           --verify-tag \
           --draft=true \
           --title "${RELEASE_VERSION}" \
@@ -736,12 +737,15 @@ jobs:
           echo "::warning::gh release create failed (exit ${GH_EXIT}). All artifacts are ready — publish manually using the instructions below."
           echo ""
           echo "=== MANUAL RELEASE INSTRUCTIONS ==="
+          echo "NOTE: the just-pushed tag ${RELEASE_VERSION} will be removed by the rollback job."
+          echo "      The command below recreates it at the verified build commit via --target."
+          echo ""
           echo "Ensure you have a GitHub token with 'contents: write' permission, then run:"
           echo ""
           echo "  cd dist"
           echo "  gh release create \\"
           echo "    --repo ${{ env.APP_REPO }} \\"
-          echo "    --target ${GITHUB_RELEASE_TARGET} \\"
+          echo "    --target ${{ needs.build-release.outputs.commit-id }} \\"
           echo "    --draft=true \\"
           echo "    --title \"${RELEASE_VERSION}\" \\"
           echo "    \"${RELEASE_VERSION}\" \\"
