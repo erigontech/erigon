@@ -193,8 +193,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
 	}
 
-	// Start the commitment calculator.
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, commitResults, rootResults)
+	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
+	// per-block gate (exec3_serial.go: `if !dbg.BatchCommitments ||
+	// shouldGenerateChangesets || KeepExecutionProofs`). When changesets
+	// must be generated (for unwind/reorg) the calculator must compute
+	// per-block — otherwise batch-mode dedupes branch updates across the
+	// batch and flushes them all into the last block's changeset, which
+	// fails on subsequent reorgs.
+	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -828,17 +835,29 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
-					return err
-				}
-
-				// Snapshot the just-completed block's changeset and clear sd.mem's
-				// accumulator before any further sd.mem writes occur. This must
-				// happen here (in the exec loop) — not in the apply loop — so that
-				// it is serialized with the exec loop's other sd.mem writes
-				// (system calls, finalize, ApplyStateWrites for the next block).
+				// Snapshot the just-completed block's changeset BEFORE sending the
+				// blockResult, so that the commitment calculator (which consumes
+				// blockResults on a separate goroutine) can find this block's
+				// saved changeset via GetChangesetByBlockNum at compute time.
+				// In per-block compute mode (shouldGenerateChangesets), the
+				// calculator switches the accumulator to this saved CS for the
+				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
+				// so branch writes land in block N's CS rather than whatever the
+				// exec loop has installed as current. If we saved AFTER sendResult,
+				// the calculator could race ahead and look up an unsaved CS,
+				// causing branch deltas to leak into the next block's CS and
+				// produce wrong-trie-root chains on subsequent reorg-driven
+				// re-execution (see TestRecreateAndRewind reproducer). Clearing
+				// the live accumulator and the local pointer must still happen
+				// here (in the exec loop) so the rotation-to-next-block install
+				// at line 893-895 is serialized with the exec loop's other
+				// sd.mem writes (system calls, finalize, ApplyStateWrites for
+				// the next block).
 				if pe.shouldGenerateChangesets && pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
+				}
+				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+					return err
 				}
 				pe.domains().SetChangesetAccumulator(nil)
 				pe.currentChangeSet = nil
@@ -2953,6 +2972,46 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
+	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
+	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
+	// d.incarnation != nil and routes into the "cleanup-before-recreate"
+	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
+	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
+	// account stays in sd.mem with non-zero incarnation, and a subsequent
+	// block's CREATE2 at the same address sees a phantom existing account,
+	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
+	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
+	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	//
+	// Two filters applied here:
+	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
+	//      skip the SelfDestructPath case uses below — a stale SelfDestructPath=true
+	//      from a non-validated incarnation must not mark the address as SD'd.
+	//   2. Final-state: pre-Cancun a single tx can SELFDESTRUCT an address and then
+	//      CREATE2-recreate at the same address; IBS emits SelfDestructPath=true
+	//      (from Selfdestruct) followed later by SelfDestructPath=false (from
+	//      CreateAccount, since the recreated object's selfdestructed flag is
+	//      cleared). The address ends ALIVE, so its recreate-time account-field
+	//      writes must survive — only mark sdSet when the LAST SelfDestructPath
+	//      entry for the address (in emission order) is true. applyVersionedWrites
+	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
+	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
+	//      eliminate it; mainnet-rare, but cheap to get right.)
+	sdSet := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
+			if v, ok := w.Val.(bool); ok {
+				sdSet[w.Address] = v
+			}
+		}
+	}
+	for addr, sd := range sdSet {
+		if !sd {
+			delete(sdSet, addr)
+		}
+	}
+
 	// Track which addresses have account-level writes vs storage-only writes.
 	// Serial's MakeWriteSet calls UpdateAccountData for every dirty object,
 	// including those with only storage changes. The commitment needs the
@@ -2961,6 +3020,14 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	hasStorageWrite := make(map[accounts.Address]bool)
 
 	for _, w := range writes {
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
+		// takes the pure-delete branch instead of cleanup-before-recreate.
+		if sdSet[w.Address] {
+			switch w.Path {
+			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath:
+				continue
+			}
+		}
 		switch w.Path {
 		case state.StoragePath:
 			// Only include writes from the current (validated) incarnation.
@@ -3067,6 +3134,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	}
 
 	for addr := range allAddresses {
+		if sdSet[addr] {
+			// Don't fill account fields for SD'd addresses — same rationale as
+			// the sdSet drop in the filter loop above. Without this, the
+			// stateReader fallback below would round-trip pre-SD account state
+			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// the SD when applyVersionedWrites picks the cleanup-then-recreate
+			// branch.
+			continue
+		}
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
 		fields := addrFields[addr]
 
