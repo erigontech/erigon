@@ -11,12 +11,6 @@ defaults:
 jobs:
   spec-tests:
     name: spec-${{ matrix.suite }}-${{ matrix.fixtures }}
-    # Skip enginextests-devnet until the devnet tarball ships
-    # blockchain_tests_engine_x/. The non-`_x` `blockchain_tests_engine/`
-    # variant uses a different JSON schema (inline `pre`, no `preHash`)
-    # that the cmd/evm enginextest runner cannot consume. Re-enable by
-    # removing this guard once the fixture lands.
-    if: ${{ !(matrix.suite == 'enginextests' && matrix.fixtures == 'devnet') }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,11 +56,23 @@ jobs:
           restore-keys: |
             test-fixtures-${{ runner.os }}-
 
+      # Skip enginextests-devnet until the devnet tarball ships
+      # blockchain_tests_engine_x/. The non-`_x` `blockchain_tests_engine/`
+      # variant uses a different JSON schema (inline `pre`, no `preHash`)
+      # that the cmd/evm enginextest runner cannot consume. Matrix entry
+      # stays so re-enabling is a one-line guard removal once the fixture
+      # lands. Job-level `if:` can't see `matrix.*`, so the guard lives on
+      # the run step.
       - name: Run spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+        if: matrix.suite != 'enginextests' || matrix.fixtures != 'devnet'
         env:
           SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           SPEC_WORKERS: ${{ matrix.workers }}
         run: make spec-${{ matrix.suite }}-${{ matrix.fixtures }}
+
+      - name: Skipped (devnet lacks blockchain_tests_engine_x fixtures)
+        if: matrix.suite == 'enginextests' && matrix.fixtures == 'devnet'
+        run: echo "Skipping spec-enginextests-devnet; see workflow comment."
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
