@@ -1074,7 +1074,11 @@ func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.Syste
 	}
 	out, err := syscall(accounts.InternAddress(*c.certifier), packed)
 	if err != nil {
-		panic(err)
+		// Failing closed (treat as non-service tx) is safer than crashing the RPC handler.
+		// One way to hit this: an eth_call against a block whose chain rules don't include
+		// opcodes used by the certifier contract bytecode (e.g. SHR pre-Constantinople).
+		log.Warn("[aura] failed to call certifier", "certifier", *c.certifier, "err", err)
+		return false
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
