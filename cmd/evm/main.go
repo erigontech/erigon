@@ -95,6 +95,10 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
+	TimeFlag = cli.BoolFlag{
+		Name:  "time",
+		Usage: "record per-test wall time and memstats on a single execution (cheaper than --bench)",
+	}
 	CreateFlag = cli.BoolFlag{
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",

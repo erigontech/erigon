@@ -9,9 +9,20 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 
 ## Prerequisite: Test fixtures
 
-`make test-all` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+`make test-all` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
 
-Two side prerequisites still apply:
+To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
+
+```bash
+make eest-spec-statetests-stable          # state tests vs eest_stable fixtures
+make eest-spec-blocktests-stable          # blockchain tests vs eest_stable fixtures
+make eest-spec-enginextests-stable        # engine-x tests vs eest_stable fixtures
+make eest-spec-statetests-devnet          # …vs eest_devnet fixtures
+make eest-spec-blocktests-devnet
+make eest-spec-enginextests-benchmark     # engine-x tests vs eest_benchmark fixtures (with per-test timings)
+```
+
+Two side prerequisites still apply for tests `make test-all` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
@@ -86,8 +97,12 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `GOGC=80 make test-all` | All tests | `test-all-erigon.yml` |
+| `make eest-spec-<suite>-<fixtures>` | EEST spec tests | `test-eest-spec.yml` |
+| `cd cl/spectest && make tests && make mainnet` | Consensus spec | `test-integration-caplin.yml` |
 
 To dispatch remotely:
 ```bash
 gh workflow run "All tests" --ref <branch>
+gh workflow run "EEST spec tests" --ref <branch>
+gh workflow run "Consensus spec" --ref <branch>
 ```

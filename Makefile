@@ -214,6 +214,7 @@ else
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 endif
 
+test-filtered: export ERIGON_SKIP_CL_SPECTEST = true
 test-filtered:
 	@_rd=""; \
 	_cleanup() { [ -n "$$_rd" ] && hdiutil detach -force "$$_rd" >/dev/null 2>&1 || true; }; \
@@ -231,16 +232,21 @@ test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
-test-all: test-fixtures test-filtered
+test-all: test-filtered
 
-## test-fixtures:                      download & verify pinned test fixture tarballs
+## test-fixtures:                      download & verify all pinned test fixture tarballs
 .PHONY: test-fixtures
-test-fixtures:
+test-fixtures: test-fixtures-cl
 	tools/test-fixtures.sh
-	# cl/spectest excludes these forks: stale or experimental fixtures that
-	# don't pass against caplin yet. Apply post-extract so the exclusions
-	# also hold under `make test-all` / `make test-group` / etc., not just
-	# under `cd cl/spectest && make tests`.
+
+## test-fixtures-cl:                   download & extract only the cl_mainnet tarball
+# cl/spectest excludes these forks: stale or experimental fixtures that
+# don't pass against caplin yet. Apply post-extract so the exclusions
+# also hold under `make test-all` / `make test-group` / etc., not just
+# under `cd cl/spectest && make tests`.
+.PHONY: test-fixtures-cl
+test-fixtures-cl:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache cl_mainnet
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
@@ -248,13 +254,39 @@ test-fixtures:
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
+## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
+.PHONY: test-fixtures-eest
+test-fixtures-eest:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
+
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+# against EEST fixtures. CI defines failure budgets in
+# .github/workflows/test-eest-spec.yml's matrix.include:; local runs use the
+# per-shard fallback defaults baked into tools/run-eest-spec-test.sh. Override
+# either with EEST_SPEC_MAX_FAILURES / EEST_SPEC_WORKERS.
+EEST_SPEC_SHARDS := \
+	statetests-stable statetests-devnet \
+	blocktests-stable blocktests-devnet \
+	enginextests-stable enginextests-devnet \
+	enginextests-benchmark-1m \
+	enginextests-benchmark-5m \
+	enginextests-benchmark-10m \
+	enginextests-benchmark-30m \
+	enginextests-benchmark-60m \
+	enginextests-benchmark-100m \
+	enginextests-benchmark-150m
+
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+	@bash tools/run-eest-spec-test.sh $(subst -, ,$*)
+
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
 	$(GOTEST)
 
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
-test-all-race: test-fixtures test-filtered
+test-all-race: test-filtered
 
 ## check-generated:                     verify go.mod/go.sum are tidy
 check-generated:
@@ -280,10 +312,10 @@ check-large-files:
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
-test-group: test-fixtures test-filtered
+test-group: test-filtered
 
 test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
-test-sonar-coverage: test-fixtures test-filtered
+test-sonar-coverage: test-filtered
 
 ## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
 test-rpc: rpcdaemon integration

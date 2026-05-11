@@ -22,9 +22,13 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 | unit | `erigon-test-unit` | `make test-short` | ~5 min | Pre-push gate |
 | all | `erigon-test-all` | `GOGC=80 make test-all` | ~30 min | Before PR review |
 | race | `erigon-test-race` | `make test-all-race` | ~60 min | Concurrency changes |
+| eest-spec | *(inline)* | `make eest-spec-<suite>-<fixtures>` | varies | EEST state/blockchain/engine-x changes |
+| caplin spec | *(inline)* | `cd cl/spectest && make tests && make mainnet` | ~15 min | CL/consensus changes |
 | hive | `erigon-test-hive` | `make test-hive` | ~20 min | EL/CL interop changes |
 | rpc | `erigon-test-rpc` | *(requires synced DB)* | ~10 min | RPC API changes |
 | assertoor | *(remote only)* | dispatch only | — | Kurtosis network test |
+
+`make test-all` no longer covers the EEST spec tests or the `cl/spectest` consensus spec test — run those via their dedicated targets above when relevant.
 
 ### Lint (run first — non-deterministic, may need multiple runs)
 ```bash
@@ -60,6 +64,7 @@ BRANCH=$(git branch --show-current)  # or set explicitly: BRANCH="bal-devnet-2"
 for wf in \
   "Unit tests" \
   "All tests" \
+  "EEST spec tests" \
   "Lint" \
   "Test Hive" \
   "Kurtosis Assertoor GitHub Action" \
@@ -78,6 +83,7 @@ done
 |-------------------------------------|-----------|-------------|------|
 | Unit tests                          | yes       | `erigon-test-unit` | `ci.yml` |
 | All tests                           | yes       | `erigon-test-all` | `test-all-erigon.yml` |
+| EEST spec tests                     | yes       | *(make eest-spec-…)* | `test-eest-spec.yml` |
 | Lint                                | yes       | *(make lint)* | `lint.yml` |
 | Test Hive                           | yes       | `erigon-test-hive` | `test-hive.yml` |
 | Kurtosis Assertoor GitHub Action    | yes       | *(remote only)* | `test-kurtosis-assertoor.yml` |
