@@ -120,7 +120,7 @@ type blockFees struct {
 type (
 	txGasAndReward struct {
 		gasUsed uint64
-		reward  *big.Int
+		reward  uint256.Int
 	}
 	sortGasAndReward []txGasAndReward
 )
@@ -130,7 +130,7 @@ func (s sortGasAndReward) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 func (s sortGasAndReward) Less(i, j int) bool {
-	return s[i].reward.Cmp(s[j].reward) < 0
+	return s[i].reward.Cmp(&s[j].reward) < 0
 }
 
 // processBlock takes a blockFees structure with the blockNumber, the header and optionally
@@ -197,8 +197,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 		baseFee.Set(bf.block.BaseFee())
 	}
 	for i, txn := range bf.block.Transactions() {
-		reward := txn.GetEffectiveGasTip(baseFee)
-		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: reward.ToBig()}
+		sorter[i] = txGasAndReward{gasUsed: bf.receipts[i].GasUsed, reward: txn.GetEffectiveGasTip(baseFee)}
 	}
 	sort.Sort(sorter)
 
@@ -211,7 +210,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64, chainco
 			txIndex++
 			sumGasUsed += sorter[txIndex].gasUsed
 		}
-		bf.results.reward[i] = sorter[txIndex].reward
+		bf.results.reward[i] = sorter[txIndex].reward.ToBig()
 	}
 }
 

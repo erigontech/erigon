@@ -267,7 +267,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
-	txs := [][]byte{}
+	txs := make([][]byte, 0, len(req.Transactions))
 	for _, transaction := range req.Transactions {
 		txs = append(txs, transaction)
 	}
