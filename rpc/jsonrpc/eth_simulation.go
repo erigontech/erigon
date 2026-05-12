@@ -1063,7 +1063,8 @@ func (r *simulationIntraBlockStateReader) ReadAccountDataForDebug(address accoun
 func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	r.composite = append(append(r.composite[:0], addressValue[:]...), keyValue[:]...)
+	copy(r.composite, addressValue[:])
+	copy(r.composite[len(addressValue):], keyValue[:])
 	enc, err := r.getEncoded(kv.StorageDomain, r.composite)
 	if err != nil {
 		return uint256.Int{}, false, err
