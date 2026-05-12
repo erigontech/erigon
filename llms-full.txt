@@ -67,24 +67,20 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 The amount of disk space recommended and RAM you need depends on the [sync mode](../fundamentals/sync-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
 
-:::info
-Please note that these figures are from September 2025, and the blockchain data size is continuously increasing.
-:::
-
 | Sync Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | 1.77 TB | 4 TB | 32 GB | 64 GB |
-| Full (Default) | 920 GB | 2 TB | 16 GB | 32 GB |
-| Minimal | 350 GB | 1 TB | 16 GB | 64 GB |
+| Archive | — | 4 TB | 32 GB | 64 GB |
+| Full (Default) | — | 2 TB | 16 GB | 32 GB |
+| Minimal | — | 1 TB | 16 GB | 64 GB |
 
 | **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 539 GB                 | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | 462 GB                 | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | 128 GB                 | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | — | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | —    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | — | 500 GB                      | 8 GB               | 16 GB                 |
 
 :::warning
-The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
 :::
 
 | **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
@@ -230,15 +226,63 @@ See [Basic Usage](../fundamentals/basic-usage) and [Configuring Erigon](../funda
 # Installation
 URL: https://docs.erigon.tech/get-started/installation
 
-const el = document.getElementById(id);
+'install-docker':   'all-operating-systems',
+  'install-prebuilt': 'linuxmacos',
+  'install-source':   'linuxmacos',
+  'install-native':   'windows',
+  'install-wsl':      'windows',
+};
+
+  if (e) e.preventDefault();
+  const el = document.getElementById(id);
   if (!el) return;
-  const scroll = () => el.scrollIntoView();
+
+  document.querySelectorAll('details[id^="install-"]').forEach(d => {
+    if (d !== el && d.open) {
+      const s = d.querySelector('summary');
+      if (s) s.click();
+      else d.open = false;
+    }
+  });
+
   if (!el.open) {
-    el.addEventListener('toggle', scroll, );
-    el.open = true;
-  } else {
-    scroll();
+    const summary = el.querySelector('summary');
+    if (summary) summary.click();
+    else el.open = true;
   }
+
+  const sectionId = sectionForMethod[id];
+  if (sectionId) {
+    history.replaceState(null, '', '#' + sectionId);
+  }
+
+  const resolveTarget = () => {
+    let t = sectionId && document.getElementById(sectionId);
+    if (!t) {
+      let cursor = el.previousElementSibling;
+      while (cursor && !/^H[1-6]$/.test(cursor.tagName)) {
+        cursor = cursor.previousElementSibling;
+      }
+      t = cursor || el;
+    }
+    return t;
+  };
+
+  let lastHeight = document.body.scrollHeight;
+  let stableFrames = 0;
+  let totalFrames = 0;
+  const waitForStableLayout = () => {
+    const h = document.body.scrollHeight;
+    if (h === lastHeight) stableFrames++;
+    else 
+    totalFrames++;
+    if (stableFrames >= 6 || totalFrames >= 90) {
+      resolveTarget().scrollIntoView();
+    } else {
+      requestAnimationFrame(waitForStableLayout);
+    }
+  };
+  requestAnimationFrame(waitForStableLayout);
 };
 
 # Installation
@@ -678,7 +722,7 @@ Be aware that the default WSL2 environment uses its own internal IP address, whi
 
 If you need to connect to Erigon from an external network (e.g., opening a port on your home router for peering on port `30303`), you must account for this separate WSL2 IP address when configuring NAT on your router. Alternatively consider [Mirrored mode networking](https://learn.microsoft.com/en-us/windows/wsl/networking#mirrored-mode-networking).
 
-Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node.
+Once you have Erigon installed, you can see [Basic Usage](/fundamentals/basic-usage) to configure your node and confirm it is syncing.
 
 ---
 
@@ -841,8 +885,8 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 ## Flag explanation
 
-* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technology` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
-  * to use Amoy testnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
+* `--chain=bor-mainnet` and `--bor.heimdall=https://heimdall-api.polygon.technologyspecifies` specify respectively the Polygon mainnet and the API endpoint for the Heimdall network
+  * to use Amoy tesnet replace with flags `--chain=amoy --bor.heimdall=https://heimdall-api-amoy.polygon.technology`
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](../../fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](../../fundamentals/web3-wallet);
 * `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
@@ -918,7 +962,7 @@ docker compose up
 * `--chain=mainnet` specifies to run on Ethereum mainnet
 * Add `--prune.mode=minimal` to run minimal [Sync Mode](/fundamentals/sync-modes) or `--prune.mode=archive` to run an archive node
 * `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use RPC and e.g. be able to connect your [web3 wallet](/fundamentals/web3-wallet)
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set
+* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 When you get familiar with running Erigon from CLI you may also consider [staking](/staking/caplin) and/or running an Ethereum node with an [external Consensus Layer](/get-started/easy-nodes/how-to-run-an-ethereum-node/ethereum-with-an-external-cl).
 
@@ -1063,7 +1107,7 @@ Additional flags can be added to [configure](/fundamentals/configuring-erigon/) 
 URL: https://docs.erigon.tech/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl
 
 
-Alternatively, you can also run a Ethereum node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
+Alternatively, you can also run a Gnosis Chain node as an Execution Layer (EL) and couple it with an external Consensus Layer (CL). Here is an example of configuration with **Lighthouse**.
 
 ### 1. Start Erigon:
 
@@ -1127,7 +1171,7 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
      --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
 
-Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.
+Check the Erigon and Lighthouse logs to make sure that the EL and CL are communicating and that your node is syncing correctly.
 
 ---
 
@@ -1216,7 +1260,7 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
  --http \
  --ws \
  --http.api=eth,debug,net,trace,web3,erigon \
- --log.dir.path=/desired/path/to/logs
+ --log.dir.path=/desired/path/to/logs \
  --torrent.download.rate=512mb
 ```
 
@@ -1229,15 +1273,48 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
     ```
 * The `--chain=mainnet` flag is set by default for Erigon to sync with the Ethereum mainnet. To explore other network options, check the [Supported Networks](supported-networks) section. For quick testing, consider selecting a testnet.
 * `--log.dir.path` dictates where [logs](logs) will be output - useful for sending reports to the Erigon team when issues occur.
-* Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
-* `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
-* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
+* Based on the [sync mode](sync-modes) you want to run you can add `--prune.mode=archive` to run an archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
+* `--http.addr=0.0.0.0 --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet).
+* `--torrent.download.rate` sets the torrent download rate cap. The default is `512mb` (megabytes per second). During initial sync Erigon will use the full allowance — on a dedicated machine this is fine, but if you share the machine with other work you may want to lower it (e.g. `--torrent.download.rate=128mb`). Set `--torrent.download.rate=Inf` to remove the limit entirely.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
 Additional flags can be added to configure the node with several options.
 
 - [configuring-erigon](configuring-erigon/)
+
+## How do I know it's syncing?
+
+Once your node is running, there are two ways to confirm it is making progress and to see exactly which stage of the initial sync it is in.
+
+### 1. Read the live log line
+
+Erigon's logs are organized by [staged sync](logs#staged-synchronization-architecture). Every log line emitted by the sync engine is prefixed with the current stage and its position in the pipeline. For example:
+
+```
+INFO[02-20|15:00:00.123] [4/8 Bodies] Downloading block bodies   block=18234567 ...
+```
+
+The prefix `[4/8 Bodies]` means: *"stage 4 of 8, currently in the Bodies stage"*. As stages complete, the prefix advances (`[5/8 Senders]`, `[6/8 Execution]`, …) until you reach `[8/8 Finish]`, at which point the node is at the chain tip.
+
+The full ordered stage list is in [Logs → Stage Definitions](logs#stage-definitions).
+
+### 2. Query the JSON-RPC
+
+If the RPC daemon is enabled (default port `8545`), the standard `eth_syncing` method tells you whether the node is still catching up and how far behind it is:
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
+  http://localhost:8545
+```
+
+* While syncing, the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (one entry per stage, with `{stage_name, block_number}`). Subtract `currentBlock` from `highestBlock` to see how many blocks remain; the `stages` array gives you the same per-stage progress as the log prefix above. (`startingBlock` is also returned but is hardcoded to `"0x0"` and carries no meaningful info.)
+* Once fully synced, the result is simply `false`.
+
+:::tip
+For a quick reference on monitoring sync progress (including using AI assistants via MCP), see the [Frequently Asked Questions](/help-center/frequently-asked-questions-faqs).
+:::
 
 ## Help
 
@@ -2815,13 +2892,13 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
-* `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
-  * Default: `false`
-* `--snap.stop`: Stops generating new snapshots.
-  * Default: `false`
-* `--snap.state.stop`: Stops generating new state files.
-  * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
+  * Default: `false`
+* `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
+  * Default: `false`
+* `--snap.stop`: Workaround for snapshot-related bugs — stops producing new snapshot files (DB will grow as a result).
+  * Default: `false`
+* `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
 
 ### Transaction Pool (TxPool)
@@ -3111,8 +3188,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
-  * Default: `512mb`
+* `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
@@ -3823,7 +3899,7 @@ The Downloader is a service responsible for seeding and downloading historical d
 **Info**: While all Erigon components are separable and can be run on different machines, the Downloader must run on the same machine as Erigon to be able to share downloaded and seeded files.
 :::
 
-For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/README.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
+For a comprehensive understanding of the Downloader's functionality, configuration, and usage, please refer to [./cmd/downloader/readme.md](https://github.com/erigontech/erigon/blob/main/cmd/downloader/readme.md) with the following key topics:
 
 1. **Snapshots overview**: An introduction to snapshots, their benefits, and how they are created and used in Erigon.
 2. **Starting Erigon with snapshots support**: Instructions on how to start Erigon with snapshots support, either by default or as a separate process.
@@ -5092,6 +5168,113 @@ then it should look something like:
 * [trace\_get](#trace_get)
 * [trace\_transaction](#trace_transaction)
 
+## Response Fields Reference
+
+All `trace_*` methods return objects built from the same set of fields. Each method's "Returns" section below indicates which top-level shape it produces; the field semantics are defined once here.
+
+### Top-level shapes
+
+| Method | Top-level shape |
+| --- | --- |
+| `trace_call`, `trace_rawTransaction`, `trace_replayTransaction` | `Object` with `output`, `stateDiff`, `trace[]`, `vmTrace` |
+| `trace_callMany` | `Array` — one per input call |
+| `trace_replayBlockTransactions` | `Array` — one per transaction; each entry adds `transactionHash` |
+| `trace_block`, `trace_filter`, `trace_transaction` | `Array` (flat list across all call frames) |
+| `trace_get` | `TraceEntry` (single call frame at the requested position) |
+
+### Top-level (ad-hoc tracing) fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
+| `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
+| `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. See **TraceEntry fields** below. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
+| `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
+
+### TraceEntry fields
+
+A `TraceEntry` represents a single call frame (root call, internal call, contract creation, or self-destruct).
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
+| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
+| `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
+| `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
+| `blockHash` | DATA, 32 BYTES | (Only in block-level methods: `trace_block`, `trace_filter`, `trace_transaction`, `trace_get`) Hash of the block containing the transaction. |
+| `blockNumber` | QUANTITY | (Block-level methods only) Number of the block containing the transaction. |
+| `transactionHash` | DATA, 32 BYTES | (Block-level methods only) Hash of the transaction containing this call frame. Absent for `"reward"` entries. |
+| `transactionPosition` | QUANTITY | (Block-level methods only) Index of the transaction within the block. Absent for `"reward"` entries. |
+
+### Action variants
+
+The `action` object's shape depends on `type`:
+
+**`type: "call"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `callType` | String | `"call"`, `"callcode"`, `"delegatecall"`, or `"staticcall"`. |
+| `from` | DATA, 20 BYTES | Sender address. |
+| `to` | DATA, 20 BYTES | Recipient address. |
+| `value` | QUANTITY | Wei value transferred. |
+| `gas` | QUANTITY | Gas provided to this call frame. |
+| `input` | DATA | Call data (selector + arguments). |
+
+**`type: "create"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `from` | DATA, 20 BYTES | Address that initiated the creation. |
+| `creationMethod` | String | How the contract was created: `"create"` or `"create2"`. |
+| `value` | QUANTITY | Wei value sent to the new contract. |
+| `gas` | QUANTITY | Gas provided to the creation. |
+| `init` | DATA | Init bytecode (constructor + runtime). |
+
+**`type: "suicide"`** (self-destruct)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `address` | DATA, 20 BYTES | Address of the self-destructing contract. |
+| `refundAddress` | DATA, 20 BYTES | Address that received the contract's remaining balance. |
+| `balance` | QUANTITY | Wei amount transferred to `refundAddress`. |
+
+**`type: "reward"`** (block/uncle reward, in `trace_block` and `trace_filter`)
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `author` | DATA, 20 BYTES | Address receiving the reward (miner / uncle author). |
+| `value` | QUANTITY | Wei amount of the reward. |
+| `rewardType` | String | `"block"` or `"uncle"`. |
+
+### Result variants
+
+The `result` object's shape depends on `type`:
+
+**`type: "call"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `gasUsed` | QUANTITY | Gas consumed by this call frame (excluding subcalls' charges). |
+| `output` | DATA | Return data of this call frame (`0x` if no data was returned). |
+
+**`type: "create"`**
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `gasUsed` | QUANTITY | Gas consumed by the creation. |
+| `code` | DATA | Deployed runtime bytecode of the new contract. |
+| `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
+
+**`type: "suicide"` and `type: "reward"`**
+
+`result` is `null` — these actions have no return value.
+
+***
+
 ## JSON-RPC API Reference
 
 ### trace\_call
@@ -5106,7 +5289,7 @@ Executes the given call and returns a number of possible traces for it.
 
 #### Returns
 
-* `Array` - Block traces
+`Object` containing `output`, `stateDiff`, `trace[]`, `vmTrace`. Each requested trace type is populated; the others are `null`. See [Response Fields Reference](#response-fields-reference) for full field semantics.
 
 #### Example
 
@@ -5177,7 +5360,7 @@ params: [
 
 #### Returns
 
-* `Array` - Array of the given transactions' traces
+`Array` — one entry per input call, each shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5262,7 +5445,7 @@ params: [
 
 #### Returns
 
-* `Object` - Block traces.
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5316,7 +5499,7 @@ params: [
 
 #### Returns
 
-* `Array` - Block transactions traces.
+`Array` — one entry per transaction in the block. Each entry is shaped like the `trace_call` response plus a `transactionHash` field identifying the transaction. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5374,7 +5557,7 @@ params: [
 
 #### Returns
 
-* `Object` - Block traces.
+`Object` shaped like the `trace_call` response (`output`, `stateDiff`, `trace[]`, `vmTrace`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5426,7 +5609,7 @@ params: [
 
 #### Returns
 
-* `Array` - Block traces.
+`Array` — flat list of all call frames in the block, including any `"reward"` entries for block/uncle rewards. Each entry includes block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5498,7 +5681,7 @@ params: [{
 
 #### Returns
 
-* `Array` - Traces matching given filter
+`Array` — flat list of call frames that match the filter, including any `"reward"` entries when the filter matches block coinbases or uncle authors. Each entry has block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5561,7 +5744,7 @@ params: [
 
 #### Returns
 
-* `Object` - Trace object
+A single `TraceEntry` corresponding to the call frame at the requested position, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`). See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -5619,7 +5802,7 @@ params: ["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]
 
 #### Returns
 
-* `Array` - Traces of given transaction
+`Array` — flat list of all call frames in the transaction, with block-level fields (`blockHash`, `blockNumber`, `transactionHash`, `transactionPosition`) on each entry. See [Response Fields Reference](#response-fields-reference).
 
 #### Example
 
@@ -6884,7 +7067,7 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1.  **Set Up Your Validator**
 
-    Deposit your stake and register your validator on Gnosis Chain by following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+    Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 2.  **Register as a Shutterized Validator**
 
     Complete the validator registration for Shutter using the tool provided in the [Shutter Validator Registration Guide](https://github.com/shutter-network/shutter-validator-registration).
@@ -7073,15 +7256,28 @@ This list addresses the most common inquiries from the Erigon community, offerin
 13. **Is it possible to recover from a database corruption?** While Erigon's database is robust, an ungraceful shutdown can cause corruption. The most reliable solution is to delete the corrupted datadir and perform a full re-sync, but it is also worth using repair tools.
 14. **What are the required ports?** Erigon requires specific ports for P2P networking (default `30303` TCP/UDP) and RPC access (`8545` HTTP, `8546` WS, `8551` Engine API). See [Default Ports](/fundamentals/default-ports) for the complete list.
 15. **What is a "snapshot sync"?** Snapshot sync is a stage of the synchronization process where the node downloads pre-made snapshots of the blockchain state. This significantly accelerates the initial sync, reducing the time required to catch up with the network. See [Sync Modes](/fundamentals/sync-modes) for details.
-16. **Can I use Erigon with Docker?** Yes, Erigon provides official Docker images on Dockerhub. See the [Installation](/get-started/installation) guide for the Docker setup instructions.
-17. **Does Erigon support other chains besides Ethereum?** Yes, Erigon is an EVM-compatible client and supports other networks like Gnosis. You can specify the chain with the `--chain` flag. See [Supported Networks](/fundamentals/supported-networks) and the [Easy Nodes](/get-started/easy-nodes) guides for chain-specific setup.
-18. **Where can I find official support?** The primary channels for support and community discussions are the official Erigon Discord and GitHub repository.
-19. **What is Caplin?** [Caplin](/staking/caplin) is Erigon's built-in beacon API server. It allows Erigon to function as both a consensus and execution client.
-20. **What is OtterSync?** OtterSync is a syncing algorithm that further enhances performance by shifting 98% of the computation to network bandwidth, reducing synchronization times and improving chain tip performance, disk footprint, and decentralization.
-21. **Why can't I query blocks before a certain height?** In `full` and `minimal` prune modes, Erigon discards historical state data that is older than the pruning window. If you need to query early blocks, you must run an archive node (`--prune.mode=archive`). See [Sync Modes](/fundamentals/sync-modes) for more on pruning. Note that the pruning mode is set permanently at the first sync and cannot be changed without a full re-sync.
-22. **Can I run Erigon on a Raspberry Pi or low-power ARM device?** It is not recommended for Mainnet. Erigon requires a high-end NVMe SSD and sufficient RAM (16 GB minimum) for reliable operation. Low-power ARM devices typically lack the disk I/O performance and memory needed to keep up with the chain tip. See [Hardware Requirements](/get-started/hardware-requirements). A testnet like Sepolia may be feasible on higher-end ARM hardware, but expect limited performance.
-23. **What is the MCP server?** The MCP (Model Context Protocol) server is a built-in component that exposes Erigon's blockchain data to AI assistants like Claude Desktop. It is enabled by default and listens on `127.0.0.1:8553`. To disable it, pass `--mcp.disable` at startup.
-24. **How do I connect Claude Desktop to my Erigon node?** Build the standalone `mcp` binary with `make mcp`, then add it to your Claude Desktop configuration at `~/.config/claude-desktop/config.json` pointing to your node's JSON-RPC endpoint or datadir. See the [MCP Server](/fundamentals/mcp) page for the full configuration example.
+16. **How do I monitor my node's sync progress?** There are three complementary ways:
+
+    * **Read the live log line** — every sync log line is prefixed with the current stage and its position in the pipeline, e.g. `[4/8 Bodies]`. The prefix advances through the stages until `[8/8 Finish]`, at which point the node is at the chain tip. See [Logs → Stage Definitions](/fundamentals/logs#stage-definitions) for the full ordered list.
+    * **Query the JSON-RPC** — call `eth_syncing` against the RPC daemon (default port `8545`):
+
+      ```bash
+      curl -s -X POST -H "Content-Type: application/json" \
+        --data '{"jsonrpc":"2.0","method":"eth_syncing","params":[],"id":1}' \
+        http://localhost:8545
+      ```
+
+      While syncing the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (per-stage progress, matching the log prefix); once fully synced it is simply `false`. (`startingBlock` is also returned but is hardcoded to `"0x0"`.)
+    * **Ask an AI assistant via MCP** — Erigon's built-in [MCP server](/fundamentals/mcp) (default `127.0.0.1:8553`) lets a connected assistant like Claude Desktop answer questions like *"Is my node synced? How many blocks behind am I?"* in plain language by querying the same data the JSON-RPC exposes. Useful when you'd rather not parse logs or `eth_syncing` output by hand.
+17. **Can I use Erigon with Docker?** Yes, Erigon provides official Docker images on Dockerhub. See the [Installation](/get-started/installation) guide for the Docker setup instructions.
+18. **Does Erigon support other chains besides Ethereum?** Yes, Erigon is an EVM-compatible client and supports other networks like Gnosis. You can specify the chain with the `--chain` flag. See [Supported Networks](/fundamentals/supported-networks) and the [Easy Nodes](/get-started/easy-nodes) guides for chain-specific setup.
+19. **Where can I find official support?** The primary channels for support and community discussions are the official Erigon Discord and GitHub repository.
+20. **What is Caplin?** [Caplin](/staking/caplin) is Erigon's built-in beacon API server. It allows Erigon to function as both a consensus and execution client.
+21. **What is OtterSync?** OtterSync is a syncing algorithm that further enhances performance by shifting 98% of the computation to network bandwidth, reducing synchronization times and improving chain tip performance, disk footprint, and decentralization.
+22. **Why can't I query blocks before a certain height?** In `full` and `minimal` prune modes, Erigon discards historical state data that is older than the pruning window. If you need to query early blocks, you must run an archive node (`--prune.mode=archive`). See [Sync Modes](/fundamentals/sync-modes) for more on pruning. Note that the pruning mode is set permanently at the first sync and cannot be changed without a full re-sync.
+23. **Can I run Erigon on a Raspberry Pi or low-power ARM device?** It is not recommended for Mainnet. Erigon requires a high-end NVMe SSD and sufficient RAM (16 GB minimum) for reliable operation. Low-power ARM devices typically lack the disk I/O performance and memory needed to keep up with the chain tip. See [Hardware Requirements](/get-started/hardware-requirements). A testnet like Sepolia may be feasible on higher-end ARM hardware, but expect limited performance.
+24. **What is the MCP server?** The MCP (Model Context Protocol) server is a built-in component that exposes Erigon's blockchain data to AI assistants like Claude Desktop. It is enabled by default and listens on `127.0.0.1:8553`. To disable it, pass `--mcp.disable` at startup.
+25. **How do I connect Claude Desktop to my Erigon node?** Build the standalone `mcp` binary with `make mcp`, then add it to your Claude Desktop configuration at `~/.config/claude-desktop/config.json` pointing to your node's JSON-RPC endpoint or datadir. See the [MCP Server](/fundamentals/mcp) page for the full configuration example.
 
 ---
 
