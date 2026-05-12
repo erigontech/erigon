@@ -489,27 +489,54 @@ func (db *MdbxKV) CHandle() unsafe.Pointer {
 // leakDetectorExtraInfo returns DB size and reclaimable freelist space so the
 // leak detector can log them next to the list of long-living transactions —
 // large reclaimable space is the usual symptom of an RO tx pinning an old snapshot.
+//
+// Reclaimable pages are computed by walking the GC table (DBI 0). Each value is
+// an MDBX_PNL: a packed array of pgno_t where element [0] is the count of the
+// page numbers that follow. We sum those counts across all GC records.
 func (db *MdbxKV) leakDetectorExtraInfo() []any {
-	var dbSize, reclaimable uint64
+	var dbSize, reclaimablePages, freelistEntries uint64
 	err := db.env.View(func(tx *mdbx.Txn) error {
 		info, err := db.env.Info(tx)
 		if err != nil {
 			return err
 		}
 		dbSize = info.Geo.Current
-		st, err := tx.StatDBI(mdbx.DBI(0)) // gc/freelist
+
+		st, err := tx.StatDBI(mdbx.DBI(0))
 		if err != nil {
 			return err
 		}
-		freelistBytes := (st.LeafPages + st.BranchPages + st.OverflowPages) * db.opts.pageSize.Bytes()
-		// page ids are stored as big-endian uint32 in the freelist, so one entry per 4 bytes
-		reclaimable = (freelistBytes / 4) * db.opts.pageSize.Bytes()
+		freelistEntries = st.Entries
+
+		c, err := tx.OpenCursor(mdbx.DBI(0))
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		for op := uint(mdbx.First); ; op = mdbx.Next {
+			_, val, err := c.Get(nil, nil, op)
+			if err != nil {
+				break
+			}
+			// MDBX_PNL layout: pgno_t array, [0]=count, [1..count]=pgnos.
+			// pgno_t is uint32 in the standard mdbx build; reading low 32 bits as
+			// little-endian gives the count whether the in-memory width is 32 or 64.
+			if len(val) >= 4 {
+				reclaimablePages += uint64(binary.LittleEndian.Uint32(val[:4]))
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return []any{"db", db.opts.label, "info_err", err}
 	}
-	return []any{"db", db.opts.label, "db_size", common.ByteCount(dbSize), "reclaimable", common.ByteCount(reclaimable)}
+	reclaimable := reclaimablePages * db.opts.pageSize.Bytes()
+	return []any{
+		"db", db.opts.label,
+		"db_size", common.ByteCount(dbSize),
+		"reclaimable", common.ByteCount(reclaimable),
+		"freelist_entries", freelistEntries,
+	}
 }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
