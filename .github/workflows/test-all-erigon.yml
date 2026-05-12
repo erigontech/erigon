@@ -46,6 +46,16 @@ jobs:
           cleanup-space: true
           ramdisk: true
 
+      - name: Cache test-fixtures tarballs
+        uses: actions/cache@v5
+        with:
+          # Only cache the .tar.gz files; the extracted dirs are recreated by
+          # tools/test-fixtures.sh on each run from the cached tarballs.
+          path: test-fixtures-cache/*.tar.gz
+          key: test-fixtures-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-${{ runner.os }}-
+
       - name: Run all tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'

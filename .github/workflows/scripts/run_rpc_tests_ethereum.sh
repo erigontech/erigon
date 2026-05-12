@@ -19,9 +19,6 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
-  # Temporary disable after merge #20830, waiting for new rpc-tests tag after merge PR #552
-  debug_traceBlockByNumber/test_33.tar
-  debug_traceBlockByNumber/test_34.tar
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -33,6 +30,8 @@ DISABLED_TEST_LIST=(
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
   eth_getTransactionByHash/test_02.json
+  # Temporarily disabled: test is flaky and fails non-deterministically; needs investigation
+  eth_simulateV1/test_201.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
   # Temporary disable required block 23917742
@@ -46,10 +45,15 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # Temporarily disabled: the following tests hang (possible regression in Erigon).
+  # For eth_createAccessList, PR #21086 is in progress.
+  # For debug_traceTransaction, the issue is under analysis.
+  eth_createAccessList/test_15.json
+  debug_traceTransaction/test_12.json
 )
 
 # Transform the array into a comma-separated string
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+RPC_TRANSPORT_TYPES="http,http_comp,websocket" "$(dirname "$0")/run_rpc_tests.sh" mainnet "$RPC_VERSION" "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

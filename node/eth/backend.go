@@ -211,6 +211,7 @@ type Ethereum struct {
 	heimdallService    *heimdall.Service
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
+	readAheader        *exec.BlockReadAheader
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -331,6 +332,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
+		readAheader:               exec.NewBlockReadAheader(),
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -456,6 +458,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
 		Events:            backend.notifications.Events,
 		Logger:            logger,
+		Disable:           stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
@@ -703,6 +706,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 
 	backend.stateDiffClient = direct.NewStateDiffClientDirect(backend.kvRPC)
+
+	// Start the eth/71 BAL downloader (EIP-8159) only on chains that activate
+	// EIP-7928. collectMissingBALs already short-circuits on the first pre-
+	// Amsterdam header (BlockAccessListHash==nil), but skipping the whole
+	// goroutine on chains that never reach Amsterdam is cheaper and clearer.
+	if chainConfig.AmsterdamTime != nil {
+		// Always-on once gated, negotiation-driven: if no peer advertises eth/71
+		// this is a silent no-op per scan pass. When eth/71 peers connect, the
+		// downloader backfills missing BALs into rawdb so subsequent stage_exec
+		// runs can skip local BAL regeneration.
+		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
+	}
+
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -853,6 +869,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Genesis,
 			config.Sync,
 			config.ExperimentalBAL,
+			backend.readAheader,
 		),
 		backend.notifications.Events,
 		&vm.Config{},
@@ -899,6 +916,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		defer dbg.LogPanic()
 		for {
 			select {
+			case <-ctx.Done():
+				logger.Debug("[mined blocks listener] ctx done")
+				return
 			case b := <-backend.minedBlocks:
 				if !sentryMcDisableBlockDownload {
 					// Add mined header and block body before broadcast. This is because the broadcast call
@@ -952,18 +972,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
-		validationNotifications, blockReader, blockWriter, logger)
+		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
@@ -992,6 +1012,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.readAheader,
 		backend.stopNode,
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
@@ -1045,7 +1066,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
-				logger.Error("could not start caplin", "err", err)
+				if !errors.Is(err, context.Canceled) {
+					logger.Error("could not start caplin", "err", err)
+				}
 			}
 			ctxCancel()
 		}()
@@ -1119,11 +1142,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	go func() {
-		if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
-			logger.Error("snapashot merge loop error", "err", err)
-		}
-	}()
+	if !dbg.NoBackgroundMaintenance() {
+		go func() {
+			if err := temporalDb.Debug().MergeLoop(ctx); err != nil {
+				logger.Error("snapashot merge loop error", "err", err)
+			}
+		}()
+	}
 
 	return backend, nil
 }
@@ -1283,7 +1308,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	aggOpts := state.New(dirs).Logger(logger).GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
 	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 		v := *snConfig.ErigondbDomainStepsInFrozenFile
 		stepsStr := "Inf"
@@ -1299,6 +1324,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	}
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	agg.SetFrozenBlocksProvider(blockReader)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -1524,11 +1550,11 @@ func (s *Ethereum) Stop() error {
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
-	// transactions. The global read-aheader spawns fire-and-forget goroutines
-	// via AddHeaderAndBodyToGlobalReadAheader during ValidateChain.
+	// transactions. The read-aheader spawns fire-and-forget goroutines via
+	// AddHeaderAndBody during ValidateChain.
 	{
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		exec.WaitForWarmup(warmCtx)
+		s.readAheader.WaitForWarmup(warmCtx)
 		warmCancel()
 	}
 
