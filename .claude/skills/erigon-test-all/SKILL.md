@@ -14,13 +14,20 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
 
 ```bash
-make eest-spec-statetests-stable          # state tests vs eest_stable fixtures
-make eest-spec-blocktests-stable          # blockchain tests vs eest_stable fixtures
-make eest-spec-enginextests-stable        # engine-x tests vs eest_stable fixtures
-make eest-spec-statetests-devnet          # …vs eest_devnet fixtures
+make eest-spec-statetests-stable             # state tests vs eest_stable fixtures
+make eest-spec-blocktests-stable             # blockchain tests vs eest_stable fixtures
+make eest-spec-enginextests-stable           # engine-x tests vs eest_stable fixtures
+make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet
-make eest-spec-enginextests-benchmark     # engine-x tests vs eest_benchmark fixtures (with per-test timings)
+make eest-spec-enginextests-benchmark-1m     # engine-x benchmark fixtures @ 1M gas target
+                                             # (with per-test --time stats);
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too
+make eest-spec-blocktests-stable-race-cancun # race-detector variant, sharded per fork:
+                                             # -pre-cancun/-cancun/-prague/-osaka, plus
+                                             # eest-spec-blocktests-devnet-race-amsterdam
 ```
+
+See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the authoritative list.
 
 Two side prerequisites still apply for tests `make test-all` does run:
 
