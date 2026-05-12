@@ -11,7 +11,7 @@ on:
     types:
       - completed
     branches:
-      - release/3.4
+      - release/3.*
   workflow_dispatch:
     inputs:
       run_id:
