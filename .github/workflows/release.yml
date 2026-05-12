@@ -703,16 +703,23 @@ jobs:
         BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
       run: |
         cd erigon
+        # Resolve the remote tag to its commit SHA: annotated tags expose the
+        # commit via the peeled ^{} ref; lightweight tags expose it on the
+        # bare ref. Prints nothing if the tag is absent.
+        resolve_remote_sha() {
+          local sha
+          sha=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}^{}" | awk '{print $1}')
+          if [ -z "${sha}" ]; then
+            sha=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}" | awk '{print $1}')
+          fi
+          printf '%s' "${sha}"
+        }
+
         # Re-check just before pushing in case a concurrent release run pushed
         # the same tag between build-release's check and now. If the tag is
         # already on remote at this run's build commit, treat it as ours and
         # continue (idempotent). Anything else is a real collision.
-        # Resolve to the commit SHA: annotated tags need the peeled ^{} ref;
-        # lightweight tags expose the commit SHA on the bare ref.
-        REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}^{}" | awk '{print $1}')
-        if [ -z "${REMOTE_SHA}" ]; then
-          REMOTE_SHA=$(git ls-remote origin "refs/tags/${RELEASE_VERSION}" | awk '{print $1}')
-        fi
+        REMOTE_SHA=$(resolve_remote_sha)
         if [ -n "${REMOTE_SHA}" ]; then
           if [ "${REMOTE_SHA}" = "${BUILD_COMMIT}" ]; then
             echo "Tag ${RELEASE_VERSION} already on remote at build commit ${BUILD_COMMIT} — continuing."
@@ -724,9 +731,24 @@ jobs:
           exit 1
         fi
         git tag "${RELEASE_VERSION}" "${BUILD_COMMIT}"
-        git push origin "${RELEASE_VERSION}"
-        echo "tag_pushed=true" >> "${GITHUB_OUTPUT}"
-        echo "Git TAG ${RELEASE_VERSION} created and pushed."
+        # If a concurrent run pushes the same tag at the same commit between the
+        # check above and our push, the push fails. Re-resolve afterwards: if
+        # the remote tag now points at our build commit, treat it as the
+        # idempotent fast-path (do NOT set tag_pushed); any other remote state
+        # is a real error.
+        if git push origin "${RELEASE_VERSION}"; then
+          echo "tag_pushed=true" >> "${GITHUB_OUTPUT}"
+          echo "Git TAG ${RELEASE_VERSION} created and pushed."
+          exit 0
+        fi
+        echo "git push failed; re-resolving remote tag to check for concurrent push of the same commit."
+        REMOTE_SHA=$(resolve_remote_sha)
+        if [ "${REMOTE_SHA}" = "${BUILD_COMMIT}" ]; then
+          echo "Tag ${RELEASE_VERSION} now on remote at build commit ${BUILD_COMMIT} (concurrent push) — continuing."
+          exit 0
+        fi
+        echo "ERROR: git push failed and remote tag does not point at this build commit (${REMOTE_SHA:-<none>} vs ${BUILD_COMMIT}). Exit."
+        exit 1
 
     - name: Publish draft of the Release notes with assets in case perform_release is set
       if: ${{ inputs.perform_release }}
@@ -831,6 +853,8 @@ jobs:
       - name: Rollback - remove git tag ${{ inputs.release_version }} if it points at this run's build commit
         env:
           BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
+          GH_TOKEN: ${{ steps.generate_token_rollback.outputs.token }}
+          GH_REPO: ${{ env.APP_REPO }}
         run: |
           cd erigon
           # Resolve to the commit SHA: annotated tags need the peeled ^{} ref;
@@ -841,10 +865,20 @@ jobs:
           fi
           if [ -z "${REMOTE_SHA}" ]; then
             echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
-          elif [ -z "${BUILD_COMMIT}" ] || [ "${REMOTE_SHA}" != "${BUILD_COMMIT}" ]; then
-            echo "Tag ${RELEASE_VERSION} on remote points at ${REMOTE_SHA}, not this run's build commit ${BUILD_COMMIT:-<unknown>} — leaving it alone."
-          else
-            echo "Tag ${RELEASE_VERSION} points at this run's build commit — removing."
-            git push -d origin "${RELEASE_VERSION}"
-            echo "Tag ${RELEASE_VERSION} removed."
+            exit 0
           fi
+          if [ -z "${BUILD_COMMIT}" ] || [ "${REMOTE_SHA}" != "${BUILD_COMMIT}" ]; then
+            echo "Tag ${RELEASE_VERSION} on remote points at ${REMOTE_SHA}, not this run's build commit ${BUILD_COMMIT:-<unknown>} — leaving it alone."
+            exit 0
+          fi
+          # Tag points at our build commit. Before deleting, confirm no GitHub
+          # Release exists for it — a concurrent run may have taken the
+          # idempotent push path and successfully created the release, and
+          # deleting the tag would orphan it.
+          if gh release view "${RELEASE_VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${RELEASE_VERSION} points at this run's build commit, but a GitHub Release for it already exists (likely created by a concurrent run) — leaving the tag alone."
+            exit 0
+          fi
+          echo "Tag ${RELEASE_VERSION} points at this run's build commit and no release exists — removing."
+          git push -d origin "${RELEASE_VERSION}"
+          echo "Tag ${RELEASE_VERSION} removed."
