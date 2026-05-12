@@ -1,0 +1,23 @@
+self-hosted-runner:
+  labels:
+    - devops-01-self-hosted
+    - ubuntu-slim
+    - Ethereum
+    - Gnosis
+    - linux
+    - long-running
+    - Polygon
+    - qa
+    - Release
+    - rpc-historical
+    - rpc-integration
+    - rpc-integration-commitment
+    - rpc-integration-geth
+    - rpc-integration-nethermind
+    - rpc-latest-erigon
+    - rpc-latest-geth
+    - rpc-performance
+    - RpcSpecific
+    - tip-tracking
+    - X64
+

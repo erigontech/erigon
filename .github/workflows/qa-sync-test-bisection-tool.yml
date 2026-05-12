@@ -13,6 +13,10 @@ on:
         description: 'Chain to test (default: mainnet)'
         required: false
         default: 'mainnet'
+      test_name:
+        description: 'Name of the test to run with the bisect script'
+        required: false
+        default: ''
 
 jobs:
   sync-test-bisect:

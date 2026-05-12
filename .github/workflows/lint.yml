@@ -17,6 +17,31 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Install actionlint
+        run: |
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin actionlint
+
+      - name: Install zizmor
+        run: pip install --break-system-packages zizmor
+
+      # runner.workspace is suppressed: it was dropped from the official context
+      # spec but is still available on self-hosted runners; QA workflows rely on
+      # it until they are migrated to github.workspace / runner.temp.
+      - name: actionlint
+        run: actionlint --ignore '"workspace" is not defined in object type'
+
+      - name: zizmor
+        run: zizmor --format github-actions .github/workflows/
+
+      # severity=warning catches real bugs (word-splitting, masked exit codes)
+      # without noise from pure style hints.
+      - name: shellcheck
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=warning
+
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
