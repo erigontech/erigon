@@ -193,8 +193,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
 	}
 
-	// Start the commitment calculator.
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, commitResults, rootResults)
+	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
+	// per-block gate (exec3_serial.go: `if !dbg.BatchCommitments ||
+	// shouldGenerateChangesets || KeepExecutionProofs`). When changesets
+	// must be generated (for unwind/reorg) the calculator must compute
+	// per-block — otherwise batch-mode dedupes branch updates across the
+	// batch and flushes them all into the last block's changeset, which
+	// fails on subsequent reorgs.
+	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -348,12 +355,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// its tx-results arrived but the trailing blockResult never did
 					// — exactly the silent-failure mode this catches.
 					//
-					// Also flag the case where maxBlockNum was never reached at all
-					// (no blockResult for it) but the channel closed cleanly: that
-					// means the exec loop signaled "done" without delivering the
-					// final block.
-					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks, pe.reachedMaxBlock.Load(), pe.maxBlockNum); len(missing) > 0 {
-						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult or were never delivered: %v",
+					// Not reaching maxBlockNum is a normal partial-batch state: when
+					// the exec loop hits its size budget mid-batch it returns nil with
+					// reachedMaxBlock=false, the apply loop drops out via the
+					// ErrLoopExhausted return below, and the stage loop resumes from
+					// lastBlockResult+1 in a follow-up call. Each block still executes
+					// exactly once across the two batches, so we deliberately do NOT
+					// flag maxBlockNum-not-applied here.
+					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
+						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
 					}
 					if pe.reachedMaxBlock.Load() {
@@ -673,35 +683,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	// Note: pe.applyTx is the stageloop's rwTx (externally supplied).
 	// Do NOT rollback it here — the stageloop owns its lifecycle.
 
-	defer func() {
-		// Close channels AFTER the exec loop finishes processing all
-		// blocks. This ensures all blockResults reach the apply loop
-		// and calculator before channels close. executeBlocks does NOT
-		// close channels — it returns from the errgroup after loading
-		// blocks, but the exec loop keeps processing.
-		safeClose := func(ch chan applyResult) {
-			defer func() {
-				// "close of closed channel" panics here are benign — it just means the
-				// channel was already closed by another shutdown path. Recover only that
-				// specific panic and re-raise anything else so real bugs still surface.
-				if rec := recover(); rec != nil {
-					if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
-						return
-					}
-					panic(rec)
-				}
-			}()
-			close(ch)
-		}
-		if pe.commitResultsCh != nil {
-			safeClose(pe.commitResultsCh)
-			pe.commitResultsCh = nil
-		}
-		if pe.applyResultsCh != nil {
-			safeClose(pe.applyResultsCh)
-			pe.applyResultsCh = nil
-		}
-	}()
+	defer pe.closeApplyChannels()
 	defer func() {
 		// Close the exec loop's own RO tx — prevents leak across batches.
 		if pe.applyTx != nil {
@@ -853,17 +835,29 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
-					return err
-				}
-
-				// Snapshot the just-completed block's changeset and clear sd.mem's
-				// accumulator before any further sd.mem writes occur. This must
-				// happen here (in the exec loop) — not in the apply loop — so that
-				// it is serialized with the exec loop's other sd.mem writes
-				// (system calls, finalize, ApplyStateWrites for the next block).
+				// Snapshot the just-completed block's changeset BEFORE sending the
+				// blockResult, so that the commitment calculator (which consumes
+				// blockResults on a separate goroutine) can find this block's
+				// saved changeset via GetChangesetByBlockNum at compute time.
+				// In per-block compute mode (shouldGenerateChangesets), the
+				// calculator switches the accumulator to this saved CS for the
+				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
+				// so branch writes land in block N's CS rather than whatever the
+				// exec loop has installed as current. If we saved AFTER sendResult,
+				// the calculator could race ahead and look up an unsaved CS,
+				// causing branch deltas to leak into the next block's CS and
+				// produce wrong-trie-root chains on subsequent reorg-driven
+				// re-execution (see TestRecreateAndRewind reproducer). Clearing
+				// the live accumulator and the local pointer must still happen
+				// here (in the exec loop) so the rotation-to-next-block install
+				// at line 893-895 is serialized with the exec loop's other
+				// sd.mem writes (system calls, finalize, ApplyStateWrites for
+				// the next block).
 				if pe.shouldGenerateChangesets && pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
+				}
+				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+					return err
 				}
 				pe.domains().SetChangesetAccumulator(nil)
 				pe.currentChangeSet = nil
@@ -886,18 +880,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// We are inside the `blockResult != nil` branch, so at least one
 				// complete (non-partial) block has been applied in this batch.
 				// That is enough to safely trigger a batch commit on size.
-				if sizeEst > batchLimit {
-					pe.triggerBatchCommitment(ctx)
-					return nil
-				}
-
-				if blockResult.BlockNum >= pe.maxBlockNum {
+				switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
+				case execLoopExitMaxReached:
 					pe.reachedMaxBlock.Store(true)
 					pe.triggerBatchCommitment(ctx)
 					return nil
-				}
-
-				if dbg.StopAfterBlock > 0 && blockResult.BlockNum >= dbg.StopAfterBlock {
+				case execLoopExitSizeLimit, execLoopExitExhausted, execLoopExitStopAfter:
 					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
@@ -1030,35 +1018,125 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
 // did not produce a corresponding blockResult — meaning the per-block
 // validator never fired for them and an invalid block could become
-// canonical. If reachedMaxBlock is false and maxBlockNum was never
-// applied, that block is added too (the exec loop signaled "done"
-// without delivering the goal). Returns nil if the apply loop's exit
-// satisfies the completeness invariant.
+// canonical. Returns nil if every block whose tx-results arrived also
+// produced a blockResult.
+//
+// Does NOT flag maxBlockNum when !reachedMaxBlock: a partial batch
+// (size-limit hit) legitimately stops short of maxBlockNum, and the
+// stage loop's ErrLoopExhausted handling resumes from the next block
+// in a follow-up call. Flagging maxBlockNum here turns that legitimate
+// path into a spurious InvalidBlock error — the BenchmarkFeeHistory
+// 200-block fixture exhausts the 5MB batch budget at block 114 and
+// previously errored despite blocks 1..114 being applied cleanly.
 //
 // Pure function — extracted from the apply loop's channel-close branch
 // so the invariant is unit-testable. See TestApplyLoopMissingBlocks.
-func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}, reachedMaxBlock bool, maxBlockNum uint64) []uint64 {
+func applyLoopMissingBlocks(txResultBlocks, appliedBlocks map[uint64]struct{}) []uint64 {
 	var missing []uint64
 	for n := range txResultBlocks {
 		if _, ok := appliedBlocks[n]; !ok {
 			missing = append(missing, n)
 		}
 	}
-	if !reachedMaxBlock {
-		if _, ok := appliedBlocks[maxBlockNum]; !ok {
-			seen := false
-			for _, m := range missing {
-				if m == maxBlockNum {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				missing = append(missing, maxBlockNum)
-			}
-		}
-	}
 	return missing
+}
+
+// execLoopExitDecision is the result of evaluating the exec-loop's
+// per-blockResult exit conditions. Values are ordered by precedence:
+// later conditions only matter if no earlier one fired.
+type execLoopExitDecision int
+
+const (
+	// execLoopContinue: keep processing — no exit condition met.
+	execLoopContinue execLoopExitDecision = iota
+	// execLoopExitSizeLimit: rs.SizeEstimate*Commitment crossed the
+	// configured batch budget; the partial-batch flush path runs.
+	execLoopExitSizeLimit
+	// execLoopExitMaxReached: blockResult.BlockNum >= maxBlockNum;
+	// the caller flips reachedMaxBlock so the apply loop returns
+	// nil (clean batch end) rather than ErrLoopExhausted.
+	execLoopExitMaxReached
+	// execLoopExitExhausted: executeBlocks dispatched its final
+	// blockResult with .Exhausted set (per-cycle block limit hit).
+	// Without honoring this the exec loop parks forever waiting
+	// for work the dispatcher will never produce.
+	execLoopExitExhausted
+	// execLoopExitStopAfter: dbg.StopAfterBlock crossed (debug only).
+	execLoopExitStopAfter
+)
+
+// execLoopShouldExit evaluates the exec-loop's per-blockResult exit
+// decision in priority order. Pure function so the precedence is
+// unit-testable; the production code at exec3_parallel.go around line
+// 864 calls this and dispatches based on the returned decision.
+//
+// Priority order (matches production):
+//  1. sizeEst > batchLimit         (size-limit batch flush — most urgent)
+//  2. blockResult.BlockNum >= max  (clean end — flip reachedMaxBlock)
+//  3. blockResult.Exhausted != nil (per-cycle dispatch limit hit)
+//  4. dbg.StopAfterBlock crossed   (debug-only halt)
+//  5. otherwise execLoopContinue   (schedule next block)
+//
+// Reordering any of these silently changes which exit branch wins when
+// two conditions overlap (e.g. final block of a cycle that also crosses
+// the size limit), which is why the test pins the exact precedence.
+// See TestExecLoopShouldExitPriority.
+func execLoopShouldExit(blockResult *blockResult, sizeEst, batchLimit, maxBlockNum, stopAfterBlock uint64) execLoopExitDecision {
+	if sizeEst > batchLimit {
+		return execLoopExitSizeLimit
+	}
+	if blockResult.BlockNum >= maxBlockNum {
+		return execLoopExitMaxReached
+	}
+	if blockResult.Exhausted != nil {
+		return execLoopExitExhausted
+	}
+	if stopAfterBlock > 0 && blockResult.BlockNum >= stopAfterBlock {
+		return execLoopExitStopAfter
+	}
+	return execLoopContinue
+}
+
+// closeApplyChannels closes the apply-loop-bound channels in the order
+// the calculator and apply loop require: commitResults FIRST so the
+// calculator drains and closes rootResults, then applyResults so the
+// apply loop sees its channel close after the calculator is done. The
+// inverse order would let the apply loop exit while the calculator is
+// still publishing — the trailing commitment write would land on a
+// closed channel and panic.
+//
+// "close of closed channel" panics inside safeClose are benign — it
+// just means the channel was already closed by another shutdown path.
+// Recover only that specific panic and re-raise anything else so real
+// bugs still surface.
+//
+// Returns the names of the channels closed in the order they were
+// closed. The production call site discards this (deferred-call
+// return values are ignored); tests use it to deterministically
+// verify the close order without racing on observer-goroutine
+// wakeups. See TestApplyLoopChannelCloseOrder.
+func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
+	safeClose := func(ch chan applyResult, name string) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				if e, ok := rec.(runtime.Error); ok && strings.Contains(e.Error(), "close of closed channel") {
+					return
+				}
+				panic(rec)
+			}
+		}()
+		close(ch)
+		closedOrder = append(closedOrder, name)
+	}
+	if pe.commitResultsCh != nil {
+		safeClose(pe.commitResultsCh, "commitResults")
+		pe.commitResultsCh = nil
+	}
+	if pe.applyResultsCh != nil {
+		safeClose(pe.applyResultsCh, "applyResults")
+		pe.applyResultsCh = nil
+	}
+	return
 }
 
 // execLoopExitCheck enforces the completeness invariant for the exec
@@ -2894,6 +2972,46 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
 
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
+	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
+	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
+	// d.incarnation != nil and routes into the "cleanup-before-recreate"
+	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
+	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
+	// account stays in sd.mem with non-zero incarnation, and a subsequent
+	// block's CREATE2 at the same address sees a phantom existing account,
+	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
+	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
+	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	//
+	// Two filters applied here:
+	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
+	//      skip the SelfDestructPath case uses below — a stale SelfDestructPath=true
+	//      from a non-validated incarnation must not mark the address as SD'd.
+	//   2. Final-state: pre-Cancun a single tx can SELFDESTRUCT an address and then
+	//      CREATE2-recreate at the same address; IBS emits SelfDestructPath=true
+	//      (from Selfdestruct) followed later by SelfDestructPath=false (from
+	//      CreateAccount, since the recreated object's selfdestructed flag is
+	//      cleared). The address ends ALIVE, so its recreate-time account-field
+	//      writes must survive — only mark sdSet when the LAST SelfDestructPath
+	//      entry for the address (in emission order) is true. applyVersionedWrites
+	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
+	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
+	//      eliminate it; mainnet-rare, but cheap to get right.)
+	sdSet := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
+			if v, ok := w.Val.(bool); ok {
+				sdSet[w.Address] = v
+			}
+		}
+	}
+	for addr, sd := range sdSet {
+		if !sd {
+			delete(sdSet, addr)
+		}
+	}
+
 	// Track which addresses have account-level writes vs storage-only writes.
 	// Serial's MakeWriteSet calls UpdateAccountData for every dirty object,
 	// including those with only storage changes. The commitment needs the
@@ -2902,6 +3020,14 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	hasStorageWrite := make(map[accounts.Address]bool)
 
 	for _, w := range writes {
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
+		// takes the pure-delete branch instead of cleanup-before-recreate.
+		if sdSet[w.Address] {
+			switch w.Path {
+			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath:
+				continue
+			}
+		}
 		switch w.Path {
 		case state.StoragePath:
 			// Only include writes from the current (validated) incarnation.
@@ -3008,6 +3134,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	}
 
 	for addr := range allAddresses {
+		if sdSet[addr] {
+			// Don't fill account fields for SD'd addresses — same rationale as
+			// the sdSet drop in the filter loop above. Without this, the
+			// stateReader fallback below would round-trip pre-SD account state
+			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// the SD when applyVersionedWrites picks the cleanup-then-recreate
+			// branch.
+			continue
+		}
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
 		fields := addrFields[addr]
 
@@ -3074,6 +3209,13 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	// and empty CodeHash, it should be deleted — not written as a regular
 	// account with zero values. Serial's updateAccount checks Empty() and
 	// calls DeleteAccount. We must match that behavior.
+	//
+	// The Nonce==0 check correctly excludes successful CREATE/CREATE2
+	// (which sets Nonce to 1 per EIP-161) — including the
+	// "constructor returned empty bytecode but wrote storage" case the
+	// calc-side 3-way Deleted branch protects via incarnation tracking.
+	// OOG-during-CREATE2 leaves Nonce==0 in the writeset, so it
+	// correctly falls through to deletion here.
 	type acctState struct {
 		balance  uint256.Int
 		nonce    uint64
@@ -3112,7 +3254,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// Check for empty accounts and replace with Delete
+	// Check for empty accounts and replace with Delete.
 	emptyAddrs := make(map[accounts.Address]bool)
 	for addr, s := range acctStates {
 		if s.hasBal && s.hasNonce && s.hasCode &&

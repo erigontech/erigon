@@ -729,9 +729,15 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		stateIgasRefundInc = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
 	}
 	verifiedAuthorities := make([]accounts.Address, 0)
-	if len(auths) > 0 {
+	if auths != nil {
+		if !st.evm.ChainRules().IsPrague {
+			return nil, stateIgasRefund, errors.New("SetCode transaction not allowed before Prague fork")
+		}
 		if contractCreation {
 			return nil, stateIgasRefund, errors.New("contract creation not allowed with type4 txs")
+		}
+		if len(auths) == 0 {
+			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
