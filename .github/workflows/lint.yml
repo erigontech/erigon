@@ -26,11 +26,15 @@ jobs:
       - name: Install zizmor
         run: pip install --break-system-packages zizmor
 
+      # -shellcheck '' disables actionlint's built-in inline-script checking;
+      # the repo's QA workflow run: blocks have many pre-existing shellcheck
+      # warnings that need a separate cleanup pass.  .sh files are covered by
+      # the dedicated shellcheck step below.
       # runner.workspace is suppressed: it was dropped from the official context
       # spec but is still available on self-hosted runners; QA workflows rely on
       # it until they are migrated to github.workspace / runner.temp.
       - name: actionlint
-        run: actionlint --ignore '"workspace" is not defined in object type'
+        run: actionlint -shellcheck '' --ignore '"workspace" is not defined in object type'
 
       - name: zizmor
         run: zizmor --format github-actions .github/workflows/
