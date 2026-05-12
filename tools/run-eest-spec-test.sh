@@ -10,7 +10,6 @@
 #   blocktests-stable                          blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
 #   enginextests-stable                        engine-x tests vs. eest_stable
-#   enginextests-devnet                        engine-x tests vs. eest_devnet
 #   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
@@ -96,11 +95,6 @@ case "$shard" in
 		extra=(--run 'fork_Amsterdam') ;;
 
 	enginextests-stable)
-		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
-		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
-	enginextests-devnet)
-		# devnet tarball does not currently ship blockchain_tests_engine_x;
-		# the test-eest-spec workflow skips this shard via step-level if:.
 		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
 

@@ -20,7 +20,6 @@ jobs:
           - { shard: blocktests-stable,            workers: 12, max-allowed-failures: 0 }
           - { shard: blocktests-devnet,            workers: 12, max-allowed-failures: 6206 }
           - { shard: enginextests-stable,          workers: 8,  max-allowed-failures: 0 }
-          - { shard: enginextests-devnet,          workers: 8,  max-allowed-failures: 0 }
           - { shard: enginextests-benchmark-1m,    workers: 1,  max-allowed-failures: 0 }
           - { shard: enginextests-benchmark-5m,    workers: 1,  max-allowed-failures: 0 }
           - { shard: enginextests-benchmark-10m,   workers: 1,  max-allowed-failures: 0 }
@@ -78,23 +77,15 @@ jobs:
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
 
-      # Skip enginextests-devnet until the devnet tarball ships
-      # blockchain_tests_engine_x/. The non-`_x` `blockchain_tests_engine/`
-      # variant uses a different JSON schema (inline `pre`, no `preHash`)
-      # that the cmd/evm enginextest runner cannot consume. Matrix entry
-      # stays so re-enabling is a one-line guard removal once the fixture
-      # lands. Job-level `if:` can't see `matrix.*`, so the guard lives on
-      # the run step.
+      # enginextests-devnet is intentionally not in the matrix: the devnet
+      # tarball does not currently ship blockchain_tests_engine_x/, and
+      # leaving the cell as a step-level skip wastes ~2m of runner setup
+      # time per CI run. Re-add the matrix entry once the fixture lands.
       - name: Run eest-spec-${{ matrix.shard }}
-        if: matrix.shard != 'enginextests-devnet'
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
         run: make eest-spec-${{ matrix.shard }}
-
-      - name: Skipped (devnet lacks blockchain_tests_engine_x fixtures)
-        if: matrix.shard == 'enginextests-devnet'
-        run: echo "Skipping eest-spec-enginextests-devnet; see workflow comment."
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

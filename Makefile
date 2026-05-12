@@ -267,7 +267,7 @@ test-fixtures-eest:
 EEST_SPEC_SHARDS := \
 	statetests-stable statetests-devnet \
 	blocktests-stable blocktests-devnet \
-	enginextests-stable enginextests-devnet \
+	enginextests-stable \
 	enginextests-benchmark-1m \
 	enginextests-benchmark-5m \
 	enginextests-benchmark-10m \
