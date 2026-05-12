@@ -113,6 +113,43 @@ type parallelExecutor struct {
 	// block-end system calls) on SharedDomains.mem.
 	shouldGenerateChangesets bool
 	currentChangeSet         *changeset.StateChangeSet
+	// currentChangeSetBlock is the block number currentChangeSet belongs to
+	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
+	// accumulator is already installed for the block whose writes are about to
+	// be applied — making changeset capture robust against blocks scheduled out
+	// of band (e.g. processRequest scheduling the first block of a new request
+	// after the blockExecutors map went empty mid-batch, with no preceding
+	// blockResult to trigger the install at the rotation site below).
+	currentChangeSetBlock uint64
+}
+
+// ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
+// block-specific StateChangeSet before any of blockNum's sd.mem writes are
+// applied. Idempotent. Exec-loop only — it mutates SharedDomains.mem via
+// SetChangesetAccumulator, which must be single-writer (see the comment on
+// currentChangeSet).
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
+	if !pe.shouldGenerateChangesets || blockNum == 0 || blockNum > pe.maxBlockNum {
+		return
+	}
+	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
+		return
+	}
+	// A previous block's accumulator is normally saved+cleared at its
+	// blockResult; if one is still installed here for a different block the
+	// rotation was missed — overwrite (the previous block's changeset was
+	// already saved at its blockResult, so nothing is lost).
+	pe.currentChangeSet = &changeset.StateChangeSet{}
+	pe.currentChangeSetBlock = blockNum
+	pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
+}
+
+// clearChangesetAccumulator detaches the current changeset accumulator after
+// its block's changeset has been saved. Exec-loop only.
+func (pe *parallelExecutor) clearChangesetAccumulator() {
+	pe.domains().SetChangesetAccumulator(nil)
+	pe.currentChangeSet = nil
+	pe.currentChangeSetBlock = 0
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -188,10 +225,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// (per-block save/clear/install) so apply-loop and exec-loop sd.mem
 	// writes never race on SharedDomains.mem.
 	pe.shouldGenerateChangesets = shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
-	if pe.shouldGenerateChangesets && startBlockNum > 0 {
-		pe.currentChangeSet = &changeset.StateChangeSet{}
-		pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
-	}
+	pe.ensureChangesetAccumulator(startBlockNum)
 
 	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
 	// per-block gate (exec3_serial.go: `if !dbg.BatchCommitments ||
@@ -867,14 +901,17 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// at line 893-895 is serialized with the exec loop's other
 				// sd.mem writes (system calls, finalize, ApplyStateWrites for
 				// the next block).
-				if pe.shouldGenerateChangesets && pe.currentChangeSet != nil {
+				// Belt-and-braces: an empty block (no tx-results reaching
+				// processResults) may not have triggered the install — create
+				// its (empty) accumulator so it gets saved like every other block.
+				pe.ensureChangesetAccumulator(blockResult.BlockNum)
+				if pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
 				}
 				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
 					return err
 				}
-				pe.domains().SetChangesetAccumulator(nil)
-				pe.currentChangeSet = nil
+				pe.clearChangesetAccumulator()
 
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
@@ -913,13 +950,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pe.RUnlock()
 
 			if ok {
-				// Install a fresh changeset accumulator for the next block before
-				// any of its sd.mem writes start. Doing this here (still in the
-				// exec loop) keeps SharedDomains.mem mutations single-writer.
-				if pe.shouldGenerateChangesets && blockExecutor.blockNum > 0 && blockExecutor.blockNum <= pe.maxBlockNum {
-					pe.currentChangeSet = &changeset.StateChangeSet{}
-					pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
-				}
+				// Fast-path install of the next block's changeset accumulator,
+				// still in the exec loop (single-writer). If the next block's
+				// executor isn't in the map yet this is a no-op; processResults
+				// then installs it lazily on the block's first apply.
+				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1236,6 +1271,11 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		if !ok {
 			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
 		}
+
+		// Ensure this block's changeset accumulator is installed before its
+		// writes are applied — covers blocks scheduled out of band (with no
+		// preceding blockResult to trigger the fast-path install above).
+		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 
