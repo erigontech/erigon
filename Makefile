@@ -260,31 +260,14 @@ test-fixtures-eest:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
-# against EEST fixtures. CI defines failure budgets in
-# .github/workflows/test-eest-spec.yml's matrix.include:; local runs use the
-# per-shard fallback defaults baked into tools/run-eest-spec-test.sh. Override
-# either with EEST_SPEC_MAX_FAILURES / EEST_SPEC_WORKERS.
-EEST_SPEC_SHARDS := \
-	statetests-stable statetests-devnet \
-	blocktests-stable blocktests-devnet \
-	enginextests-stable \
-	enginextests-benchmark-1m \
-	enginextests-benchmark-5m \
-	enginextests-benchmark-10m \
-	enginextests-benchmark-30m \
-	enginextests-benchmark-60m \
-	enginextests-benchmark-100m \
-	enginextests-benchmark-150m
-
-# Race-detector variants of blocktest shards, sharded per fork via --run regex
-# so each sub-shard fits under ~30 min. Use a separately-built evm.race binary
-# so non-race shards stay fast and these can run alongside.
-EEST_SPEC_RACE_SHARDS := \
-	blocktests-stable-race-pre-cancun \
-	blocktests-stable-race-cancun \
-	blocktests-stable-race-prague \
-	blocktests-stable-race-osaka \
-	blocktests-devnet-race-amsterdam
+# against EEST fixtures. The shard list, workers, and failure budgets live in
+# tools/eest-spec-shards.json (single source of truth shared with
+# .github/workflows/test-eest-spec.yml's load-matrix job and
+# tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
+# "-race-" dispatch through the race-instrumented evm.race binary so race
+# coverage works without polluting the non-race shards.
+EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
+EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
 
 .PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
 

@@ -9,36 +9,29 @@ defaults:
     shell: bash
 
 jobs:
+  # Matrix entries (shard / workers / max-allowed-failures) come from
+  # tools/eest-spec-shards.json so this workflow and tools/run-eest-spec-test.sh
+  # share a single source of truth. enginextests-devnet is intentionally absent
+  # from the manifest (the devnet tarball doesn't yet ship
+  # blockchain_tests_engine_x/); re-add it there when the fixture lands.
+  load-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.load.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - id: load
+        run: echo "matrix=$(jq -c . tools/eest-spec-shards.json)" >> "$GITHUB_OUTPUT"
+
   eest-spec-tests:
+    needs: load-matrix
     name: eest-spec-${{ matrix.shard }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { shard: statetests-stable,            workers: 12, max-allowed-failures: 37 }
-          - { shard: statetests-devnet,            workers: 12, max-allowed-failures: 5253 }
-          - { shard: blocktests-stable,            workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-devnet,            workers: 12, max-allowed-failures: 6206 }
-          - { shard: enginextests-stable,          workers: 8,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-1m,    workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-5m,    workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-10m,   workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-30m,   workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-60m,   workers: 1,  max-allowed-failures: 7 }
-          - { shard: enginextests-benchmark-100m,  workers: 1,  max-allowed-failures: 7 }
-          - { shard: enginextests-benchmark-150m,  workers: 1,  max-allowed-failures: 59 }
-          # Race-detected blocktest variants. Sharded per fork via --run regex
-          # so each sub-shard fits under ~30 min (race overhead ~3× → the
-          # un-sharded race-detected blocktests-stable would be ~41m). On
-          # devnet we only race the Amsterdam fork — it carries the new EIPs
-          # under development and that's where the race signal is most
-          # valuable; the rest of the devnet fork-tree just retreads stable
-          # coverage under race-instrumentation.
-          - { shard: blocktests-stable-race-pre-cancun,  workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-stable-race-cancun,      workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-stable-race-prague,      workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-stable-race-osaka,       workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-devnet-race-amsterdam,   workers: 12, max-allowed-failures: 6140 }
+        include: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -77,10 +70,6 @@ jobs:
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
 
-      # enginextests-devnet is intentionally not in the matrix: the devnet
-      # tarball does not currently ship blockchain_tests_engine_x/, and
-      # leaving the cell as a step-level skip wastes ~2m of runner setup
-      # time per CI run. Re-add the matrix entry once the fixture lands.
       - name: Run eest-spec-${{ matrix.shard }}
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}

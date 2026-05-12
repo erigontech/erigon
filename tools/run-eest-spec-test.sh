@@ -57,74 +57,45 @@ case "$shard" in
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
 
-# Per-shard config. Worker counts: statetests/blocktests=12 (CPU-bound, scale
-# with cores); enginextests=8 (memory-bound knee documented at
-# cmd/evm/enginexrunner.go:101 — higher values barely help and risk MDBX
-# virtual-memory exhaustion); benchmark=1 (clean per-test wall-time via
-# --time, not noised by sibling workers). Failure budgets mirror the values
-# committed in .github/workflows/test-eest-spec.yml's matrix.include:; keep
-# them in sync.
+# Resolve workers + failure budget from the single-source manifest. Both this
+# script and the test-eest-spec.yml load-matrix job read tools/eest-spec-shards.json,
+# so adding a shard / tweaking a budget is a one-file edit.
+manifest=tools/eest-spec-shards.json
+budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")"' "$manifest")
+if [[ -z "$budget_row" ]]; then
+	echo "shard $shard not found in $manifest" >&2
+	exit 2
+fi
+IFS=$'\t' read -r default_workers default_max <<<"$budget_row"
+
+# Per-shard structural config (cmd / fixture path / extra CLI flags).
 extra=()
 case "$shard" in
-	statetests-stable)
-		cmd=statetest;    path="$base/state_tests";              default_workers=12; default_max=37 ;;
-	statetests-devnet)
-		cmd=statetest;    path="$base/state_tests";              default_workers=12; default_max=5253 ;;
-	blocktests-stable)
-		cmd=blocktest;    path="$base/blockchain_tests";         default_workers=12; default_max=0 ;;
-	blocktests-devnet)
-		cmd=blocktest;    path="$base/blockchain_tests";         default_workers=12; default_max=6206 ;;
-
-	# Race-detector variants of blocktests-{stable,devnet}, split by fork
-	# via --run regex. Caller must export EVM_BIN to the race-built binary.
-	# Distribution is documented in the workflow file.
+	statetests-stable | statetests-devnet)
+		cmd=statetest;   path="$base/state_tests" ;;
+	blocktests-stable | blocktests-devnet)
+		cmd=blocktest;   path="$base/blockchain_tests" ;;
 	blocktests-stable-race-pre-cancun)
-		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=0
+		cmd=blocktest;   path="$base/blockchain_tests"
 		extra=(--run 'fork_(Frontier|Homestead|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)') ;;
 	blocktests-stable-race-cancun)
-		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=0
-		extra=(--run 'fork_Cancun') ;;
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Cancun') ;;
 	blocktests-stable-race-prague)
-		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=0
-		extra=(--run 'fork_Prague') ;;
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Prague') ;;
 	blocktests-stable-race-osaka)
-		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=0
-		extra=(--run 'fork_Osaka') ;;
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Osaka') ;;
 	blocktests-devnet-race-amsterdam)
-		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=6140
-		extra=(--run 'fork_Amsterdam') ;;
-
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Amsterdam') ;;
 	enginextests-stable)
-		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
+		cmd=enginextest; path="$base/blockchain_tests_engine_x"
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
-
-	enginextests-benchmark-1m   | \
-	enginextests-benchmark-5m   | \
-	enginextests-benchmark-10m  | \
-	enginextests-benchmark-30m  | \
-	enginextests-benchmark-60m  | \
-	enginextests-benchmark-100m | \
-	enginextests-benchmark-150m)
-		# Per-gas-target benchmark shard. workers=1 so per-test wall-time
-		# recorded via --time isn't noised by sibling goroutines competing
-		# for CPU/MDBX.
-		gas="${shard##*-}"
-		gas_num="${gas%m}"
+	enginextests-benchmark-*)
+		# Per-gas-target shard: "...-1m" → for_osaka_at_0001M/, etc.
+		gas="${shard##*-}"; gas_num="${gas%m}"
 		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
-		default_workers=1
-		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time)
-		case "$shard" in
-			enginextests-benchmark-1m)   default_max=0 ;;
-			enginextests-benchmark-5m)   default_max=0 ;;
-			enginextests-benchmark-10m)  default_max=0 ;;
-			enginextests-benchmark-30m)  default_max=0 ;;
-			enginextests-benchmark-60m)  default_max=7 ;;
-			enginextests-benchmark-100m) default_max=7 ;;
-			enginextests-benchmark-150m) default_max=59 ;;
-		esac ;;
-
+		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
 	*) echo "unknown shard: $shard" >&2; exit 2 ;;
 esac
 
