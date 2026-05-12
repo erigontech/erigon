@@ -476,6 +476,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		PruneTimeout:    500 * time.Millisecond,
 		BeforeIteration: nil,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+			// Release the old RO snapshot before the (long) flush so MDBX can
+			// reclaim retired pages while the RwTx is writing. Flush/ClearRam
+			// are write-only into commitRwTx and do not read through roTx.
+			roTx.Rollback()
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
@@ -489,8 +493,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
-			// Recreate RO tx + block overlay on the fresh committed state.
-			roTx.Rollback()
+			// Re-open RO tx + block overlay on the fresh committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
