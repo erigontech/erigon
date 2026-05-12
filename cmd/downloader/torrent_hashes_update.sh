@@ -17,15 +17,15 @@ fi
 #git pull
 
 # clean
-cd ./../erigon-snapshot
+cd ./../erigon-snapshot || exit 1
 git reset --hard
 git checkout auto
 git pull --ff-only origin auto
-cd ../erigon
+cd ../erigon || exit 1
 
 # it will return only .seg of 500K (because Erigon send to Downloader only such files)
 go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" --targetfile=./../erigon-snapshot/"$network".toml
-cd ./../erigon-snapshot
+cd ./../erigon-snapshot || exit 1
 git add "$network".toml
 git commit -m "[ci]: $network, [from]: $HOSTNAME"
 
@@ -33,7 +33,7 @@ git commit -m "[ci]: $network, [from]: $HOSTNAME"
 GH_TOKEN_FILE=""
 if ! type gcloud &>/dev/null; then
   #  GH_TOKEN=$(gcloud secrets versions access 1 --secret="github-snapshot-push")
-  GH_TOKEN_FILE="~/.ssh/vm_rsa"
+  GH_TOKEN_FILE="$HOME/.ssh/vm_rsa"
 fi
 
 # /dev/null to avoid logging of insecure git output
