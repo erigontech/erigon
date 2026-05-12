@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -507,13 +506,9 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
 			}
 
-			var tdBig *big.Int
-			if td != nil {
-				tdBig = td.ToBig()
-			}
 			te.hooks.OnBlockStart(tracing.BlockEvent{
 				Block:     b,
-				TD:        tdBig,
+				TD:        td,
 				Finalized: finalized,
 				Safe:      safe,
 			})
