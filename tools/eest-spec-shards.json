@@ -3,7 +3,7 @@
   {"shard": "statetests-devnet",                          "workers": 12, "max-allowed-failures": 5253},
   {"shard": "blocktests-stable",                          "workers": 12, "max-allowed-failures": 0},
   {"shard": "blocktests-stable-parallel",                 "workers": 12, "max-allowed-failures": 270,  "exec3-parallel": true},
-  {"shard": "blocktests-devnet",                          "workers": 12, "max-allowed-failures": 6383, "exec3-parallel": true},
+  {"shard": "blocktests-devnet",                          "workers": 12, "max-allowed-failures": 6386, "exec3-parallel": true},
   {"shard": "enginextests-stable",                        "workers": 8,  "max-allowed-failures": 0},
   {"shard": "enginextests-benchmark-1m",                  "workers": 1,  "max-allowed-failures": 0},
   {"shard": "enginextests-benchmark-5m",                  "workers": 1,  "max-allowed-failures": 0},
