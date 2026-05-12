@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -524,11 +523,11 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *uint256.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *uint256.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var returnTd *uint256.Int
-	var lastD *big.Int
+	var lastD *uint256.Int
 	var lastTime uint64
 	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
@@ -583,14 +582,14 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			}
 			// Check if transition to proof-of-stake happened and stop forward syncing
 			if terminalTotalDifficulty != nil {
-				if td.CmpBig(terminalTotalDifficulty) >= 0 {
+				if td.Cmp(terminalTotalDifficulty) >= 0 {
 					hd.highestInDb = link.blockHeight
 					//hd.logger.Info(POSPandaBanner)
 					dataflow.HeaderDownloadStates.AddChange(link.blockHeight, dataflow.HeaderInserted)
 					return true, true, 0, lastTime, nil
 				}
 				returnTd = td
-				lastD = link.header.Difficulty.ToBig()
+				lastD = &link.header.Difficulty
 			}
 		}
 
@@ -622,10 +621,10 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link.ClearChildren()
 	}
 	var blocksToTTD uint64
-	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil {
+	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil && !lastD.IsZero() {
 		// Calculate the estimation of when TTD will be hit
-		var x big.Int
-		x.Sub(terminalTotalDifficulty, returnTd.ToBig())
+		var x uint256.Int
+		x.Sub(terminalTotalDifficulty, returnTd)
 		x.Div(&x, lastD)
 		if x.IsUint64() {
 			blocksToTTD = x.Uint64()
@@ -637,7 +636,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *uint256.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool

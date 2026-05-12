@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -67,10 +69,10 @@ type Config struct {
 	GrayGlacierBlock      *uint64 `json:"grayGlacierBlock,omitempty"`
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake (a.k.a. "Paris", "The Merge")
-	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
-	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
-	MergeNetsplitBlock            *uint64  `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
-	MergeHeight                   *uint64  `json:"mergeBlock,omitempty"`                    // The Merge block number
+	TerminalTotalDifficulty       *uint256.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
+	TerminalTotalDifficultyPassed bool         `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
+	MergeNetsplitBlock            *uint64      `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *uint64      `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
 	ShanghaiTime  *uint64 `json:"shanghaiTime,omitempty"`
@@ -170,7 +172,7 @@ var (
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -197,7 +199,7 @@ var (
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),

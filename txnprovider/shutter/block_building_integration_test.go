@@ -219,7 +219,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	require.NoError(t, err)
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
-	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
+	chainConfig.TerminalTotalDifficulty = uint256.NewInt(0)
 	chainConfig.ShanghaiTime = common.NewUint64(0)
 	chainConfig.CancunTime = common.NewUint64(0)
 	chainConfig.PragueTime = common.NewUint64(0)

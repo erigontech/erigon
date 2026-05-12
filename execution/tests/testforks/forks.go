@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"slices"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
@@ -142,7 +143,7 @@ func init() {
 	Forks["ArrowGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0xC00000)
+	c.TerminalTotalDifficulty = uint256.NewInt(0xC00000)
 	Forks["ArrowGlacierToParisAtDiffC0000"] = c
 
 	c = configCopy(c)
@@ -151,7 +152,7 @@ func init() {
 	Forks["GrayGlacier"] = c
 
 	c = configCopy(c)
-	c.TerminalTotalDifficulty = big.NewInt(0)
+	c.TerminalTotalDifficulty = uint256.NewInt(0)
 	Forks["Merge"] = c
 	Forks["Paris"] = c
 

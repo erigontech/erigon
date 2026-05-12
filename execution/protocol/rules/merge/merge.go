@@ -462,5 +462,5 @@ func IsTTDReached(chain rules.ChainHeaderReader, parentHash common.Hash, number 
 	if td == nil {
 		return false, rules.ErrUnknownAncestorTD
 	}
-	return td.CmpBig(chain.Config().TerminalTotalDifficulty) >= 0, nil
+	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil
 }

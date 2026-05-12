@@ -875,7 +875,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),

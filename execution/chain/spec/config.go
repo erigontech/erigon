@@ -27,6 +27,8 @@ import (
 	"io/fs"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
@@ -229,7 +231,7 @@ var chainNamesPoS = []string{
 	networkname.Bloatnet,
 }
 
-func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
 }
 
@@ -242,7 +244,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 	return false
 }
 
-func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	if chainConfig.TerminalTotalDifficultyPassed {
 		return true
 	}

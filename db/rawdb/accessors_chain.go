@@ -25,7 +25,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -1065,7 +1064,7 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 }
 
 // Transitioned returns true if the block number comes after POS transition or is the last POW block
-func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.Int) (trans bool, err error) {
+func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *uint256.Int) (trans bool, err error) {
 	if terminalTotalDifficulty == nil {
 		return false, nil
 	}
@@ -1087,7 +1086,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, err
 	}
 
-	return headerTd.CmpBig(terminalTotalDifficulty) >= 0, nil
+	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
 
 // IsPosBlock returns true if the block number comes after POS transition or is the last POW block
