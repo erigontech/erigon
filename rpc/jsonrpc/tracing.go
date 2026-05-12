@@ -172,14 +172,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			return ctx.Err()
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
-		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
-
-		txCtx := evmtypes.TxContext{
-			TxHash:     txnHash,
-			Origin:     msg.From(),
-			GasPrice:   *msg.GasPrice(),
-			BlobHashes: msg.BlobHashes(),
-		}
 
 		if isBorStateSyncTxn {
 			var stateSyncEvents []*types.Message
@@ -205,9 +197,22 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			)
 			gasUsed += _gasUsed
 		} else {
-			var _gasUsed uint64
-			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
-			gasUsed += _gasUsed
+			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
+			if asMessageErr != nil {
+				stream.WriteNil()
+				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
+			} else {
+				txCtx := evmtypes.TxContext{
+					TxHash:     txnHash,
+					Origin:     msg.From(),
+					GasPrice:   *msg.GasPrice(),
+					BlobHashes: msg.BlobHashes(),
+				}
+
+				var _gasUsed uint64
+				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+				gasUsed += _gasUsed
+			}
 		}
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
