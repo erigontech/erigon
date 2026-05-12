@@ -140,7 +140,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	)
 	ctx := context.Background()
 	logger := log.New()
-	signer := types.LatestSignerForChainID(chainConfig.ChainID)
+	signer := types.LatestSignerForChainID(uint256.MustFromBig(chainConfig.ChainID))
 
 	// Generate blocks with ETH transfers.
 	const numBlocks = 50

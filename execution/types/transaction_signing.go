@@ -23,7 +23,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -153,18 +152,14 @@ func LatestSigner(config *chain.Config) *Signer {
 // Use this in transaction-handling code where the current block number and fork
 // configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
 // If you have a ChainConfig and know the current block number, use MakeSigner instead.
-func LatestSignerForChainID(chainID *big.Int) *Signer {
+func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
 	if chainID == nil {
 		return &signer
 	}
-	chainId, overflow := uint256.FromBig(chainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
+	signer.chainID.Set(chainID)
+	signer.chainIDMul.Lsh(chainID, 1) // ×2
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true

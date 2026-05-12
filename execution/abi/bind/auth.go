@@ -22,7 +22,6 @@ package bind
 import (
 	"crypto/ecdsa"
 	"errors"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -39,7 +38,7 @@ var ErrNotAuthorized = errors.New("not authorized to sign this account")
 
 // NewKeyedTransactorWithChainID is a utility method to easily create a transaction signer
 // from a single private key.
-func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*TransactOpts, error) {
+func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *uint256.Int) (*TransactOpts, error) {
 	keyAddr := crypto.PubkeyToAddress(key.PublicKey)
 	if chainID == nil {
 		return nil, ErrNoChainID
@@ -51,7 +50,7 @@ func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*Tr
 			if address != keyAddr {
 				return nil, ErrNotAuthorized
 			}
-			signature, err := crypto.Sign(txn.SigningHash(uint256.MustFromBig(chainID)).Bytes(), key)
+			signature, err := crypto.Sign(txn.SigningHash(chainID).Bytes(), key)
 			if err != nil {
 				return nil, err
 			}

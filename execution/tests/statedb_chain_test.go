@@ -67,7 +67,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
 	require.NoError(t, err)
 
 	var contractAddress common.Address

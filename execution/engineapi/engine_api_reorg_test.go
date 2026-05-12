@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,7 +51,7 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy changer at b2
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
@@ -233,7 +234,7 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 	})
 	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy a smart contract at bn2
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 		_, txn, poly, err := contracts.DeployPoly(transactOpts, eat.ContractBackend)
@@ -348,7 +349,7 @@ func TestFcuAllowsReorgBackOnCanonicalChainWhenAfterFinalisedHash(t *testing.T) 
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy changer at b2
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)
@@ -399,7 +400,7 @@ func TestFcuReturnsReorgTooDeepCode38006(t *testing.T) {
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// deploy changer at b2
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 		_, txn, changer, err := contracts.DeployChanger(transactOpts, eat.ContractBackend)

@@ -139,7 +139,7 @@ func TestEngineApiBuiltBlockWithContractDeployAndCall(t *testing.T) {
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		// Deploy Changer contract.
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 
@@ -386,7 +386,7 @@ func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = 100_000 // contract deploy ~53K+
 
@@ -481,7 +481,7 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 			},
 			GasPrice: *gasPriceU256,
 		}
-		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		signer := types.LatestSignerForChainID(uint256.MustFromBig(eat.ChainConfig.ChainID))
 		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
 		require.NoError(t, err)
 

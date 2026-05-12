@@ -205,7 +205,7 @@ func TestEngineApiBALContractCreation(t *testing.T) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 
 		// Deploy Token contract via ContractBackend
-		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainConfig.ChainID))
 		require.NoError(t, err)
 
 		contractAddr, deployTx, _, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
@@ -261,7 +261,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		mintReceiver := common.HexToAddress("0x444")
 
 		// Block 1: deploy contract
-		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainConfig.ChainID))
 		require.NoError(t, err)
 		contractAddr, _, tokenContract, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
 		require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		require.NoError(t, err)
 
 		// Block 2: mint tokens (writes to storage: balanceOf[receiver], totalSupply)
-		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainConfig.ChainID))
 		require.NoError(t, err)
 		mintTx, err := tokenContract.Mint(auth, mintReceiver, big.NewInt(1000))
 		require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 
 		// Block 1: deploy contract (needed for block 2)
-		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainConfig.ChainID))
 		require.NoError(t, err)
 		contractAddr, _, tokenContract, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
 		require.NoError(t, err)
@@ -341,7 +341,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		require.NoError(t, err)
 
 		// Tx 2: mint tokens (contract call with storage writes)
-		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, uint256.MustFromBig(eat.ChainConfig.ChainID))
 		require.NoError(t, err)
 		mintTx, err := tokenContract.Mint(auth, mintReceiver, big.NewInt(500))
 		require.NoError(t, err)
@@ -438,7 +438,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 	withdrawalReceiver := common.HexToAddress("0x888")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
-		chainId := eat.ChainConfig.ChainID
+		chainId := uint256.MustFromBig(eat.ChainConfig.ChainID)
 
 		// Block 1: deploy Changer contract (need it alive for block 2 storage writes)
 		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
@@ -609,7 +609,7 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 	})
 
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		chainId := eat.ChainConfig.ChainID
+		chainId := uint256.MustFromBig(eat.ChainConfig.ChainID)
 
 		// Block 1: deploy a Changer contract used by subsequent blocks for
 		// shared-target storage writes (exercises parallel conflict retry).
@@ -710,7 +710,7 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		signer := types.LatestSignerForChainID(uint256.MustFromBig(eat.ChainConfig.ChainID))
 		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 
 		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.PendingBlock)
@@ -773,7 +773,7 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		chainId := eat.ChainConfig.ChainID
+		chainId := uint256.MustFromBig(eat.ChainConfig.ChainID)
 
 		// Block 1: deploy Selfdestruct contract
 		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)

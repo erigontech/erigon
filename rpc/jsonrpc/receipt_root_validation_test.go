@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -84,7 +85,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eatA.Run(t, func(ctx context.Context, t *testing.T, eatA engineapitester.EngineApiTester) {
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatA.CoinbaseKey, eatA.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatA.CoinbaseKey, uint256.MustFromBig(eatA.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 
@@ -133,7 +134,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 		require.NoError(t, err)
 	})
 	eatB.Run(t, func(ctx context.Context, t *testing.T, eatB engineapitester.EngineApiTester) {
-		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatB.CoinbaseKey, eatB.ChainId())
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatB.CoinbaseKey, uint256.MustFromBig(eatB.ChainId()))
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
 

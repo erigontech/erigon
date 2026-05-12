@@ -1378,7 +1378,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 
 	key, err := crypto.GenerateKey()
 	require.NoError(err)
-	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID.ToBig()), key)
+	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID), key)
 	require.NoError(err)
 	dt := &wrapper.Tx.DynamicFeeTransaction
 	v, r, s := signedTx.RawSignatureValues()

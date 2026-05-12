@@ -178,9 +178,9 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 }
 
 func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
-	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 	require.NoError(t, err)
-	tx3, err := types.SignTx(types.NewTransaction(startingNonce+1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	tx3, err := types.SignTx(types.NewTransaction(startingNonce+1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 	require.NoError(t, err)
 	rlpTxs := make([][]byte, 2)
 	for i, tx := range []types.Transaction{tx2, tx3} {
@@ -211,7 +211,7 @@ func TestAssembleBlock(t *testing.T) {
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, err)
 		gen.AddTx(tx)
 	})
@@ -253,7 +253,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, err)
 		gen.AddTx(tx)
 	})
@@ -410,7 +410,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 
 	// Build 1 block with 1 tx as genesis state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
-		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
 	})
@@ -448,7 +448,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	// Build 1 block with 1 tx as genesis state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
-		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
 	})
@@ -510,7 +510,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 
 	// Build 1 block with 1 tx as genesis state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
-		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
 	})
@@ -525,7 +525,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 
 	contractTx, err := types.SignTx(
 		types.NewContractCreation(1, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
 	)
 	require.NoError(t, err)
 
@@ -595,7 +595,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(100),
 				params.TxGas, uint256.NewInt(baseFee), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
 		err = tx.EncodeRLP(&buf)
@@ -658,7 +658,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 
 	// Build 1 block with 1 tx as genesis state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
-		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 		require.NoError(t, txErr)
 		gen.AddTx(tx)
 	})
@@ -671,7 +671,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// nonce 1: simple transfer
 	tx1, err := types.SignTx(
 		types.NewTransaction(1, common.Address{2}, uint256.NewInt(5_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 	require.NoError(t, err)
 
 	// nonce 2: contract creation (Changer bytecode)
@@ -679,13 +679,13 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.NoError(t, err)
 	tx2, err := types.SignTx(
 		types.NewContractCreation(2, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 	require.NoError(t, err)
 
 	// nonce 3: simple transfer
 	tx3, err := types.SignTx(
 		types.NewTransaction(3, common.Address{3}, uint256.NewInt(3_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
 	require.NoError(t, err)
 
 	// Add all 3 to pool.
@@ -750,7 +750,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
 		)
 		require.NoError(t, err)
 		gen.AddTx(tx)
@@ -781,7 +781,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 			},
 			GasPrice: *uint256.NewInt(baseFee),
 		},
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)),
 		m.Key,
 	)
 	require.NoError(t, err)
@@ -901,7 +901,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		nonce := uint64(i)
 		tx, txErr := types.SignTx(
 			types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
 		)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
@@ -942,7 +942,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	deployCode := []byte{0x60, 0x00} // PUSH1 0x00 — minimal contract
 	deployTx, err := types.SignTx(
 		types.NewContractCreation(3, uint256.NewInt(0), 1_000_000, uint256.NewInt(baseFee), deployCode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
 	)
 	require.NoError(t, err)
 	var deployBuf bytes.Buffer
@@ -954,7 +954,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// Also add a simple transfer.
 	simpleTx, err := types.SignTx(
 		types.NewTransaction(4, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
 	)
 	require.NoError(t, err)
 	var simpleBuf bytes.Buffer
@@ -1151,7 +1151,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	for i := range rlpTxs {
 		tx, txErr := types.SignTx(
 			types.NewContractCreation(uint64(i), uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), deployCode),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), privKey,
+			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), privKey,
 		)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
@@ -1234,7 +1234,7 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 			"6000356001815560018160010155600181600201556001816003015500") // runtime
 	require.NoError(t, err)
 
-	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	signer := *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID))
 	baseFee := m.Genesis.BaseFee().Uint64()
 	deployTx, err := types.SignTx(
 		types.NewContractCreation(0, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), deployCode),
@@ -1330,7 +1330,7 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 
 	baseFee := m.Genesis.BaseFee().Uint64()
 	gasPrice := baseFee * 2 // non-zero priority fee
-	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	signer := types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID))
 
 	// Init code: CALLER (0x33) SELFDESTRUCT (0xFF).
 	// Creates a contract that immediately self-destructs, sending any

@@ -831,7 +831,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(*types.LatestSignerForChainID(gspec.Config.ChainID))
+			tx, err = basicTx(*types.LatestSignerForChainID(uint256.MustFromBig(gspec.Config.ChainID)))
 			if err != nil {
 				panic(err)
 			}
@@ -843,7 +843,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			}
 			block.AddTx(tx)
 
-			tx, err = basicTx(*types.LatestSignerForChainID(gspec.Config.ChainID))
+			tx, err = basicTx(*types.LatestSignerForChainID(uint256.MustFromBig(gspec.Config.ChainID)))
 			if err != nil {
 				panic(err)
 			}

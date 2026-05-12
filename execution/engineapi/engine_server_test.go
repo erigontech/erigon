@@ -115,7 +115,7 @@ func TestGetBlobsV1(t *testing.T) {
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
-	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(uint256.MustFromBig(mockSentry.ChainConfig.ChainID)), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction
 	v, r, s := txn.RawSignatureValues()
@@ -170,7 +170,7 @@ func TestGetBlobsV2(t *testing.T) {
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
-	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(uint256.MustFromBig(mockSentry.ChainConfig.ChainID)), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction
 	v, r, s := txn.RawSignatureValues()
@@ -234,7 +234,7 @@ func TestGetBlobsV3(t *testing.T) {
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
-	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
+	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(uint256.MustFromBig(mockSentry.ChainConfig.ChainID)), mockSentry.Key)
 	require.NoError(err)
 	dt := &wrappedTxn.Tx.DynamicFeeTransaction
 	v, r, s := txn.RawSignatureValues()

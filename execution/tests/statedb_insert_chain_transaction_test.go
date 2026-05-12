@@ -865,7 +865,7 @@ func getGenesis(funds ...*big.Int) initialData {
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
-		to, err := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1))
+		to, err := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1))
 		if err != nil {
 			panic(err)
 		}

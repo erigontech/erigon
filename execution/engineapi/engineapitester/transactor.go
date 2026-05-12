@@ -85,7 +85,7 @@ func (t Transactor) CreateSimpleTransfer(
 		GasPrice: *gasPriceU256,
 	}
 
-	signer := types.LatestSignerForChainID(t.chainId)
+	signer := types.LatestSignerForChainID(uint256.MustFromBig(t.chainId))
 	signedTxn, err := types.SignTx(txn, *signer, from)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign a transaction: %w", err)
