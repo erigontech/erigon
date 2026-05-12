@@ -783,27 +783,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					}
 					return v, uint64(step), len(v) > 0, nil
 				}
-				var rr commitment.CommitmentRangeReader
-				if dbg.EnvBool("PIN_TRUNK_BULK", true) {
-					rr = func(from, to []byte, yield func(k, v []byte, step uint64) bool) error {
-						it, err := ttx.Debug().RangeLatest(kv.CommitmentDomain, from, to, -1)
-						if err != nil {
-							return err
-						}
-						defer it.Close()
-						for it.HasNext() {
-							k, v, err := it.Next()
-							if err != nil {
-								return err
-							}
-							if !yield(k, v, 0) {
-								return nil
-							}
-						}
-						return nil
-					}
-				}
-				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader, rr)
+				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
 			}
 		}
 		// Refresh pinned-tier gauges once per Flush — once-per-batch
@@ -1388,40 +1368,10 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 			}
 			return v, uint64(step), len(v) > 0, nil
 		}
-		// R3: bulk range scan of the contract's two CommitmentDomain key
-		// ranges (one sequential file+DB-merged scan per parity) instead of
-		// the per-prefix GetLatest BFS — ~N random cold seeks become a couple
-		// of sequential cold reads. step is 0 here: the pinned-tier step is a
-		// coherency hint (a later same-prefix write at step>0 updates the
-		// entry in-place), and the bulk scan reads the latest committed value,
-		// so 0 is conservative-correct. PIN_TRUNK_BULK=false → BFS fallback.
-		useBulk := dbg.EnvBool("PIN_TRUNK_BULK", true)
-		rr := func(from, to []byte, yield func(k, v []byte, step uint64) bool) error {
-			it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, from, to, -1)
-			if err != nil {
-				return err
-			}
-			defer it.Close()
-			for it.HasNext() {
-				k, v, err := it.Next()
-				if err != nil {
-					return err
-				}
-				if !yield(k, v, 0) {
-					return nil
-				}
-			}
-			return nil
-		}
 		for i, h := range hashes {
 			started := time.Now()
-			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h), "bulk", useBulk)
-			var n int
-			if useBulk {
-				n, err = commitment.PreloadContractTrunkBulk(h, ramBudgetBytes, rr, branchCache, logger)
-			} else {
-				n, err = commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
-			}
+			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
+			n, err := commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
 			took := time.Since(started)
 			if err != nil {
 				logger.Warn("[trunk-preload] failed",

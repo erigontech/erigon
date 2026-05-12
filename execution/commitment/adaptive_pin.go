@@ -154,41 +154,22 @@ func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 
 // OnBlockComplete consumes the per-block miss snapshot and decides
 // promotions, extensions, and demotions. Called by the host at block
-// boundaries (after SD.Flush).
-//
-// If rr (a CommitmentRangeReader) is non-nil, initial-view preloads and
-// extensions use the bulk range scan (LoadBulk); otherwise they fall back
-// to the per-prefix BFS via reader (a CommitmentReader). The host passes
-// rr when PIN_TRUNK_BULK is enabled (default). At least one of the two
-// must be non-nil.
+// boundaries (after SD.Flush). The reader is the CommitmentReader
+// for the just-committed state, used by initial-view preload and
+// per-block extension.
 //
 // Synchronous: initial-view preloads run inline so the new pin set
-// is available for the NEXT block's reads. Extensions also run inline.
+// is available for the NEXT block's reads. Extensions also run
+// inline; sized so per-block work fits within typical inter-block
+// idle (~5 s of preload work for ExtensionBudgetBytes=8 MiB).
 //
 // Logs a [adaptive-pin] line per block when any state changes or
 // promoted contracts exist.
-func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum uint64, reader CommitmentReader, rr CommitmentRangeReader) {
+func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum uint64, reader CommitmentReader) {
 	misses := c.snapshotMisses()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	// load runs an initial-view (totalBudget = budget) or extension
-	// (totalBudget = used + step) preload via the bulk path if available,
-	// else the per-prefix BFS.
-	load := func(p *ContractTrunkPreload, totalBudget int) error {
-		if rr != nil {
-			_, err := p.LoadBulk(totalBudget, rr, c.cache, c.logger)
-			return err
-		}
-		// BFS Run takes the *additional* budget; map total → additional.
-		add := totalBudget - p.UsedBytes()
-		if add <= 0 {
-			return nil
-		}
-		_, _, err := p.Run(add, reader, c.cache, c.logger)
-		return err
-	}
 
 	var promoted, extended, demoted int
 
@@ -198,14 +179,14 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 		if hadMisses && n > 0 {
 			state.coldBlocksInARow = 0
 			delete(misses, hash)
-			// Extend if budget remains and more branches are pending.
-			if state.preload.HasMore() && state.preload.UsedBytes() < c.cfg.PerContractMaxBudgetBytes {
+			// Extend if budget remains and queue not empty.
+			if state.preload.QueueRemaining() > 0 && state.preload.UsedBytes() < c.cfg.PerContractMaxBudgetBytes {
 				remaining := c.cfg.PerContractMaxBudgetBytes - state.preload.UsedBytes()
 				step := c.cfg.ExtensionBudgetBytes
 				if step > remaining {
 					step = remaining
 				}
-				if err := load(state.preload, state.preload.UsedBytes()+step); err != nil {
+				if _, _, err := state.preload.Run(step, reader, c.cache, c.logger); err != nil {
 					c.warnf("[adaptive-pin] extend failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				} else {
 					extended++
@@ -231,7 +212,7 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 			if err != nil {
 				continue
 			}
-			if err := load(p, c.cfg.InitialViewBudgetBytes); err != nil {
+			if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
 				c.warnf("[adaptive-pin] initial-view failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				// Roll back partial pin so we don't leak entries
 				// for a contract that won't be in c.states.
