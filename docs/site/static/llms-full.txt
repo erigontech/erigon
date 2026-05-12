@@ -69,15 +69,15 @@ The amount of disk space recommended and RAM you need depends on the [sync mode]
 
 | Sync Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive |  | 4 TB | 32 GB | 64 GB |
-| Full (Default) |  | 2 TB | 16 GB | 32 GB |
-| Minimal |  | 1 TB | 16 GB | 64 GB |
+| Archive | — | 4 TB | 32 GB | 64 GB |
+| Full (Default) | — | 2 TB | 16 GB | 32 GB |
+| Minimal | — | 1 TB | 16 GB | 64 GB |
 
 | **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        |  | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) |     | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        |  | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | — | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | —    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | — | 500 GB                      | 8 GB               | 16 GB                 |
 
 :::warning
 The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
