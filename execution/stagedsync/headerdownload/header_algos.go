@@ -944,7 +944,10 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td = new(uint256.Int).Add(parentTd, &header.Difficulty)
+	td = new(uint256.Int)
+	if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+		return nil, fmt.Errorf("[%s] TD overflows uint256 for header %x %d", hi.logPrefix, hash, blockHeight)
+	}
 
 	// Now we can decide whether this header will create a change in the canonical head
 	// TODO: Add bor check here if required

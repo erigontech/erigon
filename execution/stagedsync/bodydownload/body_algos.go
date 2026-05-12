@@ -195,8 +195,11 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, block
 			bd.logger.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
 		} else if parent != nil {
 			var td uint256.Int
-			td.Add(&header.Difficulty, parent)
-			go blockPropagator(context.Background(), header, body, td)
+			if _, overflow := td.AddOverflow(&header.Difficulty, parent); overflow {
+				bd.logger.Error("TD overflows uint256", "number", header.Number.Uint64(), "hash", hash)
+			} else {
+				go blockPropagator(context.Background(), header, body, td)
+			}
 		} else {
 			bd.logger.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 		}

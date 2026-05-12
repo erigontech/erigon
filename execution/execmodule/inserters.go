@@ -102,7 +102,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 
 		// Sum TDs.
 		var td uint256.Int
-		td.Add(parentTd, &header.Difficulty)
+		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, header.Hash())
+		}
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
