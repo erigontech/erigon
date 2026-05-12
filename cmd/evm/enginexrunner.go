@@ -92,7 +92,10 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
-	workers := cliCtx.Int(WorkersFlag.Name)
+	workers := cliCtx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
 	defer cancel()
@@ -101,8 +104,8 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if workers > len(groups) && len(groups) > 0 {
-		workers = len(groups)
+	if workers > uint64(len(groups)) && len(groups) > 0 {
+		workers = uint64(len(groups))
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests across %d (fork, preAllocHash) groups; running with %d workers\n", totalTests, len(groups), workers)
 
@@ -131,7 +134,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	resultCh := make(chan testResult, totalTests)
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

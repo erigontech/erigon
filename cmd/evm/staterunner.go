@@ -83,10 +83,15 @@ func stateTestCmd(ctx *cli.Context) error {
 		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
 	}
 
+	workers := ctx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
+
 	path := ctx.Args().First()
 	if len(path) != 0 {
 		collected := collectFiles(path)
-		results, err := runStateTestsParallel(ctx, cfg, collected, ctx.Int(WorkersFlag.Name))
+		results, err := runStateTestsParallel(ctx, cfg, collected, workers)
 		if err != nil {
 			return err
 		}
@@ -109,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	return nil
 }
 
-func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers int) ([]testResult, error) {
+func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
@@ -137,7 +142,7 @@ func runStateTestsParallel(ctx *cli.Context, cfg vm.Config, files []string, work
 	}
 	close(fileCh)
 
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -192,7 +197,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	// In parallel mode (workers > 1) the stderr writes from concurrent goroutines
 	// interleave non-deterministically, which defeats differential fuzzing tools
 	// (e.g. goevmlab) that rely on per-test ordering.
-	emitStateRoot := ctx.Int(WorkersFlag.Name) <= 1
+	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
 	results := make([]testResult, 0, len(stateTests))
 
 	for key, test := range stateTests {
