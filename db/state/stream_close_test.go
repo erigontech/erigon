@@ -60,9 +60,9 @@ func TestDomainLatestIterFileInitCursorMDBXClosesDupCursorOutsideRange(t *testin
 	require.Zero(t, hi.h.Len())
 }
 
-func TestDomainLatestIterFileInitCursorMDBXClosesCursorOutsideRangeForLargeValues(t *testing.T) {
-	c := &testCursorDupSort{testCursor: testCursor{seekKey: []byte("b")}}
-	tx := &testTx{dupCursor: c}
+func TestDomainLatestIterFileInitCursorOnDBClosesCursorOutsideRangeForLargeValues(t *testing.T) {
+	c := &testCursor{seekKey: []byte("b\x00\x00\x00\x00\x00\x00\x00\x00")}
+	tx := &testTx{cursor: c}
 	hi := &DomainLatestIterFile{
 		roTx: tx,
 		to:   []byte("b"),

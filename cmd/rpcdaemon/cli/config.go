@@ -244,13 +244,18 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 		for {
 			select {
 			case <-ctx.Done():
+				log.Warn("[rpcdaemon subscribeToStateChanges] ctx done", "err", ctx.Err())
 				return
 			default:
 			}
 			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
 				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					time.Sleep(3 * time.Second)
-					continue
+					// ctx-aware retry delay so callers cancelling ctx don't have to
+					// wait up to 3s for the next retry cycle.
+					err = common.Sleep(ctx, 3*time.Second)
+					if err == nil {
+						continue
+					}
 				}
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
@@ -436,10 +441,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 		txNumsReader := blockReader.TxnumReader()
-
-		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-		}
 
 		erigonDBSettings, err := dbstate.ResolveErigonDBSettings(cfg.Dirs, logger, false)
 		if err != nil {

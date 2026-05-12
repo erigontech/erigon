@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/contracts"
@@ -100,14 +101,17 @@ func getCertifier(registrar common.Address, syscall rules.SystemCall) *common.Ad
 	}
 	out, err := syscall(accounts.InternAddress(registrar), packed)
 	if err != nil {
-		panic(err)
+		// Failing closed (no certifier) lets the caller treat the txn as non-service rather than crash the RPC handler.
+		log.Warn("[aura] failed to call registrar for certifier address", "registrar", registrar, "err", err)
+		return nil
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	res, err := registrarAbi().Unpack("getAddress", out)
 	if err != nil {
-		panic(err)
+		log.Warn("[aura] failed to unpack registrar getAddress response", "registrar", registrar, "err", err)
+		return nil
 	}
 	certifier := res[0].(common.Address)
 	return &certifier

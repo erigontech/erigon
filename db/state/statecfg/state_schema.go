@@ -82,7 +82,7 @@ func init() {
 	if dbgCommBtIndex {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
-	InitSchemas()
+	InitSchemasGen()
 }
 
 type SchemaGen struct {
@@ -448,5 +448,3 @@ func EnableHistoricalRCache() {
 	cfg.Hist.SnapshotsDisabled = false
 	Schema.RCacheDomain = cfg
 }
-
-var SchemeMinSupportedVersions = map[string]map[string]snaptype.Version{}
