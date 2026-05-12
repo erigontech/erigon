@@ -759,8 +759,13 @@ jobs:
           echo "::warning::gh release create failed (exit ${GH_EXIT}). All artifacts are ready — publish manually using the instructions below."
           echo ""
           echo "=== MANUAL RELEASE INSTRUCTIONS ==="
-          echo "NOTE: the just-pushed tag ${RELEASE_VERSION} will be removed by the rollback job."
-          echo "      The command below recreates it at the verified build commit via --target."
+          if [ "${{ steps.push_tag.outputs.tag_pushed }}" = "true" ]; then
+            echo "NOTE: the just-pushed tag ${RELEASE_VERSION} will be removed by the rollback job."
+            echo "      The command below recreates it at the verified build commit via --target."
+          else
+            echo "NOTE: tag ${RELEASE_VERSION} was already on remote at the build commit (idempotent path);"
+            echo "      rollback will not remove it. The command below targets the existing tag."
+          fi
           echo ""
           echo "Ensure you have a GitHub token with 'contents: write' permission, then run:"
           echo ""
@@ -771,12 +776,14 @@ jobs:
           echo "    --draft=true \\"
           echo "    --title \"${RELEASE_VERSION}\" \\"
           echo "    \"${RELEASE_VERSION}\" \\"
-          echo "    *.tar.gz *.deb"
+          echo "    *.tar.gz *.deb \\"
+          echo "    ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
           echo ""
           echo "Checksums file: ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
           echo "=== END MANUAL INSTRUCTIONS ==="
-          # Exit non-zero so the job fails and the In-case-of-failure rollback runs
-          # to remove the pushed tag.
+          # Exit non-zero so the job fails. If this run pushed the tag, the
+          # In-case-of-failure rollback (gated on tag_pushed) removes it; in the
+          # idempotent fast-path the rollback is intentionally skipped.
           exit ${GH_EXIT}
         else
           echo "Release draft created successfully."
