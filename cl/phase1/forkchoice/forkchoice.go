@@ -174,6 +174,11 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 
+	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
+	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
+	// (skip BLS) from gossip origin (full verification) without inspecting envelope contents.
+	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+
 	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
 	// The stages layer drains these into blockCollector before each Flush() so EL
@@ -293,6 +298,12 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	// [New in Gloas:EIP7732] Separate queue for locally-produced self-build envelopes
+	pendingLocalSelfBuildEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash
 	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](checkpointsPerCache)
 	if err != nil {
@@ -319,40 +330,41 @@ func NewForkChoiceStore(
 	headSet := make(map[common.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:                forkGraph,
-		equivocatingIndicies:     make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:           newLatestMessagesStore(anchorState.ValidatorLength()),
-		eth2Roots:                eth2Roots,
-		engine:                   engine,
-		operationsPool:           operationsPool,
-		beaconCfg:                anchorState.BeaconConfig(),
-		preverifiedSizes:         preverifiedSizes,
-		finalityCheckpoints:      finalityCheckpoints,
-		totalActiveBalances:      totalActiveBalances,
-		randaoMixesLists:         randaoMixesLists,
-		randaoDeltas:             randaoDeltas,
-		headSet:                  headSet,
-		weights:                  make(map[common.Hash]uint64),
-		participation:            participation,
-		emitters:                 emitters,
-		genesisTime:              anchorState.GenesisTime(),
-		syncedDataManager:        syncedDataManager,
-		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
-		hotSidecars:              make(map[common.Hash][]*cltypes.BlobSidecar),
-		blobStorage:              blobStorage,
-		ethClock:                 ethClock,
-		optimisticStore:          optimistic.NewOptimisticStore(),
-		probabilisticHeadGetter:  probabilisticHeadGetter,
-		publicKeysRegistry:       publicKeysRegistry,
-		verifiedExecutionPayload: verifiedExecutionPayload,
-		localValidators:          localValidators,
-		pendingConsolidations:    pendingConsolidations,
-		pendingDeposits:          pendingDeposits,
-		partialWithdrawals:       partialWithdrawals,
-		proposerLookahead:        proposerLookahead,
-		pendingEnvelopes:         pendingEnvelopes,
-		executionPayloadStatus:   executionPayloadStatus,
-		db:                       db,
+		forkGraph:                      forkGraph,
+		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:                 newLatestMessagesStore(anchorState.ValidatorLength()),
+		eth2Roots:                      eth2Roots,
+		engine:                         engine,
+		operationsPool:                 operationsPool,
+		beaconCfg:                      anchorState.BeaconConfig(),
+		preverifiedSizes:               preverifiedSizes,
+		finalityCheckpoints:            finalityCheckpoints,
+		totalActiveBalances:            totalActiveBalances,
+		randaoMixesLists:               randaoMixesLists,
+		randaoDeltas:                   randaoDeltas,
+		headSet:                        headSet,
+		weights:                        make(map[common.Hash]uint64),
+		participation:                  participation,
+		emitters:                       emitters,
+		genesisTime:                    anchorState.GenesisTime(),
+		syncedDataManager:              syncedDataManager,
+		genesisValidatorsRoot:          anchorState.GenesisValidatorsRoot(),
+		hotSidecars:                    make(map[common.Hash][]*cltypes.BlobSidecar),
+		blobStorage:                    blobStorage,
+		ethClock:                       ethClock,
+		optimisticStore:                optimistic.NewOptimisticStore(),
+		probabilisticHeadGetter:        probabilisticHeadGetter,
+		publicKeysRegistry:             publicKeysRegistry,
+		verifiedExecutionPayload:       verifiedExecutionPayload,
+		localValidators:                localValidators,
+		pendingConsolidations:          pendingConsolidations,
+		pendingDeposits:                pendingDeposits,
+		partialWithdrawals:             partialWithdrawals,
+		proposerLookahead:              proposerLookahead,
+		pendingEnvelopes:               pendingEnvelopes,
+		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
+		executionPayloadStatus:         executionPayloadStatus,
+		db:                             db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)

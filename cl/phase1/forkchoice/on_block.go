@@ -337,7 +337,20 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		// ProcessExecutionPayloadEnvelope spec check requires state.HashSSZ() to match
 		// the block's state_root, and the mutation+restoration cycle can cause the
 		// incremental hash cache to diverge.
-		if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
+		// Check for pending envelopes: first the local self-build queue (skip BLS),
+		// then the general gossip queue (full BLS verification). These are separate
+		// queues so that origin is determined by which queue wrote the entry, not by
+		// inspecting envelope contents (which an attacker could forge).
+		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
+			f.pendingLocalSelfBuildEnvelopes.Remove(common.Hash(blockRoot))
+			log.Trace("OnBlock: processing pending local self-build envelope", "blockRoot", common.Hash(blockRoot))
+			applied, applyErr := f.applyLocalSelfBuildEnvelopeLocked(ctx, pending)
+			if applyErr != nil {
+				log.Warn("OnBlock: failed to process pending local self-build envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+			} else if applied {
+				appliedEnvelope = pending.Message
+			}
+		} else if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
 			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
 			log.Trace("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
 			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.

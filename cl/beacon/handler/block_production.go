@@ -1796,11 +1796,13 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
 
 	// Process through forkchoice so the local node marks the block as FULL.
-	// validatePayload=true so the EL receives NewPayload for the self-built block.
+	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
+	// signature verification (we produced this envelope locally and may not have the
+	// VC's private key) while still validating the payload with the EL via NewPayload.
 	// Note: this typically returns an error because OnBlock (running in a background
 	// goroutine) has not finished yet — the forkchoice store queues the envelope in
 	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
-	if err := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
+	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
 		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
 

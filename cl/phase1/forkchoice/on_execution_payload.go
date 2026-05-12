@@ -128,15 +128,6 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	envelope := signedEnvelope.Message
 	builderIndex := envelope.BuilderIndex
 
-	// Skip BLS verification for locally-produced self-build envelopes that carry
-	// InfiniteSignature. The CL node constructs these when the VC does not provide
-	// a pre-signed envelope; the private key lives in the VC and is not available here.
-	// Gossip-received self-build envelopes from other proposers carry real signatures
-	// and will NOT match this check.
-	if builderIndex == clparams.BuilderIndexSelfBuild && signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
-		return nil
-	}
-
 	var pk [48]byte
 	if builderIndex == clparams.BuilderIndexSelfBuild {
 		// Self-build: use the proposer's pubkey
@@ -292,28 +283,28 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		// for later insertion into EL.
 		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
 			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", err)
-		if optErr := f.optimisticStore.AddOptimisticCandidate(block.Block); optErr != nil {
+		if optErr := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); optErr != nil {
 			return fmt.Errorf("failed to add block to optimistic store: %v", optErr)
 		}
 		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
 		log.Trace("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
-		if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
+		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
 			return fmt.Errorf("failed to add block to optimistic store: %v", err)
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
 		f.forkGraph.MarkHeaderAsInvalid(beaconBlockRoot)
 		// remove from optimistic candidate
-		if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
+		if err := f.optimisticStore.InvalidateBlock(beaconBlockRoot, block.Block); err != nil {
 			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
 		}
 		return errors.New("execution payload is invalid")
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
 		// remove from optimistic candidate
-		if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
+		if err := f.optimisticStore.ValidateBlock(beaconBlockRoot, block.Block); err != nil {
 			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
 		}
 		f.verifiedExecutionPayload.Add(beaconBlockRoot, struct{}{})
@@ -521,4 +512,127 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	}
 
 	return nil
+}
+
+// ApplyLocalSelfBuildEnvelope processes a locally-produced self-build envelope
+// that carries InfiniteSignature. The CL node constructs these when the VC does
+// not provide a pre-signed envelope; the private key lives in the VC and is not
+// available here.
+//
+// Unlike OnExecutionPayload, this method skips BLS signature verification
+// (both the forkchoice-level check and the CL state-transition check) since
+// we produced the envelope ourselves. EL validation via NewPayload still runs.
+//
+// This method MUST only be called from the local block production path.
+// Gossip-received envelopes MUST go through OnExecutionPayload which always
+// verifies BLS signatures.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("nil execution payload envelope")
+	}
+
+	envelope := signedEnvelope.Message
+	beaconBlockRoot := envelope.BeaconBlockRoot
+
+	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope)
+	if err != nil || !applied {
+		return err
+	}
+
+	if f.db != nil {
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(beaconBlockRoot), envelope)
+		}); err != nil {
+			return fmt.Errorf("ApplyLocalSelfBuildEnvelope: failed to write execution payload indices: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// applyLocalSelfBuildEnvelope acquires f.mu and delegates to the lock-held implementation.
+func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+	if signedEnvelope.Message == nil {
+		return false, errors.New("signed envelope has nil message")
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.applyLocalSelfBuildEnvelopeLocked(ctx, signedEnvelope)
+}
+
+// applyLocalSelfBuildEnvelopeLocked is the lock-held implementation for local self-build envelopes.
+// It mirrors applyEnvelopeLocked but skips signature verification by:
+//   - Not calling validateEnvelopeAgainstBlock
+//   - Using transition.DefaultMachine (FullValidation=false) instead of ValidatingMachine
+//
+// The caller MUST hold f.mu before calling this method.
+// EL validation via NewPayload still runs.
+func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeLocked(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+	if signedEnvelope.Message == nil {
+		return false, errors.New("signed envelope has nil message")
+	}
+
+	envelope := signedEnvelope.Message
+	beaconBlockRoot := envelope.BeaconBlockRoot
+
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return false, nil
+	}
+
+	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
+	if err != nil {
+		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to get block state: %w", err)
+	}
+	if blockState == nil {
+		f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		log.Trace("applyLocalSelfBuildEnvelopeLocked: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
+	}
+
+	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
+	if !ok || block == nil {
+		f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		log.Trace("applyLocalSelfBuildEnvelopeLocked: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
+	}
+
+	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
+
+	// Validate payload with EL (NewPayload).
+	var elBehind bool
+	if err := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
+		if errors.Is(err, errELBehind) {
+			elBehind = true
+		} else {
+			return false, err
+		}
+	}
+
+	blockState.SetPreviousStateRoot(block.Block.StateRoot)
+
+	// Use DefaultMachine (FullValidation=false) to skip BLS signature verification
+	// in ProcessExecutionPayloadEnvelope while still running all other spec checks.
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
+		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to verify execution payload: %w", err)
+	}
+
+	if envelope.Payload != nil {
+		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
+	}
+
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeLocked: failed to dump envelope: %w", err)
+	}
+
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+
+	if elBehind {
+		f.addPendingELPayload(block, signedEnvelope)
+	}
+
+	return true, nil
 }

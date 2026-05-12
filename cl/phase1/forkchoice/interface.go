@@ -125,6 +125,10 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
+	// self-build envelope, skipping BLS signature verification. EL validation still runs.
+	// MUST only be called from the local block production path.
+	ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
 	// Returns error if validation fails (REJECT), nil if accepted or ignored.
 	OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error

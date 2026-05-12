@@ -334,6 +334,10 @@ func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEn
 	return nil
 }
 
+func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return nil
+}
+
 func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	return nil
 }
