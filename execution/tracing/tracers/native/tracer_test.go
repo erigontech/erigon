@@ -36,11 +36,10 @@ import (
 // GetResult. Under -race, writes to the interruption reason field must not
 // race with reads, for every tracer that implements it.
 //
-// callTracer and flatCallTracer's GetResult short-circuits on
-// an empty callstack ("incorrect number of top-level calls") before loading
-// the reason. For those tracers the test pushes a single top-level call frame
-// via OnEnter so GetResult reaches the reason.Load() path where the race can
-// be observed under -race.
+// callTracer and flatCallTracer's GetResult short-circuits when the callstack
+// is empty, before loading the reason. For those tracers the test pushes a
+// single top-level call frame via OnEnter so GetResult reaches the reason.Load()
+// path where the race can be observed under -race.
 func TestTracerStopRace(t *testing.T) {
 	type setup struct {
 		name       string
@@ -54,27 +53,40 @@ func TestTracerStopRace(t *testing.T) {
 	}
 	for _, s := range cases {
 		t.Run(s.name, func(t *testing.T) {
-			tr, err := tracers.New(s.name, &tracers.Context{}, json.RawMessage("{}"))
-			require.NoError(t, err)
-
-			if s.needsFrame && tr.OnEnter != nil {
-				// Push a single top-level call frame so GetResult doesn't
-				// short-circuit before reading the interruption reason.
-				tr.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, 0, uint256.Int{}, nil)
-			}
-
+			const iterations = 1000
 			stopErr := errors.New("execution timeout")
-			var wg sync.WaitGroup
-			wg.Add(2)
-			go func() {
-				defer wg.Done()
-				tr.Stop(stopErr)
-			}()
-			go func() {
-				defer wg.Done()
-				_, _ = tr.GetResult()
-			}()
-			wg.Wait()
+
+			for range iterations {
+				tr, err := tracers.New(s.name, &tracers.Context{}, json.RawMessage("{}"))
+				require.NoError(t, err)
+
+				if s.needsFrame && tr.OnEnter != nil {
+					// Push a single top-level call frame so GetResult doesn't
+					// short-circuit before reading the interruption reason.
+					tr.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, 0, uint256.Int{}, nil)
+				}
+
+				start := make(chan struct{})
+				var ready sync.WaitGroup
+				var wg sync.WaitGroup
+				ready.Add(2)
+				wg.Add(2)
+				go func() {
+					defer wg.Done()
+					ready.Done()
+					<-start
+					tr.Stop(stopErr)
+				}()
+				go func() {
+					defer wg.Done()
+					ready.Done()
+					<-start
+					_, _ = tr.GetResult()
+				}()
+				ready.Wait()
+				close(start)
+				wg.Wait()
+			}
 		})
 	}
 }
