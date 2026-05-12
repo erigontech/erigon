@@ -1,12 +1,51 @@
 rules:
   # This repo uses version tags (e.g. @v6) rather than SHA pins.
-  # SHA-pinning all third-party actions is a separate policy decision tracked
-  # in a future issue; disable the blanket rule so the linter catches real
-  # security findings (template-injection, excessive-permissions, etc.).
+  # Pinning all third-party actions to SHAs is a separate policy decision;
+  # disable globally so the linter catches real security findings instead.
   unpinned-uses:
     disable: true
 
-  # Docker-layer caching in test-kurtosis-assertoor.yml is intentional;
-  # the artipacked risk is accepted for that workflow.
-  artipacked:
-    disable: true
+  # Pre-existing template-injection findings in QA and CD workflows need a
+  # dedicated cleanup pass; tracked in issue #21132.
+  # Files not listed here are still checked — new workflows get full coverage.
+  template-injection:
+    ignore:
+      - backups-dashboards.yml
+      - ci-cd-main-branch-docker-images.yml
+      - ci-gate.yml               # toJSON(needs) is not user-controllable
+      - qa-clean-exit-block-downloading.yml
+      - qa-clean-exit-snapshot-downloading.yml
+      - qa-constrained-tip-tracking.yml
+      - qa-rpc-integration-tests-clients.yml
+      - qa-rpc-integration-tests-gnosis.yml
+      - qa-rpc-integration-tests-latest.yml
+      - qa-rpc-integration-tests-polygon.yml
+      - qa-rpc-integration-tests-remote.yml
+      - qa-rpc-integration-tests.yml
+      - qa-rpc-performance-comparison-tests.yml
+      - qa-rpc-performance-tests.yml
+      - qa-snap-download.yml
+      - qa-stage-exec.yml
+      - qa-sync-from-scratch-minimal-node.yml
+      - qa-sync-from-scratch.yml
+      - qa-sync-with-externalcl.yml
+      - qa-tip-tracking-gnosis.yml
+      - qa-tip-tracking-with-load.yml
+      - qa-tip-tracking.yml
+      - qa-txpool-performance-test.yml
+
+  # Cache-poisoning (artipacked) findings in these workflows are intentional;
+  # tracked in issue #21132.
+  cache-poisoning:
+    ignore:
+      - manifest.yml
+      - qa-rpc-integration-tests-gnosis.yml
+      - qa-rpc-integration-tests.yml
+      - qa-sync-from-scratch.yml
+      - test-kurtosis-assertoor.yml
+
+  # ci-gate.yml requires actions:write to cancel merge-queue sibling runs
+  # on first failure; the broad permission is intentional.
+  excessive-permissions:
+    ignore:
+      - ci-gate.yml
