@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -153,7 +152,7 @@ var ( // listings filled by init()
 	registeredChainsByName = map[string]Spec{}
 
 	// list of chain IDs that are considered Proof of Stake (PoS) chains
-	chainIdsPoS = []*big.Int{}
+	chainIdsPoS = []*uint256.Int{}
 )
 
 var (
@@ -235,7 +234,7 @@ func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *uint256.Int
 	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
 }
 
-func isChainIDPoS(chainID *big.Int) bool {
+func isChainIDPoS(chainID *uint256.Int) bool {
 	for _, id := range chainIdsPoS {
 		if id.Cmp(chainID) == 0 {
 			return true

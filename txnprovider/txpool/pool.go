@@ -218,10 +218,7 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
-	if overflow {
-		return nil, errors.New("chainID overflow")
-	}
+	configChainID := chainConfig.ChainID
 
 	lock := &sync.Mutex{}
 

@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"math/big"
 	"testing"
 	"time"
 
@@ -140,7 +139,7 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 // Prague, Osaka, Amsterdam) are activated at timestamp 0.
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
 		SpuriousDragonBlock:           common.NewUint64(0),

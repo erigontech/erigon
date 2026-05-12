@@ -256,7 +256,7 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	contractDeployerPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	contractDeployer := crypto.PubkeyToAddress(contractDeployerPrivKey.PublicKey)
-	chainIdU256, _ := uint256.FromBig(genesis.Config.ChainID)
+	chainIdU256 := genesis.Config.ChainID
 	shutterConfig := shuttercfg.ConfigByChainName(chainspec.Chiado.Config.ChainName)
 	shutterConfig.BootstrapNodes = []string{decryptionKeySenderPeerAddr}
 	shutterConfig.PrivateKey = eat.NodeKey

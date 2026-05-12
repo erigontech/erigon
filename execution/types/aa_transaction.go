@@ -559,13 +559,13 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
+func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *uint256.Int) (*Message, error) {
 	zeroAddress := common.Address{}
 	if tx.Paymaster == nil || bytes.Equal(zeroAddress[:], tx.Paymaster[:]) {
 		return nil, nil
 	}
 
-	signingHash := tx.SigningHash(uint256.MustFromBig(chainID))
+	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err
@@ -589,8 +589,8 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
-	signingHash := tx.SigningHash(uint256.MustFromBig(chainID))
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *uint256.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
+	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err

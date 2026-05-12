@@ -880,7 +880,7 @@ func getGenesis(funds ...*big.Int) initialData {
 		transactOpts: transactOpts,
 		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),

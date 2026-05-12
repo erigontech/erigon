@@ -199,7 +199,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),

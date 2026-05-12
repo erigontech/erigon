@@ -615,7 +615,7 @@ func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int)
 
 // NewRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *big.Int) *RPCTransaction {
+func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *uint256.Int) *RPCTransaction {
 	txn := opaqueTxn.(*types.LegacyTx)
 	result := &RPCTransaction{
 		Type:     hexutil.Uint64(txn.Type()),
@@ -633,7 +633,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
 	if blockHash != (common.Hash{}) {
-		result.ChainID = (*hexutil.Big)(chainId)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)

@@ -29,7 +29,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -702,7 +701,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			txn2.SetSender(accounts.InternAddress(senders[j]))
 			sender = senders[j]
 		} else {
-			signer := types.LatestSignerForChainID(uint256.MustFromBig(chainConfig.ChainID))
+			signer := types.LatestSignerForChainID(chainConfig.ChainID)
 			s, err := txn2.Sender(*signer)
 			if err != nil {
 				return nil, err

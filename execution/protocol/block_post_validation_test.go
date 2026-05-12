@@ -17,7 +17,6 @@
 package protocol
 
 import (
-	"math/big"
 	"strings"
 	"testing"
 
@@ -38,7 +37,7 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 	t.Parallel()
 
 	// Frontier rules — pre-Byzantium, so the receipt-root path is not exercised.
-	cfg := &chain.Config{ChainID: big.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	logAddr := common.HexToAddress("0x095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	receipt := &types.Receipt{

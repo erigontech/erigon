@@ -58,7 +58,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
 		)
 		require.NoError(t, err)
 		gen.AddTx(tx)
@@ -89,7 +89,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 			},
 			GasPrice: *uint256.NewInt(baseFee),
 		},
-		*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
 		m.Key,
 	)
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
-			*types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key,
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
 		)
 		require.NoError(t, err)
 		gen.AddTx(tx)

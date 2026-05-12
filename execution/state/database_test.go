@@ -55,7 +55,7 @@ func TestCreate2Revive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -72,7 +72,7 @@ func TestCreate2Revive(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -239,7 +239,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -255,7 +255,7 @@ func TestCreate2Polymorth(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -503,7 +503,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -519,7 +519,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -558,7 +558,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 
@@ -666,7 +666,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -682,7 +682,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -715,7 +715,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
@@ -830,7 +830,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		funds        = big.NewInt(1000000000)
 		gspec        = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -850,7 +850,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var err error
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -974,7 +974,7 @@ func TestEip2200Gas(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -992,7 +992,7 @@ func TestEip2200Gas(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -1082,7 +1082,7 @@ func TestWrongIncarnation(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -1096,7 +1096,7 @@ func TestWrongIncarnation(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -1206,7 +1206,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -1223,7 +1223,7 @@ func TestWrongIncarnation2(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 
@@ -1262,7 +1262,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
@@ -1498,7 +1498,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOpts.GasLimit = 1000000
 	var revive *contracts.Revive2
@@ -1565,7 +1565,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
 	transactOptsLonger.GasLimit = 1000000
 	longerChain, err1 := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
@@ -1700,7 +1700,7 @@ func TestTxLookupUnwind(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),

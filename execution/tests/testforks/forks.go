@@ -21,7 +21,6 @@ package testforks
 
 import (
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -61,7 +60,7 @@ var blobSchedule = map[string]*params.BlobConfig{
 var Forks = map[string]*chain.Config{}
 
 func init() {
-	c := &chain.Config{ChainID: big.NewInt(1)}
+	c := &chain.Config{ChainID: uint256.NewInt(1)}
 	Forks["Frontier"] = c
 
 	c = configCopy(c)

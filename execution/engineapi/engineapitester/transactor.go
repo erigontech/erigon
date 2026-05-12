@@ -32,10 +32,10 @@ import (
 
 type Transactor struct {
 	rpcApiClient requests.RequestGenerator
-	chainId      *big.Int
+	chainId      *uint256.Int
 }
 
-func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *big.Int) Transactor {
+func NewTransactor(rpcApiClient requests.RequestGenerator, chainId *uint256.Int) Transactor {
 	return Transactor{
 		rpcApiClient: rpcApiClient,
 		chainId:      chainId,
@@ -85,7 +85,7 @@ func (t Transactor) CreateSimpleTransfer(
 		GasPrice: *gasPriceU256,
 	}
 
-	signer := types.LatestSignerForChainID(uint256.MustFromBig(t.chainId))
+	signer := types.LatestSignerForChainID(t.chainId)
 	signedTxn, err := types.SignTx(txn, *signer, from)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign a transaction: %w", err)
@@ -98,6 +98,6 @@ func (t Transactor) RpcClient() requests.RequestGenerator {
 	return t.rpcApiClient
 }
 
-func (t Transactor) ChainId() *big.Int {
-	return new(big.Int).Set(t.chainId)
+func (t Transactor) ChainId() *uint256.Int {
+	return new(uint256.Int).Set(t.chainId)
 }

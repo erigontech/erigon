@@ -294,15 +294,15 @@ func initialState1() error {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	if err != nil {
 		panic(err)
 	}
-	transactOpts1, err := bind.NewKeyedTransactorWithChainID(key1, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts1, err := bind.NewKeyedTransactorWithChainID(key1, m.ChainConfig.ChainID)
 	if err != nil {
 		panic(err)
 	}
-	transactOpts2, err := bind.NewKeyedTransactorWithChainID(key2, uint256.MustFromBig(m.ChainConfig.ChainID))
+	transactOpts2, err := bind.NewKeyedTransactorWithChainID(key2, m.ChainConfig.ChainID)
 	if err != nil {
 		panic(err)
 	}

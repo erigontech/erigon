@@ -44,7 +44,7 @@ type ContractsDeployer struct {
 	address              common.Address
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
-	chainId              *big.Int
+	chainId              *uint256.Int
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier
 }
 
@@ -52,7 +52,7 @@ func NewContractsDeployer(
 	key *ecdsa.PrivateKey,
 	cb bind.ContractBackend,
 	cl *MockCl,
-	chainId *big.Int,
+	chainId *uint256.Int,
 	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{
@@ -96,7 +96,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeploymen
 			fmt.Println("DEPLOY ERR", err, dbg.Stack())
 		}
 	}()
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, uint256.MustFromBig(d.chainId))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -167,7 +167,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 	dep ContractsDeployment,
 	ekg EonKeyGeneration,
 ) (common.Address, *shuttercontracts.KeyperSet, error) {
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, uint256.MustFromBig(d.chainId))
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return common.Address{}, nil, err
 	}

@@ -79,7 +79,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-		tx, err := types.SignTx(types.NewTransaction(uint64(i), m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *types.LatestSignerForChainID(uint256.MustFromBig(m.ChainConfig.ChainID)), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(uint64(i), m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, err)
 		b.AddTx(tx)
 	})

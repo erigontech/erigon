@@ -44,10 +44,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config != nil {
 		var chainId uint256.Int
 		if config.ChainID != nil {
-			overflow := chainId.SetFromBig(config.ChainID)
-			if overflow {
-				panic("chainID higher than 2^256-1")
-			}
+			chainId.Set(config.ChainID)
 		}
 		signer.unprotected = true
 		switch {
@@ -116,13 +113,9 @@ func MakeFrontierSigner() *Signer {
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	chainId, overflow := uint256.FromBig(config.ChainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
+		signer.chainID.Set(config.ChainID)
+		signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
 		if config.CancunTime != nil {
 			signer.blob = true
 		}

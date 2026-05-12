@@ -23,8 +23,6 @@ import (
 	"crypto/rand"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -92,7 +90,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 	}
 
 	gasLimit := new(big.Int).SetUint64(signedTxn.GetGasLimit())
-	opts, err := bind.NewKeyedTransactorWithChainID(et.encryptorPrivKey, uint256.MustFromBig(et.base.ChainId()))
+	opts, err := bind.NewKeyedTransactorWithChainID(et.encryptorPrivKey, et.base.ChainId())
 	if err != nil {
 		return EncryptedSubmission{}, err
 	}

@@ -20,6 +20,8 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -36,7 +38,7 @@ type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
 	GetLatestBlockNumber(ctx context.Context) (uint64, error)
-	GetChainID(ctx context.Context) (*big.Int, error)
+	GetChainID(ctx context.Context) (*uint256.Int, error)
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
 	GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error)
 	GetBlockNumberForTx(ctx context.Context, hash common.Hash) (blockNum uint64, ok bool, err error)
@@ -74,7 +76,7 @@ func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.
 	return blockNum, ok, err
 }
 
-func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
+func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err

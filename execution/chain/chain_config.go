@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -42,8 +41,8 @@ import (
 //
 // Config must be copied only with jinzhu/copier since it contains a sync.Once.
 type Config struct {
-	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
-	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
+	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
+	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
 	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
 
@@ -127,7 +126,7 @@ type Config struct {
 
 var (
 	TestChainAuraConfig = &Config{
-		ChainID:               big.NewInt(1),
+		ChainID:               uint256.NewInt(1),
 		Rules:                 AuRaRules,
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
@@ -143,7 +142,7 @@ var (
 	}
 
 	TestChainBerlinConfig = &Config{
-		ChainID:               big.NewInt(1337),
+		ChainID:               uint256.NewInt(1337),
 		Rules:                 EtHashRules,
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
@@ -158,7 +157,7 @@ var (
 	}
 
 	TestChainOsakaConfig = &Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         EtHashRules,
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
@@ -185,7 +184,7 @@ var (
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         EtHashRules,
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
@@ -649,7 +648,7 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock, head) {
 		return newCompatError("Spurious Dragon fork block", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
-	if c.IsSpuriousDragon(head) && !bigEqual(c.ChainID, newcfg.ChainID) {
+	if c.IsSpuriousDragon(head) && !uint256Equal(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
@@ -700,7 +699,7 @@ func numEqual(x, y *uint64) bool {
 	return *x == *y
 }
 
-func bigEqual(x, y *big.Int) bool {
+func uint256Equal(x, y *uint256.Int) bool {
 	if x == nil {
 		return y == nil
 	}
@@ -781,7 +780,7 @@ func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                           *big.Int
+	ChainID                                           *uint256.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
