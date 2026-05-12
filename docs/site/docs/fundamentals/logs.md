@@ -28,7 +28,7 @@ Erigon provides extensive logging configuration through command-line flags. Key 
 * `--log.json`: Enable JSON formatting for console logs
 * `--verbosity`: Set console log level (default: `info`)
 * `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
-* `--log.dir.verbosity`: Set file log level
+* `--log.dir.verbosity`: Set file log level (default: `dbug`)
 * `--log.delays`: Enable block delay logging
 
 **Log Levels**
