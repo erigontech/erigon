@@ -16,4 +16,4 @@ npm run typecheck # TypeScript check without emit
 
 ## Deployment
 
-Deployment to [docs.erigon.tech](https://docs.erigon.tech) is handled automatically via GitHub Actions on every push to `release/3.4`. Do not use manual `yarn deploy` — it is not configured for this site.
+Deployment is handled automatically by `.github/workflows/docs-deploy.yml` on every push to `release/3.4`. Do not use manual `yarn deploy` — it is not configured for this site.
