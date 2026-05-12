@@ -3047,6 +3047,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		}
 	}
 
+	logger.Info("waiting for background build/merge to drain")
+	agg.WaitForFiles()
+
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
 	}
