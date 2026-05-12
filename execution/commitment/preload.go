@@ -49,13 +49,11 @@ type pathDepth struct {
 // Caller MUST NOT use the same instance from multiple goroutines.
 type ContractTrunkPreload struct {
 	contractHash    []byte
-	contractNibbles []byte // 64 nibbles of contractHash, cached for the bulk range scan (preload_bulk.go)
 	queue           []pathDepth
 	pinnedPrefixes  [][]byte
 	pinned          int
 	usedBytes       int
 	maxDepthReached int
-	lastBulkHadMore bool // last LoadBulk hit the byte budget with branches left unpinned
 }
 
 // NewContractTrunkPreload constructs a preload state seeded at depth 64
@@ -72,7 +70,6 @@ func NewContractTrunkPreload(contractHash []byte) (*ContractTrunkPreload, error)
 	}
 	return &ContractTrunkPreload{
 		contractHash:    contractHash,
-		contractNibbles: contractNibbles,
 		queue:           []pathDepth{{path: contractNibbles, depth: 64}},
 		maxDepthReached: 64,
 	}, nil
@@ -181,10 +178,6 @@ func (p *ContractTrunkPreload) QueueRemaining() int { return len(p.queue) }
 
 // MaxDepthReached returns the deepest trie depth pinned so far.
 func (p *ContractTrunkPreload) MaxDepthReached() int { return p.maxDepthReached }
-
-// HasMore reports whether more branches remain to be pinned (BFS queue
-// non-empty, or the last bulk scan was cut short by the byte budget).
-func (p *ContractTrunkPreload) HasMore() bool { return len(p.queue) > 0 || p.lastBulkHadMore }
 
 // PinnedPrefixes returns the prefix slices this preload has added to
 // the cache so far. The adaptive controller uses this to Invalidate
