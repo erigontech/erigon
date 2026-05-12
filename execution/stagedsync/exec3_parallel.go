@@ -2588,14 +2588,37 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 
-					// Update CollectorWrites with fee-adjusted coinbase balance
-					// so the BlockStateCache sees the correct accumulated fees.
-					if txResult.CollectorWrites != nil {
-						for _, w := range addWrites {
+					// Update CollectorWrites with fee-adjusted balances (coinbase /
+					// burnt) so the BlockStateCache sees the correct accumulated
+					// fees. CollectorWrites is a flat slice, so replacing a
+					// BalancePath entry by address is a linear scan; doing that per
+					// addWrites entry is O(len(addWrites)·len(CollectorWrites)) — when
+					// finalize is a full block-end IBS reconstruction both can be ~one
+					// entry per account the block touched (a tx that pays ~100k
+					// accounts — TestInvalidReceiptHashHighMgas), i.e. ~10^10
+					// comparisons. Index CollectorWrites' BalancePath entries by
+					// address once instead.
+					if len(txResult.CollectorWrites) > 0 {
+						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
+						for i, w := range txResult.CollectorWrites {
 							if w.Path == state.BalancePath {
-								if bal, ok := w.Val.(uint256.Int); ok {
-									txResult.CollectorWrites = txResult.CollectorWrites.SetBalance(w.Address, bal, w.Reason)
-								}
+								balIdx[w.Address] = i
+							}
+						}
+						for _, w := range addWrites {
+							if w.Path != state.BalancePath {
+								continue
+							}
+							bal, ok := w.Val.(uint256.Int)
+							if !ok {
+								continue
+							}
+							if i, found := balIdx[w.Address]; found {
+								txResult.CollectorWrites[i].Val = bal
+								txResult.CollectorWrites[i].Reason = w.Reason
+							} else {
+								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, Reason: w.Reason})
+								balIdx[w.Address] = len(txResult.CollectorWrites) - 1
 							}
 						}
 					}

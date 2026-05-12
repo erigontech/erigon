@@ -692,21 +692,6 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
-// SetBalance replaces the BalancePath write for addr in the write set with
-// the given value. If no existing BalancePath write is found, a new entry is
-// appended. This is used in the direct finalize path to adjust fee-calc
-// balances in pre-computed collector writes without IBS reconstruction.
-func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
-	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
-			w.Val = val
-			w.Reason = reason
-			return writes
-		}
-	}
-	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
-}
-
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
 // address has no existing writes in the set, all four account fields (balance,
 // nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
