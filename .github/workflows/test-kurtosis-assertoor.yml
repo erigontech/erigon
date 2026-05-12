@@ -20,9 +20,66 @@ on:
         default: false
 
 jobs:
+  # Build the erigon image once for the whole matrix. The matrix below has
+  # grown to suite × {serial, parallel} entries — having every entry run its
+  # own buildx with `cache-to: type=gha,mode=max,scope=kurtosis-erigon-build`
+  # means ~a dozen jobs hammering the same GHA cache key concurrently, which
+  # the cache backend answers with 504s ("failed to parse error response 504"
+  # → `failed to build`). One builder, one cache writer; the matrix consumes
+  # the image as a run-scoped artifact.
+  build-erigon-image:
+    name: build-erigon-image
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v6
+
+      - name: Conditional Docker Login
+        # Only login if we can. Workflow works without it but we want to avoid
+        # rate limiting by Docker Hub when possible. External repos don't
+        # have access to our Docker secrets.
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build erigon Docker image (with BuildKit layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current-base
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      - name: Export erigon image as a run-scoped artifact
+        run: docker save test/erigon:current-base -o "${RUNNER_TEMP}/erigon-base-image.tar"
+
+      - name: Upload erigon image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: erigon-base-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/erigon-base-image.tar
+          retention-days: 1
+          if-no-files-found: error
+
   assertoor_test:
     name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    needs: build-erigon-image
+    # On cache-warming runs build-erigon-image alone warms the kurtosis image
+    # cache; there's nothing for the matrix to do (the test step is skipped).
+    if: ${{ !inputs.cache-warming-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -38,6 +95,7 @@ jobs:
         # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so divergence
         # is caught on the PR. Matrix entries spawn separate hosted runners
         # and run concurrently — wall-clock unchanged, runner-minutes doubled.
+        # All entries share the single erigon image built by build-erigon-image.
         include:
           - suite: regular
             package_args: .github/workflows/kurtosis/regular-assertoor.io
@@ -89,25 +147,6 @@ jobs:
       - name: Fast checkout git repository
         uses: actions/checkout@v6
 
-      - name: Conditional Docker Login
-        # Only login if we can. Workflow works without it but we want to avoid
-        # rate limiting by Docker Hub when possible. External repos don't
-        # have access to our Docker secrets.
-        # continue-on-error: transient Docker Hub network timeouts should not
-        # abort the entire workflow — the run proceeds without login (unlogged pull).
-        if: |
-          github.repository == 'erigontech/erigon' &&
-          github.actor != 'dependabot[bot]' &&
-          !github.event.pull_request.head.repo.fork
-        continue-on-error: true
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v5
@@ -133,22 +172,19 @@ jobs:
           docker save ${{ env.TEKU_IMAGE }}        -o /tmp/docker-cache/teku.tar
           docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
 
-      - name: Build erigon Docker image (with BuildKit layer cache)
-        uses: docker/build-push-action@v6
+      - name: Download erigon image artifact
+        uses: actions/download-artifact@v8
         with:
-          context: .
-          load: true
-          tags: test/erigon:current-base
-          build-args: |
-            BINARIES=erigon caplin
-          cache-from: type=gha,scope=kurtosis-erigon-build
-          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+          name: erigon-base-image-${{ github.run_id }}
+          path: ${{ runner.temp }}
+
+      - name: Load erigon base image into daemon
+        run: docker load -i "${RUNNER_TEMP}/erigon-base-image.tar"
 
       - name: Bake exec_mode env into the runtime image
         # Kurtosis launches `test/erigon:current` as the EL participant.
-        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the cached
-        # base image so the matrix entries differ in exec mode without
-        # invalidating the BuildKit layer cache.
+        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the shared
+        # base image so the matrix entries differ only in exec mode.
         env:
           ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
         run: |
