@@ -38,6 +38,7 @@ import (
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -377,6 +378,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
+	db.leakDetector.SetExtraInfo(db.leakDetectorExtraInfo)
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
 	// copy map to avoid changing global variable
@@ -482,6 +484,32 @@ func (db *MdbxKV) Accede() bool                { return db.opts.HasFlag(mdbx.Acc
 
 func (db *MdbxKV) CHandle() unsafe.Pointer {
 	return db.env.CHandle()
+}
+
+// leakDetectorExtraInfo returns DB size and reclaimable freelist space so the
+// leak detector can log them next to the list of long-living transactions —
+// large reclaimable space is the usual symptom of an RO tx pinning an old snapshot.
+func (db *MdbxKV) leakDetectorExtraInfo() []any {
+	var dbSize, reclaimable uint64
+	err := db.env.View(func(tx *mdbx.Txn) error {
+		info, err := db.env.Info(tx)
+		if err != nil {
+			return err
+		}
+		dbSize = info.Geo.Current
+		st, err := tx.StatDBI(mdbx.DBI(0)) // gc/freelist
+		if err != nil {
+			return err
+		}
+		freelistBytes := (st.LeafPages + st.BranchPages + st.OverflowPages) * db.opts.pageSize.Bytes()
+		// page ids are stored as big-endian uint32 in the freelist, so one entry per 4 bytes
+		reclaimable = (freelistBytes / 4) * db.opts.pageSize.Bytes()
+		return nil
+	})
+	if err != nil {
+		return []any{"db", db.opts.label, "info_err", err}
+	}
+	return []any{"db", db.opts.label, "db_size", common.ByteCount(dbSize), "reclaimable", common.ByteCount(reclaimable)}
 }
 
 // openDBIs - first trying to open existing DBI's in RO transaction

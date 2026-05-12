@@ -35,6 +35,7 @@ type LeakDetector struct {
 	enabled       atomic.Bool
 	slowThreshold atomic.Pointer[time.Duration]
 	autoIncrement atomic.Uint64
+	extraInfo     atomic.Pointer[func() []any]
 
 	list     map[uint64]LeakDetectorItem
 	listLock sync.Mutex
@@ -59,7 +60,11 @@ func NewLeakDetector(name string, slowThreshold time.Duration) *LeakDetector {
 
 		for range logEvery.C {
 			if list := d.slowList(); len(list) > 0 {
-				log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), "list", strings.Join(d.slowList(), ", "))
+				args := []any{"list", strings.Join(list, ", ")}
+				if fn := d.extraInfo.Load(); fn != nil {
+					args = append(args, (*fn)()...)
+				}
+				log.Info(fmt.Sprintf("[dbg.%s] long living resources", name), args...)
 			}
 		}
 	}()
@@ -115,4 +120,15 @@ func (d *LeakDetector) Enabled() bool { return d.enabled.Load() }
 func (d *LeakDetector) SetSlowThreshold(t time.Duration) {
 	d.slowThreshold.Store(&t)
 	d.enabled.Store(t > 0)
+}
+
+// SetExtraInfo attaches a callback whose return value is appended as key/value
+// pairs to the periodic "long living resources" log line. Use it to surface
+// owner-specific context (e.g. MDBX db size, reclaimable space) next to the
+// list of leaked resources.
+func (d *LeakDetector) SetExtraInfo(fn func() []any) {
+	if d == nil {
+		return
+	}
+	d.extraInfo.Store(&fn)
 }
