@@ -175,7 +175,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 
 // SignTx signs the transaction using the given signer and private key.
 func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -185,7 +185,7 @@ func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, erro
 
 // SignNewTx creates a transaction and signs it.
 func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -234,7 +234,7 @@ func (sg Signer) Sender(tx Transaction) (accounts.Address, error) {
 func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (accounts.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
+	signChainID := &sg.chainID // This is reset to nil if txn is unprotected
 	// recoverPlain below will subtract 27 from V
 	switch t := txn.(type) {
 	case *LegacyTx:

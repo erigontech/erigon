@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -150,7 +149,7 @@ func (stx *BlobTx) Hash() common.Hash {
 }
 
 type blobTxSigHash struct {
-	ChainID    *big.Int
+	ChainID    *uint256.Int
 	Nonce      uint64
 	GasTipCap  *uint256.Int
 	GasFeeCap  *uint256.Int
@@ -163,7 +162,7 @@ type blobTxSigHash struct {
 	BlobHashes []common.Hash
 }
 
-func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
+func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{

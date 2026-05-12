@@ -181,7 +181,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	return hash
 }
 
-func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccountAbstractionTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
 		chainID,
 		tx.NonceKey, tx.Nonce,
@@ -565,7 +565,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 		return nil, nil
 	}
 
-	signingHash := tx.SigningHash(chainID)
+	signingHash := tx.SigningHash(uint256.MustFromBig(chainID))
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err
@@ -590,7 +590,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 }
 
 func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
-	signingHash := tx.SigningHash(chainID)
+	signingHash := tx.SigningHash(uint256.MustFromBig(chainID))
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {
 		return nil, err

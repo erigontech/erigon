@@ -21,10 +21,8 @@ package rlp
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 	"reflect"
 	"sync"
@@ -42,8 +40,6 @@ const (
 	LongListCode        = 0xF7 // long list prefix (length 56+)
 	SingleByteThreshold = 0x80 // values below this are encoded as themselves
 )
-
-var ErrNegativeBigInt = errors.New("rlp: cannot encode negative big.Int")
 
 // Encoder is implemented by types that require custom
 // encoding rules or want to encode private fields.
@@ -128,10 +124,6 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 	switch {
 	case typ == rawValueType:
 		return writeRawValue, nil
-	case typ.AssignableTo(reflect.PointerTo(bigInt)):
-		return writeBigIntPtr, nil
-	case typ.AssignableTo(bigInt):
-		return writeBigIntNoPtr, nil
 	case typ == reflect.PointerTo(u256Int):
 		return writeU256IntPtr, nil
 	case typ == u256Int:
@@ -184,28 +176,6 @@ func writeInt(val reflect.Value, w *encBuffer) error {
 
 func writeBool(val reflect.Value, w *encBuffer) error {
 	w.writeBool(val.Bool())
-	return nil
-}
-
-func writeBigIntPtr(val reflect.Value, w *encBuffer) error {
-	ptr := val.Interface().(*big.Int)
-	if ptr == nil {
-		w.str = append(w.str, EmptyStringCode)
-		return nil
-	}
-	if ptr.Sign() == -1 {
-		return ErrNegativeBigInt
-	}
-	w.writeBigInt(ptr)
-	return nil
-}
-
-func writeBigIntNoPtr(val reflect.Value, w *encBuffer) error {
-	i := val.Interface().(big.Int)
-	if i.Sign() == -1 {
-		return ErrNegativeBigInt
-	}
-	w.writeBigInt(&i)
 	return nil
 }
 

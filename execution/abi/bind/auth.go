@@ -24,6 +24,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/types"
@@ -49,7 +51,7 @@ func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*Tr
 			if address != keyAddr {
 				return nil, ErrNotAuthorized
 			}
-			signature, err := crypto.Sign(txn.SigningHash(chainID).Bytes(), key)
+			signature, err := crypto.Sign(txn.SigningHash(uint256.MustFromBig(chainID)).Bytes(), key)
 			if err != nil {
 				return nil, err
 			}

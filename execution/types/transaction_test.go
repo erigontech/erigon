@@ -212,11 +212,11 @@ func TestTransactionEncode(t *testing.T) {
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
 	t.Parallel()
-	if emptyEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
-		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(big.NewInt(1)))
+	if emptyEip2718Tx.SigningHash(uint256.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(uint256.NewInt(1)))
 	}
-	if signedEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
-		t.Errorf("signed EIP-2718 transaction hash mismatch, got %x", signedEip2718Tx.SigningHash(big.NewInt(1)))
+	if signedEip2718Tx.SigningHash(uint256.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+		t.Errorf("signed EIP-2718 transaction hash mismatch, got %x", signedEip2718Tx.SigningHash(uint256.NewInt(1)))
 	}
 }
 
@@ -279,7 +279,7 @@ func TestEIP2930Signer(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		sigHash := test.tx.SigningHash(test.chainID)
+		sigHash := test.tx.SigningHash(uint256.MustFromBig(test.chainID))
 		if sigHash != test.wantSignerHash {
 			t.Errorf("test %d: wrong sig hash: got %x, want %x", i, sigHash, test.wantSignerHash)
 		}
