@@ -189,21 +189,21 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 			// optimistic block candidate
-			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
+			if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
 				return fmt.Errorf("failed to add block to optimistic store: %v", err)
 			}
 		case execution_client.PayloadStatusInvalidated:
 			log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
 			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			// remove from optimistic candidate
-			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
+			if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 				return fmt.Errorf("failed to remove block from optimistic store: %v", err)
 			}
 			return errors.New("block is invalid")
 		case execution_client.PayloadStatusValidated:
 			log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 			// remove from optimistic candidate
-			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
+			if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
 				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
 			}
 			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
