@@ -512,44 +512,6 @@ func EncodeU64(i uint64, w io.Writer, buffer []byte) error {
 	return err
 }
 
-// BigIntLen returns the RLP-encoded length of i.
-func BigIntLen(i *big.Int) int {
-	bitLen := 0 // treat nil as 0
-	if i != nil {
-		bitLen = i.BitLen()
-	}
-	if bitLen < 8 {
-		return 1
-	}
-	// Strictly speaking, +1 is not correct when the number is longer than 55 bytes
-	// (see https://ethereum.org/developers/docs/data-structures-and-encoding/rlp/),
-	// but in practice all our numbers are smaller than that.
-	return 1 + common.BitLenToByteLen(bitLen)
-}
-
-// EncodeBigInt encodes i as an RLP string via w.
-func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
-	bitLen := 0 // treat nil as 0
-	if i != nil {
-		bitLen = i.BitLen()
-	}
-	if bitLen < 8 {
-		if bitLen > 0 {
-			buffer[0] = byte(i.Uint64())
-		} else {
-			buffer[0] = EmptyStringCode
-		}
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-
-	size := common.BitLenToByteLen(bitLen)
-	buffer[0] = EmptyStringCode + byte(size)
-	i.FillBytes(buffer[1 : 1+size])
-	_, err := w.Write(buffer[:1+size])
-	return err
-}
-
 // Uint256Len returns the RLP-encoded length of i.
 func Uint256Len(i uint256.Int) int {
 	bitLen := i.BitLen()

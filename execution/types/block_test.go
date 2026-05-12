@@ -632,8 +632,8 @@ func TestCopyHeader(t *testing.T) {
 	}
 }
 
-func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
-	// Covers an EncodeBigInt() panic that can happen if a malicious peer sends a header with a big.Int with a 32-byte value
+func TestEncodeUint256BufferOverflowPrevention(t *testing.T) {
+	// Covers an EncodeUint256() panic that can happen if a malicious peer sends a header with a uint256 with a 32-byte value
 	// Create a 249-bit base fee value (32 bytes in big-endian)
 	// This is the minimum bit length that requires 32 bytes of storage
 	maliciousBaseFee := new(uint256.Int).Lsh(uint256.NewInt(1), 248) // 2^248, BitLen() = 249
@@ -655,6 +655,6 @@ func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
 		MixDigest:   common.Hash{},
 		Nonce:       BlockNonce{},
 	}
-	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeBigInt() -> panic
+	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeUint256() — make sure this doesn't panic.
 	_ = header.Hash()
 }
