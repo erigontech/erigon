@@ -760,13 +760,17 @@ jobs:
   In-case-of-failure:
     name: "Rollback: remove remote git tag if release did not publish successfully"
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
-    # Run whenever the release did not fully publish — covers failure,
-    # cancellation, and skipped-due-to-upstream cases uniformly.
+    # Run only when publish-release actually ran and did not succeed (failure
+    # or cancellation). Excluding 'skipped' keeps the rollback from firing
+    # when an upstream job (e.g. the tag-already-exists pre-flight in
+    # build-release) failed before publish-release had a chance to push the
+    # tag — otherwise we would delete a pre-existing remote tag.
     if: >-
       always() &&
       inputs.perform_release &&
       inputs.release_version != '' &&
-      needs.publish-release.result != 'success'
+      needs.publish-release.result != 'success' &&
+      needs.publish-release.result != 'skipped'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
