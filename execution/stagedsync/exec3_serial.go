@@ -59,8 +59,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
-	commitEvery := time.NewTicker(5 * time.Second)
-	defer commitEvery.Stop()
+	checkIsBatchFullEvery := time.NewTicker(5 * time.Second)
+	defer checkIsBatchFullEvery.Stop()
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -234,7 +234,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if se.isApplyingBlocks {
 				se.LogExecution()
 			}
-		case <-commitEvery.C:
+		case <-checkIsBatchFullEvery.C:
 			if !se.isApplyingBlocks {
 				break
 			}
