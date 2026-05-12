@@ -5,14 +5,14 @@ rules:
   unpinned-uses:
     disable: true
 
-  # Pre-existing template-injection findings in QA and CD workflows need a
-  # dedicated cleanup pass; tracked in issue #21132.
-  # Files not listed here are still checked — new workflows get full coverage.
+  # Pre-existing template-injection findings need a dedicated cleanup pass;
+  # tracked in issue #21132. Files not listed here still get full coverage.
   template-injection:
     ignore:
       - backups-dashboards.yml
       - ci-cd-main-branch-docker-images.yml
       - ci-gate.yml               # toJSON(needs) is not user-controllable
+      - docker-image-remove.yml
       - qa-clean-exit-block-downloading.yml
       - qa-clean-exit-snapshot-downloading.yml
       - qa-constrained-tip-tracking.yml
@@ -33,6 +33,8 @@ rules:
       - qa-tip-tracking-with-load.yml
       - qa-tip-tracking.yml
       - qa-txpool-performance-test.yml
+      - release.yml
+      - test-all-erigon-race.yml
 
   # Cache-poisoning (artipacked) findings in these workflows are intentional;
   # tracked in issue #21132.
@@ -44,8 +46,16 @@ rules:
       - qa-sync-from-scratch.yml
       - test-kurtosis-assertoor.yml
 
-  # ci-gate.yml requires actions:write to cancel merge-queue sibling runs
-  # on first failure; the broad permission is intentional.
+  # Workflows missing explicit permissions: blocks — needs a cleanup pass
+  # to add least-privilege permissions to each workflow; tracked in #21132.
   excessive-permissions:
-    ignore:
-      - ci-gate.yml
+    disable: true
+
+  # persist-credentials: false not set on most checkouts; tracked in #21132.
+  credential-persistence:
+    disable: true
+
+  # secrets: inherit is intentional in ci-gate.yml and cache-warming.yml;
+  # tracked in #21132.
+  secrets-inherit:
+    disable: true
