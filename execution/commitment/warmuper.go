@@ -46,6 +46,12 @@ type WarmupConfig struct {
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
 
+// warmupTxMaxAge caps how long a single warmup worker holds an RO tx.
+// Long-lived warmup RO txs pin the aggregator snapshot, preventing MDBX
+// from reclaiming retired pages and growing the freelist into the
+// tens-of-GB range on high-churn chains (e.g. bloatnet commitment rebuild).
+const warmupTxMaxAge = 30 * time.Second
+
 // WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
 	KeysProcessed uint64
@@ -171,9 +177,12 @@ func (w *Warmuper) Start() {
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
 			trieCtx, cleanup := w.ctxFactory()
-			if cleanup != nil {
-				defer cleanup()
-			}
+			txStarted := time.Now()
+			defer func() {
+				if cleanup != nil {
+					cleanup()
+				}
+			}()
 
 			for {
 				select {
@@ -182,6 +191,15 @@ func (w *Warmuper) Start() {
 				case item, ok := <-w.work:
 					if !ok {
 						return nil
+					}
+					// Rotate the RO tx before processing the next key so we don't
+					// pin the aggregator snapshot across many minutes of RW churn.
+					if time.Since(txStarted) >= warmupTxMaxAge {
+						if cleanup != nil {
+							cleanup()
+						}
+						trieCtx, cleanup = w.ctxFactory()
+						txStarted = time.Now()
 					}
 					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 					w.keysProcessed.Add(1)
