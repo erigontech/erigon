@@ -96,6 +96,21 @@ func PreloadContractTrunkParallel(
 		// defensively — it's a few k entries / wave, cheap.
 		sort.Slice(frontier, func(i, j int) bool { return bytes.Compare(frontier[i].key, frontier[j].key) < 0 })
 
+		// Cap the wave's *fetch* at what the remaining budget can possibly
+		// absorb (minEntryBytes is a true lower bound on a pinned entry's cost,
+		// so this never under-fetches and the budget is guaranteed exhausted
+		// inside the wave). Without it, a wide budget-truncated wave — depth 69
+		// is ~1.3M keys but only ~20k fit — would issue >1M file lookups to pin
+		// a tiny fraction, and that over-fetch races the next block.
+		const minEntryBytes = estimatedEntryOverheadBytes + 33 // 33 = shortest compact key at depth >= 64; value >= 0 bytes
+		truncatedByBudget := false
+		if remaining := ramBudgetBytes - usedBytes; remaining > 0 {
+			if maxFetch := remaining/minEntryBytes + 1; maxFetch < len(frontier) {
+				frontier = frontier[:maxFetch]
+				truncatedByBudget = true
+			}
+		}
+
 		keys := make([][]byte, len(frontier))
 		for i := range frontier {
 			keys[i] = frontier[i].key
@@ -144,6 +159,9 @@ func PreloadContractTrunkParallel(
 				childPath[len(pk.path)] = byte(n)
 				next = append(next, toPathKey(childPath))
 			}
+		}
+		if truncatedByBudget {
+			budgetHit = true // belt-and-braces: the wave was sized to exhaust the budget
 		}
 		frontier = next
 	}

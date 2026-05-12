@@ -230,6 +230,45 @@ func TestPreloadParallel_NotFoundStopsDescent(t *testing.T) {
 	}
 }
 
+func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
+	// A wide wave (root with all 16 children) under a tiny budget: the depth-65
+	// fetch must be capped well below the wave width — otherwise a budget-
+	// truncated wide wave (depth 69 on the real workload is ~1.3M keys) would
+	// fetch the whole thing to pin a handful.
+	hash := make([]byte, 32)
+	for i := range hash {
+		hash[i] = 0x55
+	}
+	root := string(hexNibbles(hash))
+	tree := syntheticTree{root: 0xffff}
+	for n := 0; n < 16; n++ {
+		tree[root+string([]byte{byte(n)})] = 0 // 16 depth-65 leaves
+	}
+	const valSz = 100
+	entry := estimatedEntryOverheadBytes + len(nibbles.HexToCompact([]byte(root))) + valSz
+	budget := 3*entry + 50 // ~3 entries
+
+	maxBatch := 0
+	base := fakeResolver(tree, nil, valSz, "")
+	resolve := func(keys [][]byte) ([][]byte, error) {
+		if len(keys) > maxBatch {
+			maxBatch = len(keys)
+		}
+		return base(keys)
+	}
+	c := NewBranchCache(64)
+	n, err := PreloadContractTrunkParallel(hash, budget, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n < 1 || n > 3 {
+		t.Fatalf("pinned %d, expected 1..3 for a ~3-entry budget", n)
+	}
+	if maxBatch > 6 {
+		t.Fatalf("depth-65 wave (width 16) should have been capped to ~remaining/minEntryBytes; resolver saw a batch of %d", maxBatch)
+	}
+}
+
 func TestPreloadParallel_ResolverError(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	root := ""
