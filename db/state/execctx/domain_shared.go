@@ -25,6 +25,7 @@ import (
 	"math"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1115,28 +1116,109 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 		return
 	}
 	go func() {
-		tx, err := db.BeginTemporalRo(ctx)
-		if err != nil {
-			logger.Warn("[trunk-preload] BeginTemporalRo failed", "err", err)
-			return
+		// PIN_TRUNK_PARALLEL (default on): the parallel file-only wave-BFS
+		// (PreloadContractTrunkParallel). =false falls back to the per-prefix
+		// BFS via tx.GetLatest. Worker txs: each goroutine MUST use its own
+		// tx — MDBX cursors aren't concurrent-safe under one tx (cgo "unpinned
+		// Go pointer" panic). Reads here go via the file layer only
+		// (DebugGetLatestFromFiles): no MDBX cursor, no per-key cgo crossing,
+		// and values are already dereferenced. Correct for the from-cold-
+		// snapshot trigger path (MDBX holds nothing for the subtree).
+		parallel := dbg.EnvBool("PIN_TRUNK_PARALLEL", true)
+		nWorkers := runtime.GOMAXPROCS(0)
+		if nWorkers < 1 {
+			nWorkers = 1
 		}
-		defer tx.Rollback()
-		// Read directly via tx.GetLatest — no SharedDomains wrap.
-		// SD's GetLatest layers in sd.mem / parent.mem checks that
-		// (a) we don't need (the trunk hasn't been written yet in this
-		// goroutine's tx), and (b) would risk re-introducing the
-		// shared-cursor problem.
+		if nWorkers > 16 {
+			nWorkers = 16
+		}
+		if !parallel {
+			nWorkers = 1
+		}
+		txs := make([]kv.TemporalTx, 0, nWorkers)
+		for i := 0; i < nWorkers; i++ {
+			t, err := db.BeginTemporalRo(ctx) //nolint:gocritic // collected into txs; all rolled back via the defer below
+			if err != nil {
+				for _, t := range txs {
+					t.Rollback()
+				}
+				logger.Warn("[trunk-preload] BeginTemporalRo failed", "worker", i, "err", err)
+				return
+			}
+			txs = append(txs, t)
+		}
+		defer func() {
+			for _, t := range txs {
+				t.Rollback()
+			}
+		}()
+
 		reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-			v, step, err := tx.GetLatest(kv.CommitmentDomain, prefix)
+			v, step, err := txs[0].GetLatest(kv.CommitmentDomain, prefix)
 			if err != nil {
 				return nil, 0, false, err
 			}
 			return v, uint64(step), len(v) > 0, nil
 		}
+
+		resolve := func(keys [][]byte) ([][]byte, error) {
+			n := len(keys)
+			vals := make([][]byte, n)
+			if n == 0 {
+				return vals, nil
+			}
+			nw := nWorkers
+			if nw > n {
+				nw = n
+			}
+			chunk := (n + nw - 1) / nw
+			var wg sync.WaitGroup
+			var mu sync.Mutex
+			var firstErr error
+			for w := 0; w < nw; w++ {
+				lo, hi := w*chunk, (w+1)*chunk
+				if hi > n {
+					hi = n
+				}
+				if lo >= hi {
+					break
+				}
+				wg.Add(1)
+				go func(t kv.TemporalTx, lo, hi int) {
+					defer wg.Done()
+					d := t.Debug()
+					for i := lo; i < hi; i++ {
+						v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, keys[i], 0)
+						if err != nil {
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = err
+							}
+							mu.Unlock()
+							return
+						}
+						if found {
+							vc := make([]byte, len(v))
+							copy(vc, v)
+							vals[i] = vc
+						}
+					}
+				}(txs[w], lo, hi)
+			}
+			wg.Wait()
+			return vals, firstErr
+		}
+
 		for i, h := range hashes {
 			started := time.Now()
-			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h))
-			n, err := commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
+			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h), "parallel", parallel, "workers", nWorkers)
+			var n int
+			var err error
+			if parallel {
+				n, err = commitment.PreloadContractTrunkParallel(h, ramBudgetBytes, resolve, branchCache, logger)
+			} else {
+				n, err = commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
+			}
 			took := time.Since(started)
 			if err != nil {
 				logger.Warn("[trunk-preload] failed",
