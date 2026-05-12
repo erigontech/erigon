@@ -2,7 +2,7 @@
 ETL
 ===
 
-ETL framework is most commonly used in [staged sync](../../eth/stagedsync).
+ETL framework is most commonly used in [staged sync](https://github.com/erigontech/erigon/tree/main/execution/stagedsync).
 
 It implements a pattern where we extract some data from a database, transform it,
 then put it into temp files and insert back to the database in sorted order.
@@ -125,7 +125,7 @@ function.
 ======================
 
 If you want a more modular behaviour instead of just reading from the DB (like
-generating intermediate hashes in https://github.com/erigontech/erigon/blob/master/core/chain_makers.go, you can use
+generating intermediate hashes in https://github.com/erigontech/erigon/blob/main/execution/tests/blockgen/chain_makers.go, you can use
 `etl.Collector` struct directly.
 
 It has a `.Collect()` method that you can provide your data to.
