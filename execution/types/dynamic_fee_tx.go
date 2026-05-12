@@ -276,7 +276,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
-		to = accounts.NilAddress
+		to = accounts.ZeroAddress
 	} else {
 		to = accounts.InternAddress(*tx.To)
 	}
@@ -374,13 +374,13 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 
 func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
-	if s.IsNil() {
+	if s.IsZero() {
 		return sender, false
 	}
 	return s, true
 }
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
+	if from := tx.from; !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

@@ -362,7 +362,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var txTo accounts.Address
 	if tx.To == nil {
-		txTo = accounts.NilAddress
+		txTo = accounts.ZeroAddress
 	} else {
 		txTo = accounts.InternAddress(*tx.To)
 	}
@@ -462,17 +462,16 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 
 func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
-	if s.IsNil() {
+	if s.IsZero() {
 		return sender, false
 	}
 	return s, true
 }
 
 func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() {
-		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
-			return from, nil
-		}
+	if from := tx.from; !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 
 	addr, err := signer.Sender(tx)

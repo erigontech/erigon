@@ -18,60 +18,46 @@ package accounts
 
 import (
 	"fmt"
-	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 )
 
-type Address unique.Handle[common.Address]
+type Address common.Address
 
 var ZeroAddress = InternAddress(common.Address{})
 var NilAddress = Address{}
 
 func InternAddress(a common.Address) Address {
-	return Address(unique.Make(a))
+	return Address(a)
 }
 
 func (a Address) IsNil() bool {
-	return a == NilAddress
+	return false
 }
 
 func (a Address) IsZero() bool {
-	return a == NilAddress || a == ZeroAddress
+	return common.Address(a) == (common.Address{})
 }
 
 func (a Address) Value() common.Address {
-	if a == NilAddress {
-		return common.Address{}
-	}
-	return unique.Handle[common.Address](a).Value()
+	return common.Address(a)
 }
 
-func (a Address) Handle() unique.Handle[common.Address] {
-	return unique.Handle[common.Address](a)
+func (a Address) Handle() common.Address {
+	return a.Value()
 }
 
 func (a Address) String() string {
-	if a == NilAddress {
-		return "<nil>"
-	}
 	return a.Value().String()
 }
 
 func (a Address) Format(s fmt.State, c rune) {
-	if a == NilAddress {
-		s.Write([]byte("<nil>"))
-		return
-	}
 	a.Value().Format(s, c)
 }
 
 // MarshalText returns the hex representation of a.
 func (a Address) MarshalText() ([]byte, error) {
-	if a.IsNil() {
-		return nil, nil
-	}
 	return a.Value().MarshalText()
 }
 
@@ -96,128 +82,73 @@ func (a *Address) UnmarshalJSON(input []byte) error {
 }
 
 func (a Address) Cmp(o Address) int {
-	switch {
-	case a == NilAddress:
-		switch {
-		case o == NilAddress:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilAddress:
-		return +1
-	}
-
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+type StorageKey common.Hash
 
 var ZeroKey = InternKey(common.Hash{})
 var NilKey = StorageKey{}
 
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	return StorageKey(k)
 }
 
 func (k StorageKey) IsNil() bool {
-	return k == NilKey
+	return false
 }
 
 func (k StorageKey) Value() common.Hash {
-	if k == NilKey {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](k).Value()
+	return common.Hash(k)
 }
 
 func (k StorageKey) String() string {
-	if k == NilKey {
-		return "<nil>"
-	}
 	return k.Value().String()
 }
 
 func (k StorageKey) Format(s fmt.State, c rune) {
-	if k == NilKey {
-		s.Write([]byte("<nil>"))
-		return
-	}
 	k.Value().Format(s, c)
 }
 
 func (k StorageKey) Cmp(o StorageKey) int {
-	switch {
-	case k == NilKey:
-		switch {
-		case o == NilKey:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilKey:
-		return +1
-	}
-
 	return k.Value().Cmp(o.Value())
 }
 
-type CodeHash unique.Handle[common.Hash]
+type CodeHash common.Hash
 
 var ZeroCodeHash = InternCodeHash(common.Hash{})
 var NilCodeHash = CodeHash{}
 var EmptyCodeHash = InternCodeHash(empty.CodeHash)
 
 func InternCodeHash(k common.Hash) CodeHash {
-	return CodeHash(unique.Make(k))
+	return CodeHash(k)
 }
 
 func (h CodeHash) IsNil() bool {
-	return h == NilCodeHash
+	return false
 }
 
 func (h CodeHash) IsEmpty() bool {
-	return h == EmptyCodeHash || h == ZeroCodeHash || h == NilCodeHash
+	value := common.Hash(h)
+	return value == empty.CodeHash || value == (common.Hash{})
 }
 
 func (h CodeHash) IsZero() bool {
-	return h == NilCodeHash || h == ZeroCodeHash
+	return common.Hash(h) == (common.Hash{})
 }
 
 func (h CodeHash) Value() common.Hash {
-	if h == NilCodeHash {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](h).Value()
+	return common.Hash(h)
 }
 
 func (h CodeHash) String() string {
-	if h == NilCodeHash {
-		return "<nil>"
-	}
 	return h.Value().String()
 }
 
 func (h CodeHash) Format(s fmt.State, c rune) {
-	if h == NilCodeHash {
-		s.Write([]byte("<nil>"))
-		return
-	}
 	h.Value().Format(s, c)
 }
 
 func (h CodeHash) Cmp(o CodeHash) int {
-	switch {
-	case h == NilCodeHash:
-		switch {
-		case o == NilCodeHash:
-			return 0
-		default:
-			return -1
-		}
-	case o == NilCodeHash:
-		return +1
-	}
-
 	return h.Value().Cmp(o.Value())
 }

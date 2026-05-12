@@ -879,7 +879,7 @@ func (m callMsg) CheckNonce() bool       { return false }
 func (m callMsg) CheckTransaction() bool { return false }
 func (m callMsg) To() accounts.Address {
 	if m.CallMsg.To == nil {
-		return accounts.NilAddress
+		return accounts.ZeroAddress
 	}
 	return accounts.InternAddress(*m.CallMsg.To)
 }

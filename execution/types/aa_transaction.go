@@ -209,7 +209,7 @@ func (tx *AccountAbstractionTransaction) payloadSize() (payloadSize, accessListL
 	payloadSize += rlp.U64Len(tx.Nonce)
 
 	payloadSize++
-	if !tx.SenderAddress.IsNil() {
+	if !tx.SenderAddress.IsZero() {
 		payloadSize += 20
 	}
 
@@ -293,7 +293,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	var senderAddress *common.Address
-	if !tx.SenderAddress.IsNil() {
+	if !tx.SenderAddress.IsZero() {
 		senderValue := tx.SenderAddress.Value()
 		senderAddress = &senderValue
 

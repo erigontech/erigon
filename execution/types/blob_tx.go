@@ -69,7 +69,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var stxTo accounts.Address
 	if stx.To == nil {
-		stxTo = accounts.NilAddress
+		stxTo = accounts.ZeroAddress
 	} else {
 		stxTo = accounts.InternAddress(*stx.To)
 	}
@@ -108,14 +108,14 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 
 func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
 	s := stx.from
-	if s.IsNil() {
+	if s.IsZero() {
 		return sender, false
 	}
 	return s, true
 }
 
 func (stx *BlobTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := stx.from; !from.IsNil() && !from.IsZero() {
+	if from := stx.from; !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

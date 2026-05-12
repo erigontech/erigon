@@ -85,7 +85,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			AuthorizationsLen:  authorizationsLen,
 			AccessListLen:      uint64(len(msg.AccessList())),
 			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
-			IsContractCreation: msg.To().IsNil(),
+			IsContractCreation: msg.To().IsZero(),
 			IsEIP2:             rules.IsHomestead,
 			IsEIP2028:          rules.IsIstanbul,
 			IsEIP3860:          rules.IsShanghai,

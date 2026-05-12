@@ -520,7 +520,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		if receipt.Status == types.ReceiptStatusFailed {
 			log.Debug("[replayBlock] skipping transaction because it has status=failed", "transactionHash", txn.Hash())
 
-			contractCreation := msg.To().IsNil()
+			contractCreation := msg.To().IsZero()
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())

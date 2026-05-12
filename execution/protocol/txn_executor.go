@@ -178,7 +178,7 @@ func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResul
 
 // to returns the recipient of the message.
 func (st *TxnExecutor) to() accounts.Address {
-	if st.msg == nil || st.msg.To().IsNil() /* contract creation */ {
+	if st.msg == nil || st.msg.To().IsZero() {
 		return accounts.ZeroAddress
 	}
 	return st.msg.To()
@@ -369,7 +369,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	msg := st.msg
 	sender := msg.From()
-	contractCreation := msg.To().IsNil()
+	contractCreation := msg.To().IsZero()
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
@@ -503,7 +503,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	msg := st.msg
 	sender := msg.From()
-	contractCreation := msg.To().IsNil()
+	contractCreation := msg.To().IsZero()
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 	auths := msg.Authorizations()
 

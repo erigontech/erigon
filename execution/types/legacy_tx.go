@@ -85,7 +85,7 @@ func (ct *CommonTx) GetData() []byte {
 }
 
 func (ct *CommonTx) GetSender() (accounts.Address, bool) {
-	if sc := ct.from; !sc.IsNil() {
+	if sc := ct.from; !sc.IsZero() {
 		return sc, true
 	}
 	return accounts.NilAddress, false
@@ -313,7 +313,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
-		to = accounts.NilAddress
+		to = accounts.ZeroAddress
 	} else {
 		to = accounts.InternAddress(*tx.To)
 	}
@@ -415,13 +415,13 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 
 func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
-	if s.IsNil() {
+	if s.IsZero() {
 		return sender, false
 	}
 	return s, true
 }
 func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
-	if from := tx.from; !from.IsNil() && !from.IsZero() {
+	if from := tx.from; !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer
 		return from, nil
 	}

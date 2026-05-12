@@ -293,7 +293,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header) (result []byte, err error) {
 	msg := types.NewMessage(
 		contract,
-		accounts.NilAddress, // to
+		accounts.ZeroAddress, // to
 		0, &u256.Num0,
 		SysCallGasLimit,
 		&u256.Num0,

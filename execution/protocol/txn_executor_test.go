@@ -167,7 +167,7 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 	// Initcode = STOP (0x00): creates account, deploys no code.
 	evm1 := newAmsterdamEVM(ibs, blockGasLimit)
 	msg1 := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), 200_000,
+		sender, accounts.ZeroAddress, 0, uint256.NewInt(0), 200_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		[]byte{0x00}, nil,
 		false, // checkNonce

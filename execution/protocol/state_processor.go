@@ -173,7 +173,7 @@ func MakeReceipt(
 		receipt.BlobGasUsed = txn.GetBlobGas()
 	}
 	// If the transaction created a contract, store the creation address in the receipt.
-	if msg.To().IsNil() {
+	if msg.To().IsZero() {
 		receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 	}
 	// Set the receipt logs and create a bloom for filtering
