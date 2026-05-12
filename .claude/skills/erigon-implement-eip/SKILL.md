@@ -115,11 +115,15 @@ Run local tests using the `/erigon-test-all` skill. Analyse and fix any failures
 
 The most important tests when implementing a new EIP for the EL are the EEST spec test shards, exercised by the `cmd/evm` runners (`statetest`, `blocktest`, `enginextest`) via the Makefile targets:
 
-- `make eest-spec-statetests-devnet` / `…-stable` — state-tests against the devnet/stable EEST fixtures
-- `make eest-spec-blocktests-devnet` / `…-stable` — blockchain-tests against the devnet/stable EEST fixtures
-- `make eest-spec-enginextests-devnet` / `…-stable` / `…-benchmark` — engine-x tests against devnet/stable/benchmark EEST fixtures
+- `make eest-spec-statetests-stable` / `…-devnet` — state-tests against the stable/devnet EEST fixtures
+- `make eest-spec-blocktests-stable` / `…-devnet` — blockchain-tests against the stable/devnet EEST fixtures
+- `make eest-spec-enginextests-stable` — engine-x tests against the stable EEST fixtures (no devnet variant: the devnet tarball doesn't yet ship `blockchain_tests_engine_x/`)
+- `make eest-spec-enginextests-benchmark-1m` / `-5m` / `-10m` / `-30m` / `-60m` / `-100m` / `-150m` — engine-x tests against the per-gas-target benchmark fixtures, with `--time` per-test stats
+- `make eest-spec-blocktests-stable-race-{pre-cancun,cancun,prague,osaka}` and `make eest-spec-blocktests-devnet-race-amsterdam` — race-detector variants split by fork
 
-For an EIP on a hardfork under development, the **`-devnet`** shards are the primary signal; the `-stable` and `-benchmark` shards are regression checks against prior hardforks.
+See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the authoritative list.
+
+For an EIP on a hardfork under development, the **`-devnet`** shards are the primary signal; the `-stable` shards (and `-benchmark-*` shards, where applicable) are regression checks against prior hardforks.
 
 ### Where the test fixtures come from
 
