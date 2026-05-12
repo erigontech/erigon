@@ -276,9 +276,26 @@ EEST_SPEC_SHARDS := \
 	enginextests-benchmark-100m \
 	enginextests-benchmark-150m
 
-.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
+# Race-detector variants of blocktest shards, sharded per fork via --run regex
+# so each sub-shard fits under ~30 min. Use a separately-built evm.race binary
+# so non-race shards stay fast and these can run alongside.
+EEST_SPEC_RACE_SHARDS := \
+	blocktests-stable-race-pre-cancun \
+	blocktests-stable-race-cancun \
+	blocktests-stable-race-prague \
+	blocktests-stable-race-osaka \
+	blocktests-devnet-race-amsterdam
+
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
+
+evm.race:
+	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
+
 $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
-	@bash tools/run-eest-spec-test.sh $(subst -, ,$*)
+	@bash tools/run-eest-spec-test.sh "$*"
+
+$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
+	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
