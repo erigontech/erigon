@@ -27,6 +27,9 @@
 #                                              detection doesn't fire.
 #   blocktests-devnet-race-amsterdam           race-detector variant filtered
 #                                              to the Amsterdam fork only.
+#   *-parallel                                  any of the above with "-parallel"
+#                                              appended sets ERIGON_EXEC3_PARALLEL=true
+#                                              from the manifest entry.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -57,20 +60,31 @@ case "$shard" in
 	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
 
-# Resolve workers + failure budget from the single-source manifest. Both this
-# script and the test-eest-spec.yml load-matrix job read tools/eest-spec-shards.json,
-# so adding a shard / tweaking a budget is a one-file edit.
+# Resolve workers + failure budget + exec3-parallel flag from the single-source
+# manifest. Both this script and the test-eest-spec.yml load-matrix job read
+# tools/eest-spec-shards.json, so adding a shard / tweaking a budget is a
+# one-file edit.
 manifest=tools/eest-spec-shards.json
-budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")"' "$manifest")
+budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"' "$manifest")
 if [[ -z "$budget_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2
 fi
-IFS=$'\t' read -r default_workers default_max <<<"$budget_row"
+IFS=$'\t' read -r default_workers default_max exec3_parallel <<<"$budget_row"
+if [[ "$exec3_parallel" == "true" ]]; then
+	export ERIGON_EXEC3_PARALLEL=true
+fi
 
-# Per-shard structural config (cmd / fixture path / extra CLI flags).
+# Strip "-parallel" suffix for case-arm routing — the parallel variant has the
+# same fixture path / regex as the non-parallel parent shard; only the
+# ERIGON_EXEC3_PARALLEL env var differs.
+shard_route="${shard%-parallel}"
+
+# Per-shard structural config (cmd / fixture path / extra CLI flags). Match
+# against shard_route so "-parallel" variants reuse the same arm as their
+# non-parallel parent.
 extra=()
-case "$shard" in
+case "$shard_route" in
 	statetests-stable | statetests-devnet)
 		cmd=statetest;   path="$base/state_tests" ;;
 	blocktests-stable | blocktests-devnet)
@@ -90,13 +104,15 @@ case "$shard" in
 		cmd=enginextest; path="$base/blockchain_tests_engine_x"
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
 	enginextests-benchmark-*)
-		# Per-gas-target shard: "...-1m" → for_osaka_at_0001M/, etc.
-		gas="${shard##*-}"; gas_num="${gas%m}"
+		# Per-gas-target shard: "...-1m" → for_osaka_at_0001M/, etc. Use
+		# shard_route (with any "-parallel" suffix stripped) so the parallel
+		# variants resolve to the same gas-target subdir.
+		gas="${shard_route##*-}"; gas_num="${gas%m}"
 		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
 		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
-	*) echo "unknown shard: $shard" >&2; exit 2 ;;
+	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
 
 workers="${EEST_SPEC_WORKERS:-$default_workers}"
@@ -142,8 +158,14 @@ echo "tmpdir:  $TMPDIR"
 echo "max-allowed-failures: $max"
 
 # Don't fail on non-zero — the runners report all results via JSON regardless,
-# and we want to inspect the JSON to drive the pass/fail decision.
-"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$result_file" || true
+# and we want to inspect the JSON to drive the pass/fail decision. The grep
+# filter strips any init-time log lines (e.g. dbg.envLookup's "[WARN] [env]"
+# message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm sets the log
+# handler, and the default log handler writes to stdout) so jq sees only JSON.
+raw_file=$(mktemp)
+"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || true
+grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$result_file"
+rm -f "$raw_file"
 
 total=$(jq 'length' "$result_file")
 failed=$(jq '[.[] | select(.pass == false)] | length' "$result_file")
