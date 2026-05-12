@@ -326,9 +326,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	header := block.HeaderNoCopy()
 
-	// Build the BlockContext early so we can derive chain.Rules for AsMessage
-	// (which validates tx-type-vs-fork before we have an EVM) and later reuse
-	// the same context for the EVM itself.
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	blockContext.GetHash = vmTestBlockHash
 	if baseFee != nil {
@@ -405,9 +402,10 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return statedb, preRoot, gasUsed, err
 	}
 
-	// Coinbase touch — only on a successful apply. On pre-EIP-158 forks a stray
-	// touch creates an empty account that never gets pruned, breaking the
-	// post-state root the fixture expects for an unapplied tx.
+	// Add 0-value mining reward. This only makes a difference in the cases
+	// where the coinbase self-destructed or the tx didn't pay any fees; in
+	// those cases the coinbase isn't otherwise created and needs to be
+	// touched. Matches go-ethereum's state-test runner.
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
