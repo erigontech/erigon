@@ -24,6 +24,16 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v4
+        with:
+          # Only cache the .tar.gz; the extracted dir is recreated by
+          # tools/test-fixtures.sh on each run from the cached tarball.
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
+
       - name: test-integration-caplin
         run: |
           cd cl/spectest
@@ -59,6 +69,14 @@ jobs:
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v4
+        with:
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
 
       - name: test-integration-caplin
         run: |

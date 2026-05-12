@@ -177,16 +177,6 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 	return err
 }
 
-// Execute runs the payload execution for a test (NewPayload + FCU)
-// without any tester setup. The tester must already exist.
-func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
-	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
-	if err != nil {
-		return err
-	}
-	return extr.execute(ctx, tester, test)
-}
-
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	for _, newPayload := range test.NewPayloads {
 		err := processNewPayload(ctx, tester, newPayload)
