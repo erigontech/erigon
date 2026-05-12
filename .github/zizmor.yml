@@ -52,7 +52,7 @@ rules:
     disable: true
 
   # persist-credentials: false not set on most checkouts; tracked in #21132.
-  credential-persistence:
+  overprovisioned-secrets:
     disable: true
 
   # secrets: inherit is intentional in ci-gate.yml and cache-warming.yml;

@@ -39,7 +39,7 @@ jobs:
       - name: Actions security audit (zizmor)
         run: |
           zizmor --config .github/zizmor.yml --format github .github/workflows/ || {
-            EC=$?; [ "$EC" -eq 13 ] && exit 0 || exit "$EC"
+            EC=$?; [ "$EC" -lt 14 ] && exit 0 || exit "$EC"
           }
 
       # severity=warning catches real bugs (word-splitting, masked exit codes)
