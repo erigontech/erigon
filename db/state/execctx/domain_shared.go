@@ -1209,13 +1209,64 @@ func triggerTrunkPreload(ctx context.Context, branchCache *commitment.BranchCach
 			return vals, firstErr
 		}
 
+		// dbPrefetch: phase 1 — pull the contract's MDBX-resident commitment
+		// branches (the freshest values: recently rewritten, not yet flushed to
+		// files) into an in-memory map via one range cursor per parity range, so
+		// the parallel wave-BFS resolves them from memory and the file layer is
+		// authoritative only for the keys MDBX doesn't have. The DupSort
+		// valsTable dups are invertedStep||value (latest first), so Seek +
+		// NextNoDup walks the latest value per key. Bounded by ramBudgetBytes;
+		// on a from-cold-snapshot start this finds nothing.
+		dbPrefetch := func(h []byte) map[string][]byte {
+			m := map[string][]byte{}
+			c, cerr := txs[0].CursorDupSort(kv.TblCommitmentVals)
+			if cerr != nil {
+				logger.Warn("[trunk-preload] phase-1 CursorDupSort failed", "err", cerr)
+				return m
+			}
+			defer c.Close()
+			evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(h))
+			bytesBudget := ramBudgetBytes
+			scanRange := func(from, to []byte) error {
+				for k, v, err := c.Seek(from); k != nil; k, v, err = c.NextNoDup() {
+					if err != nil {
+						return err
+					}
+					if bytes.Compare(k, to) >= 0 {
+						break
+					}
+					if len(v) < 8 {
+						continue
+					}
+					val := common.Copy(v[8:])
+					m[string(common.Copy(k))] = val
+					if bytesBudget -= len(val) + 8; bytesBudget <= 0 {
+						return nil
+					}
+				}
+				return nil
+			}
+			if err := scanRange(evenFrom, evenTo); err != nil {
+				logger.Warn("[trunk-preload] phase-1 even-range scan", "err", err)
+			} else if bytesBudget > 0 {
+				if err := scanRange(oddFrom, oddTo); err != nil {
+					logger.Warn("[trunk-preload] phase-1 odd-range scan", "err", err)
+				}
+			}
+			return m
+		}
+
 		for i, h := range hashes {
 			started := time.Now()
 			logger.Info("[trunk-preload] contract starting", "i", i, "hash", hex.EncodeToString(h), "parallel", parallel, "workers", nWorkers)
 			var n int
 			var err error
 			if parallel {
-				n, err = commitment.PreloadContractTrunkParallel(h, ramBudgetBytes, resolve, branchCache, logger)
+				dbBranches := dbPrefetch(h)
+				if len(dbBranches) > 0 {
+					logger.Info("[trunk-preload] phase-1 db prefetch", "hash", hex.EncodeToString(h), "db_branches", len(dbBranches))
+				}
+				n, err = commitment.PreloadContractTrunkParallel(h, ramBudgetBytes, dbBranches, resolve, branchCache, logger)
 			} else {
 				n, err = commitment.PreloadContractTrunk(h, ramBudgetBytes, reader, branchCache, logger)
 			}
