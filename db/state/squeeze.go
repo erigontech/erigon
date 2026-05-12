@@ -865,6 +865,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
+
+	if existing := acRo.TxNumsInFiles(kv.CommitmentDomain); existing > 0 {
+		skipped := 0
+		for _, r := range ranges {
+			if existing >= r.to {
+				skipped++
+			}
+		}
+		logger.Info("[commitment_rebuild] resume: existing commitment files cover up to txNum",
+			"txNum", existing, "rangesToSkip", skipped, "rangesTotal", len(ranges))
+	}
+
 	start := time.Now()
 
 	// rebuild trie config: drives both the per-shard step cap below and the SharedDomains
@@ -983,7 +995,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
-			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
 			if concurrent {
 				domains.EnableParaTrieDB(rwDb)
 			}
@@ -1092,7 +1104,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
-		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.Fullpaths()))
+		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.String()))
 
 	sf := time.Now()
 	var processed uint64

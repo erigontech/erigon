@@ -18,6 +18,7 @@ package rpchelper
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/c2h5oh/datasize"
 
@@ -60,9 +61,16 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	baseBlockNum uint64,
 	deltaComputation func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error),
 ) ([]byte, error) {
-	// Prepare a temporary data storage for commitment replay computation
+	// Prepare a temporary data storage for commitment replay computation.
+	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
+	// so a 2 TB reservation immediately exhausts the pagefile. On Linux/macOS the reservation
+	// is backed by sparse files with copy-on-write, so 2 TB is harmless.
+	mapSize := 2 * datasize.TB
+	if runtime.GOOS == "windows" {
+		mapSize = 1 * datasize.GB
+	}
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(nil, r.dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(nil, r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)

@@ -70,6 +70,12 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	sdc.paraTrieDB = db
 }
 
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// It requires a DB to be set by calling EnableParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
+	sdc.trieWarmup = trieWarmup
+}
+
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, branch updates from Process() are stored as a pending update
 // instead of being applied inline. Used during fork validation where the update is
@@ -89,6 +95,15 @@ func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.Pendi
 // SetPendingUpdate sets the pending update (used during Merge to transfer from another context).
 func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.PendingCommitmentUpdate) {
 	sdc.pendingUpdate = upd
+}
+
+// PeekPendingUpdate returns the current pending update without taking ownership.
+// Returns nil if no pending update is set. Used by the parallel commitment
+// calculator to annotate the pending update with the block hash after a
+// per-block ComputeCommitment, so the next FlushPendingUpdates can route to
+// the exact (BlockNum, BlockHash) past changeset.
+func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.PendingCommitmentUpdate {
+	return sdc.pendingUpdate
 }
 
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
@@ -129,14 +144,31 @@ func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateRead
 	sdc.SetStateReader(stateReader)
 }
 
-// SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
-}
-
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
+}
+
+// SetCapture enables/disables trie operation capture for diagnosis.
+func (sdc *SharedDomainsCommitmentContext) SetCapture(capture []string) {
+	sdc.patriciaTrie.SetCapture(capture)
+}
+
+// GetUpdates returns the current updates buffer. Used by the commitment
+// calculator to swap in its accumulated touches.
+func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
+	return sdc.updates
+}
+
+// SetUpdates replaces the updates buffer. Used by the commitment calculator
+// to install its accumulated touches before calling ComputeCommitment.
+func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
+	sdc.updates = updates
+}
+
+// EnableWarmupCache enables/disables warmup cache during commitment processing.
+func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
+	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
 // ClearWarmupCache discards any stale account/storage values held in the active
@@ -208,6 +240,9 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
 	if sdc.updates.Mode() == commitment.ModeDisabled {
 		return
+	}
+	if dbg.TraceTouchKey {
+		fmt.Printf("TOUCHKEY %s key=%x val=%x\n", d, key, val)
 	}
 
 	switch d {
@@ -614,10 +649,17 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
-		txNum = uint64(0)
-		if blockNum > 0 {
-			txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
-		}
+		// blockNum=0 means genesis (block 0) executed — NOT "no progress".
+		// The "no progress" case is len(bnBytes)==0 (no SyncStageProgress
+		// entry at all) which is handled by the outer if branch leaving
+		// blockNum/txNum at their zero defaults. When the entry exists,
+		// blockNum is the last executed block and TxNums.Max(blockNum)
+		// returns its last txNum — for genesis, that's 1 (txIndex=-1 at
+		// txNum=0 + block-end at txNum=1, per genesiswrite.WriteGenesisBesideState
+		// which calls TxNums.Append(tx, 0, len(txs)+1)). Returning txNum=0
+		// for blockNum=0 would falsely match the "never executed" case and
+		// make exec3.go's skip logic re-execute genesis on subsequent cycles.
+		txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -747,7 +789,16 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	return sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
+	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
+	// underlying state cache / getter aliases shared storage that another goroutine
+	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
+	// boundary so all downstream consumers are safe.
+	return common.Copy(enc), step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

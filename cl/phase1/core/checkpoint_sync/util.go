@@ -2,6 +2,7 @@ package checkpoint_sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -26,6 +27,9 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 		st, err := syncer.GetLatestBeaconState(ctx)
 		if err == nil {
 			return st, nil
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, err
 		}
 		log.Warn("[Checkpoint Sync] Remote checkpoint sync failed, attempting to read local head state", "err", err)
 
