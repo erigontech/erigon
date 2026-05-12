@@ -299,6 +299,17 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	defer domains.Close()
 	blockNum, txNum := readBlockNr, uint64(1)
 
+	// Pre-state root, computed once over the just-flushed pre-allocation.
+	// We return it for any early-return path so the test framework's
+	// `post.Root` check still has a real root to compare against when the tx
+	// was rejected before / during apply (the fixture's post.Root for those
+	// cases equals the pre-state root).
+	preRootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+	if err != nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("pre-state ComputeCommitment: %w", err)
+	}
+	preRoot := common.BytesToHash(preRootBytes)
+
 	r := rpchelper.NewLatestStateReader(tx)
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
@@ -328,37 +339,34 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	// EEST fixtures carry the signed RLP-encoded tx in `post.txbytes`; running
 	// it through the production AsMessage path means we test real validation
 	// (tx-type-vs-fork from each AsMessage, plus EIP-4844 blob structural rules
-	// in BlobTx.AsMessage). Decode failures and AsMessage failures both surface
-	// here as the tx-apply error: ApplyMessage is skipped but FinalizeTx /
-	// CommitBlock still run so the post-state root reflects the unapplied tx.
+	// in BlobTx.AsMessage). Decode/AsMessage failures and ApplyMessage failures
+	// all bubble up as the function's err so the test framework can match them
+	// against the fixture's ExpectException.
 	//
 	// Older in-tree corner-case fixtures only carry the JSON `transaction`
-	// block. None of those exercise pre-fork tx-type rejection, so we build
-	// the Message via toMessage (no validation) and treat construction errors
-	// as fatal.
-	var (
-		msg      protocol.Message
-		applyErr error
-	)
+	// block; for those we build the Message via toMessage (no validation).
+	var msg protocol.Message
 	if len(post.Tx) > 0 {
 		signer := types.LatestSignerForChainID(config.ChainID)
 		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
-		decodedTx, decodeErr := types.DecodeTransaction(post.Tx)
-		if decodeErr != nil {
-			applyErr = decodeErr
-		} else {
-			msg, applyErr = decodedTx.AsMessage(*signer, baseFee, chainRules)
+		decodedTx, err := types.DecodeTransaction(post.Tx)
+		if err != nil {
+			return statedb, preRoot, 0, err
+		}
+		msg, err = decodedTx.AsMessage(*signer, baseFee, chainRules)
+		if err != nil {
+			return statedb, preRoot, 0, err
 		}
 	} else {
 		msg, err = toMessage(t.Json.Tx, post, baseFee)
 		if err != nil {
-			return nil, common.Hash{}, 0, err
+			return statedb, preRoot, 0, err
 		}
 	}
 
-	gasUsed := uint64(0)
-	if applyErr == nil {
-		gasUsed, applyErr = t.applyStateTestMessage(statedb, msg, block, header, baseFee, blobBaseFee, config, vmconfig)
+	gasUsed, err := t.applyStateTestMessage(statedb, msg, block, header, baseFee, blobBaseFee, config, vmconfig)
+	if err != nil {
+		return statedb, preRoot, gasUsed, err
 	}
 
 	if err = statedb.FinalizeTx(chainRules, w); err != nil {
@@ -368,13 +376,11 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, gasUsed, err
 	}
 
-	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, common.Hash{}, gasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	// Propagate transaction execution error (e.g. intrinsic gas too low)
-	return statedb, common.BytesToHash(rootBytes), gasUsed, applyErr
+	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }
 
 func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
