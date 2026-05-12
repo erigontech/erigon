@@ -3374,7 +3374,7 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 
 	// --- ModeDirect (serial baseline) ---
 	msDirect := NewMockState(t)
-	hphDirect := NewHexPatriciaHashed(1, msDirect)
+	hphDirect := NewHexPatriciaHashed(1, msDirect, DefaultTrieConfig())
 
 	// Block 1: both accounts
 	plainKeys1, updates1 := NewUpdateBuilder().
@@ -3415,7 +3415,7 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 
 	// --- ModeUpdate (parallel calculator) ---
 	msUpdate := NewMockState(t)
-	hphUpdate := NewHexPatriciaHashed(1, msUpdate)
+	hphUpdate := NewHexPatriciaHashed(1, msUpdate, DefaultTrieConfig())
 
 	// Block 1: same accounts
 	err = msUpdate.applyPlainUpdates(plainKeys1, updates1)
