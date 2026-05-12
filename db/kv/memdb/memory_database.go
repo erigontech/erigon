@@ -40,8 +40,8 @@ func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
-	// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
-	// produces test names that cause 'file name too long' errors
+	// we can't use tb.TempDir() here because some tests produce names long
+	// enough to cause 'file name too long' errors when reused as paths
 	dirname, err := os.MkdirTemp("", "testdb-"+string(label)+"-*")
 	if err != nil {
 		tb.Fatal(err)
