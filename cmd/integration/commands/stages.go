@@ -324,6 +324,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
+	withUseGevm(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
@@ -629,7 +630,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
-		dbg.Exec3Parallel = true // default for integration tool
+		dbg.Exec3Parallel = !useGevm // default for integration tool
 	}
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
@@ -640,6 +641,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	_, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	vmConfig.UseGevm = useGevm
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
@@ -1182,6 +1184,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
+	vmConfig.UseGevm = useGevm
 
 	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
