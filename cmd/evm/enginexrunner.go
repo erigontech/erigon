@@ -273,21 +273,21 @@ func runEngineXGroup(
 	}()
 	for _, t := range tests {
 		r := testResult{Name: t.name, Pass: true}
-		// Always timedExec(bench=false): single execution with memstats.
-		// We deliberately don't expose bench=true (testing.Benchmark loop)
-		// for engine_x tests because NewPayload + FCU are idempotent for a
-		// block hash the EL has already processed — iterations 2..N would
-		// short-circuit through the already-known-block fast path instead
-		// of re-executing, so the resulting NsPerOp reflects the
-		// fast-path lookup cost, not the actual execution cost.
-		_, stats, err := timedExec(false, func() ([]byte, uint64, error) {
-			return nil, 0, runner.Run(ctx, t.def)
-		})
+		var err error
+		if timeIt {
+			var stats execStats
+			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
+				return nil, 0, runner.Run(ctx, t.def)
+			})
+			if err == nil {
+				r.Stats = &stats
+			}
+		} else {
+			err = runner.Run(ctx, t.def)
+		}
 		if err != nil {
 			r.Pass = false
 			r.Error = err.Error()
-		} else if timeIt {
-			r.Stats = &stats
 		}
 		resultCh <- r
 	}

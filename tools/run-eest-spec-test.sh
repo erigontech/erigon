@@ -92,11 +92,6 @@ case "$shard" in
 		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=0
 		extra=(--run 'fork_Osaka') ;;
 	blocktests-devnet-race-amsterdam)
-		# Only the Amsterdam fork is raced on the devnet side — it carries
-		# the new EIPs under development and is where race-detection signal
-		# is most valuable. 6140 failures match the non-race amsterdam-only
-		# subset (the 66 fork_BPO2ToAmsterdamAtTime15k transition failures
-		# are out of scope here; add `BPO` to the regex if needed).
 		cmd=blocktest; path="$base/blockchain_tests"; default_workers=12; default_max=6140
 		extra=(--run 'fork_Amsterdam') ;;
 
