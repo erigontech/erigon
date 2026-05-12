@@ -2,7 +2,7 @@
   {
     "shard": "statetests-stable",
     "workers": 12,
-    "max-allowed-failures": 37
+    "max-allowed-failures": 0
   },
   {
     "shard": "statetests-devnet",
