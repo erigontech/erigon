@@ -37,7 +37,7 @@ jobs:
         run: actionlint -shellcheck '' --ignore '"workspace" is not defined in object type'
 
       - name: zizmor
-        run: zizmor --format github-actions .github/workflows/
+        run: zizmor --format github .github/workflows/
 
       # severity=warning catches real bugs (word-splitting, masked exit codes)
       # without noise from pure style hints.
