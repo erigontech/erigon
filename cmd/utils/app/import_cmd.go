@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"os/signal"
 	"strings"
@@ -279,7 +278,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// expect when Hive imports one block per file.
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
-	var parentTd, currentHeadTd *big.Int
+	var parentTd, currentHeadTd *uint256.Int
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
@@ -288,11 +287,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			if readErr != nil {
 				return fmt.Errorf("read parent TD: %w", readErr)
 			}
-			if td != nil {
-				parentTd = td.ToBig()
-			}
+			parentTd = td
 		} else {
-			parentTd = new(big.Int)
+			parentTd = new(uint256.Int)
 		}
 		if hash := rawdb.ReadHeadBlockHash(tx); hash != (common.Hash{}) {
 			if num := rawdb.ReadHeaderNumber(tx, hash); num != nil {
@@ -300,9 +297,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 				if readErr != nil {
 					return fmt.Errorf("read head TD: %w", readErr)
 				}
-				if td != nil {
-					currentHeadTd = td.ToBig()
-				}
+				currentHeadTd = td
 				currentHeadHash = hash
 				currentHeadNumber = *num
 			}
@@ -320,21 +315,21 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// UpdateForkChoice as before.
 	isPoW := tipBlock.Header().Difficulty.Sign() > 0
 	if setHead && isPoW && parentTd != nil && currentHeadTd != nil {
-		importedTipTd := new(big.Int).Set(parentTd)
+		importedTipTd := new(uint256.Int).Set(parentTd)
 		for _, b := range chain.Blocks {
-			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
+			importedTipTd.Add(importedTipTd, &b.Header().Difficulty)
 		}
-		if !ethash.ShouldReorg(uint256.MustFromBig(currentHeadTd), currentHeadNumber, currentHeadHash, uint256.MustFromBig(importedTipTd), tipBlock.NumberU64(), tipBlock.Hash()) {
+		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
 			// Side chain — write headers/bodies/TDs directly without executing
 			// or changing head.
 			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {
-				td := new(big.Int).Set(parentTd)
+				td := new(uint256.Int).Set(parentTd)
 				for _, b := range chain.Blocks {
-					td.Add(td, b.Header().Difficulty.ToBig())
+					td.Add(td, &b.Header().Difficulty)
 					if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
 						return fmt.Errorf("write side-chain header: %w", err)
 					}
-					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), *uint256.MustFromBig(td)); err != nil {
+					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), *td); err != nil {
 						return fmt.Errorf("write side-chain TD: %w", err)
 					}
 					if _, err := rawdb.WriteRawBodyIfNotExists(tx, b.Hash(), b.NumberU64(), b.RawBody()); err != nil {
