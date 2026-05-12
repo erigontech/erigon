@@ -325,16 +325,30 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	header := block.HeaderNoCopy()
-	chainRules := buildStateTestRules(config, header)
 
-	var blobBaseFee *uint256.Int
+	// Build the BlockContext early so we can derive chain.Rules for AsMessage
+	// (which validates tx-type-vs-fork before we have an EVM) and later reuse
+	// the same context for the EVM itself.
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
+	blockContext.GetHash = vmTestBlockHash
+	if baseFee != nil {
+		blockContext.BaseFee.Set(baseFee)
+	}
+	if t.Json.Env.Difficulty != nil {
+		blockContext.Difficulty.Set(t.Json.Env.Difficulty)
+	}
+	if config.IsLondon(0) && t.Json.Env.Random != nil {
+		rnd := common.Hash(t.Json.Env.Random.Bytes32())
+		blockContext.PrevRanDao = &rnd
+		blockContext.Difficulty.Clear()
+	}
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
-		bf, err := misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, err
 		}
-		blobBaseFee = &bf
 	}
+	chainRules := blockContext.Rules(config)
 
 	// EEST fixtures carry the signed RLP-encoded tx in `post.txbytes`; running
 	// it through the production AsMessage path means we test real validation
@@ -364,15 +378,42 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		}
 	}
 
-	gasUsed, err := t.applyStateTestMessage(statedb, msg, block, header, baseFee, blobBaseFee, config, vmconfig)
+	// Prepare the EVM.
+	txContext := protocol.NewEVMTxContext(msg)
+	evm := vm.NewEVM(blockContext, txContext, statedb, config, vmconfig)
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
+		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+	}
+
+	// Execute the message.
+	snapshot := statedb.PushSnapshot()
+	gaspool := new(protocol.GasPool)
+	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
+	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	gasUsed := uint64(0)
+	if res != nil {
+		gasUsed = res.ReceiptGasUsed
+	}
+	if err != nil {
+		statedb.RevertToSnapshot(snapshot, err)
+	}
+	statedb.PopSnapshot(snapshot)
+	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
+		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	}
 	if err != nil {
 		return statedb, preRoot, gasUsed, err
 	}
 
-	if err = statedb.FinalizeTx(chainRules, w); err != nil {
+	// Coinbase touch — only on a successful apply. On pre-EIP-158 forks a stray
+	// touch creates an empty account that never gets pruned, breaking the
+	// post-state root the fixture expects for an unapplied tx.
+	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
+
+	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, gasUsed, err
 	}
-	if err = statedb.CommitBlock(chainRules, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, gasUsed, err
 	}
 
@@ -454,87 +495,6 @@ var rlpHash = types.RlpHash
 
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
-}
-
-// applyStateTestMessage runs ApplyMessage for a state-test subtest and applies
-// the post-apply coinbase touch. The returned error is the ApplyMessage error,
-// which the test framework may treat as expected (matched against the fixture's
-// ExpectException); it is not a fatal runner error.
-//
-// This is only called when the message was built successfully. For pre-apply
-// rejections (decode/AsMessage failures) the caller skips it: on pre-EIP-158
-// forks a stray coinbase touch would create an empty account that never gets
-// pruned, breaking the post-state root the fixture expects for an unapplied tx.
-func (t *StateTest) applyStateTestMessage(statedb *state.IntraBlockState, msg protocol.Message, block *types.Block, header *types.Header, baseFee, blobBaseFee *uint256.Int, config *chain.Config, vmconfig vm.Config) (uint64, error) {
-	txContext := protocol.NewEVMTxContext(msg)
-	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
-	context.GetHash = vmTestBlockHash
-	if baseFee != nil {
-		context.BaseFee.Set(baseFee)
-	}
-	if blobBaseFee != nil {
-		context.BlobBaseFee = *blobBaseFee
-	}
-	if t.Json.Env.Difficulty != nil {
-		context.Difficulty.Set(t.Json.Env.Difficulty)
-	}
-	if config.IsLondon(0) && t.Json.Env.Random != nil {
-		rnd := common.Hash(t.Json.Env.Random.Bytes32())
-		context.PrevRanDao = &rnd
-		context.Difficulty.Clear()
-	}
-	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
-		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	}
-
-	snapshot := statedb.PushSnapshot()
-	gaspool := new(protocol.GasPool)
-	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	res, applyErr := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
-	gasUsed := uint64(0)
-	if res != nil {
-		gasUsed = res.ReceiptGasUsed
-	}
-	if applyErr != nil {
-		statedb.RevertToSnapshot(snapshot, applyErr)
-	}
-	statedb.PopSnapshot(snapshot)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
-	}
-	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
-	return gasUsed, applyErr
-}
-
-// buildStateTestRules constructs a chain.Rules for the given state-test header.
-// State tests run a single tx against genesis, so we don't have a full EVM/block
-// context handy when we need rules outside of the apply path (e.g. for
-// FinalizeTx/CommitBlock when the tx is rejected pre-apply).
-func buildStateTestRules(c *chain.Config, header *types.Header) *chain.Rules {
-	num := header.Number.Uint64()
-	t := header.Time
-	chainID := c.ChainID
-	if chainID == nil {
-		chainID = new(big.Int)
-	}
-	return &chain.Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(num),
-		IsTangerineWhistle: c.IsTangerineWhistle(num),
-		IsSpuriousDragon:   c.IsSpuriousDragon(num),
-		IsByzantium:        c.IsByzantium(num),
-		IsConstantinople:   c.IsConstantinople(num),
-		IsPetersburg:       c.IsPetersburg(num),
-		IsIstanbul:         c.IsIstanbul(num),
-		IsBerlin:           c.IsBerlin(num),
-		IsLondon:           c.IsLondon(num),
-		IsShanghai:         c.IsShanghai(t),
-		IsCancun:           c.IsCancun(t),
-		IsPrague:           c.IsPrague(t),
-		IsOsaka:            c.IsOsaka(t),
-		IsAmsterdam:        c.IsAmsterdam(t),
-	}
 }
 
 // toMessage builds a protocol.Message directly from the JSON fixture's
