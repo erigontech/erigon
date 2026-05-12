@@ -154,7 +154,7 @@ func TestPreloadParallel_FullBudget_BreadthFirst(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestPreloadParallel_BudgetCutoff(t *testing.T) {
 	}
 	budget += 10 // slack inside the want-th but below the (want+1)-th
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, budget, fakeResolver(tree, nil, valSz, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(hash, budget, nil, fakeResolver(tree, nil, valSz, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestPreloadParallel_NotFoundStopsDescent(t *testing.T) {
 	}
 	r2 := root + string([]byte{2}) // R||2 — make it absent from the file layer
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, 1<<20, fakeResolver(tree, map[string]bool{r2: true}, 100, ""), c, nil)
+	n, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, map[string]bool{r2: true}, 100, ""), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 		return base(keys)
 	}
 	c := NewBranchCache(64)
-	n, err := PreloadContractTrunkParallel(hash, budget, resolve, c, nil)
+	n, err := PreloadContractTrunkParallel(hash, budget, nil, resolve, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +266,118 @@ func TestPreloadParallel_CapsWaveFetch(t *testing.T) {
 	}
 	if maxBatch > 6 {
 		t.Fatalf("depth-65 wave (width 16) should have been capped to ~remaining/minEntryBytes; resolver saw a batch of %d", maxBatch)
+	}
+}
+
+func TestPreloadParallel_DbHitsShadowFiles(t *testing.T) {
+	// A branch present in both dbBranches (fresh) and the file layer (stale)
+	// must resolve to the DB value — and the DB value's child bitmap must drive
+	// the descent. Tree: as buildSyntheticTree but with an extra leaf R1.7; the
+	// file value for R1 has bitmap {3} (so R1.7 unreachable via files), the DB
+	// value for R1 has bitmap {3,7} — so R1.7 should get pinned iff the DB value
+	// is the one used.
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	r1 := root + string([]byte{1})
+	tree[r1+string([]byte{7})] = 0 // R1.7 leaf, present in the file layer
+	const valSz = 100
+
+	freshR1 := branchVal(0b10001000, valSz) // bits 3 and 7
+	freshR1[4] = 0xAB                       // a marker so we can assert the exact bytes were pinned
+	dbBranches := map[string][]byte{string(nibbles.HexToCompact([]byte(r1))): freshR1}
+
+	c := NewBranchCache(64)
+	n, err := PreloadContractTrunkParallel(hash, 1<<20, dbBranches, fakeResolver(tree, nil, valSz, ""), c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(tree) {
+		t.Fatalf("pinned %d, want %d (whole tree reachable via the fresh R1 bitmap)", n, len(tree))
+	}
+	// R1's cached value is the DB one, not the stale file one.
+	gotR1, _, ok := c.Get(nibbles.HexToCompact([]byte(r1)))
+	if !ok {
+		t.Fatal("R1 not pinned")
+	}
+	if !bytes.Equal(gotR1, freshR1) {
+		t.Fatalf("R1 cached value is not the DB value: got %x want %x", gotR1, freshR1)
+	}
+	// R1.7 is reachable only because the DB bitmap has bit 7 — it must be pinned.
+	if _, _, ok := c.Get(nibbles.HexToCompact([]byte(r1 + string([]byte{7})))); !ok {
+		t.Fatal("R1.7 should be pinned (the DB value of R1 has it as a child); the stale file bitmap was used instead")
+	}
+}
+
+func TestNextSubtree(t *testing.T) {
+	cases := []struct{ in, want []byte }{
+		{[]byte{0x01, 0x02}, []byte{0x01, 0x03}},
+		{[]byte{0x01, 0xff}, []byte{0x02}},
+		{[]byte{0x00}, []byte{0x01}},
+	}
+	for _, c := range cases {
+		if got := NextSubtree(c.in); !bytes.Equal(got, c.want) {
+			t.Fatalf("NextSubtree(%x) = %x, want %x", c.in, got, c.want)
+		}
+	}
+	if NextSubtree([]byte{0xff, 0xff}) != nil {
+		t.Fatalf("NextSubtree(0xffff) should be nil")
+	}
+}
+
+func TestContractTrunkKeyRanges(t *testing.T) {
+	hashA := make([]byte, 32)
+	for i := range hashA {
+		hashA[i] = byte(7*i + 3)
+	}
+	hashB := make([]byte, 32)
+	for i := range hashB {
+		hashB[i] = byte(251 - 3*i)
+	}
+	nibA := ContractNibbles(hashA)
+	nibB := ContractNibbles(hashB)
+	evenFrom, evenTo, oddFrom, oddTo := ContractTrunkKeyRanges(nibA)
+	inRange := func(k, from, to []byte) bool {
+		return bytes.Compare(k, from) >= 0 && (to == nil || bytes.Compare(k, to) < 0)
+	}
+	keyOf := func(contractNibbles, slotPath []byte) []byte {
+		return nibbles.HexToCompact(append(append([]byte{}, contractNibbles...), slotPath...))
+	}
+	slotPaths := [][]byte{
+		{},           // 64 — subtree root (even)
+		{0x0}, {0xf}, // 65 (odd)
+		{0x1, 0x2}, {0xf, 0xf}, // 66 (even)
+		{0x3, 0x4, 0x5},           // 67 (odd)
+		{0x6, 0x7, 0x8, 0x9},      // 68 (even)
+		{0xa, 0xb, 0xc, 0xd, 0xe}, // 69 (odd)
+		make([]byte, 64),          // 128 (even) — deepest
+	}
+	for _, sp := range slotPaths {
+		k := keyOf(nibA, sp)
+		total := 64 + len(sp)
+		if total%2 == 0 {
+			if !inRange(k, evenFrom, evenTo) || inRange(k, oddFrom, oddTo) {
+				t.Fatalf("depth %d (even) branch %x: must be in [%x,%x), not in [%x,%x)", total, k, evenFrom, evenTo, oddFrom, oddTo)
+			}
+		} else {
+			if !inRange(k, oddFrom, oddTo) || inRange(k, evenFrom, evenTo) {
+				t.Fatalf("depth %d (odd) branch %x: must be in [%x,%x), not in [%x,%x)", total, k, oddFrom, oddTo, evenFrom, evenTo)
+			}
+		}
+		if got := nibbles.CompactToHex(k); !bytes.Equal(got, append(append([]byte{}, nibA...), sp...)) {
+			t.Fatalf("CompactToHex round-trip mismatch for slot %x", sp)
+		}
+	}
+	// A different contract's branches must be in neither of A's ranges.
+	for _, sp := range slotPaths[:6] {
+		k := keyOf(nibB, sp)
+		if inRange(k, evenFrom, evenTo) || inRange(k, oddFrom, oddTo) {
+			t.Fatalf("foreign-contract branch %x leaked into A's ranges", k)
+		}
 	}
 }
 
@@ -279,7 +391,7 @@ func TestPreloadParallel_ResolverError(t *testing.T) {
 	}
 	c := NewBranchCache(64)
 	// Fail when R||1 (depth 65) is requested -> root pinned at depth 64, then error.
-	_, err := PreloadContractTrunkParallel(hash, 1<<20, fakeResolver(tree, nil, 100, root+string([]byte{1})), c, nil)
+	_, err := PreloadContractTrunkParallel(hash, 1<<20, nil, fakeResolver(tree, nil, 100, root+string([]byte{1})), c, nil)
 	if err == nil {
 		t.Fatal("expected error from the resolver")
 	}
