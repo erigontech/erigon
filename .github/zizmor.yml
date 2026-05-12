@@ -1,0 +1,12 @@
+rules:
+  # This repo uses version tags (e.g. @v6) rather than SHA pins.
+  # SHA-pinning all third-party actions is a separate policy decision tracked
+  # in a future issue; disable the blanket rule so the linter catches real
+  # security findings (template-injection, excessive-permissions, etc.).
+  unpinned-uses:
+    disable: true
+
+  # Docker-layer caching in test-kurtosis-assertoor.yml is intentional;
+  # the artipacked risk is accepted for that workflow.
+  artipacked:
+    disable: true
