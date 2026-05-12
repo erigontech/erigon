@@ -31,7 +31,7 @@ git commit -m "[ci]: $network, [from]: $HOSTNAME"
 
 #GH_TOKEN=""
 GH_TOKEN_FILE=""
-if [ ! type gcloud ] &>/dev/null; then
+if ! type gcloud &>/dev/null; then
   #  GH_TOKEN=$(gcloud secrets versions access 1 --secret="github-snapshot-push")
   GH_TOKEN_FILE="~/.ssh/vm_rsa"
 fi
