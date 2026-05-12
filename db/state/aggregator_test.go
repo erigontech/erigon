@@ -17,12 +17,12 @@
 package state
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -79,7 +79,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	values := make([]byte, valueSize)
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -516,6 +516,80 @@ func TestAggregator_CommittedTxNumGuard(t *testing.T) {
 		"guard should allow: committed txNum is past the step")
 	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
 		"guard should allow: committed txNum is well past the step")
+}
+
+// TestAggregator_BuildFiles_GapRefuses verifies that buildFilesInBackground
+// refuses to aggregate when MDBX's earliest history entry lies strictly above
+// the next step to build AND snapshot files already cover the earlier range.
+// This is the scenario that silently corrupted state after a partial
+// OtterSync: the preverified set stopped at step S, MDBX only had history
+// for step S+k (from a short catch-up execution), and the aggregator produced
+// empty files for steps S..S+k-1 that the merge later combined with
+// preverified inputs to advertise phantom coverage.
+func TestAggregator_BuildFiles_GapRefuses(t *testing.T) {
+	t.Parallel()
+	// generate* helpers hardcode stepSize=10; keep our aggregator consistent.
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	// Establish the "preverified snapshots cover [0,5)" side of the gap.
+	// Without this, the guard must not fire (a fresh datadir writing only to
+	// later steps is legitimate, not a bug).
+	dirs := agg.Dirs()
+	generateAccountsFile(t, dirs, []testFileRange{{0, 5}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 5}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 5}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 5}})
+	require.NoError(t, agg.OpenFolder())
+
+	// Establish the "MDBX only has step 10" side of the gap.
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 100, []byte("k"))
+
+	// Ask the aggregator to build up through step 11.
+	// With the guard, step=5 (files cover 0..5), firstInDB=10, firstInDB>step
+	// → refuse. No new accounts file gets produced.
+	require.NoError(t, agg.BuildFiles(11*stepSize))
+
+	// Only the pre-existing file v1.0-accounts.0-5.kv should be present.
+	files, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+	require.NoError(t, err)
+	for _, f := range files {
+		if strings.Contains(f, "-accounts.") {
+			require.Contains(t, f, "0-5",
+				"only the pre-existing 0-5 accounts file should remain; got %s", f)
+		}
+	}
+}
+
+// TestAggregator_BuildFiles_EmptyStepOK verifies the corollary: on a fresh
+// datadir (no pre-existing snapshot files) where MDBX happens to have no
+// history at step 0 but does at a later step, the aggregator is allowed to
+// proceed. This is the false-positive case we had to distinguish from the
+// real gap-corruption scenario — there are no earlier files to silently
+// merge with, so nothing can be corrupted.
+func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+
+	// No pre-generated files. Insert history only at step 1 (not step 0).
+	putHistoryKey(t, db, agg.d[kv.AccountsDomain].History.KeysTable, 10, []byte("k"))
+
+	// BuildFiles must not refuse — the guard's `step > 0` clause should let
+	// this through.
+	require.NoError(t, agg.BuildFiles(2*stepSize))
+}
+
+// putHistoryKey inserts a single (txNumBE, key) pair into the domain's
+// History.KeysTable. The table is a DupSort table, but DupSort Put semantics
+// are equivalent to Put for a single value, which is all these tests need.
+func putHistoryKey(t *testing.T, db kv.RwDB, table string, txNum uint64, k []byte) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], txNum)
+		return tx.Put(table, key[:], k)
+	}))
 }
 
 func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {

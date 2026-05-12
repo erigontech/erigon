@@ -38,6 +38,7 @@ var ProtocolToString = map[uint]string{
 	direct.ETH68: "eth68",
 	direct.ETH69: "eth69",
 	direct.ETH70: "eth70",
+	direct.ETH71: "eth71",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -48,7 +49,7 @@ const ProtocolName = "eth"
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
-var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18, direct.ETH70: 18}
+var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18, direct.ETH70: 18, direct.ETH71: 20}
 
 const (
 	// Protocol messages in eth/64
@@ -68,6 +69,10 @@ const (
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
 	BlockRangeUpdateMsg           = 0x11
+
+	// Protocol messages added in eth/71 (EIP-8159 Block Access List Exchange)
+	GetBlockAccessListsMsg = 0x12
+	BlockAccessListsMsg    = 0x13
 )
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
@@ -117,6 +122,25 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
 	},
+	direct.ETH71: {
+		StatusMsg:                     sentryproto.MessageId_STATUS_69,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_70,
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_70,
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+		// Added in eth/71 (EIP-8159 Block Access List Exchange)
+		GetBlockAccessListsMsg: sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71,
+		BlockAccessListsMsg:    sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
+	},
 }
 
 var FromProto = map[uint]map[sentryproto.MessageId]uint64{
@@ -163,6 +187,24 @@ var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+	},
+	direct.ETH71: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_70:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_70:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+		// Added in eth/71 (EIP-8159 Block Access List Exchange)
+		sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: GetBlockAccessListsMsg,
+		sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:     BlockAccessListsMsg,
 	},
 }
 
@@ -350,6 +392,44 @@ type BlockBodiesRLPPacket66 struct {
 	RequestId uint64
 	BlockBodiesRLPPacket
 }
+
+// GetBlockAccessListsPacket is the eth/71 request to retrieve Block Access
+// Lists (EIP-7928) for a list of block hashes (EIP-8159).
+type GetBlockAccessListsPacket []common.Hash
+
+// GetBlockAccessListsPacket66 wraps GetBlockAccessListsPacket in the eth/66
+// request-id envelope. Reused unchanged for eth/71.
+type GetBlockAccessListsPacket66 struct {
+	RequestId uint64
+	GetBlockAccessListsPacket
+}
+
+// BlockAccessListsPacket is the eth/71 response to a GetBlockAccessLists
+// request. Entries are positionally aligned with the request: element i is
+// the BAL for request hash i. The BAL payload is the canonical RLP encoding
+// of a types.BlockAccessList per EIP-7928, passed through as RawValue since
+// rawdb stores it in that exact form.
+//
+// An empty RLP list (0xc0) in slot i has two possible meanings and MUST be
+// disambiguated by the caller via the corresponding header's
+// BlockAccessListHash:
+//   - "peer does not have this BAL" — hash will not match the header
+//   - "block has a genuinely empty BAL" — hash will equal the empty-list hash
+//     (see common/empty.BlockAccessListHash)
+type BlockAccessListsPacket []rlp.RawValue
+
+// BlockAccessListsPacket66 wraps BlockAccessListsPacket in the eth/66
+// request-id envelope. Reused unchanged for eth/71.
+type BlockAccessListsPacket66 struct {
+	RequestId uint64
+	BlockAccessListsPacket
+}
+
+func (p *GetBlockAccessListsPacket66) Name() string { return "GetBlockAccessLists" }
+func (p *GetBlockAccessListsPacket66) Kind() byte   { return GetBlockAccessListsMsg }
+
+func (p *BlockAccessListsPacket66) Name() string { return "BlockAccessLists" }
+func (p *BlockAccessListsPacket66) Kind() byte   { return BlockAccessListsMsg }
 
 // Unpack retrieves the transactions, uncles, withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.

@@ -37,7 +37,7 @@ DOCKER_TAG ?= erigontech/erigon:latest
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 #CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
 #CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
-#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=1 # Disabled by default; enable for MDBX GC profiling
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
@@ -231,7 +231,22 @@ test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
 test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
-test-all: test-filtered
+test-all: test-fixtures test-filtered
+
+## test-fixtures:                      download & verify pinned test fixture tarballs
+.PHONY: test-fixtures
+test-fixtures:
+	tools/test-fixtures.sh
+	# cl/spectest excludes these forks: stale or experimental fixtures that
+	# don't pass against caplin yet. Apply post-extract so the exclusions
+	# also hold under `make test-all` / `make test-group` / etc., not just
+	# under `cd cl/spectest && make tests`.
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
@@ -239,7 +254,7 @@ test-bench:
 	$(GOTEST)
 
 test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
-test-all-race: test-filtered
+test-all-race: test-fixtures test-filtered
 
 ## check-generated:                     verify go.mod/go.sum are tidy
 check-generated:
@@ -265,10 +280,10 @@ check-large-files:
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
-test-group: test-filtered
+test-group: test-fixtures test-filtered
 
 test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
-test-sonar-coverage: test-filtered
+test-sonar-coverage: test-fixtures test-filtered
 
 ## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
 test-rpc: rpcdaemon integration
@@ -288,7 +303,13 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
-eest-bal:
+# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
+# so this target stays in sync with whatever the rest of the test suite uses.
+# Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
+EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
+EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+
+eest-devnet:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
@@ -298,7 +319,7 @@ eest-bal:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v5.1.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL))
 
 # Define the run_suite function
 define run_suite
@@ -341,7 +362,10 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
-EEST_VERSION = v5.3.0
+# Pull the pinned develop tarball URL straight from test-fixtures.json
+# so this target stays in sync with the rest of the test suite. Lazy `=`
+# so unrelated targets don't shell out to jq at make-parse time.
+EEST_STABLE_URL = $(shell jq -r '."eest_stable".url' test-fixtures.json)
 
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
@@ -353,7 +377,7 @@ eest-hive:
 		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
@@ -454,7 +478,7 @@ mocks:
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
-solc:
+solc: $(OPENZEPPELIN)
 	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
 	@cd txnprovider/shutter && $(MAKE) solc
 
@@ -510,8 +534,13 @@ stringer:
 	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
+## versions-gen:                       regenerate version_schema_gen.go from versions.yaml
+versions-gen:
+	$(GOBUILD) -o $(GOBIN)/bumper ./cmd/bumper
+	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:

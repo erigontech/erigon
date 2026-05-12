@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/node/app"
 	"github.com/erigontech/erigon/node/app/component"
-	"github.com/stretchr/testify/require"
 )
 
 // --- Test Infrastructure ---
@@ -85,21 +86,21 @@ func (p *trackedProvider) Deactivate(ctx context.Context) error {
 // TestIsolatedDomain verifies that components in an isolated domain
 // don't interfere with the shared root domain.
 func TestIsolatedDomain(t *testing.T) {
-	domain, err := component.NewComponentDomain(context.Background(), "isolated")
+	domain, err := component.NewComponentDomain(t.Context(), "isolated")
 	require.NoError(t, err)
 
 	tracker := &orderTracker{}
-	c, err := component.NewComponent[trackedProvider](context.Background(),
+	c, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("comp"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "comp", tracker: tracker}))
 	require.NoError(t, err)
 	require.Equal(t, "isolated:comp", c.Id().String())
 
-	err = c.Activate(context.Background())
+	err = c.Activate(t.Context())
 	require.NoError(t, err)
 
-	state, err := c.AwaitState(context.Background(), component.Active)
+	state, err := c.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 	require.Equal(t, component.Active, state)
 
@@ -108,10 +109,10 @@ func TestIsolatedDomain(t *testing.T) {
 	require.Contains(t, events, "comp:initialize")
 	require.Contains(t, events, "comp:activate")
 
-	err = c.Deactivate(context.Background())
+	err = c.Deactivate(t.Context())
 	require.NoError(t, err)
 
-	state, err = c.AwaitState(context.Background(), component.Deactivated)
+	state, err = c.AwaitState(t.Context(), component.Deactivated)
 	require.NoError(t, err)
 	require.Equal(t, component.Deactivated, state)
 
@@ -123,20 +124,20 @@ func TestIsolatedDomain(t *testing.T) {
 // their dependents — modeling the Storage → Downloader → SnapshotManager
 // hierarchy.
 func TestDependencyActivationOrder(t *testing.T) {
-	domain, err := component.NewComponentDomain(context.Background(), "order-test")
+	domain, err := component.NewComponentDomain(t.Context(), "order-test")
 	require.NoError(t, err)
 
 	tracker := &orderTracker{}
 
 	// Storage — no dependencies (foundation)
-	storage, err := component.NewComponent[trackedProvider](context.Background(),
+	storage, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("storage"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "storage", tracker: tracker}))
 	require.NoError(t, err)
 
 	// Downloader — depends on Storage
-	downloader, err := component.NewComponent[trackedProvider](context.Background(),
+	downloader, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("downloader"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "downloader", tracker: tracker}),
@@ -144,7 +145,7 @@ func TestDependencyActivationOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	// SnapshotManager — depends on Downloader (and transitively on Storage)
-	snapMgr, err := component.NewComponent[trackedProvider](context.Background(),
+	snapMgr, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("snapshot-manager"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "snapshot-manager", tracker: tracker}),
@@ -152,10 +153,10 @@ func TestDependencyActivationOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	// Activate the leaf — should cascade to activate dependencies first
-	err = snapMgr.Activate(context.Background())
+	err = snapMgr.Activate(t.Context())
 	require.NoError(t, err)
 
-	state, err := snapMgr.AwaitState(context.Background(), component.Active)
+	state, err := snapMgr.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 	require.Equal(t, component.Active, state)
 
@@ -188,7 +189,7 @@ func TestDependencyActivationOrder(t *testing.T) {
 // may see stale state because deactivation is async (goroutine at line 1001).
 // This test is skipped until the framework bug is fixed.
 func TestDependencyDeactivationOrder(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	domain, err := component.NewComponentDomain(ctx, "deactivation-test")
 	require.NoError(t, err)
 
@@ -215,10 +216,10 @@ func TestDependencyDeactivationOrder(t *testing.T) {
 	require.Equal(t, component.Active, storage.State())
 
 	// Deactivate the leaf — should cascade to deactivate dependencies
-	err = downloader.Deactivate(context.Background())
+	err = downloader.Deactivate(t.Context())
 	require.NoError(t, err)
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer waitCancel()
 
 	state, err := downloader.AwaitState(waitCtx, component.Deactivated)
@@ -246,7 +247,7 @@ func TestDependencyDeactivationOrder(t *testing.T) {
 // Storage → Downloader → SnapshotManager, all in an isolated domain.
 // Verifies clean startup, all states correct, clean shutdown.
 func TestThreeLevelHierarchy(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	domain, err := component.NewComponentDomain(ctx, "hierarchy")
 	require.NoError(t, err)
 
@@ -292,10 +293,10 @@ func TestThreeLevelHierarchy(t *testing.T) {
 		"activation order wrong: storage=%d, downloader=%d, snap-mgr=%d", sAct, dAct, smAct)
 
 	// Deactivate from the leaf — should cascade through the full tree
-	err = snapMgr.Deactivate(context.Background())
+	err = snapMgr.Deactivate(t.Context())
 	require.NoError(t, err)
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer waitCancel()
 
 	_, err = snapMgr.AwaitState(waitCtx, component.Deactivated)
@@ -320,25 +321,25 @@ func TestThreeLevelHierarchy(t *testing.T) {
 // depend on the same base component (e.g., both Downloader and TxPool
 // depend on Storage).
 func TestMultipleDependentsOnSameBase(t *testing.T) {
-	domain, err := component.NewComponentDomain(context.Background(), "multi-dep")
+	domain, err := component.NewComponentDomain(t.Context(), "multi-dep")
 	require.NoError(t, err)
 
 	tracker := &orderTracker{}
 
-	storage, err := component.NewComponent[trackedProvider](context.Background(),
+	storage, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("storage"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "storage", tracker: tracker}))
 	require.NoError(t, err)
 
-	downloader, err := component.NewComponent[trackedProvider](context.Background(),
+	downloader, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("downloader"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "downloader", tracker: tracker}),
 		component.WithDependencies(storage))
 	require.NoError(t, err)
 
-	txpool, err := component.NewComponent[trackedProvider](context.Background(),
+	txpool, err := component.NewComponent[trackedProvider](t.Context(),
 		component.WithId("txpool"),
 		component.WithDomain(domain),
 		component.WithProvider(&trackedProvider{name: "txpool", tracker: tracker}),
@@ -346,14 +347,14 @@ func TestMultipleDependentsOnSameBase(t *testing.T) {
 	require.NoError(t, err)
 
 	// Activate both leaves
-	err = downloader.Activate(context.Background())
+	err = downloader.Activate(t.Context())
 	require.NoError(t, err)
-	_, err = downloader.AwaitState(context.Background(), component.Active)
+	_, err = downloader.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 
-	err = txpool.Activate(context.Background())
+	err = txpool.Activate(t.Context())
 	require.NoError(t, err)
-	_, err = txpool.AwaitState(context.Background(), component.Active)
+	_, err = txpool.AwaitState(t.Context(), component.Active)
 	require.NoError(t, err)
 
 	// All three active
@@ -362,9 +363,9 @@ func TestMultipleDependentsOnSameBase(t *testing.T) {
 	require.Equal(t, component.Active, txpool.State())
 
 	// Deactivate downloader — storage should stay active (txpool still depends on it)
-	err = downloader.Deactivate(context.Background())
+	err = downloader.Deactivate(t.Context())
 	require.NoError(t, err)
-	_, err = downloader.AwaitState(context.Background(), component.Deactivated)
+	_, err = downloader.AwaitState(t.Context(), component.Deactivated)
 	require.NoError(t, err)
 
 	require.Equal(t, component.Deactivated, downloader.State())

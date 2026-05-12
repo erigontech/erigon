@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -328,7 +327,12 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
-			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() && !syscall {
+			// Under Spurious Dragon, a zero-value CALL to a non-existent
+			// non-precompile account short-circuits as a no-op instead of
+			// creating the account. This also preserves the EIP-4788
+			// beacon-root syscall's "no-op when not deployed" semantics at
+			// the fork-transition block, before the contract is deployed.
+			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
@@ -350,11 +354,19 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 		}
 	} else if typ == STATICCALL {
-		// We do an AddBalance of zero here, just in order to trigger a touch.
-		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
-		// but is the correct thing to do and matters on other networks, in tests, and potential
-		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		// Trigger a touch on the callee so EIP-161 state clearing applies to
+		// empty accounts (matters on test networks; on Mainnet all empties are
+		// gone by Byzantium). Use TouchAccount rather than AddBalance(0): the
+		// latter has a serial-mode shortcut for the RIPEMD-160 precompile
+		// (special-snowflake balance-increase path) that bypasses
+		// GetOrNewStateObject. Without loading the account the FinalizeTx
+		// "exists in dirties but not stateObjects → skip" branch fires and
+		// the touch never reaches state-clearing — diverging from
+		// CALL's behavior, which loads the account via Exist() before the
+		// zero-value Transfer. Affects ethereum/tests RevertPrecompiledTouch_d3.
+		if err := evm.intraBlockState.TouchAccount(addr); err != nil {
+			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
 	}
 
 	savedStateGasConsumed := evm.stateGasConsumed

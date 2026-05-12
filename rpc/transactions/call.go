@@ -78,12 +78,14 @@ func DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(gasCap, header.BaseFee)
+	msg, err := args.ToMessage(gasCap, effectiveHeader.BaseFee)
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {
 			return nil, err

@@ -34,7 +34,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -84,15 +85,10 @@ type Service struct {
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
 // websocket.
 //
-// From Gorilla websocket docs:
-//
-//	Connections support one concurrent reader and one concurrent writer.
-//	Applications are responsible for ensuring that no more than one goroutine calls the write methods
-//	  - NextWriter, SetWriteDeadline, WriteMessage, WriteJSON, EnableWriteCompression, SetCompressionLevel
-//	concurrently and that no more than one goroutine calls the read methods
-//	  - NextReader, SetReadDeadline, ReadMessage, ReadJSON, SetPongHandler, SetPingHandler
-//	concurrently.
-//	The Close and WriteControl methods can be called concurrently with all other methods.
+// coder/websocket docs: connections support one concurrent reader and one concurrent
+// writer. Applications are responsible for ensuring no more than one goroutine calls
+// write methods concurrently and no more than one goroutine calls read methods
+// concurrently.
 type connWrapper struct {
 	conn *websocket.Conn
 
@@ -112,7 +108,7 @@ func (w *connWrapper) WriteJSON(v any) error {
 	w.wlock.Lock()
 	defer w.wlock.Unlock()
 
-	return w.conn.WriteJSON(v)
+	return wsjson.Write(context.Background(), w.conn, v)
 }
 
 // ReadJSON wraps corresponding method on the websocket but is safe for concurrent calling
@@ -120,14 +116,12 @@ func (w *connWrapper) ReadJSON(v any) error {
 	w.rlock.Lock()
 	defer w.rlock.Unlock()
 
-	return w.conn.ReadJSON(v)
+	return wsjson.Read(context.Background(), w.conn, v)
 }
 
 // Close wraps corresponding method on the websocket but is safe for concurrent calling
 func (w *connWrapper) Close() error {
-	// The Close and WriteControl methods can be called concurrently with all other methods,
-	// so the mutex is not used here
-	return w.conn.Close()
+	return w.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 // New returns a monitoring service ready for stats reporting.
@@ -196,16 +190,20 @@ func (s *Service) loop() {
 				conn *connWrapper
 				err  error
 			)
-			dialer := websocket.Dialer{HandshakeTimeout: 5 * time.Second}
 			header := make(http.Header)
 			header.Set("origin", "http://localhost")
 			for _, url := range urls {
-				//nolint
-				c, _, err := dialer.Dial(url, header)
-				if err == nil {
-					conn = newConnectionWrapper(c)
-					break
+				dialCtx, dialCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				c, resp, dialErr := websocket.Dial(dialCtx, url, &websocket.DialOptions{HTTPHeader: header})
+				dialCancel()
+				if dialErr != nil {
+					if resp != nil {
+						resp.Body.Close()
+					}
+					continue
 				}
+				conn = newConnectionWrapper(c)
+				break
 			}
 			if conn == nil {
 				log.Warn("Stats server unreachable")

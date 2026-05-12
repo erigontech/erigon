@@ -71,6 +71,10 @@ enum MessageId {
   // ======= eth 70 protocol ===========
   GET_RECEIPTS_70 = 40;
   RECEIPTS_70 = 41;
+
+  // ======= eth 71 protocol (EIP-8159) ===========
+  GET_BLOCK_ACCESS_LISTS_71 = 42;
+  BLOCK_ACCESS_LISTS_71 = 43;
 }
 
 message OutboundMessageData {
@@ -156,6 +160,7 @@ enum Protocol {
   ETH68 = 3;
   ETH69 = 4;
   ETH70 = 6;
+  ETH71 = 7;
   WIT0 = 5;
 }
 

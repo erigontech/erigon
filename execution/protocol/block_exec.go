@@ -376,7 +376,7 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
+func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if blockGasUsed != h.GasUsed {
 		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
 			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
@@ -413,7 +413,15 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 		}
+	}
 
+	// The logs bloom is part of every block header from Frontier on, so it must
+	// be validated independently of the receipt-root check (which is gated on
+	// Byzantium because pre-Byzantium receipts encode an intermediate state
+	// root that Erigon doesn't materialise). Without this, an invalid bloom on
+	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
+	// is silently accepted.
+	if checkBloom && !alwaysSkipReceiptCheck {
 		lbloom := types.CreateBloom(receipts)
 		if lbloom != h.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)

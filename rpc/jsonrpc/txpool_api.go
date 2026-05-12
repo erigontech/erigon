@@ -70,17 +70,20 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 
 	content := map[string]map[string]map[string]*ethapi.RPCTransaction{
 		"pending": make(map[string]map[string]*ethapi.RPCTransaction),
-		"baseFee": make(map[string]map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
 	}
 
 	pending := make(map[common.Address][]types.Transaction, 8)
-	baseFee := make(map[common.Address][]types.Transaction, 8)
 	queued := make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
 			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
+		}
+		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
+		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
+		if txn.Type() == types.BlobTxType {
+			continue
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
@@ -89,11 +92,6 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
 			pending[addr] = append(pending[addr], txn)
-		case txpoolproto.AllReply_BASE_FEE:
-			if _, ok := baseFee[addr]; !ok {
-				baseFee[addr] = make([]types.Transaction, 0, 4)
-			}
-			baseFee[addr] = append(baseFee[addr], txn)
 		case txpoolproto.AllReply_QUEUED:
 			if _, ok := queued[addr]; !ok {
 				queued[addr] = make([]types.Transaction, 0, 4)
@@ -116,15 +114,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	if curHeader == nil {
 		return nil, nil
 	}
-	// Flatten the pending transactions
 	for account, txs := range pending {
 		content["pending"][account.Hex()] = flattenTxs(txs, curHeader, cc)
 	}
-	// Flatten the baseFee transactions
-	for account, txs := range baseFee {
-		content["baseFee"][account.Hex()] = flattenTxs(txs, curHeader, cc)
-	}
-	// Flatten the queued transactions
 	for account, txs := range queued {
 		content["queued"][account.Hex()] = flattenTxs(txs, curHeader, cc)
 	}
@@ -139,12 +131,10 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 
 	content := map[string]map[string]*ethapi.RPCTransaction{
 		"pending": make(map[string]*ethapi.RPCTransaction),
-		"baseFee": make(map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]*ethapi.RPCTransaction),
 	}
 
 	pending := make([]types.Transaction, 0, 4)
-	baseFee := make([]types.Transaction, 0, 4)
 	queued := make([]types.Transaction, 0, 4)
 	for i := range reply.Txs {
 		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
@@ -155,12 +145,15 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		if sender != addr {
 			continue
 		}
+		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
+		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
+		if txn.Type() == types.BlobTxType {
+			continue
+		}
 
 		switch reply.Txs[i].TxnType {
 		case txpoolproto.AllReply_PENDING:
 			pending = append(pending, txn)
-		case txpoolproto.AllReply_BASE_FEE:
-			baseFee = append(baseFee, txn)
 		case txpoolproto.AllReply_QUEUED:
 			queued = append(queued, txn)
 		}
@@ -180,11 +173,7 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 	if curHeader == nil {
 		return nil, nil
 	}
-	// Flatten the pending transactions
 	content["pending"] = flattenTxs(pending, curHeader, cc)
-	// Flatten the baseFee transactions
-	content["baseFee"] = flattenTxs(baseFee, curHeader, cc)
-	// Flatten the queued transactions
 	content["queued"] = flattenTxs(queued, curHeader, cc)
 	return content, nil
 }
@@ -197,7 +186,6 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 	}
 	return map[string]hexutil.Uint{
 		"pending": hexutil.Uint(reply.PendingCount),
-		"baseFee": hexutil.Uint(reply.BaseFeeCount),
 		"queued":  hexutil.Uint(reply.QueuedCount),
 	}, nil
 }

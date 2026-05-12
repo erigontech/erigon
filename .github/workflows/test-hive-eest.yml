@@ -4,9 +4,6 @@ on:
   workflow_call:
   workflow_dispatch:
 
-env:
-  EEST_VERSION: 'v5.3.0'
-
 concurrency:
   # Dynamic group to fill all available runners
   group: hive-eest-tests-${{ github.run_id }}
@@ -26,29 +23,50 @@ jobs:
           # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
           # matches the suite name (eest/consume-engine) while the remainder
           # filters individual pytest test IDs by fork parameter.
+          # pool-size: --client.pool.size for hive's warm-daemon client pool.
+          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
+          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
+          # consume-engine shards (reuse is essentially depth-2 consecutive),
+          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
+          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
+          # glamsterdam-devnet is the exception — its curve keeps climbing past
+          # 24, so it gets a larger pool.
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
+            pool-size: 0
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
+            pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Prague"
             shard: prague
+            pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Osaka"
             shard: osaka
+            pool-size: 4
+            fixtures-tarball: eest_stable
           - sim: consume-rlp
-            sim-limit: ".*eip2930_access_list.*" # all tests take too long
+            sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
+            pool-size: 0
+            fixtures-tarball: eest_stable
           # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
             sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
             shard: glamsterdam-devnet
-            fixtures-url: "https://github.com/ethereum/execution-spec-tests/releases/download/bal@v5.6.1/fixtures_bal.tar.gz"
-            extra-hive-flags: "--sim.buildarg branch=devnets/bal/3 --sim.loglevel=3 --client.checktimelimit=300s"
+            pool-size: 24
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            max-failures: 1  # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
+            # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
+            # transitioning to bal-devnet-4
+            max-failures: 579
     steps:
       - name: Clean docker system
         run: |
@@ -71,6 +89,7 @@ jobs:
           sparse-checkout: |
             go.mod
             .github/workflows/hive-versions.json
+            test-fixtures.json
           sparse-checkout-cone-mode: false
           path: erigon-src
 
@@ -81,10 +100,14 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
-          repository: ethereum/hive
-          ref: ${{ steps.hive-version.outputs.ref }}
+          # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool, which
+          # is the upstream-PR-ready (ethereum/hive#1449) warm-daemon client
+          # pool. Revert to ethereum/hive + steps.hive-version.outputs.ref
+          # once that PR lands; until then we ride this fork.
+          repository: erigontech/hive
+          ref: a3c9afd9ada800efc41c0287d66f7d083684d3cb
           path: hive
-    
+
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
@@ -100,7 +123,7 @@ jobs:
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-    
+
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
@@ -139,17 +162,19 @@ jobs:
       # We also fail if more than half the tests fail
       - name: Run hive tests and parse output
         run: |
+          fixtures_url=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].url' erigon-src/test-fixtures.json)
+          branch=$(jq -r --arg t '${{ matrix.fixtures-tarball }}' '.[$t].branch // empty' erigon-src/test-fixtures.json)
+          branch_arg=""
+          if [ -n "$branch" ]; then
+            branch_arg="--sim.buildarg branch=$branch"
+          fi
           cd hive
           docker ps
-          fixtures_url="${{ matrix.fixtures-url }}"
-          if [ -z "$fixtures_url" ]; then
-            fixtures_url="https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz"
-          fi
           run_suite() {
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures="${fixtures_url}" ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -221,3 +246,11 @@ jobs:
           docker system prune -af --volumes
         if: always()
 
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true
