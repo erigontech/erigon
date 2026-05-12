@@ -1431,14 +1431,15 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
-	// Record storage deletes for the parallel commitment calculator.
-	// When versionMap is active, the calculator needs explicit DELETE entries
-	// for each storage slot — it can't use DomainDelPrefix like the serial path.
-	if sdb.versionMap != nil {
-		for key := range stateObject.dirtyStorage {
-			versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
-		}
-	}
+	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
+	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
+	// the account stays alive until end-of-tx, so a re-entry's GetState must
+	// still see the dirty values — and versionedRead consults versionedWrites
+	// before the stateObject, so a spurious StoragePath=0 here would make those
+	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
+	// The parallel commitment calculator gets the per-slot DELETE entries from
+	// normalizeWriteSet's SD cascade (sdStorageSlots = vm.StorageKeys ∪
+	// domainStorageKeys), so they don't need to be emitted here.
 
 	return true, nil
 }
