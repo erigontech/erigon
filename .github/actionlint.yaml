@@ -20,4 +20,5 @@ self-hosted-runner:
     - RpcSpecific
     - tip-tracking
     - X64
+    - ARM64
 

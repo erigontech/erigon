@@ -24,7 +24,7 @@ jobs:
             | tar -xz -C /usr/local/bin actionlint
 
       - name: Install zizmor
-        run: pip install --break-system-packages zizmor
+        run: pip install --break-system-packages zizmor==1.24.1
 
       # -shellcheck '' disables actionlint's built-in inline-script checking;
       # the repo's QA workflow run: blocks have many pre-existing shellcheck
