@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -812,12 +813,12 @@ func HashWithModifications(
 	offset := 0
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
-			accountKeyHex = keybytesToHex(aKeys[ai][:])
+			accountKeyHex = nibbles.KeybytesToHex(aKeys[ai][:])
 			accountKeyHex = accountKeyHex[:len(accountKeyHex)-1]
 			ai++
 		}
 		if storageKeyHex == nil && si < len(sKeys) {
-			storageKeyHex = keybytesToHex(sKeys[si][:])
+			storageKeyHex = nibbles.KeybytesToHex(sKeys[si][:])
 			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}
