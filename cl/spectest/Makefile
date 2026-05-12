@@ -1,7 +1,7 @@
 .PHONY: clean setup example run clean
 
 tests:
-	$(MAKE) -C ../.. test-fixtures
+	$(MAKE) -C ../.. test-fixtures-cl
 
 clean:
 	rm -rf ../../test-fixtures-cache/cl_mainnet
