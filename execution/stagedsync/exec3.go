@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -488,7 +489,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	} else {
 		if te.hooks.OnBlockStart != nil {
 			var b *types.Block
-			var td *big.Int
+			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
@@ -506,9 +507,13 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
 			}
 
+			var tdBig *big.Int
+			if td != nil {
+				tdBig = td.ToBig()
+			}
 			te.hooks.OnBlockStart(tracing.BlockEvent{
 				Block:     b,
-				TD:        td,
+				TD:        tdBig,
 				Finalized: finalized,
 				Safe:      safe,
 			})

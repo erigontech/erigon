@@ -324,7 +324,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		for _, b := range chain.Blocks {
 			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
 		}
-		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
+		if !ethash.ShouldReorg(uint256.MustFromBig(currentHeadTd), currentHeadNumber, currentHeadHash, uint256.MustFromBig(importedTipTd), tipBlock.NumberU64(), tipBlock.Hash()) {
 			// Side chain — write headers/bodies/TDs directly without executing
 			// or changing head.
 			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {

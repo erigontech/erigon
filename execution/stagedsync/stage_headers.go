@@ -137,11 +137,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
 	}*/
 
-	var localTdBig *big.Int
-	if localTd != nil {
-		localTdBig = localTd.ToBig()
-	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTdBig, startProgress, cfg.blockReader)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(exec.NewChainReader(cfg.chainConfig, tx, cfg.blockReader, logger))
 
 	stopped := false

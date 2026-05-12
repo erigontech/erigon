@@ -22,6 +22,7 @@ package protocol
 import (
 	"cmp"
 	"fmt"
+	"math/big"
 	"slices"
 	"time"
 
@@ -100,9 +101,13 @@ func ExecuteBlockEphemerally(
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
 		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
+		var tdBig *big.Int
+		if td != nil {
+			tdBig = td.ToBig()
+		}
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        tdBig,
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})

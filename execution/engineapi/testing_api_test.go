@@ -124,7 +124,7 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	return nil, nil
 }
-func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
+func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -147,7 +146,7 @@ func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
+func (r headerReader) GetTd(common.Hash, uint64) *uint256.Int {
 	return nil
 }
 

@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -515,7 +514,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
+	var td *uint256.Int
 	if newPayload {
 		parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = s.chainRW.GetTd(ctx, parentHash, blockNumber-1)
@@ -523,7 +522,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		td = s.chainRW.GetTd(ctx, blockHash, blockNumber)
 	}
 
-	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+	if td != nil && td.CmpBig(s.config.TerminalTotalDifficulty) < 0 {
 		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}

@@ -2,7 +2,8 @@ package exec
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -63,16 +64,13 @@ func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		cr.logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
-	if td == nil {
-		return nil
-	}
-	return td.ToBig()
+	return td
 }
 func (cr ChainReaderImpl) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
 func (cr ChainReaderImpl) FrozenBorBlocks(align bool) uint64 {
