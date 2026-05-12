@@ -221,6 +221,9 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
 	}
+	if useGevmFromEnv() {
+		mOpts = append(mOpts, execmoduletester.WithUseGevm())
+	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
