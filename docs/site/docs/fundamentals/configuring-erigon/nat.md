@@ -33,7 +33,7 @@ Nodes that are reachable from the internet (i.e. correctly advertised via NAT) t
 
 * receive transactions earlier
 * receive a wider variety of transactions
-* maintain a healthier “pending” transaction pool
+* maintain a healthier "pending" transaction pool
 
 For validators and block producers, this directly affects:
 
@@ -74,7 +74,7 @@ Benefits:
 
 * enables inbound peer connections
 * improves transaction gossip freshness
-* leads to healthier txpool “pending” state
+* leads to healthier txpool "pending" state
 * strongly recommended for validators
 
 Example:
@@ -103,3 +103,25 @@ Useful when:
 * running behind NAT
 * no UPnP is available
 * external IP cannot be configured manually
+
+## Caplin (consensus layer) NAT
+
+If you are running Erigon with the embedded Caplin consensus layer, configure NAT for the CL P2P separately using `--caplin.nat`.
+
+This flag sets the external address advertised in the **discv5 ENR** and **libp2p multiaddrs**; the socket itself still binds to `--caplin.discovery.addr`. It accepts the same values as `--nat`:
+
+| Value | Behaviour |
+|-------|-----------|
+| `""` (default) | No NAT mapping — CL peers cannot reach you inbound |
+| `extip:1.2.3.4` | Advertise a fixed public IP — recommended for VPS / datacenters |
+| `stun` | Discover external IP via STUN |
+| `upnp` | Use UPnP to discover and map the port |
+| `pmp` | Use NAT-PMP; optionally `pmp:192.168.0.1` to specify the gateway |
+
+:::tip For validators running behind NAT or inside Docker
+Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
+
+```
+--nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114
+```
+:::
