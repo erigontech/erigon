@@ -223,6 +223,10 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 		return
 	}
 	subnetField = common.Copy(subnetField)
+	if subnetIndex < 0 {
+		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
+		return
+	}
 	if len(subnetField) <= subnetIndex/8 {
 		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
