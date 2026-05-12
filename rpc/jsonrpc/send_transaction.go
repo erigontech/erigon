@@ -52,7 +52,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		txnChainId := txn.GetChainID()
 		chainId := cc.ChainID
 		if chainId.Cmp(txnChainId) != 0 {
-			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
+			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, txnChainId)
 		}
 	}
 
