@@ -203,9 +203,7 @@ jobs:
         # stale tags get reclaimed without needing a separate maintenance job.
         run: |
           echo "Force-removing this job's containers..."
-          if [ -n "$(docker ps -aq)" ]; then
-            docker rm -f $(docker ps -aq) || true
-          fi
+          docker ps -aq | xargs -r docker rm -f || true
           echo "Pruning dangling images, networks, build cache, and unused volumes..."
           docker system prune -f --volumes
           echo "Evicting tagged images older than 720h (30d) to bound tag drift..."
