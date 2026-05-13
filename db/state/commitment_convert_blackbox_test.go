@@ -742,7 +742,7 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	db, agg := testDbAndAggregatorv3(t, 10)
+	_, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 	require.NoError(t, os.MkdirAll(backupDir, 0o755))
@@ -757,12 +757,7 @@ func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("CONV_BT"), 0o644))
 
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	at := state.AggTx(tx)
-
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), at, log.New()))
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
 
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
@@ -784,13 +779,9 @@ func TestRestoreCommitmentFiles_NoBackup(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	db, _ := testDbAndAggregatorv3(t, 10)
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	at := state.AggTx(tx)
+	_, agg := testDbAndAggregatorv3(t, 10)
 
-	err = state.RestoreCommitmentFiles(t.Context(), at, log.New())
+	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
 	require.Error(t, err, "must refuse to run without a backup directory")
 	require.Contains(t, err.Error(), "no backup",
 		"error must mention 'no backup' so the operator understands the cause")
@@ -805,7 +796,7 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	db, agg := testDbAndAggregatorv3(t, 10)
+	_, agg := testDbAndAggregatorv3(t, 10)
 	dirs := agg.Dirs()
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 	require.NoError(t, os.MkdirAll(backupDir, 0o755))
@@ -825,12 +816,7 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	require.NoError(t, os.WriteFile(convKVPath, []byte("CONV_KV"), 0o644))
 	require.NoError(t, os.WriteFile(convKVEIPath, []byte("CONV_KVEI"), 0o644))
 
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	at := state.AggTx(tx)
-
-	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), at, log.New()))
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
 
 	// Sweep removed both cross-version artifacts.
 	_, statErr := os.Stat(convKVPath)
@@ -845,4 +831,40 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
 	require.Equal(t, origKV, restoredKV)
 	require.Equal(t, origBT, restoredBT)
+}
+
+// TestRestoreCommitmentFiles_RejectsForeignFile verifies the restore refuses to
+// proceed when the backup directory contains a file whose name does not match
+// the commitment step-range pattern. Without this guard a stray file like
+// `random.bak` would short-circuit step-range collection silently or, worse,
+// a foreign file whose name happens to contain `-commitment.<from>-<to>.`
+// could broaden the orphan sweep into unrelated commitment files.
+func TestRestoreCommitmentFiles_RejectsForeignFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	// One legitimate backup entry alongside one foreign filename.
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "random.bak"), []byte("X"), 0o644))
+
+	// Sentinel file in SnapDomain to prove no sweep ran before the rejection.
+	sentinel := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-32.kv")
+	require.NoError(t, os.WriteFile(sentinel, []byte("SENTINEL"), 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.Error(t, err, "must refuse to run when backup contains a non-matching entry")
+	require.Contains(t, err.Error(), "random.bak",
+		"error must name the offending entry")
+
+	// Sweep must not have fired — sentinel still present, backup still intact.
+	_, statErr := os.Stat(sentinel)
+	require.NoError(t, statErr, "sweep must not run when validation fails")
+	_, statErr = os.Stat(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"))
+	require.NoError(t, statErr, "backup must be untouched after rejection")
 }

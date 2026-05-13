@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -742,8 +743,11 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 // operator notices). On success the now-empty backup dir is removed, the
 // snapshots/backup/ parent is cleaned if also empty, and the caller is told to
 // restart erigon to pick up the restored files.
-func RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
-	dirs := at.Dirs()
+//
+// Takes datadir.Dirs directly (not an AggregatorRoTx) so restore can run even
+// when the on-disk state is broken enough that the aggregator can't open it —
+// which is exactly when restore is most needed.
+func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 	snapDomain := dirs.SnapDomain
 
@@ -780,6 +784,9 @@ func RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	// restored files.
 	swept := 0
 	for r := range ranges {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
 		matches, globErr := filepath.Glob(pattern)
 		if globErr != nil {
@@ -806,8 +813,11 @@ func RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		moved++
 	}
 
-	if rmErr := dir.RemoveAll(backupDir); rmErr != nil {
-		logger.Warn("[commitment_convert] restore: failed to remove empty backup dir", "path", backupDir, "err", rmErr)
+	// dir.RemoveFile (os.Remove) refuses non-empty directories; rely on that
+	// to surface unexpected leftovers (operator-placed subdirs, files the
+	// rename loop skipped) instead of silently wiping them via RemoveAll.
+	if rmErr := dir.RemoveFile(backupDir); rmErr != nil {
+		logger.Warn("[commitment_convert] restore: failed to remove backup dir", "path", backupDir, "err", rmErr)
 	}
 	cleanupParentIfEmpty(filepath.Dir(backupDir), logger)
 

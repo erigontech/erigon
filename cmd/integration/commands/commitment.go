@@ -539,10 +539,11 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 }
 
 func commitmentRestore(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	// Restore only shuffles files on disk; it does not need an aggregator view
+	// of the snapshots and must keep working when the on-disk state is broken
+	// enough that the aggregator can't open it.
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	acRo := agg.BeginFilesRo()
-	defer acRo.Close()
-	return dbstate.RestoreCommitmentFiles(ctx, acRo, logger)
+	return dbstate.RestoreCommitmentFiles(ctx, agg.Dirs(), logger)
 }
 
 // integration commitment visualize
