@@ -1065,6 +1065,18 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
+	// EIP-8037: child CREATE failure creates no account — refund the
+	// NEW_ACCOUNT state gas charged at entry back to the parent's reservoir.
+	if suberr != nil && evm.chainRules.IsAmsterdam {
+		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
+		scope.stateGas += stateGas
+		if evm.stateGasConsumed >= stateGas {
+			evm.stateGasConsumed -= stateGas
+		} else {
+			evm.stateGasConsumed = 0
+		}
+	}
+
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil

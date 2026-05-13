@@ -1108,10 +1108,11 @@ func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
 // TestAssembleBlockStateGasLimit verifies that the builder respects the EIP-8037
 // block validity invariant: gas_used = max(regular, state) <= gas_limit.
 //
-// Contract creations have high intrinsic state gas (~131K per create at
-// CostPerStateByte=1174) but low regular gas (~30K). With a 500K gas limit,
-// about 4 creates would push state gas past the limit even though regular gas
-// has room. Without the fix the builder would produce an invalid block.
+// Contract creations have high intrinsic state gas (~184K per create at
+// CostPerStateByte=1530, STATE_BYTES_PER_NEW_ACCOUNT=120) but low regular gas
+// (~30K). With a 500K gas limit, about 3 creates would push state gas past
+// the limit even though regular gas has room. Without the fix the builder
+// would produce an invalid block.
 func TestAssembleBlockStateGasLimit(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -213,15 +213,17 @@ const (
 	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 
 	// EIP-8037: State Creation Gas Cost Increase
-	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
+	TargetStateGrowthPerYear uint64 = 128_849_018_880 // 120 × 1024^3 bytes
 	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
 	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
 	CreateGasEIP8037                = CallValueTransferGas
 	Create2GasEIP8037               = CallValueTransferGas
 	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
 	PerAuthBaseCostEIP8037          = 7_500
-	StateBytesNewAccount            = 112 // bytes per new account creation
+	StateBytesNewAccount            = 120 // bytes per new account creation
+	StateBytesPerStorageSet         = 64  // bytes per new storage slot
 	StateBytesAuthBase              = 23  // bytes per authorization base cost
+	SystemMaxSstoresPerCall         = 16  // upper bound on new SSTOREs per system call (matches MAX_WITHDRAWAL_REQUESTS_PER_BLOCK)
 )
 
 // EIP-7702: Set EOA account code

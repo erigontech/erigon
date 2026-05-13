@@ -267,6 +267,16 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	depth := evm.depth
 
+	// EIP-8037: on top-level error (revert or exceptional halt), refund the
+	// full execution state_gas_used to the reservoir via state_refund.
+	if depth == 0 && evm.chainRules.IsAmsterdam {
+		defer func() {
+			if err != nil {
+				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
+			}
+		}()
+	}
+
 	version := evm.intraBlockState.Version()
 	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
@@ -503,6 +513,18 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 
 	depth := evm.depth
+
+	// EIP-8037: on top-level CREATE error (revert, halt, address collision,
+	// insufficient balance, …), refund the full execution state_gas_used plus
+	// the intrinsic NEW_ACCOUNT state gas via state_refund.
+	if depth == 0 && evm.chainRules.IsAmsterdam {
+		defer func() {
+			if err != nil {
+				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
+				evm.intraBlockState.AddStateRefund(uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte)
+			}
+		}()
+	}
 
 	if evm.Config().Tracer != nil {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gasRemaining, value, nil)

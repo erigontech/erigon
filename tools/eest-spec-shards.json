@@ -7,7 +7,7 @@
   {
     "shard": "statetests-devnet",
     "workers": 12,
-    "max-allowed-failures": 5253
+    "max-allowed-failures": 392
   },
   {
     "shard": "blocktests-stable",
@@ -23,7 +23,7 @@
   {
     "shard": "blocktests-devnet",
     "workers": 12,
-    "max-allowed-failures": 6486,
+    "max-allowed-failures": 905,
     "exec3-parallel": true
   },
   {
@@ -113,7 +113,7 @@
   {
     "shard": "blocktests-devnet-race-amsterdam",
     "workers": 12,
-    "max-allowed-failures": 6182,
+    "max-allowed-failures": 606,
     "exec3-parallel": true
   }
 ]

@@ -611,10 +611,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
-			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
-			// regularGasConsumed tracks only regular-dimension opcode gas.
-			blockState := imdGas.State + st.evm.StateGasConsumed()
+			// EIP-8037: state-gas refunds are credited directly to the
+			// reservoir and bypass the 20% cap; only the regular refund
+			// counter is capped. The top-level halt/revert refund (full
+			// state_gas_used, plus intrinsic NEW_ACCOUNT on CREATE tx) is
+			// issued from evm.{call,create} via AddStateRefund.
+			refundCounters := st.state.GetRefund()
+			st.gasRemaining.State += refundCounters.State
+			blockState := imdGas.State + st.evm.StateGasConsumed() - refundCounters.State
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
@@ -622,7 +626,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			// Use Total()-level subtraction to avoid per-component uint64 underflow
 			// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
 			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total() + st.evm.RevertedSpillGas()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Total())
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, refundCounters.Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular

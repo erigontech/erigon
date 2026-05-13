@@ -16,29 +16,8 @@
 
 package misc
 
-import (
-	"math"
-	"math/bits"
-
-	"github.com/erigontech/erigon/execution/protocol/params"
-)
-
+// CostPerStateByte returns the EIP-8037 cost per state byte (CPSB).
+// Fixed by spec; gasLimit is accepted for a future re-derivation EIP.
 func CostPerStateByte(gasLimit uint64) uint64 {
-	// TODO this should be removed after bal-devnet-3 (we use hardcoded cspb=1174 for now)
-	const balDevnet3Spec = true
-	if balDevnet3Spec {
-		return 1174
-	}
-	//raw = ceil((gas_limit * 2_628_000) / (2 * TARGET_STATE_GROWTH_PER_YEAR))
-	//shifted = raw + CPSB_OFFSET
-	//shift = max(bit_length(shifted) - CPSB_SIGNIFICANT_BITS, 0)
-	//cost_per_state_byte = max(((shifted >> shift) << shift) - CPSB_OFFSET, 1)
-	raw := uint64(math.Ceil(float64(gasLimit*2_628_000) / float64(2*params.TargetStateGrowthPerYear)))
-	shifted := raw + params.CpsbOffset
-	shift := max(bits.Len64(shifted)-params.CpsbSignificantBits, 0)
-	rounded := (shifted >> shift) << shift
-	if rounded <= params.CpsbOffset {
-		return 1
-	}
-	return rounded - params.CpsbOffset
+	return 1530
 }

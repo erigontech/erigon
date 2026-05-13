@@ -74,7 +74,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
-					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: 32 * evm.Context.CostPerStateByte}, nil
+					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: params.StateBytesPerStorageSet * evm.Context.CostPerStateByte}, nil
 				} else {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
 				}
@@ -99,7 +99,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 				if rules.IsAmsterdam {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
-					evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
+					evm.IntraBlockState().AddStateRefund(params.StateBytesPerStorageSet * evm.Context.CostPerStateByte)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
