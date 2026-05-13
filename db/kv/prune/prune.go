@@ -306,7 +306,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue, mode)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, stepSize, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func tableScanningPrune(
 	ctx context.Context,
 	stat *Stat,
 	filenameBase string,
-	txFrom, txTo uint64,
+	txFrom, txTo, stepSize uint64,
 	txNumGetter func(key, val []byte) uint64,
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
@@ -413,6 +413,42 @@ func tableScanningPrune(
 				stat.PruneCountValues += deleted
 				if deleted > 1 {
 					stat.DupsDeleted += deleted
+				}
+			}
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
+			if ctx.Err() != nil {
+				stat.LastPrunedValue = common.Copy(val)
+				stat.ValueProgress = InProgress
+				return common.Copy(val), nil
+			}
+		} else if mode == StepValueStorageMode && stepSize > 0 {
+			// Range-del fast path for StepValue: dup value starts with
+			// ~step_BE so the lex order is ASC val == DESC step.
+			// "Delete dups with step < threshold" maps to
+			// "delete dups with ~step >= ~(threshold-1)" — a suffix range in
+			// dup byte order. Position with ExactKeyValueGreaterOrEqual at
+			// the 8-byte boundary `~(threshold-1)_BE`, then
+			// DeleteCurrentMultiValAfterIncluding wipes the suffix in one
+			// MDBX call. Mirrors the dup-byte semantics of DeleteDupBefore
+			// for the non-inverted modes. Same txFrom-already-pruned
+			// invariant as those modes.
+			stepThreshold := txTo / stepSize
+			if stepThreshold > 0 {
+				var target [8]byte
+				binary.BigEndian.PutUint64(target[:], ^(stepThreshold - 1))
+				deleted, err := valDelCursor.DeleteDupAfter(val, target[:])
+				if err != nil {
+					return nil, fmt.Errorf("range-del-after dups for %s: %w", filenameBase, err)
+				}
+				if deleted > 0 {
+					stat.MinTxNum = min(stat.MinTxNum, lastDupTxNum)
+					stat.MaxTxNum = max(stat.MaxTxNum, (stepThreshold-1)*stepSize)
+					stat.PruneCountValues += deleted
+					if deleted > 1 {
+						stat.DupsDeleted += deleted
+					}
 				}
 			}
 			if throttling != nil {

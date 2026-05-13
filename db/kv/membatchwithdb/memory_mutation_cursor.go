@@ -474,6 +474,10 @@ func (m *memoryMutationCursor) DeleteDupBefore(_, _ []byte) (uint64, error) {
 	panic("Not implemented")
 }
 
+func (m *memoryMutationCursor) DeleteDupAfter(_, _ []byte) (uint64, error) {
+	panic("Not implemented")
+}
+
 func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
 	memKey, memValue, err := m.memCursor.SeekBothExact(key, value)
 	if err != nil || m.isTableCleared() {

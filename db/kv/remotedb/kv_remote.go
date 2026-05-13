@@ -686,6 +686,9 @@ func (c *remoteCursorDupSort) DeleteKeysBefore(_ []byte) (uint64, error) {
 func (c *remoteCursorDupSort) DeleteDupBefore(_, _ []byte) (uint64, error) {
 	panic("not supported")
 }
+func (c *remoteCursorDupSort) DeleteDupAfter(_, _ []byte) (uint64, error) {
+	panic("not supported")
+}
 
 func (c *remoteCursorDupSort) FirstDup() ([]byte, error)          { return c.firstDup() }
 func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)   { return c.nextDup() }

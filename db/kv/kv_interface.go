@@ -306,6 +306,13 @@ type RwCursorDupSort interface {
 	// DeleteDupBefore deletes all dup values of `key` whose bytes are strictly
 	// less than `val`. Returns the number of dup values deleted. Atomic.
 	DeleteDupBefore(key, val []byte) (uint64, error)
+
+	// DeleteDupAfter deletes all dup values of `key` whose bytes are greater
+	// than or equal to `val`. Returns the number of dup values deleted.
+	// Atomic. The "or equal" half of the boundary is needed by callers that
+	// store inverted sort keys (e.g. ~step_BE) and want to delete all dups
+	// from a target downward.
+	DeleteDupAfter(key, val []byte) (uint64, error)
 }
 
 type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
@@ -323,6 +330,11 @@ type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (us
 	// less than `val`. Returns the number of dup values deleted. For non-DupSort
 	// tables (single value per key) this is a no-op returning 0.
 	DeleteDupBefore(key, val []byte) (uint64, error)
+
+	// DeleteDupAfter deletes all dup values of `key` whose bytes are greater
+	// than or equal to `val`. Returns the number of dup values deleted. For
+	// non-DupSort tables this is a no-op returning 0.
+	DeleteDupAfter(key, val []byte) (uint64, error)
 }
 
 // RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
@@ -356,6 +368,9 @@ func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil
 }
 func (c *RwCursorPseudoDupSort) DeleteDupBefore(_, _ []byte) (uint64, error) {
+	return 0, nil
+}
+func (c *RwCursorPseudoDupSort) DeleteDupAfter(_, _ []byte) (uint64, error) {
 	return 0, nil
 }
 

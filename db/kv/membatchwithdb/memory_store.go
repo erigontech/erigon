@@ -762,6 +762,9 @@ func (c *memStoreCursor) DeleteKeysBefore(_ []byte) (uint64, error) {
 func (c *memStoreCursor) DeleteDupBefore(_, _ []byte) (uint64, error) {
 	panic("DeleteDupBefore not implemented")
 }
+func (c *memStoreCursor) DeleteDupAfter(_, _ []byte) (uint64, error) {
+	panic("DeleteDupAfter not implemented")
+}
 
 func (c *memStoreCursor) Close() {}
 

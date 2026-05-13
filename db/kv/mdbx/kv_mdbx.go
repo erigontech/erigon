@@ -1611,6 +1611,11 @@ func (c *MdbxCursorPseudoDupSort) DeleteDupBefore(_, _ []byte) (uint64, error) {
 	return 0, nil
 }
 
+// DeleteDupAfter is a no-op for non-DupSort tables (one value per key).
+func (c *MdbxCursorPseudoDupSort) DeleteDupAfter(_, _ []byte) (uint64, error) {
+	return 0, nil
+}
+
 type MdbxDupSortCursor struct {
 	*MdbxCursor
 }
@@ -1832,6 +1837,24 @@ func (c *MdbxDupSortCursor) DeleteDupBefore(key, val []byte) (uint64, error) {
 	n, err := c.c.RangeDel(mdbx.DeleteCurrentMultiValBeforeIncluding)
 	if err != nil {
 		return 0, fmt.Errorf("label: %s, in DeleteDupBefore RangeDel: %w", c.label, err)
+	}
+	return n, nil
+}
+
+// DeleteDupAfter deletes all dup values of key whose bytes are greater than or
+// equal to val via MDBX's ExactKeyValueGreaterOrEqual navigation +
+// DeleteCurrentMultiValAfterIncluding RangeDel.
+func (c *MdbxDupSortCursor) DeleteDupAfter(key, val []byte) (uint64, error) {
+	_, _, err := c.c.Get(key, val, mdbx.ExactKeyValueGreaterOrEqual)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("label: %s, in DeleteDupAfter Get: %w", c.label, err)
+	}
+	n, err := c.c.RangeDel(mdbx.DeleteCurrentMultiValAfterIncluding)
+	if err != nil {
+		return 0, fmt.Errorf("label: %s, in DeleteDupAfter RangeDel: %w", c.label, err)
 	}
 	return n, nil
 }
