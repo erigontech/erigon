@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -39,6 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+// commitmentStepRangeRe parses the `<from>-<to>` step range from a commitment
+// filename of the shape `<anything>-commitment.<from>-<to>.<ext>`.
+var commitmentStepRangeRe = regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.`)
 
 // ConvertOpts is the target encoding state requested from ConvertCommitmentFiles.
 // Both axes are independent: TargetSqueeze controls the value codec
@@ -721,8 +726,93 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] DONE. converted %d files. Originals preserved at:\n    %s\nTo revert this conversion:\n    rm snapshots/domain/*-commitment.* && mv snapshots/backup/domains/* snapshots/domain/ && restart erigon",
+		"[commitment_convert] DONE. converted %d files. Originals preserved at:\n    %s\nTo restore originals: re-run with --restore",
 		processedFiles, backupDir))
+	return nil
+}
+
+// RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
+// from snapshots/backup/domains/ back into snapshots/domain/. Before each
+// rename it sweeps the destination of any orphaned siblings that share the
+// backup file's step range — necessary because the converter may have produced
+// accessor types that don't exist in the backup (e.g. converted .kvei when the
+// original had only .kvi, or a newer version-prefix on the .kv).
+//
+// Refuses if snapshots/backup/domains/ is missing or empty (errors out so the
+// operator notices). On success the now-empty backup dir is removed, the
+// snapshots/backup/ parent is cleaned if also empty, and the caller is told to
+// restart erigon to pick up the restored files.
+func RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
+	dirs := at.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	snapDomain := dirs.SnapDomain
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("[commitment_convert] no backup to restore from at %s", backupDir)
+		}
+		return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", backupDir, err)
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("[commitment_convert] no backup to restore from at %s (empty)", backupDir)
+	}
+
+	type stepRange struct{ from, to string }
+	ranges := make(map[stepRange]struct{})
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		m := commitmentStepRangeRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			return fmt.Errorf("[commitment_convert] restore: backup entry %q does not match commitment step-range pattern", e.Name())
+		}
+		ranges[stepRange{m[1], m[2]}] = struct{}{}
+		files = append(files, e.Name())
+	}
+
+	// Orphan sweep: remove every *-commitment.<from>-<to>.* in snapshots/domain/
+	// for each step-range covered by the backup. Naive rename-overwrite would
+	// leave cross-version accessor siblings behind (e.g. converted .kvei when
+	// the original had only .kvi), breaking erigon startup against the
+	// restored files.
+	swept := 0
+	for r := range ranges {
+		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
+		matches, globErr := filepath.Glob(pattern)
+		if globErr != nil {
+			return fmt.Errorf("[commitment_convert] restore: glob %s: %w", pattern, globErr)
+		}
+		for _, m := range matches {
+			if rmErr := dir.RemoveFile(m); rmErr != nil {
+				return fmt.Errorf("[commitment_convert] restore: rm orphan %s: %w", m, rmErr)
+			}
+			swept++
+		}
+	}
+
+	moved := 0
+	for _, name := range files {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		src := filepath.Join(backupDir, name)
+		dst := filepath.Join(snapDomain, name)
+		if renameErr := os.Rename(src, dst); renameErr != nil {
+			return fmt.Errorf("[commitment_convert] restore mv %s -> %s: %w", src, dst, renameErr)
+		}
+		moved++
+	}
+
+	if rmErr := dir.RemoveAll(backupDir); rmErr != nil {
+		logger.Warn("[commitment_convert] restore: failed to remove empty backup dir", "path", backupDir, "err", rmErr)
+	}
+	cleanupParentIfEmpty(filepath.Dir(backupDir), logger)
+
+	logger.Info(fmt.Sprintf("[commitment_convert] restore complete: restored %d files from %s to %s (swept %d orphans); restart erigon",
+		moved, backupDir, snapDomain, swept))
 	return nil
 }
 

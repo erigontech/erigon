@@ -733,3 +733,116 @@ func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
 	_, err = os.Stat(backupDir)
 	require.NoError(t, err, "backup dir must exist after successful run")
 }
+
+// TestRestoreCommitmentFiles_HappyPath seeds the backup dir with original
+// commitment files, seeds snapshots/domain/ with same-named "converted"
+// dummies, runs RestoreCommitmentFiles, and asserts the originals overwrite
+// the dummies while the backup tree is cleaned up.
+func TestRestoreCommitmentFiles_HappyPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	// Seed backup with originals and snap/domain with converted dummies of the
+	// same names — restore must overwrite the dummies with the originals.
+	origKV := []byte("ORIG_KV")
+	origBT := []byte("ORIG_BT")
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), origKV, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.bt"), origBT, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), []byte("CONV_KV"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("CONV_BT"), 0o644))
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := state.AggTx(tx)
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), at, log.New()))
+
+	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
+	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
+	require.Equal(t, origKV, restoredKV, "kv must hold original backup bytes")
+	require.Equal(t, origBT, restoredBT, "bt must hold original backup bytes")
+
+	_, statErr := os.Stat(backupDir)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"backup dir must be removed after restore (err=%v)", statErr)
+	_, statErr = os.Stat(filepath.Join(dirs.Snap, "backup"))
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"empty backup parent must be removed (err=%v)", statErr)
+}
+
+// TestRestoreCommitmentFiles_NoBackup confirms RestoreCommitmentFiles refuses
+// to run when snapshots/backup/domains/ is missing — the operator must see a
+// clear error rather than a silent no-op.
+func TestRestoreCommitmentFiles_NoBackup(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, _ := testDbAndAggregatorv3(t, 10)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := state.AggTx(tx)
+
+	err = state.RestoreCommitmentFiles(t.Context(), at, log.New())
+	require.Error(t, err, "must refuse to run without a backup directory")
+	require.Contains(t, err.Error(), "no backup",
+		"error must mention 'no backup' so the operator understands the cause")
+}
+
+// TestRestoreCommitmentFiles_OrphanSweep verifies the orphan-sweep step:
+// converted files with a different version prefix (or extra accessor types)
+// must be removed before the originals are renamed back into place, otherwise
+// the restored datadir would contain cross-version siblings that confuse
+// erigon at startup.
+func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	db, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	// Originals (v2.0): .kv + .bt under backup.
+	origKV := []byte("ORIG_KV")
+	origBT := []byte("ORIG_BT")
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), origKV, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.bt"), origBT, 0o644))
+
+	// Converted (v2.1): different version prefix and a sibling accessor type
+	// (.kvei) that does not exist in the backup. Naive rename-overwrite would
+	// leave both behind alongside the restored v2.0 originals.
+	convKVPath := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-32.kv")
+	convKVEIPath := filepath.Join(dirs.SnapDomain, "v2.1-commitment.0-32.kvei")
+	require.NoError(t, os.WriteFile(convKVPath, []byte("CONV_KV"), 0o644))
+	require.NoError(t, os.WriteFile(convKVEIPath, []byte("CONV_KVEI"), 0o644))
+
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := state.AggTx(tx)
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), at, log.New()))
+
+	// Sweep removed both cross-version artifacts.
+	_, statErr := os.Stat(convKVPath)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"v2.1 .kv orphan must be swept (err=%v)", statErr)
+	_, statErr = os.Stat(convKVEIPath)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"v2.1 .kvei orphan must be swept (err=%v)", statErr)
+
+	// Originals restored with backup content.
+	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
+	restoredBT := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"))
+	require.Equal(t, origKV, restoredKV)
+	require.Equal(t, origBT, restoredBT)
+}

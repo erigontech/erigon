@@ -289,16 +289,16 @@ if convertRestore {
 - Modify: `db/state/commitment_convert.go`
 - Modify: `db/state/commitment_convert_blackbox_test.go`
 
-- [ ] add `RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error` per the shape in Technical Details. Place it directly after `ConvertCommitmentFiles` for proximity.
-- [ ] add the package-level `commitmentStepRangeRe` regexp at file scope (above `RestoreCommitmentFiles`).
-- [ ] implement the three-step body: read backup dir + collect step-range set → orphan-glob-and-delete in `snapshots/domain/` → rename backup entries into `snapshots/domain/`.
-- [ ] use `at.Dirs().Snap` to derive `backupDir` and `at.Dirs().SnapDomain`.
-- [ ] respect `ctx.Done()` between file renames in step 3 (the operation can be long if there are many files).
-- [ ] update the convert-success log message at line ~679 from `"To revert this conversion: rm ... && mv ..."` to `"To restore originals: re-run with --restore"`.
-- [ ] write blackbox test `TestRestoreCommitmentFiles_HappyPath`. Use `testDbAggregatorWithFiles(t, cfg)` (the existing fixture pattern in this file — `AggregatorRoTx` is a struct, not stubbable). Open an `AggregatorRoTx` via `agg.BeginFilesRo()` so `at.Dirs()` returns real paths. Then **manually** seed test files: write `v2.0-commitment.0-32.kv` ("ORIG_KV") and `v2.0-commitment.0-32.bt` ("ORIG_BT") into `<datadir>/snapshots/backup/domains/`; write same-named files containing "CONV_*" bytes into `<datadir>/snapshots/domain/`. Call `state.RestoreCommitmentFiles(ctx, at, log.New())`. Assert: `<snapDomain>/v2.0-commitment.0-32.kv` reads "ORIG_KV"; backup dir is gone; backup parent is gone.
-- [ ] write blackbox test `TestRestoreCommitmentFiles_NoBackup`. Use the same fixture but DO NOT seed `snapshots/backup/domains/`. Call `RestoreCommitmentFiles`. Assert error message contains "no backup".
-- [ ] write blackbox test `TestRestoreCommitmentFiles_OrphanSweep`. Seed backup with `v2.0-commitment.0-32.kv` + `v2.0-commitment.0-32.bt` ("ORIG_*"). Seed `snapshots/domain/` with `v2.1-commitment.0-32.kv` + `v2.1-commitment.0-32.kvei` ("CONV_*", different version prefix and a sibling type that doesn't exist in backup). Call restore. Assert: the v2.1 files are gone, the v2.0 files exist and contain "ORIG_*", swept count in log is 2.
-- [ ] run tests: `go test ./db/state/ -run TestRestoreCommitmentFiles -count=1 -v` — all three must pass
+- [x] add `RestoreCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error` per the shape in Technical Details. Place it directly after `ConvertCommitmentFiles` for proximity.
+- [x] add the package-level `commitmentStepRangeRe` regexp at file scope (above `RestoreCommitmentFiles`).
+- [x] implement the three-step body: read backup dir + collect step-range set → orphan-glob-and-delete in `snapshots/domain/` → rename backup entries into `snapshots/domain/`.
+- [x] use `at.Dirs().Snap` to derive `backupDir` and `at.Dirs().SnapDomain`.
+- [x] respect `ctx.Done()` between file renames in step 3 (the operation can be long if there are many files).
+- [x] update the convert-success log message at line ~679 from `"To revert this conversion: rm ... && mv ..."` to `"To restore originals: re-run with --restore"`.
+- [x] write blackbox test `TestRestoreCommitmentFiles_HappyPath`. Use `testDbAggregatorWithFiles(t, cfg)` (the existing fixture pattern in this file — `AggregatorRoTx` is a struct, not stubbable). Open an `AggregatorRoTx` via `agg.BeginFilesRo()` so `at.Dirs()` returns real paths. Then **manually** seed test files: write `v2.0-commitment.0-32.kv` ("ORIG_KV") and `v2.0-commitment.0-32.bt` ("ORIG_BT") into `<datadir>/snapshots/backup/domains/`; write same-named files containing "CONV_*" bytes into `<datadir>/snapshots/domain/`. Call `state.RestoreCommitmentFiles(ctx, at, log.New())`. Assert: `<snapDomain>/v2.0-commitment.0-32.kv` reads "ORIG_KV"; backup dir is gone; backup parent is gone. (Used the simpler `testDbAndAggregatorv3` fixture — restore tests don't need pre-built commitment files; they need only the directory layout.)
+- [x] write blackbox test `TestRestoreCommitmentFiles_NoBackup`. Use the same fixture but DO NOT seed `snapshots/backup/domains/`. Call `RestoreCommitmentFiles`. Assert error message contains "no backup".
+- [x] write blackbox test `TestRestoreCommitmentFiles_OrphanSweep`. Seed backup with `v2.0-commitment.0-32.kv` + `v2.0-commitment.0-32.bt` ("ORIG_*"). Seed `snapshots/domain/` with `v2.1-commitment.0-32.kv` + `v2.1-commitment.0-32.kvei` ("CONV_*", different version prefix and a sibling type that doesn't exist in backup). Call restore. Assert: the v2.1 files are gone, the v2.0 files exist and contain "ORIG_*". (Skipped asserting on log swept-count — log capture would be over-engineered for a cosmetic detail.)
+- [x] run tests: `go test ./db/state/ -run TestRestoreCommitmentFiles -count=1 -v` — all three must pass
 
 ### Task 5: Wire `--restore` flag on the integration command
 
