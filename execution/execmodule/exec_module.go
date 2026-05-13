@@ -190,6 +190,7 @@ type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
+	blockRetire services.BlockRetire
 
 	// MDBX database
 	db               kv.TemporalRwDB // main database
@@ -235,6 +236,7 @@ var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 func NewExecModule(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
 	currentBlockNumber uint64,
@@ -256,6 +258,7 @@ func NewExecModule(
 
 	em := &ExecModule{
 		blockReader:             blockReader,
+		blockRetire:             blockRetire,
 		db:                      db,
 		logger:                  logger,
 		forkValidator:           forkValidator,

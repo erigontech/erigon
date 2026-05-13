@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -431,21 +430,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 			"overlay_extra_blocks", latestRw-latestCommitted)
 	}
 
-	// Pre-trigger block retire so the background freezer has the Execution
-	// run as head-start before the next cycle's aggregator collation gates
-	// on FrozenBlocks. No-op if a retire round is already in flight; CAS
-	// inside RetireBlocksInBackground also bumps maxScheduledBlock. Pass a
-	// noop seeder so the pre-trigger doesn't announce files; SnapshotsPrune's
-	// later call uses the real seeder.
-	//
-	// Use Senders.Progress (= prevStageProgress) as the ceiling so retire has
-	// a forward-looking target. The canonical-hash table can be sparse during
-	// PoS catch-up (FCU writes it progressively), but retireBlocks now
-	// defensively skips a chunk whose blockTo isn't yet canonical and tries
-	// again next round, so the forward-looking ceiling is safe.
-	if cfg.blockRetire != nil {
-		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, prevStageProgress, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
-	}
+	// Note: retire is not triggered here. In the engine-API forkchoice path,
+	// writes accumulate in the block overlay during pipeline execution and
+	// only become visible to retire's RO tx after CommitCycle commits them
+	// to MDBX. A trigger here would fire too early to see anything new. The
+	// trigger lives inside CommitCycle in execmodule/forkchoice.go, right
+	// after commitRwTx.Commit().
 
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
 		return err

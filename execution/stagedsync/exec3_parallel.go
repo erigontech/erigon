@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -417,14 +416,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							// fix these here - they will contain estimates after commit logging
 							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
-							// Re-trigger background retire with the latest committed block as
-							// ceiling. Inside the CompareAndSwap gate this is cheap: if retire
-							// is already running it just bumps maxScheduledBlock; otherwise it
-							// spawns a fresh round. lastBlockResult.BlockNum is guaranteed
-							// canonical (we just executed it).
-							if pe.cfg.blockRetire != nil {
-								pe.cfg.blockRetire.RetireBlocksInBackground(ctx, 0, lastBlockResult.BlockNum, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
-							}
+							// Retire is woken up from execmodule/forkchoice.go CommitCycle
+							// after the brief RW tx commits. Triggering here fires before
+							// MDBX commit and would be visible only to overlay-reading txs.
 							uncommittedBlocks = 0
 							uncommittedGas = 0
 							uncommittedTransactions = 0

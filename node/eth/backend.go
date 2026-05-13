@@ -979,6 +979,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
+		blockRetire,
 		backend.chainDB,
 		pipelineExecutor,
 		currentBlockNumber,

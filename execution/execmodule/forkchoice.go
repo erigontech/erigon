@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -497,6 +499,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
+			}
+			// The MDBX commit above just made the overlay's canonical-hash
+			// writes visible to all other RO txs. This is the ONLY moment
+			// retire's background goroutine (which opens its own RO tx) can
+			// see new canonical entries — wake it up with the freshly-
+			// committed max so it doesn't sit idle until the next CommitCycle.
+			if e.blockRetire != nil {
+				var retireTo uint64
+				func() {
+					c, cerr := roTx.Cursor(kv.HeaderCanonical)
+					if cerr != nil {
+						return
+					}
+					defer c.Close()
+					if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
+						retireTo = binary.BigEndian.Uint64(k)
+					}
+				}()
+				if retireTo > 0 {
+					e.blockRetire.RetireBlocksInBackground(ctx, 0, retireTo, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
+				}
 			}
 			if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()

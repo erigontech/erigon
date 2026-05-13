@@ -719,6 +719,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
+		blockRetire,
 		mock.DB,
 		pipelineExecutor,
 		1, // currentBlockNumber
