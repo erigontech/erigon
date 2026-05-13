@@ -901,6 +901,13 @@ func loadRestoreManifest(path string) ([]string, bool, error) {
 		if line == "" {
 			continue
 		}
+		// Reject path components: manifest entries must be plain basenames so
+		// filepath.Join cannot escape backupDir/snapDomain on restore. The
+		// commitment step-range regex is not anchored and would otherwise
+		// accept e.g. "../../etc/passwd-commitment.0-32.kv".
+		if line != filepath.Base(line) || strings.ContainsAny(line, `/\`) {
+			return nil, false, fmt.Errorf("[commitment_convert] restore: manifest entry %q must be a plain filename", line)
+		}
 		out = append(out, line)
 	}
 	return out, true, nil

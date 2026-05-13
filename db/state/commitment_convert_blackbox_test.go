@@ -968,3 +968,28 @@ func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
 	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
 	require.Equal(t, origKV, restoredKV)
 }
+
+// TestRestoreCommitmentFiles_RejectsPathTraversalInManifest verifies the
+// load-manifest path refuses entries that contain path components. The
+// step-range regex is not anchored, so a name like
+// `../../etc/passwd-commitment.0-32.kv` would otherwise pass shape validation
+// and let filepath.Join escape backupDir / snapDomain on rename.
+func TestRestoreCommitmentFiles_RejectsPathTraversalInManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG"), 0o644))
+	manifest := "../../etc/passwd-commitment.0-32.kv"
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.Error(t, err, "must reject manifest entries with path components")
+	require.Contains(t, err.Error(), "plain filename",
+		"error must call out the basename requirement")
+}
