@@ -277,11 +277,11 @@ if convertRestore {
 **Files:**
 - Modify: `db/state/commitment_convert.go`
 
-- [ ] rename the function `cleanupRebuildParent(parent string, logger log.Logger)` to `cleanupParentIfEmpty(parent string, logger log.Logger)` (body unchanged — the logic is already generic).
-- [ ] update its existing call sites (search `cleanupRebuildParent` in the file; there are 2 callers in phases 1 and 4).
-- [ ] update the comment block to drop the "rebuild/" specificity — say "removes the parent dir if it's empty (the child has just been cleared)".
-- [ ] build: `make integration`
-- [ ] no test changes — function semantics unchanged
+- [x] rename the function `cleanupRebuildParent(parent string, logger log.Logger)` to `cleanupParentIfEmpty(parent string, logger log.Logger)` (body unchanged — the logic is already generic).
+- [x] update its existing call sites (search `cleanupRebuildParent` in the file; there are 2 callers in phases 1 and 4).
+- [x] update the comment block to drop the "rebuild/" specificity — say "removes the parent dir if it's empty (the child has just been cleared)".
+- [x] build: `make integration`
+- [x] no test changes — function semantics unchanged
 
 ### Task 4: Implement `RestoreCommitmentFiles`
 

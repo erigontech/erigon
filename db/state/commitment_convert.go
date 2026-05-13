@@ -678,7 +678,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 			logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
 		}
-		cleanupRebuildParent(filepath.Dir(rebuildDir), logger)
+		cleanupParentIfEmpty(filepath.Dir(rebuildDir), logger)
 		logger.Info("[commitment_convert] no files needed conversion; no backup or promote performed")
 		return nil
 	}
@@ -711,7 +711,7 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 		logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
 	}
-	cleanupRebuildParent(filepath.Dir(rebuildDir), logger)
+	cleanupParentIfEmpty(filepath.Dir(rebuildDir), logger)
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 4 promote: %d files moved to %s",
 		promoted, dirs.SnapDomain))
 
@@ -906,10 +906,10 @@ func convertPhase4(rebuildDir, snapDomain string) (int, error) {
 	return moved, nil
 }
 
-// cleanupRebuildParent removes the rebuild/ parent dir if it's empty (i.e. we
-// just emptied the only child snapshots/rebuild/domain/). Failure is logged
-// but non-fatal — a stray empty rebuild/ directory is harmless.
-func cleanupRebuildParent(parent string, logger log.Logger) {
+// cleanupParentIfEmpty removes the parent dir if it's empty (the child has
+// just been cleared). Failure is logged but non-fatal — a stray empty
+// directory is harmless.
+func cleanupParentIfEmpty(parent string, logger log.Logger) {
 	entries, err := os.ReadDir(parent)
 	if err != nil {
 		return
@@ -918,7 +918,7 @@ func cleanupRebuildParent(parent string, logger log.Logger) {
 		return
 	}
 	if rmErr := dir.RemoveAll(parent); rmErr != nil {
-		logger.Warn("[commitment_convert] failed to remove empty rebuild parent", "path", parent, "err", rmErr)
+		logger.Warn("[commitment_convert] failed to remove empty parent dir", "path", parent, "err", rmErr)
 	}
 }
 
