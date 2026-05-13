@@ -113,9 +113,11 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("archive_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, _ := setupAPI(t, prune.ArchiveMode, false)
+		api, head := setupAPI(t, prune.ArchiveMode, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
+		require.Equal(t, head, uint64(result.Head.Number))
+		require.NotEqual(t, common.Hash{}, result.Head.Hash)
 		require.Equal(t, uint64(0), oldest(t, result.State))
 		require.Equal(t, uint64(0), oldest(t, result.Tx))
 		require.Equal(t, uint64(0), oldest(t, result.Logs))

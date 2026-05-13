@@ -47,8 +47,15 @@ type CapabilityField struct {
 	OldestBlock *hexutil.Uint64 `json:"oldestBlock,omitempty"`
 }
 
+// CapabilityHead identifies the canonical chain tip at the moment eth_capabilities was called.
+type CapabilityHead struct {
+	Number hexutil.Uint64 `json:"number"`
+	Hash   common.Hash    `json:"hash"`
+}
+
 // CapabilitiesResult is the response type of eth_capabilities.
 type CapabilitiesResult struct {
+	Head        CapabilityHead  `json:"head"`
 	State       CapabilityField `json:"state"`
 	Tx          CapabilityField `json:"tx"`
 	Logs        CapabilityField `json:"logs"`
@@ -81,6 +88,10 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
+	headHash, err := rawdb.ReadCanonicalHash(tx, headBlock)
+	if err != nil {
+		return nil, err
+	}
 
 	avail := func(oldest uint64) CapabilityField {
 		o := hexutil.Uint64(oldest)
@@ -100,6 +111,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	}
 
 	return &CapabilitiesResult{
+		Head:  CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
 		State: avail(stateOldest),
 		Tx:    avail(blocksOldest),
 		Logs:  avail(stateOldest),
