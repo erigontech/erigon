@@ -1053,10 +1053,13 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, false, err
 	}
 	if a.frozenBlocks != nil && a.frozenBlocks.FrozenBlocks() > 0 {
-		// Cap the lookup at lastBlockInDB: frozenBlocks may exceed what has
-		// been executed so far (e.g. block snapshot files cover the full
-		// chain but we are still syncing). TxNums.Max on a block not yet in
-		// MDBX returns 0, which would block all collation.
+		// Cap the lookup at lastBlockInDB so we express the intent clearly:
+		// "collation must not advance past the last executed block or the
+		// frozen-blocks boundary, whichever is smaller."
+		// TxNums.Max falls back to the last entry in the DB when the
+		// requested block is not present, which would give the same number
+		// for any frozenBlocks > lastBlockInDB, but using min() makes the
+		// intent explicit and avoids relying on that fallback behaviour.
 		capBlock := min(a.frozenBlocks.FrozenBlocks(), lastBlockInDB)
 		var capTxNum uint64
 		if err = a.db.View(ctx, func(tx kv.Tx) error {
