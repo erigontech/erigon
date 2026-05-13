@@ -57,7 +57,9 @@ var engineXTestCommand = cli.Command{
 			Usage:    "Directory containing engine-x pre-alloc JSON files",
 			Required: true,
 		},
+		&JSONOutputFlag,
 		&RunFlag,
+		&TimeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
 	},
@@ -92,13 +94,9 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
-	workers := cliCtx.Int(WorkersFlag.Name)
-	if workers <= 0 {
-		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
-		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
-		// ~4.3GB peak RSS. Higher values barely improve wall time and
-		// values >24 risk MDBX virtual-memory exhaustion.
-		workers = 8
+	workers := cliCtx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
@@ -108,8 +106,8 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if workers > len(groups) && len(groups) > 0 {
-		workers = len(groups)
+	if workers > uint64(len(groups)) && len(groups) > 0 {
+		workers = uint64(len(groups))
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests across %d (fork, preAllocHash) groups; running with %d workers\n", totalTests, len(groups), workers)
 
@@ -137,13 +135,14 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	groupCh := make(chan engineXGroupKey)
 	resultCh := make(chan testResult, totalTests)
 
+	timeIt := cliCtx.Bool(TimeFlag.Name)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for key := range groupCh {
-				runEngineXGroup(ctx, runner, key, groups[key], resultCh)
+				runEngineXGroup(ctx, runner, key, groups[key], timeIt, resultCh)
 			}
 		}()
 	}
@@ -172,7 +171,29 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	sort.Slice(results, func(i, j int) bool { return results[i].Name < results[j].Name })
 
 	report(cliCtx, results)
+	if timeIt {
+		printTimings(results)
+	}
 	return nil
+}
+
+// printTimings writes per-test wall-time to stderr sorted descending by Time.
+// Goes to stderr so JSON mode (--jsonout to stdout) isn't polluted.
+func printTimings(results []testResult) {
+	timed := make([]testResult, 0, len(results))
+	for _, r := range results {
+		if r.Stats != nil {
+			timed = append(timed, r)
+		}
+	}
+	sort.Slice(timed, func(i, j int) bool {
+		return timed[i].Stats.Time > timed[j].Stats.Time
+	})
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, "=== test timings (descending) ===")
+	for _, r := range timed {
+		fmt.Fprintf(os.Stderr, "  %12s  %s\n", r.Stats.Time, r.Name)
+	}
 }
 
 // loadEngineXGroups walks path for JSON files, parses each, filters tests by
@@ -229,12 +250,15 @@ func isUnderPreAlloc(p string) bool {
 // runEngineXGroup executes every test in the group sequentially on a single
 // tester (created lazily by the runner) then evicts the tester to free its
 // node and temp directory before returning. Results are streamed to resultCh
-// so the parent goroutine can collect across all workers.
+// so the parent goroutine can collect across all workers. When timeIt is
+// true, each test's single Run is wrapped in timedExec so wall-time and
+// memstats land on the JSON output.
 func runEngineXGroup(
 	ctx context.Context,
 	runner *engineapitester.EngineXTestRunner,
 	key engineXGroupKey,
 	tests []engineXNamedTest,
+	timeIt bool,
 	resultCh chan<- testResult,
 ) {
 	defer func() {
@@ -245,7 +269,18 @@ func runEngineXGroup(
 	}()
 	for _, t := range tests {
 		r := testResult{Name: t.name, Pass: true}
-		err := runner.Run(ctx, t.def)
+		var err error
+		if timeIt {
+			var stats execStats
+			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
+				return nil, 0, runner.Run(ctx, t.def)
+			})
+			if err == nil {
+				r.Stats = &stats
+			}
+		} else {
+			err = runner.Run(ctx, t.def)
+		}
 		if err != nil {
 			r.Pass = false
 			r.Error = err.Error()
