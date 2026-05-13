@@ -5,13 +5,13 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/gossip"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 const (
 	// overlay parameters
-	gossipSubD    = 4 // topic stable mesh target count
 	gossipSubDlo  = 2 // topic stable mesh low watermark
 	gossipSubDhi  = 6 // topic stable mesh high watermark
 	gossipSubDout = 1 // topic stable mesh target out degree. // Dout must be set below Dlo, and must not exceed D / 2.
@@ -22,18 +22,14 @@ const (
 	gossipSubSeenTTL      = 550 // number of heartbeat intervals to retain message IDs
 	// heartbeat interval
 	gossipSubHeartbeatInterval = 700 * time.Millisecond // frequency of heartbeat, milliseconds
-
-	// decayToZero specifies the terminal value that we will use when decaying
-	// a value.
-	decayToZero = 0.01
 )
 
 // determines the decay rate from the provided time period till
-// the decayToZero value. Ex: ( 1 -> 0.01)
+// gossip.DecayToZero. Ex: ( 1 -> 0.01)
 func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconChainConfig) float64 {
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	numOfTimes := totalDurationDecay / oneSlotDuration
-	return math.Pow(decayToZero, 1/float64(numOfTimes))
+	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }
 
 func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
@@ -61,7 +57,7 @@ func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 		BehaviourPenaltyThreshold:   6,
 		BehaviourPenaltyDecay:       scoreDecay(10*oneEpochDuration, beaconConfig), // 10 epochs
 		DecayInterval:               oneSlotDuration,
-		DecayToZero:                 decayToZero,
+		DecayToZero:                 gossip.DecayToZero,
 		RetainScore:                 100 * oneEpochDuration, // Retain for 100 epochs
 	}
 	pubsubQueueSize := 600
@@ -83,7 +79,7 @@ func pubsubGossipParam() pubsub.GossipSubParams {
 	gParams := pubsub.DefaultGossipSubParams()
 	gParams.Dlo = gossipSubDlo
 	gParams.Dhi = gossipSubDhi
-	gParams.D = gossipSubD
+	gParams.D = gossip.GossipSubD
 	gParams.Dout = gossipSubDout
 
 	gParams.HeartbeatInterval = gossipSubHeartbeatInterval

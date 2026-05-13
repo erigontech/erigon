@@ -14,6 +14,7 @@ make erigon
 ```
 
 This starts a node that:
+
 - Creates a PoS genesis with 64 validators (Deneb fork from genesis)
 - Runs the embedded Caplin consensus layer
 - Proposes a block every 6 seconds (one per slot)
@@ -21,22 +22,22 @@ This starts a node that:
 
 ## Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--chain=dev` | — | **Required.** Enables dev mode with PoS genesis. |
-| `--beacon.api=beacon,validator,node,config` | — | **Required.** Enables the Beacon API endpoints used by the embedded validator. |
-| `--dev-validator-seed` | `devnet` | Deterministic seed for BLS key derivation. Change to run independent dev chains. |
-| `--dev-validator-count` | `64` | Number of genesis validators. |
-| `--dev.slot-time` | `6` | Seconds per slot (minimum: 2). Lower values produce blocks faster. |
-| `--datadir` | `dev` | Data directory. Each run creates fresh state (ephemeral mode). |
+| Flag                                        | Default  | Description                                                                      |
+|---------------------------------------------|----------|----------------------------------------------------------------------------------|
+| `--chain=dev`                               | —        | **Required.** Enables dev mode with PoS genesis.                                 |
+| `--beacon.api=beacon,validator,node,config` | —        | **Required.** Enables the Beacon API endpoints used by the embedded validator.   |
+| `--dev-validator-seed`                      | `devnet` | Deterministic seed for BLS key derivation. Change to run independent dev chains. |
+| `--dev-validator-count`                     | `64`     | Number of genesis validators.                                                    |
+| `--dev.slot-time`                           | `6`      | Seconds per slot (minimum: 2). Lower values produce blocks faster.               |
+| `--datadir`                                 | `dev`    | Data directory. Each run creates fresh state (ephemeral mode).                   |
 
 ### Optional flags
 
-| Flag | Description |
-|------|-------------|
+| Flag                                                | Description                           |
+|-----------------------------------------------------|---------------------------------------|
 | `--http.api=eth,erigon,web3,net,debug,trace,txpool` | Enable JSON-RPC APIs for interaction. |
-| `--http.port=8545` | JSON-RPC port (default: 8545). |
-| `--beacon.api.port=5555` | Beacon API port (default: 5555). |
+| `--http.port=8545`                                  | JSON-RPC port (default: 8545).        |
+| `--beacon.api.port=5555`                            | Beacon API port (default: 5555).      |
 
 ## Example: Fast block production
 

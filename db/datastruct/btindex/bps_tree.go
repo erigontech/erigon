@@ -197,7 +197,7 @@ func (n *Node) Decode(buf []byte) (uint64, error) {
 	return uint64(10 + l), nil
 }
 
-func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
+func (b *BpsTree) WarmUp(kv *seg.Reader) error {
 	t := time.Now()
 	N := b.offt.Count()
 	if N == 0 {
@@ -219,11 +219,11 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	var key []byte
 	for i := step; i < N; i += step {
 		di := i - 1
-		key, _, _, err = b.dataLookupFunc(di, kv)
-		if err != nil {
-			return err
-		}
-		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+		off := b.offt.Get(di)
+		kv.Reset(off)
+		key, _ = kv.Next(key[:0]) // read key only; reuse buffer to avoid allocs
+		kv.Skip()                 // skip value — WarmUp only needs the key
+		b.mx = append(b.mx, Node{off: off, key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 

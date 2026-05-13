@@ -72,10 +72,28 @@ type TemporalMemBatch struct {
 	pastForkableWriters map[kv.ForkableId][]kv.BufferedWriter
 
 	currentChangesAccumulator *changeset.StateChangeSet
-	pastChangesAccumulator    map[string]*changeset.StateChangeSet
+	// pastChangesAccumulator is read by the parallel commitment calculator
+	// goroutine (via SharedDomains.GetChangesetByBlockNum) while the exec
+	// loop writes to it (via SavePastChangesetAccumulator). pastChangesLock
+	// serializes those accesses so map-iteration during GetChangesetByBlockNum
+	// doesn't race with map-write during SavePastChangesetAccumulator.
+	pastChangesLock        sync.RWMutex
+	pastChangesAccumulator map[string]*changeset.StateChangeSet
 
-	unwindToTxNum   uint64
+	unwindToTxNum uint64
+	// unwindChangeset is keyed by the pre-step portion of each entry's Key
+	// (`Key[:len(Key)-8]`) and is consulted only by the getLatest fallback —
+	// it's intentionally collapsed to one entry per real key so a pre-unwind
+	// value can be found by the same key the overlay uses.
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	// unwindChangesetRaw preserves every diff entry (distinct by Key+step) so
+	// Flush can replay a complete unwind against MDBX, including multiple
+	// step entries for the same real key (e.g. a commitment branch that was
+	// written in both step N and N+1 during forward execution). Collapsing
+	// these — as unwindChangeset does — loses every step except the one that
+	// happened to be iterated last, leaving orphan domain entries at steps
+	// above the unwind target.
+	unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
 }
@@ -293,6 +311,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
+	sd.unwindChangesetRaw = nil
 
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
@@ -383,6 +402,8 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 	}
 }
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
+	sd.pastChangesLock.Lock()
+	defer sd.pastChangesLock.Unlock()
 	if sd.pastChangesAccumulator == nil {
 		sd.pastChangesAccumulator = make(map[string]*changeset.StateChangeSet)
 	}
@@ -393,7 +414,14 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 }
 
 // GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
+//
+// WARNING: ambiguous when pastChangesAccumulator holds multiple changesets for
+// the same block number (e.g. canonical + fork during a reorg-bounce test).
+// The first match in non-deterministic map iteration order is returned.
+// Prefer GetChangesetByHash when the caller has the block hash available.
 func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
+	sd.pastChangesLock.RLock()
+	defer sd.pastChangesLock.RUnlock()
 	for key, cs := range sd.pastChangesAccumulator {
 		keyBytes := common.ToBytesZeroCopy(key)
 		if binary.BigEndian.Uint64(keyBytes[:8]) == blockNumber {
@@ -404,32 +432,109 @@ func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.H
 	return common.Hash{}, nil
 }
 
+// GetChangesetByHash returns the changeset saved under the exact (blockNumber,
+// blockHash) key. Returns nil if not found. Use this in preference to
+// GetChangesetByBlockNum when both pieces of information are known —
+// pastChangesAccumulator can hold multiple changesets per block number after
+// a fork-bounce, and number-only lookups can return the wrong one
+// non-deterministically.
+func (sd *TemporalMemBatch) GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet {
+	var key [40]byte
+	binary.BigEndian.PutUint64(key[:8], blockNumber)
+	copy(key[8:], blockHash[:])
+	sd.pastChangesLock.RLock()
+	defer sd.pastChangesLock.RUnlock()
+	return sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]
+}
+
 func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	if changeset, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]; ok {
+	sd.pastChangesLock.RLock()
+	cs, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]
+	sd.pastChangesLock.RUnlock()
+	if ok {
 		return [kv.DomainLen][]kv.DomainEntryDiff{
-			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
-			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
-			changeset.Diffs[kv.CodeDomain].GetDiffSet(),
-			changeset.Diffs[kv.CommitmentDomain].GetDiffSet(),
+			cs.Diffs[kv.AccountsDomain].GetDiffSet(),
+			cs.Diffs[kv.StorageDomain].GetDiffSet(),
+			cs.Diffs[kv.CodeDomain].GetDiffSet(),
+			cs.Diffs[kv.CommitmentDomain].GetDiffSet(),
 		}, true, nil
 	}
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	sd.latestStateLock.Lock()
+	defer sd.latestStateLock.Unlock()
+
 	sd.unwindToTxNum = unwindToTxNum
+
+	// Drop overlay entries stamped with txNum > unwindToTxNum. Without this,
+	// getLatest returns entries written inside the unwound range because it
+	// picks dataWithTxNums[len-1] without consulting sd.unwindToTxNum — the
+	// unwindChangeset fallback below is only reachable on an overlay miss.
+	// Observed as post-Fusaka gas-used mismatches after forkchoice-driven
+	// unwinds (an SSTORE on a slot first-written inside the unwound range
+	// charges SSTORE_RESET instead of SSTORE_SET — a 17100 gas shortfall
+	// per slot). Keys whose slice empties out are removed so the
+	// unwindChangeset fallback can supply the pre-unwind answer.
+	pruneSlice := func(entries []dataWithTxNum) []dataWithTxNum {
+		kept := entries[:0]
+		for _, e := range entries {
+			if e.txNum <= unwindToTxNum {
+				kept = append(kept, e)
+			}
+		}
+		return kept
+	}
+	for d := range sd.domains {
+		for k, entries := range sd.domains[d] {
+			kept := pruneSlice(entries)
+			if len(kept) == 0 {
+				delete(sd.domains[d], k)
+			} else {
+				sd.domains[d][k] = kept
+			}
+		}
+	}
+	// Collect first, mutate after: btree.Scan doesn't allow Set/Delete during traversal.
+	type storageEdit struct {
+		key  string
+		kept []dataWithTxNum
+	}
+	var edits []storageEdit
+	sd.storage.Scan(func(k string, entries []dataWithTxNum) bool {
+		kept := pruneSlice(entries)
+		if len(kept) != len(entries) {
+			edits = append(edits, storageEdit{k, kept})
+		}
+		return true
+	})
+	for _, e := range edits {
+		if len(e.kept) == 0 {
+			sd.storage.Delete(e.key)
+		} else {
+			sd.storage.Set(e.key, e.kept)
+		}
+	}
+
 	var unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
+	var unwindChangesetRaw *[kv.DomainLen][]kv.DomainEntryDiff
 
 	if changeset != nil {
 		unwindChangeset = &[kv.DomainLen]map[string]kv.DomainEntryDiff{}
+		unwindChangesetRaw = &[kv.DomainLen][]kv.DomainEntryDiff{}
 
 		for domain, changes := range changeset {
 			if unwindChangeset[domain] == nil {
 				unwindChangeset[domain] = map[string]kv.DomainEntryDiff{}
 			}
+
+			// unwindChangesetRaw preserves every (key, step) entry — Flush needs
+			// the full list to delete every orphan step entry from MDBX.
+			unwindChangesetRaw[domain] = append(unwindChangesetRaw[domain][:0], changes...)
 
 			for _, change := range changes {
 				unwindChangeset[domain][change.Key[:len(change.Key)-8]] = change
@@ -438,6 +543,7 @@ func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLe
 	}
 
 	sd.unwindChangeset = unwindChangeset
+	sd.unwindChangesetRaw = unwindChangesetRaw
 }
 
 func (sd *TemporalMemBatch) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64) (err error) {
@@ -534,17 +640,28 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		return fmt.Errorf("can't merge from batch with non-nil currentChangesAccumulator")
 	}
 
+	// Fixed lock order (receiver write-lock, then `other` read-lock).
+	// Callers must not interleave reciprocal Merge calls — i.e. never run
+	// a.Merge(b) and b.Merge(a) concurrently, which would deadlock here.
+	// In practice Merge runs single-threaded at stage commit / batch
+	// rollup, so this is a documented assumption rather than an enforced
+	// invariant.
+	sd.pastChangesLock.Lock()
+	other.pastChangesLock.RLock()
 	for key, changeSet := range other.pastChangesAccumulator {
 		if sd.pastChangesAccumulator == nil {
 			sd.pastChangesAccumulator = map[string]*changeset.StateChangeSet{}
 		}
 		sd.pastChangesAccumulator[key] = changeSet
 	}
+	other.pastChangesLock.RUnlock()
+	sd.pastChangesLock.Unlock()
 
 	if other.unwindChangeset != nil {
 		if sd.unwindChangeset == nil {
 			sd.unwindToTxNum = other.unwindToTxNum
 			sd.unwindChangeset = other.unwindChangeset
+			sd.unwindChangesetRaw = other.unwindChangesetRaw
 		} else {
 			for domain, otherDiffs := range other.unwindChangeset {
 				for key, otherDiff := range otherDiffs {
@@ -559,6 +676,28 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
+			// Also merge the raw changesets — Flush walks these to ensure every
+			// step entry in MDBX gets reverted, not just the collapsed one.
+			//
+			// Precondition: both sd.unwindChangesetRaw[domain] and otherDiffs
+			// must be sorted by Key; MergeDiffSets relies on that ordering.
+			// The invariant is established upstream — DomainDiff.GetDiffSet
+			// sorts (db/kv/helpers.go), the serialize/deserialize pair
+			// preserves order, TemporalMemBatch.Unwind copies its sorted input
+			// verbatim, and MergeDiffSets itself returns sorted output.
+			if other.unwindChangesetRaw != nil {
+				if sd.unwindChangesetRaw == nil {
+					sd.unwindChangesetRaw = other.unwindChangesetRaw
+				} else {
+					for domain, otherDiffs := range other.unwindChangesetRaw {
+						if sd.unwindToTxNum < other.unwindToTxNum {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(otherDiffs, sd.unwindChangesetRaw[domain])
+						} else {
+							sd.unwindChangesetRaw[domain] = changeset.MergeDiffSets(sd.unwindChangesetRaw[domain], otherDiffs)
+						}
+					}
+				}
+			}
 			if sd.unwindToTxNum < other.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
@@ -570,17 +709,19 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
-	if sd.unwindChangeset != nil {
-		var changeSet [kv.DomainLen][]kv.DomainEntryDiff
-		for domain, diffEntries := range sd.unwindChangeset {
-			for _, entry := range diffEntries {
-				changeSet[domain] = append(changeSet[domain], entry)
-			}
-			sort.Slice(changeSet[domain], func(i, j int) bool {
-				return changeSet[domain][i].Key < changeSet[domain][j].Key
+	if sd.unwindChangesetRaw != nil {
+		// Replay against the RAW (step-preserving) changeset — the collapsed
+		// unwindChangeset would lose every (key, step) entry except one per
+		// real key, which leaves orphan domain-values entries at steps above
+		// the unwind target (observed on mainnet for the commitment domain).
+		for domain := range sd.unwindChangesetRaw {
+			sort.Slice(sd.unwindChangesetRaw[domain], func(i, j int) bool {
+				return sd.unwindChangesetRaw[domain][i].Key < sd.unwindChangesetRaw[domain][j].Key
 			})
 		}
-		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
+		if err := tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, sd.unwindChangesetRaw); err != nil {
+			return err
+		}
 	}
 
 	if err := sd.flushDiffSet(ctx, tx); err != nil {

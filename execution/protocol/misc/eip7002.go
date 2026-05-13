@@ -19,25 +19,25 @@ package misc
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // See https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7002.md#system-call
-func DequeueWithdrawalRequests7002(syscall rules.SystemCall, state *state.IntraBlockState) (*types.FlatRequest, error) {
-	codeSize, err := state.GetCodeSize(params.WithdrawalRequestAddress)
+func DequeueWithdrawalRequests7002(syscall rules.SystemCall, state *state.IntraBlockState, withdrawalRequestAddress accounts.Address) (*types.FlatRequest, error) {
+	codeSize, err := state.GetCodeSize(withdrawalRequestAddress)
 	if err != nil {
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, fmt.Errorf("[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", params.WithdrawalRequestAddress)
+		return nil, fmt.Errorf("[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", withdrawalRequestAddress)
 	}
 
-	res, err := syscall(params.WithdrawalRequestAddress, nil)
+	res, err := syscall(withdrawalRequestAddress, nil)
 	if err != nil {
-		return nil, fmt.Errorf("[EIP-7002] Unprecedented Syscall failure WithdrawalRequestAddress=%x error=%s", params.WithdrawalRequestAddress, err.Error())
+		return nil, fmt.Errorf("[EIP-7002] Unprecedented Syscall failure WithdrawalRequestAddress=%x error=%s", withdrawalRequestAddress, err.Error())
 	}
 	if res != nil {
 		// Just append the contract output

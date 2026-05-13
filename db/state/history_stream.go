@@ -245,9 +245,11 @@ type HistoryRangeAsOfDB struct {
 func (hi *HistoryRangeAsOfDB) Close() {
 	if hi.valsCDup != nil {
 		hi.valsCDup.Close()
+		hi.valsCDup = nil
 	}
 	if hi.dataC != nil {
 		hi.dataC.Close()
+		hi.dataC = nil
 	}
 }
 

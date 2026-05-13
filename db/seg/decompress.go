@@ -509,8 +509,40 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 }
 func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
 func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDictSize + d.lenDictSize }
 func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
+
+// DictMemSize returns the in-memory size of the decoded Huffman table structures
+// (arena-allocated codeword/table/slot slabs). Pattern bytes are subslices of the
+// mmap'd file data and are not included.
+func (d *Decompressor) DictMemSize() uint64 {
+	var total uint64
+	if d.patArena != nil {
+		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
+		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
+		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+	}
+	if d.posArena != nil {
+		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
+		total += uint64(cap(d.posArena.entriesArr)) * uint64(unsafe.Sizeof(posEntry{}))
+		total += uint64(cap(d.posArena.ptrsArr)) * uint64(unsafe.Sizeof((*posTable)(nil)))
+	}
+	return total
+}
+
+// Stats accumulates snapshot segment stats for summary logging.
+type Stats struct {
+	Words   uint64
+	Dict    uint64
+	DictMem uint64
+}
+
+func (s *Stats) Add(d *Decompressor) {
+	s.Words += uint64(d.Count())
+	s.Dict += d.SerializedTotalDictSize()
+	s.DictMem += d.DictMemSize()
+}
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 

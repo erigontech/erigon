@@ -1,11 +1,15 @@
 package fusefilter
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -205,6 +209,317 @@ func TestWriterClose(t *testing.T) {
 
 	// Close again (should be safe)
 	writer.Close()
+}
+
+func TestWriterShardedBasic(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded"))
+	require.NoError(err)
+	defer w.Close()
+
+	keys := []uint64{1, 2, 3, 0xFF << 56, 0xAB<<56 | 12345, 0x01<<56 | 99}
+	for _, k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, consumed, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+	require.Equal(buf.Len(), consumed)
+
+	for _, k := range keys {
+		require.True(r.ContainsHash(k), "key %d missing", k)
+	}
+	// Keys in different shards are absent.
+	require.False(r.ContainsHash(0xBB<<56 | 99999))
+}
+
+func TestWriterShardedLarge(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded_large"))
+	require.NoError(err)
+	defer w.Close()
+
+	const n = 100_000
+	for i := range n {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	for i := range n {
+		require.True(r.ContainsHash(uint64(i)), "key %d missing", i)
+	}
+}
+
+func TestWriterShardedForceInMem(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "sharded_mem"))
+	require.NoError(err)
+	defer w.Close()
+	require.NoError(w.AddHash(42))
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	sz := r.ForceInMem()
+	require.Greater(uint64(sz), uint64(0))
+	require.True(r.ContainsHash(42))
+}
+
+func TestWriterShardedSingleShard(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "single_shard"))
+	require.NoError(err)
+	defer w.Close()
+
+	// All keys have high byte = 0x42 — only shard 0x42 is populated
+	const shard = uint64(0x42)
+	keys := []uint64{shard<<56 | 1, shard<<56 | 2, shard<<56 | 999, shard<<56 | 0xFFFF}
+	for _, k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+
+	r, consumed, err := NewReaderShardedOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+	require.Equal(buf.Len(), consumed)
+
+	for _, k := range keys {
+		require.True(r.ContainsHash(k), "key %#x missing", k)
+	}
+	// All other shards absent
+	require.False(r.ContainsHash(uint64(0x00)<<56 | 1))
+	require.False(r.ContainsHash(uint64(0xFF)<<56 | 1))
+}
+
+func TestWriterShardedTruncated(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	w, err := NewWriterSharded(filepath.Join(dir, "trunc"))
+	require.NoError(err)
+	defer w.Close()
+	for i := range 10 {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+
+	var buf bytes.Buffer
+	_, err = w.BuildTo(&buf)
+	require.NoError(err)
+	full := buf.Bytes()
+
+	_, _, err = NewReaderShardedOnBytes(full[:2], "trunc") // shorter than 4-byte header
+	require.Error(err)
+
+	_, _, err = NewReaderShardedOnBytes(full[:5], "trunc") // header ok but truncated shard table
+	require.Error(err)
+}
+
+func TestWriterShardedSegmentCountRoundTrip(t *testing.T) {
+	// Regression: SegmentCount and SegmentCountLength were aliased (both read from offset 8).
+	require := require.New(t)
+	dir := t.TempDir()
+
+	filePath := filepath.Join(dir, "seg_count")
+	writer, err := NewWriter(filePath)
+	require.NoError(err)
+	defer writer.Close()
+
+	const n = 1000
+	for i := range n {
+		require.NoError(writer.AddHash(uint64(i)))
+	}
+	require.NoError(writer.Build())
+	writer.Close()
+
+	f, err := os.Open(filePath)
+	require.NoError(err)
+	defer f.Close()
+	raw, err := io.ReadAll(f)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(raw, "seg_count")
+	require.NoError(err)
+	require.NotZero(r.inner.SegmentCount)
+	require.NotZero(r.inner.SegmentCountLength)
+	require.NotZero(r.inner.SegmentLength)
+}
+
+// 200K random keys, then probe 200K fresh randoms. Expects FP rate < 1%.
+func TestWriterShardedUniformDistribution(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_uniform")
+
+	rng := rand.New(rand.NewPCG(1, 2))
+	const keyCount = 200_000
+	keys := make(map[uint64]struct{}, keyCount)
+	for len(keys) < keyCount {
+		keys[rng.Uint64()] = struct{}{}
+	}
+
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for k := range keys {
+		require.NoError(w.AddHash(k))
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+
+	for k := range keys {
+		require.True(r.ContainsHash(k))
+	}
+
+	falsePositives := 0
+	const probes = 200_000
+	for i := 0; i < probes; i++ {
+		var k uint64
+		for {
+			k = rng.Uint64()
+			if _, ok := keys[k]; !ok {
+				break
+			}
+		}
+		if r.ContainsHash(k) {
+			falsePositives++
+		}
+	}
+	fpRate := float64(falsePositives) / float64(probes)
+	t.Logf("false positive rate: %d/%d = %.4f%%", falsePositives, probes, fpRate*100)
+	require.Less(fpRate, 0.01, "false positive rate unexpectedly high")
+}
+
+// Per-shard fill counts at 511/512/513 stress the page-flush boundary in
+// WriterOffHeap (page = 512 uint64s).
+func TestWriterShardedPageBoundary(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_pageboundary")
+
+	// v2 shards by high byte: pack shard id into the high byte.
+	plan := map[uint64]int{
+		0x01: 511,
+		0x02: 512,
+		0x03: 513,
+		0x04: 500,
+		0x05: 1024,
+		0x07: 100,
+	}
+	var allKeys []uint64
+	for shard, n := range plan {
+		for i := 0; i < n; i++ {
+			allKeys = append(allKeys, shard<<56|uint64(i))
+		}
+	}
+
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for _, k := range allKeys {
+		require.NoError(w.AddHash(k))
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+	for _, k := range allKeys {
+		require.True(r.ContainsHash(k))
+	}
+}
+
+// Feed duplicated hashes to one shard to exercise xorfilter's in-place
+// pruneDuplicates pass against the RDWR mmap of the temp file.
+func TestWriterShardedMmapMutationOnDuplicates(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "sharded_dedup")
+
+	const unique = 1000
+	w, err := NewWriterSharded(filePath)
+	require.NoError(err)
+	w.DisableFsync()
+	for i := 0; i < unique; i++ {
+		require.NoError(w.AddHash(uint64(i)))
+	}
+	for i := 0; i < 100; i++ {
+		require.NoError(w.AddHash(uint64(i))) // duplicates
+	}
+	require.NoError(w.Build())
+	w.Close()
+
+	r, err := NewReaderSharded(filePath)
+	require.NoError(err)
+	defer r.Close()
+	for i := 0; i < unique; i++ {
+		require.True(r.ContainsHash(uint64(i)))
+	}
+}
+
+// requireFilterEqual asserts every header field and fingerprint count match between two filters.
+func requireFilterEqual(t *testing.T, expected, got *xorfilter.BinaryFuse[uint8]) {
+	t.Helper()
+	require.Equal(t, expected.SegmentCount, got.SegmentCount)
+	require.Equal(t, expected.SegmentCountLength, got.SegmentCountLength)
+	require.Equal(t, expected.Seed, got.Seed)
+	require.Equal(t, expected.SegmentLength, got.SegmentLength)
+	require.Equal(t, expected.SegmentLengthMask, got.SegmentLengthMask)
+	require.Equal(t, len(expected.Fingerprints), len(got.Fingerprints))
+}
+
+// Regression: reader previously decoded SegmentCount from offset 8 instead of 4, silently reading SegmentCountLength.
+func TestHeaderRoundTrip(t *testing.T) {
+	require := require.New(t)
+
+	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "hdr_rt"))
+	require.NoError(err)
+	defer w.Close()
+
+	for i := uint64(0); i < 50; i++ {
+		require.NoError(w.AddHash(i))
+	}
+
+	original, err := w.build()
+	require.NoError(err)
+
+	var buf bytes.Buffer
+	_, err = writeFilter(w.features, original, &buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	requireFilterEqual(t, original, r.inner)
 }
 
 func TestMultipleFilters(t *testing.T) {

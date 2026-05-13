@@ -39,6 +39,7 @@ const (
 	ExecutionStatusMissingSegment    ExecutionStatus = 3
 	ExecutionStatusInvalidForkchoice ExecutionStatus = 4
 	ExecutionStatusBusy              ExecutionStatus = 5
+	ExecutionStatusReorgTooDeep      ExecutionStatus = 6
 )
 
 func (s ExecutionStatus) String() string {
@@ -55,6 +56,8 @@ func (s ExecutionStatus) String() string {
 		return "InvalidForkchoice"
 	case ExecutionStatusBusy:
 		return "Busy"
+	case ExecutionStatusReorgTooDeep:
+		return "ReorgTooDeep"
 	default:
 		return fmt.Sprintf("ExecutionStatus(%d)", int32(s))
 	}

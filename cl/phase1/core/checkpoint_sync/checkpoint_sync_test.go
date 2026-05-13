@@ -90,6 +90,18 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	require.True(t, errors.Is(err, context.DeadlineExceeded))
 }
 
+func TestRemoteCheckpointSyncCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	clparams.ConfigurableCheckpointsURLs = []string{"http://127.0.0.1:1"}
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
+	currentState, err := syncer.GetLatestBeaconState(ctx)
+
+	require.Nil(t, currentState)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

@@ -16,6 +16,7 @@ new execution logic end-to-end.
 ## Prerequisites
 
 You need:
+
 - `--datadir` — path to the Erigon data directory (block snapshots must be present)
 - `--chain` — chain name (e.g. `chiado`, `mainnet`, `gnosis`, `sepolia`)
 
@@ -48,16 +49,19 @@ but more RAM; `8m` is a reasonable default.
 ## Useful optional flags
 
 **Profiling** (add when you want pprof):
+
 ```
 --pprof --pprof.port=6160
 ```
 
 **Correctness assertions** (add when hunting state bugs — slows execution):
+
 ```
 ERIGON_ASSERT=true
 ```
 
 **Stop at a specific block** (useful to reproduce a bug at block N):
+
 ```
 --block=<N>
 ```
@@ -65,6 +69,7 @@ ERIGON_ASSERT=true
 ## Verifying snapshot integrity
 
 If you suspect corrupted snapshot files before running:
+
 ```bash
 go run ./cmd/erigon seg integrity --datadir <datadir> --sample=0.001
 ```

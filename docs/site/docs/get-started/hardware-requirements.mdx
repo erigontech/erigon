@@ -1,0 +1,70 @@
+---
+title: "Hardware Requirements"
+description: "Minimum and recommended specs for running Erigon on mainnet, testnets, and archive mode."
+sidebar_position: 2
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import diskSizes from '@site/src/data/disk-sizes.json';
+
+# Hardware Requirements
+
+## Overview
+
+A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory Express) disk is essential for optimal performance. Avoid Hard Disk Drives (HDD), as they can cause Erigon to lag behind the blockchain tip, albeit not fall behind.
+
+| Component | Recommendation | Notes |
+| --- | --- | --- |
+| Disk Type | Use high-end NVMe SSDs. | Avoid HDDs.SSD performance may degrade when nearing full capacity. |
+| Disk Configuration | RAID 0 for multiple disks (Speed) | High-Speed Option: RAID 0 provides maximum speed but no redundancy (data loss risk).ZFS filesystems may be considered for Archive nodes for their data integrity features, but complex RAID-Z setups are generally not recommended. |
+| RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
+| CPU | 4–8 cores for Full nodes8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| Linux | Kernel version > v4 | A modern Linux distribution is required. |
+
+
+## Disk Size and RAM Requirements
+
+The amount of disk space recommended and RAM you need depends on the [sync mode](../fundamentals/sync-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, with the sole exception of the `--prune.mode` flag.
+
+<Tabs>
+<TabItem value="ethereum-mainnet" label="Ethereum mainnet">
+| Sync Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
+| --- | --- | --- | --- | --- |
+| Archive | {diskSizes?.networks?.['mainnet']?.['archive']?.display ?? '—'} | 4 TB | 32 GB | 64 GB |
+| Full (Default) | {diskSizes?.networks?.['mainnet']?.['full']?.display ?? '—'} | 2 TB | 16 GB | 32 GB |
+| Minimal | {diskSizes?.networks?.['mainnet']?.['minimal']?.display ?? '—'} | 1 TB | 16 GB | 64 GB |
+
+</TabItem>
+<TabItem value="gnosis-chain" label="Gnosis Chain">
+| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
+| Archive        | {diskSizes?.networks?.['gnosis']?.['archive']?.display ?? '—'} | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | {diskSizes?.networks?.['gnosis']?.['full']?.display ?? '—'}    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | {diskSizes?.networks?.['gnosis']?.['minimal']?.display ?? '—'} | 500 GB                      | 8 GB               | 16 GB                 |
+</TabItem>
+<TabItem value="polygon" label="Polygon">
+:::warning
+The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases). Disk usage figures below are from September 2025 and are no longer automatically updated.
+:::
+
+| **Sync Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
+| -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
+| Archive        | 4.85 TB                | 8 TB                        | 64 GB              | 128 GB                |
+| Full (Default) | 3.3 TB                 | 4 TB                        | 32 GB              | 64 GB                 |
+| Minimal        | 1.2 TB                 | 2 TB                        | 32 GB              | 64 GB                 |
+</TabItem>
+</Tabs>
+
+:::tip
+See also how you can [optimize storage](../fundamentals/optimizing-storage).
+:::
+
+## Bandwidth Requirements
+
+Your internet bandwidth is also an important factor, particularly for sync speed and validator performance.
+
+| Node Type      | Bandwidth (Required) | Bandwidth (Recommended) |
+| -------------- | -------------------- | ----------------------- |
+| Staking/Mining | 10 Mbps              | 50 Mbps                 |
+| Non-Staking    | 5 Mbps               | 25 Mbps                 |
