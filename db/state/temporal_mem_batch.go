@@ -272,12 +272,11 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	// modified by the unwound block. Only fires when ts is at-or-after the
 	// unwind point — for ts < unwindToTxNum the caller falls through to the
 	// underlying tx (chain DB / files) which holds the older committed value
-	// that was never unwound. Without this, after a forkchoice-driven commit
-	// the chain DB may still hold the post-change value (engine_x tester
-	// reuses the same backend across sequential ValidatePayload calls and
-	// commits each one via MergeExtendingFork) — the commitment calculator's
-	// asOfStateReader (committer.go) would then read stale post-commit
-	// values for unwound keys and compute a wrong trie root.
+	// that was never unwound. Without this fallback, when the unwound block's
+	// writes were already committed to chain DB before the in-memory unwind
+	// the chain DB still holds the post-change value, and the commitment
+	// calculator's asOfStateReader (committer.go) reads those stale values
+	// for unwound keys and computes a wrong trie root.
 	unwoundLatest := func(domain kv.Domain, key string) (v []byte, ok bool, err error) {
 		if sd.unwindChangeset == nil || ts < sd.unwindToTxNum {
 			return nil, false, nil
@@ -366,15 +365,13 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 
 	// Wrap the callback to respect sd.unwindChangeset: when iterating the
 	// underlying tx + ramIter, the chain DB may still hold values written by
-	// blocks that were unwound in-memory but committed earlier (engine_x
-	// tester reuses the same backend across sequential ValidatePayload calls
-	// and commits each one's results via MergeExtendingFork). Without this
+	// blocks that were unwound in-memory but committed earlier. Without this
 	// wrapper, createContract's DomainDelPrefix sees the stale value via
 	// IteratePrefix and records it as the prev value in the new block's diff
 	// — which on the next unwind restores that stale value, masking a
 	// freshly-written same-value SSTORE as a no-op and producing a wrong
-	// trie root. See db/state/temporal_mem_batch.go GetLatest's unwoundLatest
-	// for the equivalent point-read fix.
+	// trie root. See GetAsOf's unwoundLatest for the equivalent point-read
+	// fix.
 	wrappedIt := it
 	if sd.unwindChangeset != nil {
 		if values := sd.unwindChangeset[domain]; len(values) > 0 {
