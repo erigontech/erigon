@@ -1971,7 +1971,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
 			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
-		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
+		var stepsInDB kv.Step
+		if lastInDB > step {
+			stepsInDB = lastInDB - step
+		}
+		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "steps_in_db", stepsInDB)
 
 		// Stagger aggregation across fleet nodes to prevent synchronized I/O stalls.
 		// Set different values per node via AGGREGATION_DELAY_MS env var.
