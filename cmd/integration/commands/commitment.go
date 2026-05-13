@@ -485,21 +485,26 @@ Examples:
 			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 			return
 		}
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
 		if convertRestore {
-			if err := commitmentRestore(db, cmd.Context(), logger); err != nil {
+			// Restore is a filesystem-only operation. Dispatch before openDB so
+			// recovery still works when the on-disk state is broken enough that
+			// MDBX/aggregator/snapshots can't open — which is exactly when
+			// --restore is most needed.
+			dirs := datadir.New(datadirCli)
+			if err := dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error(err.Error())
 				}
 			}
 			return
 		}
+
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
 
 		opts := dbstate.ConvertOpts{
 			TargetSqueeze:   convertSqueeze,
@@ -536,14 +541,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
-}
-
-func commitmentRestore(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	// Restore only shuffles files on disk; it does not need an aggregator view
-	// of the snapshots and must keep working when the on-disk state is broken
-	// enough that the aggregator can't open it.
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	return dbstate.RestoreCommitmentFiles(ctx, agg.Dirs(), logger)
 }
 
 // integration commitment visualize

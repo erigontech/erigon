@@ -833,6 +833,48 @@ func TestRestoreCommitmentFiles_OrphanSweep(t *testing.T) {
 	require.Equal(t, origBT, restoredBT)
 }
 
+// TestRestoreCommitmentFiles_RerunnableAfterPartialFailure simulates a restore
+// that crashed after the orphan sweep deleted the converted files and after
+// some — but not all — backup files were renamed into snapshots/domain/. A
+// retry must complete the operation without deleting the files that the prior
+// attempt already moved.
+func TestRestoreCommitmentFiles_RerunnableAfterPartialFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	// Simulate "after partial failure" state:
+	//   - manifest already on disk, listing the full set of 3 backup files;
+	//   - .kv and .bt already moved into SnapDomain on the prior attempt;
+	//   - only .kvi remains in backup (the rename that crashed).
+	origKV := []byte("ORIG_KV")
+	origBT := []byte("ORIG_BT")
+	origKVI := []byte("ORIG_KVI")
+	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvi"
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kvi"), origKVI, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"), origKV, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), origBT, 0o644))
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+
+	// All three originals present with the expected content — the manifest-aware
+	// sweep must not have deleted the .kv/.bt files already in place.
+	require.Equal(t, origKV, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv")))
+	require.Equal(t, origBT, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt")))
+	require.Equal(t, origKVI, readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kvi")))
+
+	// Backup tree gone after successful completion.
+	_, statErr := os.Stat(backupDir)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"backup dir must be removed after successful retry (err=%v)", statErr)
+}
+
 // TestRestoreCommitmentFiles_RejectsForeignFile verifies the restore refuses to
 // proceed when the backup directory contains a file whose name does not match
 // the commitment step-range pattern. Without this guard a stray file like
@@ -867,4 +909,62 @@ func TestRestoreCommitmentFiles_RejectsForeignFile(t *testing.T) {
 	require.NoError(t, statErr, "sweep must not run when validation fails")
 	_, statErr = os.Stat(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"))
 	require.NoError(t, statErr, "backup must be untouched after rejection")
+}
+
+// TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides
+// reproduces the case where an existing manifest references a file that is
+// absent from both the backup directory and the destination — e.g. a crash
+// produced a truncated manifest with extra entries an operator was about to
+// rebuild, or a backup file was deleted out-of-band between attempts. Without
+// the cross-check, restore would silently report success while a file is
+// missing; the operator would only discover it after erigon failed to start.
+func TestRestoreCommitmentFiles_FailsWhenManifestEntryMissingFromBothSides(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	// Manifest references three files. Only .kv exists in backup; .bt was moved
+	// to SnapDomain on a prior attempt (legitimate retry state); .kvi exists in
+	// neither location — that's the missing-data case we must detect.
+	manifest := "v2.0-commitment.0-32.kv\nv2.0-commitment.0-32.bt\nv2.0-commitment.0-32.kvi"
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), []byte(manifest), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), []byte("ORIG_KV"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.bt"), []byte("ORIG_BT"), 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.Error(t, err, "must fail when a manifest entry is in neither backup nor destination")
+	require.Contains(t, err.Error(), "v2.0-commitment.0-32.kvi",
+		"error must name the missing file")
+}
+
+// TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp reproduces a crash
+// during the very first manifest write: the .restore_manifest.tmp temp file is
+// left behind without a corresponding .restore_manifest. The next restore must
+// not treat the stale .tmp as a backup entry (it doesn't match the commitment
+// pattern; without the explicit filter it would trigger the foreign-file
+// guard). Restore must complete successfully against the real backup entries.
+func TestRestoreCommitmentFiles_AtomicManifestIgnoresStaleTmp(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	origKV := []byte("ORIG_KV")
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, "v2.0-commitment.0-32.kv"), origKV, 0o644))
+	// Stale tmp from a crashed manifest write — must be ignored, not parsed.
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest.tmp"), []byte("garbage"), 0o644))
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New()))
+
+	restoredKV := readFileBytes(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
+	require.Equal(t, origKV, restoredKV)
 }

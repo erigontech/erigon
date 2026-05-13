@@ -732,6 +732,18 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	return nil
 }
 
+// restoreManifestName is the filename of the persistent manifest written inside
+// snapshots/backup/domains/ on the first restore attempt. It records the full
+// set of files the operation is responsible for so a retry after a partial
+// failure does not lose track of which files belong in snapshots/domain/.
+const restoreManifestName = ".restore_manifest"
+
+// restoreManifestTmpName is the temp file used to write the manifest atomically
+// (write-then-rename). A crash between write and rename leaves the temp file
+// behind; subsequent runs ignore it (buildRestoreManifest skips both names) and
+// the next successful manifest write truncates it.
+const restoreManifestTmpName = ".restore_manifest.tmp"
+
 // RestoreCommitmentFiles undoes ConvertCommitmentFiles by moving every file
 // from snapshots/backup/domains/ back into snapshots/domain/. Before each
 // rename it sweeps the destination of any orphaned siblings that share the
@@ -744,12 +756,20 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 // snapshots/backup/ parent is cleaned if also empty, and the caller is told to
 // restart erigon to pick up the restored files.
 //
+// Safe to re-run after a partial failure: the first attempt persists a manifest
+// listing every file that needs to be restored, and subsequent attempts use
+// that manifest as the source of truth instead of the current backup dir
+// contents (which would be incomplete after some renames succeeded). The
+// orphan sweep preserves any file whose name appears in the manifest, so
+// already-restored files are not deleted on retry.
+//
 // Takes datadir.Dirs directly (not an AggregatorRoTx) so restore can run even
 // when the on-disk state is broken enough that the aggregator can't open it —
 // which is exactly when restore is most needed.
 func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
 	snapDomain := dirs.SnapDomain
+	manifestPath := filepath.Join(backupDir, restoreManifestName)
 
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -758,30 +778,42 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		}
 		return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", backupDir, err)
 	}
-	if len(entries) == 0 {
-		return fmt.Errorf("[commitment_convert] no backup to restore from at %s (empty)", backupDir)
+
+	manifest, manifestExists, err := loadRestoreManifest(manifestPath)
+	if err != nil {
+		return err
+	}
+	if !manifestExists {
+		manifest, err = buildRestoreManifest(entries)
+		if err != nil {
+			return err
+		}
+		if len(manifest) == 0 {
+			return fmt.Errorf("[commitment_convert] no backup to restore from at %s (empty)", backupDir)
+		}
+		if wErr := writeRestoreManifestAtomic(manifestPath, manifest); wErr != nil {
+			return fmt.Errorf("[commitment_convert] restore: write manifest %s: %w", manifestPath, wErr)
+		}
 	}
 
 	type stepRange struct{ from, to string }
 	ranges := make(map[stepRange]struct{})
-	files := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		m := commitmentStepRangeRe.FindStringSubmatch(e.Name())
+	manifestSet := make(map[string]struct{}, len(manifest))
+	for _, name := range manifest {
+		m := commitmentStepRangeRe.FindStringSubmatch(name)
 		if m == nil {
-			return fmt.Errorf("[commitment_convert] restore: backup entry %q does not match commitment step-range pattern", e.Name())
+			return fmt.Errorf("[commitment_convert] restore: manifest entry %q does not match commitment step-range pattern", name)
 		}
 		ranges[stepRange{m[1], m[2]}] = struct{}{}
-		files = append(files, e.Name())
+		manifestSet[name] = struct{}{}
 	}
 
 	// Orphan sweep: remove every *-commitment.<from>-<to>.* in snapshots/domain/
-	// for each step-range covered by the backup. Naive rename-overwrite would
-	// leave cross-version accessor siblings behind (e.g. converted .kvei when
-	// the original had only .kvi), breaking erigon startup against the
-	// restored files.
+	// for each step-range covered by the backup, EXCEPT files whose basename is
+	// in the manifest. Preserving manifest-listed names is what makes retry safe
+	// after a partial rename: a file already restored on a prior attempt stays
+	// where it is rather than being deleted and then re-created from a backup
+	// entry that no longer exists.
 	swept := 0
 	for r := range ranges {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -793,6 +825,9 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			return fmt.Errorf("[commitment_convert] restore: glob %s: %w", pattern, globErr)
 		}
 		for _, m := range matches {
+			if _, expected := manifestSet[filepath.Base(m)]; expected {
+				continue
+			}
 			if rmErr := dir.RemoveFile(m); rmErr != nil {
 				return fmt.Errorf("[commitment_convert] restore: rm orphan %s: %w", m, rmErr)
 			}
@@ -800,30 +835,146 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		}
 	}
 
-	moved := 0
-	for _, name := range files {
+	movedThisRun, alreadyInPlace := 0, 0
+	for _, name := range manifest {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		src := filepath.Join(backupDir, name)
 		dst := filepath.Join(snapDomain, name)
+		if _, statErr := os.Stat(src); statErr != nil {
+			if !errors.Is(statErr, os.ErrNotExist) {
+				return fmt.Errorf("[commitment_convert] restore: stat backup %s: %w", src, statErr)
+			}
+			// src missing: the prior attempt either (a) already moved it to dst
+			// or (b) failed to ever place it. Confirm dst actually exists before
+			// counting it as restored — otherwise a partial backup would be
+			// silently reported as successful and the operator would never know
+			// the file is gone.
+			if _, dstErr := os.Stat(dst); dstErr != nil {
+				if errors.Is(dstErr, os.ErrNotExist) {
+					return fmt.Errorf(
+						"[commitment_convert] restore: manifest lists %s but neither backup nor destination exists "+
+							"(rename %s to retry or delete it to abandon)",
+						name, manifestPath)
+				}
+				return fmt.Errorf("[commitment_convert] restore: stat destination %s: %w", dst, dstErr)
+			}
+			alreadyInPlace++
+			continue
+		}
 		if renameErr := os.Rename(src, dst); renameErr != nil {
 			return fmt.Errorf("[commitment_convert] restore mv %s -> %s: %w", src, dst, renameErr)
 		}
-		moved++
+		movedThisRun++
 	}
 
-	// dir.RemoveFile (os.Remove) refuses non-empty directories; rely on that
-	// to surface unexpected leftovers (operator-placed subdirs, files the
-	// rename loop skipped) instead of silently wiping them via RemoveAll.
+	// All renames succeeded — drop the manifest first so the backup dir can be
+	// removed by os.Remove (which refuses non-empty dirs and so will surface any
+	// unexpected leftovers instead of wiping them via RemoveAll).
+	if rmErr := dir.RemoveFile(manifestPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		logger.Warn("[commitment_convert] restore: failed to remove manifest", "path", manifestPath, "err", rmErr)
+	}
 	if rmErr := dir.RemoveFile(backupDir); rmErr != nil {
 		logger.Warn("[commitment_convert] restore: failed to remove backup dir", "path", backupDir, "err", rmErr)
 	}
 	cleanupParentIfEmpty(filepath.Dir(backupDir), logger)
 
-	logger.Info(fmt.Sprintf("[commitment_convert] restore complete: restored %d files from %s to %s (swept %d orphans); restart erigon",
-		moved, backupDir, snapDomain, swept))
+	logger.Info(fmt.Sprintf("[commitment_convert] restore complete: %d files at %s (%d moved this run, %d already in place, swept %d orphans); restart erigon",
+		len(manifest), snapDomain, movedThisRun, alreadyInPlace, swept))
 	return nil
+}
+
+// loadRestoreManifest reads the persistent manifest written on the first
+// restore attempt. Returns (entries, exists, err) — exists=false with err=nil
+// when the manifest file is simply absent (first run).
+func loadRestoreManifest(path string) ([]string, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("[commitment_convert] restore: read manifest %s: %w", path, err)
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out, true, nil
+}
+
+// buildRestoreManifest validates every entry in the backup dir matches the
+// commitment step-range pattern and returns the list of file basenames. Any
+// non-conforming entry aborts the operation before any destructive step.
+func buildRestoreManifest(entries []os.DirEntry) ([]string, error) {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == restoreManifestName || name == restoreManifestTmpName {
+			continue
+		}
+		if !commitmentStepRangeRe.MatchString(name) {
+			return nil, fmt.Errorf("[commitment_convert] restore: backup entry %q does not match commitment step-range pattern", name)
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+// writeRestoreManifestAtomic writes the manifest with crash safety: data goes
+// to a .tmp sibling first (with fsync to flush bytes to disk), then os.Rename
+// replaces the final path atomically, and finally the parent directory is
+// fsynced so the rename's directory entry is durable across power loss. A
+// crash mid-write leaves only the .tmp file, which buildRestoreManifest skips.
+// A crash mid-rename either leaves the old manifest intact or atomically
+// swaps to the new one — never a half-written file. POSIX does not guarantee
+// rename durability without the parent-dir fsync: without it, the manifest's
+// directory entry could disappear on reboot even though the orphan sweep had
+// already run, and the next retry would rebuild a subset manifest and delete
+// already-restored siblings via the step-range orphan glob.
+func writeRestoreManifestAtomic(path string, entries []string) error {
+	parent := filepath.Dir(path)
+	tmpPath := filepath.Join(parent, restoreManifestTmpName)
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte(strings.Join(entries, "\n"))); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return fsyncDir(parent)
+}
+
+// fsyncDir flushes the directory's metadata (including any pending rename
+// entries inside it) to disk. Required on POSIX filesystems to make a rename
+// durable across power loss.
+func fsyncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // preflightBackupDir refuses to start if the backup dir already exists with
