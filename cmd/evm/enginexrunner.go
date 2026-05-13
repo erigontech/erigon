@@ -94,13 +94,9 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
-	workers := cliCtx.Int(WorkersFlag.Name)
-	if workers <= 0 {
-		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
-		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
-		// ~4.3GB peak RSS. Higher values barely improve wall time and
-		// values >24 risk MDBX virtual-memory exhaustion.
-		workers = 8
+	workers := cliCtx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
@@ -110,8 +106,8 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if workers > len(groups) && len(groups) > 0 {
-		workers = len(groups)
+	if workers > uint64(len(groups)) && len(groups) > 0 {
+		workers = uint64(len(groups))
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests across %d (fork, preAllocHash) groups; running with %d workers\n", totalTests, len(groups), workers)
 
@@ -141,7 +137,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

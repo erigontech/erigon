@@ -2,7 +2,7 @@
   {
     "shard": "statetests-stable",
     "workers": 12,
-    "max-allowed-failures": 37
+    "max-allowed-failures": 0
   },
   {
     "shard": "statetests-devnet",
@@ -78,7 +78,7 @@
   {
     "shard": "enginextests-benchmark-60m",
     "workers": 1,
-    "max-allowed-failures": 7
+    "max-allowed-failures": 0
   },
   {
     "shard": "enginextests-benchmark-60m-parallel",
@@ -89,7 +89,7 @@
   {
     "shard": "enginextests-benchmark-100m",
     "workers": 1,
-    "max-allowed-failures": 7
+    "max-allowed-failures": 0
   },
   {
     "shard": "enginextests-benchmark-100m-parallel",
@@ -100,7 +100,7 @@
   {
     "shard": "enginextests-benchmark-150m",
     "workers": 1,
-    "max-allowed-failures": 59
+    "max-allowed-failures": 0
   },
   {
     "shard": "enginextests-benchmark-150m-parallel",
