@@ -51,47 +51,6 @@ func TestHexToCompact(t *testing.T) {
 	}
 }
 
-func TestHexToCompactBuf(t *testing.T) {
-	tests := []struct{ hex []byte }{
-		// empty keys, with and without terminator.
-		{hex: []byte{}},
-		{hex: []byte{Terminator}},
-		// odd length, no terminator
-		{hex: []byte{1, 2, 3, 4, 5}},
-		// even length, no terminator
-		{hex: []byte{0, 1, 2, 3, 4, 5}},
-		// odd length, terminator
-		{hex: []byte{15, 1, 12, 11, 8, Terminator /*term*/}},
-		// even length, terminator
-		{hex: []byte{0, 15, 1, 12, 11, 8, Terminator /*term*/}},
-	}
-	for _, test := range tests {
-		// Calculate expected using the original allocating method
-		expected := HexToCompact(test.hex)
-
-		// Test with exactly-sized buffer
-		exactBuf := make([]byte, len(expected))
-		gotExact := HexToCompactBuf(test.hex, exactBuf)
-		if !bytes.Equal(gotExact, expected) {
-			t.Errorf("HexToCompactBuf(exact) for %x -> %x, want %x", test.hex, gotExact, expected)
-		}
-
-		// Test with undersized buffer (should allocate and return correct result)
-		smallBuf := make([]byte, 0)
-		gotSmall := HexToCompactBuf(test.hex, smallBuf)
-		if !bytes.Equal(gotSmall, expected) {
-			t.Errorf("HexToCompactBuf(small) for %x -> %x, want %x", test.hex, gotSmall, expected)
-		}
-
-		// Test with oversized buffer (should only use needed capacity)
-		largeBuf := make([]byte, 100)
-		gotLarge := HexToCompactBuf(test.hex, largeBuf)
-		if !bytes.Equal(gotLarge, expected) {
-			t.Errorf("HexToCompactBuf(large) for %x -> %x, want %x", test.hex, gotLarge, expected)
-		}
-	}
-}
-
 func TestKeybytesHex(t *testing.T) {
 	tests := []struct{ key, hexIn, hexOut []byte }{
 		{key: []byte{}, hexIn: []byte{Terminator}, hexOut: []byte{Terminator}},
@@ -216,14 +175,6 @@ func FuzzHexCompactRoundtrip(f *testing.F) {
 		}
 
 		compact := HexToCompact(hex)
-
-		// Verify HexToCompactBuf equivalence
-		var buf [128]byte
-		compactBuf := HexToCompactBuf(hex, buf[:])
-		if !bytes.Equal(compact, compactBuf) {
-			t.Fatalf("HexToCompactBuf mismatch: expected=%x got=%x", compact, compactBuf)
-		}
-
 		got := CompactToHex(compact)
 		if !bytes.Equal(got, hex) {
 			t.Fatalf("roundtrip failed: input=%x compact=%x got=%x", hex, compact, got)
