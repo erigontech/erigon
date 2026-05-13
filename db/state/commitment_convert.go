@@ -332,6 +332,19 @@ func buildValueTransformer(
 	}, nil
 }
 
+// buildPhase1Prefix renders the trailing `(N/M files, X.X% overall by keys)`
+// suffix appended to every phase-1 log line. The percentage is computed from
+// `processedKeys / grandTotalKeys` rather than file count so the displayed
+// progress matches the actual work done (commitment files vary in size by
+// orders of magnitude across step ranges).
+func buildPhase1Prefix(fileIdx, fileTotal int, processedKeys, grandTotalKeys uint64) string {
+	pct := float32(0)
+	if grandTotalKeys > 0 {
+		pct = 100.0 * float32(processedKeys) / float32(grandTotalKeys)
+	}
+	return fmt.Sprintf("(%d/%d files, %.1f%% overall by keys)", fileIdx, fileTotal, pct)
+}
+
 // convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
 //
 // It detects the source file's current state, builds the per-pair key and value
@@ -352,34 +365,37 @@ func buildValueTransformer(
 // caught by the orchestrator) without producing any output. Range-mismatch and
 // codec errors are wrapped with the source file's path.
 //
-// `progressPrefix` is built once per file by the orchestrator
-// (e.g. `"(3/12 files, 25.0% overall)"`) and appended verbatim to per-file log
-// lines so no overall-% arithmetic happens inside the conversion loop.
+// `fileIdx`/`fileTotal`/`grandTotalKeys`/`processedKeys` are used to render the
+// per-tick `(N/M files, X.X% overall by keys)` progress suffix. The function
+// rebuilds the suffix per log site (not once per file) so the percentage stays
+// current mid-file. `ki` is the number of (k, v) pairs read from the source,
+// returned so the caller can advance its running `processedKeys` total.
 func convertCommitmentFile(
 	ctx context.Context,
 	at *AggregatorRoTx,
 	file VisibleFile,
 	dstDir string,
 	opts ConvertOpts,
-	progressPrefix string,
+	fileIdx, fileTotal int,
+	grandTotalKeys, processedKeys uint64,
 	logger log.Logger,
-) (sizeDelta int64, deltaPct float32, err error) {
+) (sizeDelta int64, deltaPct float32, ki uint64, err error) {
 	st, err := detectFileState(at, file, 48)
 	if err != nil {
 		// A file with only the state row (no non-state samples) has no branches
 		// to re-encode on either axis. Treat as already-in-target so the
 		// orchestrator skips it instead of aborting Phase 1 on every other file.
 		if errors.Is(err, errNoNonStateSamples) {
-			return 0, 0, errSkip
+			return 0, 0, 0, errSkip
 		}
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
 	}
 
 	stepSize := at.StepSize()
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 	if endTxNum == 0 || endTxNum < startTxNum {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: invalid range %d..%d", file.Fullpath(), startTxNum, endTxNum)
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: invalid range %d..%d", file.Fullpath(), startTxNum, endTxNum)
 	}
 	stepFrom := kv.Step(startTxNum / stepSize)
 	stepTo := kv.Step(endTxNum / stepSize)
@@ -399,7 +415,7 @@ func convertCommitmentFile(
 			filepath.Base(file.Fullpath()), stepFrom, stepTo))
 	}
 	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze {
-		return 0, 0, errSkip
+		return 0, 0, 0, errSkip
 	}
 
 	commitmentRo := at.d[kv.CommitmentDomain]
@@ -414,16 +430,16 @@ func convertCommitmentFile(
 	// datadirs where commitment ranges don't align with account/storage ranges.
 	vt, err := buildValueTransformer(st.squeezed, effectiveTargetSqueeze, commitmentRo, accountsRo, storageRo, rng, startTxNum, endTxNum, stepFrom, stepTo, file.Fullpath())
 	if err != nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: %w", file.Fullpath(), err)
 	}
 
 	vf, ok := file.(visibleFile)
 	if !ok {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: VisibleFile is not state.visibleFile (got %T)", file.Fullpath(), file)
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: VisibleFile is not state.visibleFile (got %T)", file.Fullpath(), file)
 	}
 	src := vf.src
 	if src == nil || src.decompressor == nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: source has no decompressor", file.Fullpath())
+		return 0, 0, 0, fmt.Errorf("convertCommitmentFile %q: source has no decompressor", file.Fullpath())
 	}
 
 	batch := &TemporalMemBatch{}
@@ -458,12 +474,11 @@ func convertCommitmentFile(
 	// pass the actual source file range to vt, matching SqueezeCommitmentFiles.
 	// collateETL's per-pair fromTxNum/endTxNum are derived from stepFrom/stepTo
 	// with a (-1) offset that does not match the source file for stepFrom>0 files.
-	var ki uint64
 	var k, v []byte
 	for reader.HasNext() {
 		k, _ = reader.Next(k[:0])
 		if !reader.HasNext() {
-			return 0, 0, fmt.Errorf("convertCommitmentFile %q: truncated at ki=%d (value missing)", file.Fullpath(), ki)
+			return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: truncated at ki=%d (value missing)", file.Fullpath(), ki)
 		}
 		v, _ = reader.Next(v[:0])
 		ki++
@@ -475,7 +490,7 @@ func convertCommitmentFile(
 		} else {
 			tk, kerr := kxform(k)
 			if kerr != nil {
-				return 0, 0, fmt.Errorf("convertCommitmentFile %q: keyXform at ki=%d key=%x: %w",
+				return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: keyXform at ki=%d key=%x: %w",
 					file.Fullpath(), ki, k, kerr)
 			}
 			outKey = append([]byte(nil), tk...)
@@ -485,7 +500,7 @@ func convertCommitmentFile(
 		if !isState && vt != nil {
 			tv, verr := vt(v, startTxNum, endTxNum)
 			if verr != nil {
-				return 0, 0, fmt.Errorf("convertCommitmentFile %q: vt at ki=%d key=%x: %w",
+				return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: vt at ki=%d key=%x: %w",
 					file.Fullpath(), ki, k, verr)
 			}
 			outVal = append([]byte(nil), tv...)
@@ -494,12 +509,12 @@ func convertCommitmentFile(
 		}
 
 		if perr := wal.PutWithPrev(outKey, outVal, txNumForPut, nil); perr != nil {
-			return 0, 0, fmt.Errorf("convertCommitmentFile %q: wal put at ki=%d: %w", file.Fullpath(), ki, perr)
+			return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: wal put at ki=%d: %w", file.Fullpath(), ki, perr)
 		}
 
 		select {
 		case <-ctx.Done():
-			return 0, 0, ctx.Err()
+			return 0, 0, ki, ctx.Err()
 		case <-logEvery.C:
 			filePct := float32(0)
 			if totalForFile > 0 {
@@ -507,27 +522,29 @@ func convertCommitmentFile(
 			}
 			logger.Info(fmt.Sprintf(
 				"[commitment_convert] progress %d/%d file=%s (%.1f%% in file) %s",
-				ki, totalForFile, baseName, filePct, progressPrefix))
+				ki, totalForFile, baseName, filePct,
+				buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 		default:
 		}
 	}
 
 	// vt was applied per-pair above; pass nil so collateETL doesn't double-transform.
 	if err := commitmentRo.d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, nil, dstDir, false); err != nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
+		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: dumpStepRangeToPath: %w", file.Fullpath(), err)
 	}
 
 	newKVPath := commitmentRo.d.kvNewFilePathIn(dstDir, stepFrom, stepTo)
 	delta, pct, err := commitmentFileSizeDelta(file.Fullpath(), newKVPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("convertCommitmentFile %q: size delta: %w", file.Fullpath(), err)
+		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: size delta: %w", file.Fullpath(), err)
 	}
 
 	logger.Info(fmt.Sprintf(
 		"[commitment_convert] phase 1 file done %s sizeDelta=%.1f%% ki=%d %s",
-		baseName, pct, ki, progressPrefix))
+		baseName, pct, ki,
+		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 
-	return delta, pct, nil
+	return delta, pct, ki, nil
 }
 
 // commitmentFileSizeDelta returns (origSize-newSize) and that delta as a
@@ -620,14 +637,24 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
 	}
 
+	// Pre-pass: sum total key count across every input file so phase 1 can
+	// render a keys-overall percentage. KeyCountInFiles is cheap (no I/O —
+	// just sums cached decompressor.Count() values), so this loop costs O(files).
+	var grandTotalKeys uint64
+	for _, f := range files {
+		grandTotalKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
+	}
+
 	// Phase 1: convert all.
-	processedFiles, skippedFiles, totalSizeDelta, err := convertPhase1(ctx, at, files, rebuildDir, opts, logger)
+	phaseStart := time.Now()
+	processedFiles, skippedFiles, totalSizeDelta, err := convertPhase1(ctx, at, files, rebuildDir, opts, grandTotalKeys, logger)
 	if err != nil {
 		return err
 	}
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, sizeDelta=%s",
-		processedFiles, skippedFiles, len(files), signedByteSizeHR(totalSizeDelta)))
+		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, in %s, sizeDelta=%s",
+		processedFiles, skippedFiles, len(files),
+		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta)))
 
 	if processedFiles == 0 {
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
@@ -725,26 +752,35 @@ func preflightRebuildDir(rebuildDir string, logger log.Logger) error {
 // convertPhase1 runs convertCommitmentFile against every visible commitment
 // file in sequence, writing outputs into rebuildDir. errSkip is caught
 // (counted as skipped, not as error); any other error aborts.
+//
+// `grandTotalKeys` is the pre-computed sum of key counts across every input
+// file (computed by the caller via a single pass over at.KeyCountInFiles).
+// It is used to render the keys-overall percentage in the trailing progress
+// suffix. Locally-tracked `processedKeys` advances on both successful
+// completion (by `ki`) and on `errSkip` (by the file's key count) so the
+// suffix converges to 100% when every file is processed-or-skipped.
 func convertPhase1(
 	ctx context.Context,
 	at *AggregatorRoTx,
 	files VisibleFiles,
 	rebuildDir string,
 	opts ConvertOpts,
+	grandTotalKeys uint64,
 	logger log.Logger,
 ) (processedFiles, skippedFiles int, totalSizeDelta int64, err error) {
 	N := len(files)
+	var processedKeys uint64
 	for i, f := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return processedFiles, skippedFiles, totalSizeDelta, ctxErr
 		}
-		progressPrefix := fmt.Sprintf("(%d/%d files, %.1f%% overall)",
-			i+1, N, 100.0*float32(i)/float32(N))
-		delta, _, convErr := convertCommitmentFile(ctx, at, f, rebuildDir, opts, progressPrefix, logger)
+		delta, _, ki, convErr := convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
 		if errors.Is(convErr, errSkip) {
 			skippedFiles++
+			processedKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
 			logger.Info(fmt.Sprintf("[commitment_convert] phase 1 skip %s (already in target state) %s",
-				filepath.Base(f.Fullpath()), progressPrefix))
+				filepath.Base(f.Fullpath()),
+				buildPhase1Prefix(i+1, N, processedKeys, grandTotalKeys)))
 			continue
 		}
 		if convErr != nil {
@@ -752,6 +788,7 @@ func convertPhase1(
 				"[commitment_convert] phase 1 file %s: %w (cleanup: rm -rf %s)",
 				f.Fullpath(), convErr, rebuildDir)
 		}
+		processedKeys += ki
 		processedFiles++
 		totalSizeDelta += delta
 	}

@@ -112,7 +112,7 @@ func TestConvertCommitmentFile_AlreadyTarget(t *testing.T) {
 	dstDir := t.TempDir()
 	// Source is V1+unsqueezed (disableCommitmentBranchTransform=true), target same.
 	opts := state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: false}
-	_, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, "", log.New())
+	_, _, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, 1, 1, uint64(0), uint64(0), log.New())
 	require.ErrorIs(t, convErr, state.ErrSkipForTest, "no-op axes must return errSkip")
 
 	// No output should have been produced.
@@ -147,7 +147,7 @@ func TestConvertCommitmentFile_V1ToV2_KeysOnly(t *testing.T) {
 
 	dstDir := t.TempDir()
 	opts := state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: true}
-	_, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, "(1/1 files)", log.New())
+	_, _, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, 1, 1, uint64(0), uint64(0), log.New())
 	require.NoError(t, convErr)
 
 	// Output .kv must land in dstDir.
@@ -220,7 +220,7 @@ func TestConvertCommitmentFile_V1ToV1_Squeeze(t *testing.T) {
 
 	dstDir := t.TempDir()
 	opts := state.ConvertOpts{TargetSqueeze: true, TargetNibblesV2: false}
-	_, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, "(1/1)", log.New())
+	_, _, _, convErr := state.ConvertCommitmentFileForTest(t.Context(), at, file, dstDir, opts, 1, 1, uint64(0), uint64(0), log.New())
 	require.NoError(t, convErr)
 
 	newKVPath := findKVInDir(t, dstDir)
@@ -284,9 +284,9 @@ func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
 	origKVName := filepath.Base(origPath)
 
 	tmpDir1 := t.TempDir()
-	_, _, err = state.ConvertCommitmentFileForTest(t.Context(), at,
+	_, _, _, err = state.ConvertCommitmentFileForTest(t.Context(), at,
 		file, tmpDir1, state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: true},
-		"(rt fwd)", log.New())
+		1, 1, uint64(0), uint64(0), log.New())
 	require.NoError(t, err)
 	rwTx.Rollback()
 
@@ -313,9 +313,9 @@ func TestConvertCommitmentFile_RoundTrip_V1V2(t *testing.T) {
 	file2 := pickLargestCommitmentFile(t, at2)
 
 	tmpDir2 := t.TempDir()
-	_, _, err = state.ConvertCommitmentFileForTest(t.Context(), at2,
+	_, _, _, err = state.ConvertCommitmentFileForTest(t.Context(), at2,
 		file2, tmpDir2, state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: false},
-		"(rt back)", log.New())
+		1, 1, uint64(0), uint64(0), log.New())
 	require.NoError(t, err)
 
 	finalPath := filepath.Join(tmpDir2, origKVName)
