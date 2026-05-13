@@ -111,6 +111,12 @@ func TestCapabilities(t *testing.T) {
 		require.NotNil(t, f.OldestBlock)
 		return uint64(*f.OldestBlock)
 	}
+	window := func(t *testing.T, f CapabilityField) uint64 {
+		t.Helper()
+		require.NotNil(t, f.DeleteStrategy)
+		require.Equal(t, "window", f.DeleteStrategy.Type)
+		return uint64(f.DeleteStrategy.RetentionBlocks)
+	}
 
 	t.Run("archive_no_commitment", func(t *testing.T) {
 		t.Parallel()
@@ -124,6 +130,10 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, uint64(0), oldest(t, result.Logs))
 		require.Equal(t, uint64(0), oldest(t, result.Receipts))
 		require.Equal(t, uint64(0), oldest(t, result.Blocks))
+		// archive keeps everything: no delete strategy on any field
+		require.Nil(t, result.State.DeleteStrategy)
+		require.Nil(t, result.Tx.DeleteStrategy)
+		require.Nil(t, result.Blocks.DeleteStrategy)
 		require.True(t, result.StateProofs.Disabled)
 		require.Nil(t, result.StateProofs.OldestBlock)
 	})
@@ -136,6 +146,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, uint64(0), oldest(t, result.State))
 		require.False(t, result.StateProofs.Disabled)
 		require.Equal(t, uint64(0), oldest(t, result.StateProofs))
+		require.Nil(t, result.StateProofs.DeleteStrategy)
 	})
 
 	t.Run("full_no_commitment", func(t *testing.T) {
@@ -144,13 +155,18 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// state/logs/receipts limited to history prune distance
+		// state/logs/receipts: finite history window
 		require.Equal(t, pruned, oldest(t, result.State))
 		require.Equal(t, pruned, oldest(t, result.Logs))
 		require.Equal(t, pruned, oldest(t, result.Receipts))
-		// full keeps all block snapshots: tx and blocks start from 0
+		require.Equal(t, testPruneDistance, window(t, result.State))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		// full keeps all block snapshots via DefaultBlocksPruneMode: no delete strategy
 		require.Equal(t, uint64(0), oldest(t, result.Tx))
 		require.Equal(t, uint64(0), oldest(t, result.Blocks))
+		require.Nil(t, result.Tx.DeleteStrategy)
+		require.Nil(t, result.Blocks.DeleteStrategy)
 		require.True(t, result.StateProofs.Disabled)
 	})
 
@@ -161,6 +177,7 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
 		require.False(t, result.StateProofs.Disabled)
+		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
 	t.Run("minimal_no_commitment", func(t *testing.T) {
@@ -175,6 +192,9 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, pruned, oldest(t, result.Logs))
 		require.Equal(t, pruned, oldest(t, result.Receipts))
 		require.Equal(t, pruned, oldest(t, result.Blocks))
+		require.Equal(t, testPruneDistance, window(t, result.State))
+		require.Equal(t, testPruneDistance, window(t, result.Tx))
+		require.Equal(t, testPruneDistance, window(t, result.Blocks))
 		require.True(t, result.StateProofs.Disabled)
 	})
 
@@ -185,6 +205,7 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
 		require.False(t, result.StateProofs.Disabled)
+		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
 	// full mode on a chain with MergeHeight: pre-merge tx/blocks are not kept,

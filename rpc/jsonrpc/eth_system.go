@@ -41,11 +41,23 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// DeleteStrategy describes how a node removes old data for a category.
+// Currently only the "window" type is defined: the node keeps a sliding
+// window of RetentionBlocks blocks and discards everything older.
+// The field is omitted when data is kept indefinitely (archive nodes, or
+// DefaultBlocksPruneMode which uses chain-specific history expiry).
+type DeleteStrategy struct {
+	Type            string         `json:"type"`
+	RetentionBlocks hexutil.Uint64 `json:"retentionBlocks"`
+}
+
 // CapabilityField describes availability of a data category: when Disabled is true the node
 // does not hold that data at all; otherwise OldestBlock is the lowest block number available.
+// DeleteStrategy is set when the node uses a finite retention window.
 type CapabilityField struct {
-	Disabled    bool            `json:"disabled"`
-	OldestBlock *hexutil.Uint64 `json:"oldestBlock,omitempty"`
+	Disabled       bool            `json:"disabled"`
+	OldestBlock    *hexutil.Uint64 `json:"oldestBlock,omitempty"`
+	DeleteStrategy *DeleteStrategy `json:"deleteStrategy,omitempty"`
 }
 
 // CapabilityHead identifies the canonical chain tip at the moment eth_capabilities was called.
@@ -99,9 +111,14 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return nil, err
 	}
 
-	avail := func(oldest uint64) CapabilityField {
+	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
-		return CapabilityField{OldestBlock: &o}
+		f := CapabilityField{OldestBlock: &o}
+		if d, ok := dist.(prune.Distance); ok && d != prune.DefaultBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+			rb := hexutil.Uint64(d)
+			f.DeleteStrategy = &DeleteStrategy{Type: "window", RetentionBlocks: rb}
+		}
+		return f
 	}
 
 	// For KeepAllBlocksPruneMode (MaxUint64-1) and DefaultBlocksPruneMode (MaxUint64),
@@ -117,20 +134,20 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
-		stateproofs = avail(stateOldest)
+		stateproofs = avail(stateOldest, pruneMode.History)
 	} else {
 		stateproofs = CapabilityField{Disabled: true}
 	}
 
 	return &CapabilitiesResult{
 		Head:  CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
-		State: avail(stateOldest),
-		Tx:    avail(blocksOldest),
-		Logs:  avail(stateOldest),
+		State: avail(stateOldest, pruneMode.History),
+		Tx:    avail(blocksOldest, pruneMode.Blocks),
+		Logs:  avail(stateOldest, pruneMode.History),
 		// receipts are read from DB (RCacheDomain) if --persist.receipts is enabled, otherwise
 		// recalculated via re-execution; in both cases the available range matches state history
-		Receipts:    avail(stateOldest),
-		Blocks:      avail(blocksOldest),
+		Receipts:    avail(stateOldest, pruneMode.History),
+		Blocks:      avail(blocksOldest, pruneMode.Blocks),
 		StateProofs: stateproofs,
 	}, nil
 }
