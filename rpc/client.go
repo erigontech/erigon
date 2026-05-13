@@ -364,6 +364,9 @@ func (c *Client) BatchCall(b []BatchElem) error {
 // while sending the request. Any error specific to a request is reported through the
 // Error field of the corresponding BatchElem.
 //
+// An empty batch is rejected with an invalid-request error (-32600) without
+// contacting the server.
+//
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	if len(b) == 0 {
