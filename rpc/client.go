@@ -347,8 +347,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 // BatchCall sends all given requests as a single batch and waits for the server
 // to return a response for all of them.
 //
-// In contrast to Call, BatchCall only returns I/O errors. Any error specific to
-// a request is reported through the Error field of the corresponding BatchElem.
+// In contrast to Call, BatchCall only returns I/O errors, with one exception:
+// an empty batch is rejected with an invalid-request error (-32600) before any
+// send. Any error specific to a request is reported through the Error field of
+// the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCall(b []BatchElem) error {
@@ -361,11 +363,9 @@ func (c *Client) BatchCall(b []BatchElem) error {
 // context's deadline.
 //
 // In contrast to CallContext, BatchCallContext only returns errors that have occurred
-// while sending the request. Any error specific to a request is reported through the
-// Error field of the corresponding BatchElem.
-//
-// An empty batch is rejected with an invalid-request error (-32600) without
-// contacting the server.
+// while sending the request, with one exception: an empty batch is rejected with
+// an invalid-request error (-32600) before any send. Any error specific to a
+// request is reported through the Error field of the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
