@@ -1,0 +1,41 @@
+---
+title: Staking
+sidebar_position: 5
+hide_title: true
+description: "Run an Ethereum validator with Erigon — use the embedded Caplin consensus layer or connect an external CL client like Lighthouse or Prysm."
+---
+
+import Link from '@docusaurus/Link';
+
+<div className="lp-hero">
+  <h1>Staking</h1>
+  <p>Run an Ethereum validator with Erigon — using the built-in Caplin consensus layer or any external CL client.</p>
+</div>
+
+<div className="lp-grid">
+
+<Link className="lp-card" to="/staking/caplin">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="2"/>
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
+  </svg>
+  <div className="lp-card-title">Caplin (Built-in CL)</div>
+  <div className="lp-card-desc">Configure Erigon's embedded consensus layer as a full validator — no external CL dependency required.</div>
+</Link>
+
+<Link className="lp-card" to="/staking/external-consensus-client-as-validator">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+  </svg>
+  <div className="lp-card-title">External Consensus Client</div>
+  <div className="lp-card-desc">Connect Lighthouse, Prysm, Teku, or Nimbus via the Engine API for split EL/CL validator setups.</div>
+</Link>
+
+<Link className="lp-card" to="/staking/shutter-network">
+  <img src="/img/shutter.svg" className="lp-icon" alt="Shutter Network" />
+  <div className="lp-card-title">Shutter Network</div>
+  <div className="lp-card-desc">Privacy-preserving mempool protection — shield validator transactions from front-running and MEV.</div>
+</Link>
+
+</div>
