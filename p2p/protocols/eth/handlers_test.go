@@ -571,6 +571,8 @@ func (balHeaderReader) Integrity(context.Context) error { panic("not expected") 
 // ethereum/EIPs#11553) for any hash we don't have stored — including unknown
 // blocks and known blocks with no BAL recorded.
 func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T) {
+	rawdb.ResetBALCacheForTest()
+	t.Cleanup(rawdb.ResetBALCacheForTest)
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -594,7 +596,7 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 
 	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
-	result := AnswerGetBlockAccessListsQuery(tx, query, reader)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
 
 	if len(result) != 3 {
 		t.Fatalf("result len: have %d, want 3", len(result))
@@ -613,6 +615,8 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 // TestAnswerGetBlockAccessListsQuery_SoftSizeLimit verifies the handler
 // respects softResponseLimit by truncating the response (not padding).
 func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
+	rawdb.ResetBALCacheForTest()
+	t.Cleanup(rawdb.ResetBALCacheForTest)
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -646,7 +650,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		query = append(query, h)
 	}
 
-	result := AnswerGetBlockAccessListsQuery(tx, query, reader)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
 	if len(result) < 1 || len(result) >= len(query) {
 		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
 	}
