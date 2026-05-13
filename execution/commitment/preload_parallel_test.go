@@ -399,3 +399,337 @@ func TestPreloadParallel_ResolverError(t *testing.T) {
 		t.Fatal("the depth-64 root should have been pinned before the depth-65 failure")
 	}
 }
+
+// --- Resumable ContractTrunkPreloadParallel tests (Run-by-Run) ---
+
+// TestContractTrunkPreloadParallel_ResumeAcrossSteps confirms that splitting a
+// full preload into multiple Run calls yields the same pinned set as a
+// one-shot run with the equivalent total budget.
+func TestContractTrunkPreloadParallel_ResumeAcrossSteps(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+
+	// Reference: one-shot.
+	cRef := NewBranchCache(64)
+	if _, err := PreloadContractTrunkParallel(hash, 1<<20, nil, resolve, cRef, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step-by-step: budget exactly one entry per Run (the budget is checked
+	// before the entry is pinned; with overhead we need at least one entry's
+	// worth per step to make progress).
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each entry is ~estimatedEntryOverheadBytes + 33 + valSz; over-allocate a
+	// bit per step so we always pin at least one new entry.
+	perStep := 2 * (estimatedEntryOverheadBytes + 33 + valSz)
+	const maxSteps = 50
+	var steps int
+	for ; steps < maxSteps; steps++ {
+		_, done, err := p.Run(perStep, nil, resolve, c, nil)
+		if err != nil {
+			t.Fatalf("step %d: %v", steps, err)
+		}
+		if done {
+			break
+		}
+	}
+	if steps >= maxSteps {
+		t.Fatalf("preload did not complete in %d steps; pinned=%d", maxSteps, p.PinnedTotal())
+	}
+	if p.PinnedTotal() != len(tree) {
+		t.Fatalf("step-by-step pinned %d, want %d", p.PinnedTotal(), len(tree))
+	}
+	if c.PinnedCount() != cRef.PinnedCount() {
+		t.Fatalf("step-by-step cache pinned %d != one-shot cache pinned %d", c.PinnedCount(), cRef.PinnedCount())
+	}
+	// Spot-check: every path in the reference is in the step-by-step cache.
+	for path := range tree {
+		key := nibbles.HexToCompact([]byte(path))
+		vRef, _, okRef := cRef.Get(key)
+		v, _, ok := c.Get(key)
+		if !okRef || !ok {
+			t.Fatalf("path %x: ref ok=%v, step ok=%v", path, okRef, ok)
+		}
+		if !bytes.Equal(v, vRef) {
+			t.Fatalf("path %x: step value differs from ref", path)
+		}
+	}
+}
+
+// TestContractTrunkPreloadParallel_RunAfterCompleteIsNoOp confirms that once
+// the BFS reaches an empty frontier, further Run calls are no-ops.
+func TestContractTrunkPreloadParallel_RunAfterCompleteIsNoOp(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n1, done1, err := p.Run(1<<20, nil, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done1 {
+		t.Fatalf("expected done after full budget, got done=false (queue=%d)", p.QueueRemaining())
+	}
+	if n1 != len(tree) {
+		t.Fatalf("first Run pinned %d, want %d", n1, len(tree))
+	}
+	prevPinned := c.PinnedCount()
+	n2, done2, err := p.Run(1<<20, nil, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done2 {
+		t.Fatal("expected done on second Run")
+	}
+	if n2 != 0 {
+		t.Fatalf("second Run pinned %d new entries, want 0", n2)
+	}
+	if c.PinnedCount() != prevPinned {
+		t.Fatalf("cache pinned count changed across no-op Run: %d -> %d", prevPinned, c.PinnedCount())
+	}
+}
+
+// TestContractTrunkPreloadParallel_StepBudgetCaps confirms that a small step
+// budget stops the BFS even when the frontier has more work — and the saved
+// state has the queue position preserved for the next call.
+func TestContractTrunkPreloadParallel_StepBudgetCaps(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Budget for ~3 entries (depth-64 root + 2 depth-65 children).
+	rootKey := nibbles.HexToCompact(hexNibbles(hash))
+	entry := estimatedEntryOverheadBytes + len(rootKey) + valSz
+	smallBudget := 3*entry + 10
+	n1, done1, err := p.Run(smallBudget, nil, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done1 {
+		t.Fatalf("expected NOT done after a 3-entry budget; got done=true (pinned=%d)", n1)
+	}
+	if n1 < 1 || n1 > 5 {
+		t.Fatalf("expected ~3 pinned this step, got %d", n1)
+	}
+	if p.QueueRemaining() == 0 {
+		t.Fatal("expected frontier to be non-empty after small-budget step")
+	}
+	// Now exhaust with a full follow-on budget.
+	_, done2, err := p.Run(1<<20, nil, resolve, c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !done2 {
+		t.Fatalf("expected done after large follow-on budget; queue=%d", p.QueueRemaining())
+	}
+	// In our synthetic tree only 3 of 7 paths sit at depths 64-65; the rest
+	// require descending past the truncated wave. The cap-per-wave logic
+	// drops the truncated wave's tail (BFS-wise) but the children of the
+	// pinned ones progress on the next call. Cumulative pinned should be
+	// >= the step-1 count.
+	if p.PinnedTotal() <= n1 {
+		t.Fatalf("follow-on Run made no progress: pinned still %d (step-1 was %d)", p.PinnedTotal(), n1)
+	}
+}
+
+// TestContractTrunkPreloadParallel_ResumeAfterResolverError confirms that a
+// resolver error preserves the partial state — a retry on the next Run picks
+// up from the same wave once the resolver is healthy again.
+func TestContractTrunkPreloadParallel_ResumeAfterResolverError(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	const valSz = 100
+	// Fail when R||1 is requested (a depth-65 key) — depth-64 wave succeeds.
+	failingResolve := fakeResolver(tree, nil, valSz, root+string([]byte{1}))
+	healthyResolve := fakeResolver(tree, nil, valSz, "")
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, done, err := p.Run(1<<20, nil, failingResolve, c, nil)
+	if err == nil {
+		t.Fatal("expected resolver error")
+	}
+	if done {
+		t.Fatal("Run with resolver error should return done=false")
+	}
+	// Depth-64 root should still be pinned (it was the previous wave).
+	if c.PinnedCount() == 0 {
+		t.Fatal("expected the depth-64 root pinned before the depth-65 wave failed")
+	}
+	preErrPinned := p.PinnedTotal()
+	// Retry with a healthy resolver — should pick up where we left off and
+	// finish. The previous partial wave will be re-attempted in the new
+	// call (the failing wave's frontier WAS advanced past the depth where
+	// the error fired — the error path returns before updating
+	// p.frontier/p.nextDepth, so retry sees the same depth's frontier).
+	n, done, err := p.Run(1<<20, nil, healthyResolve, c, nil)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	if !done {
+		t.Fatalf("retry should complete the preload; queue=%d", p.QueueRemaining())
+	}
+	if p.PinnedTotal()-preErrPinned != n {
+		t.Fatalf("PinnedTotal delta %d != Run pinned %d", p.PinnedTotal()-preErrPinned, n)
+	}
+	// Whole tree should be pinned by now.
+	if p.PinnedTotal() != len(tree) {
+		t.Fatalf("after retry pinned %d, want %d", p.PinnedTotal(), len(tree))
+	}
+}
+
+// TestContractTrunkPreloadParallel_DbBranchesPerStep confirms that dbBranches
+// can change between Run calls (caller may pass a freshly-prefetched overlay
+// per block) and that the freshest values shadow file values per call.
+func TestContractTrunkPreloadParallel_DbBranchesPerStep(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	root := ""
+	for p := range tree {
+		if root == "" || len(p) < len(root) {
+			root = p
+		}
+	}
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+
+	// On the first wave (depth 64) supply a fresh R value via dbBranches.
+	freshRoot := branchVal(tree[root], valSz)
+	freshRoot[4] = 0xAB
+	dbWave0 := map[string][]byte{string(nibbles.HexToCompact([]byte(root))): freshRoot}
+
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wave 0: pin the root using dbBranches (one entry budget).
+	rootKey := nibbles.HexToCompact([]byte(root))
+	stepBudget := estimatedEntryOverheadBytes + len(rootKey) + valSz + 10
+	if _, _, err := p.Run(stepBudget, dbWave0, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	}
+	if p.DbHitsPinned() != 1 {
+		t.Fatalf("wave 0: expected 1 db-hit pinned, got %d", p.DbHitsPinned())
+	}
+	gotRoot, _, ok := c.Get(rootKey)
+	if !ok {
+		t.Fatal("root not pinned after wave 0")
+	}
+	if !bytes.Equal(gotRoot, freshRoot) {
+		t.Fatalf("wave 0: root pinned with stale file value, expected fresh dbBranches value")
+	}
+
+	// Wave 1: depth 65. Pass an empty dbBranches (file-only); resolver
+	// supplies stale-bitmap values.
+	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !done {
+		t.Fatalf("expected done after large budget; queue=%d", p.QueueRemaining())
+	}
+	if p.DbHitsPinned() != 1 {
+		t.Fatalf("expected db-hit count to remain 1, got %d", p.DbHitsPinned())
+	}
+	if p.PinnedTotal() != len(tree) {
+		t.Fatalf("after wave 1 pinned %d, want %d", p.PinnedTotal(), len(tree))
+	}
+}
+
+// TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate confirms that
+// PinnedPrefixes() accumulates across Run calls (needed for demote-time
+// cache invalidation in the adaptive controller).
+func TestContractTrunkPreloadParallel_PinnedPrefixesAccumulate(t *testing.T) {
+	hash, tree, _ := buildSyntheticTree(t)
+	const valSz = 100
+	resolve := fakeResolver(tree, nil, valSz, "")
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootKey := nibbles.HexToCompact(hexNibbles(hash))
+	entry := estimatedEntryOverheadBytes + len(rootKey) + valSz
+	// Two small steps then one big step.
+	for i := 0; i < 2; i++ {
+		if _, _, err := p.Run(2*entry+10, nil, resolve, c, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, done, err := p.Run(1<<20, nil, resolve, c, nil); err != nil {
+		t.Fatal(err)
+	} else if !done {
+		t.Fatal("expected done after large step")
+	}
+	prefixes := p.PinnedPrefixes()
+	if len(prefixes) != p.PinnedTotal() {
+		t.Fatalf("PinnedPrefixes len %d != PinnedTotal %d", len(prefixes), p.PinnedTotal())
+	}
+	// Every prefix must be in the cache.
+	for _, pf := range prefixes {
+		if _, _, ok := c.Get(pf); !ok {
+			t.Fatalf("prefix %x in PinnedPrefixes but not in cache", pf)
+		}
+	}
+	// All prefixes are unique.
+	seen := map[string]bool{}
+	for _, pf := range prefixes {
+		if seen[string(pf)] {
+			t.Fatalf("duplicate prefix %x in PinnedPrefixes", pf)
+		}
+		seen[string(pf)] = true
+	}
+}
+
+// TestContractTrunkPreloadParallel_NilCacheError + NilResolverError confirm
+// the input-validation guards.
+func TestContractTrunkPreloadParallel_NilCacheError(t *testing.T) {
+	hash := make([]byte, 32)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolve := func(keys [][]byte) ([][]byte, error) { return make([][]byte, len(keys)), nil }
+	if _, _, err := p.Run(1<<20, nil, resolve, nil, nil); err == nil {
+		t.Fatal("expected error when cache is nil")
+	}
+}
+
+func TestContractTrunkPreloadParallel_NilResolverError(t *testing.T) {
+	hash := make([]byte, 32)
+	c := NewBranchCache(64)
+	p, err := NewContractTrunkPreloadParallel(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.Run(1<<20, nil, nil, c, nil); err == nil {
+		t.Fatal("expected error when resolver is nil")
+	}
+}
+
+func TestContractTrunkPreloadParallel_BadHashLengthError(t *testing.T) {
+	if _, err := NewContractTrunkPreloadParallel(make([]byte, 31)); err == nil {
+		t.Fatal("expected error for 31-byte hash")
+	}
+	if _, err := NewContractTrunkPreloadParallel(make([]byte, 33)); err == nil {
+		t.Fatal("expected error for 33-byte hash")
+	}
+}
