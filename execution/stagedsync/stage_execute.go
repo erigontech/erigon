@@ -392,21 +392,44 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
+	// Diagnostic: print the highest block number whose canonical hash is in
+	// kv.HeaderCanonical right now. This is the actual ceiling for what
+	// DumpBlocks can read, and is the value we want to compare against when
+	// choosing a retire pre-trigger ceiling.
+	{
+		c, cerr := rwTx.Cursor(kv.HeaderCanonical)
+		if cerr == nil {
+			defer c.Close()
+			if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
+				latestCanonical := binary.BigEndian.Uint64(k)
+				logger.Info("[exec] stage entry",
+					"exec.blockNumber", s.BlockNumber,
+					"senders.progress", prevStageProgress,
+					"latest_canonical_in_db", latestCanonical)
+			}
+		}
+	}
+
 	// Pre-trigger block retire so the background freezer has the Execution
 	// run as head-start before the next cycle's aggregator collation gates
-	// on FrozenBlocks. No-op if a retire round is already in flight (the
-	// CompareAndSwap inside RetireBlocksInBackground also bumps
-	// maxScheduledBlock). Pass a noop seeder so this pre-trigger doesn't
-	// announce files; SnapshotsPrune's later call uses the real seeder.
+	// on FrozenBlocks. No-op if a retire round is already in flight; CAS
+	// inside RetireBlocksInBackground also bumps maxScheduledBlock. Pass a
+	// noop seeder so the pre-trigger doesn't announce files; SnapshotsPrune's
+	// later call uses the real seeder.
 	//
-	// Use s.BlockNumber (Execution's own last-committed block) as the ceiling
-	// rather than Senders.Progress: Senders' stored progress can be ahead of
-	// the canonical-hash table writes during early-sync warm-up, causing
-	// DumpBlocks to error with "last header not found" for blocks Senders
-	// committed but whose canonical hash isn't yet in DB. Blocks up to
-	// s.BlockNumber are guaranteed canonical because Execution read them.
+	// Use BlockHashes.Progress as the ceiling: it's upstream of Bodies and
+	// Senders, and is the stage that actually writes kv.HeaderCanonical
+	// entries, so blocks up to that progress are guaranteed to have canonical
+	// hashes readable by DumpBlocks. Using Execution's own progress
+	// (s.BlockNumber) is safer but starves retire on chains where Execution
+	// lags FrozenBlocks by less than one chunk.
 	if cfg.blockRetire != nil {
-		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, s.BlockNumber, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
+		retireTo, perr := stageProgress(rwTx, cfg.db, stages.BlockHashes)
+		if perr != nil {
+			logger.Warn("[exec] couldn't read BlockHashes progress for retire pre-trigger; using exec progress", "err", perr)
+			retireTo = s.BlockNumber
+		}
+		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, retireTo, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
 	}
 
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
