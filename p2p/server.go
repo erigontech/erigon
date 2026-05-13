@@ -373,7 +373,16 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 		return errors.New("server already running")
 	}
 	srv.lock.Lock()
-	defer srv.lock.Unlock()
+	started := false
+	defer func() {
+		if !started {
+			srv.stopPartialStart()
+			srv.lock.Unlock()
+			srv.loopWG.Wait()
+			return
+		}
+		srv.lock.Unlock()
+	}()
 
 	srv.logger = logger
 	if srv.clock == nil {
@@ -423,7 +432,34 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	srv.running.Store(true)
 	srv.loopWG.Add(1)
 	go srv.run()
+	started = true
 	return nil
+}
+
+func (srv *Server) stopPartialStart() {
+	if srv.quitFunc != nil {
+		srv.quitFunc()
+	}
+	if srv.listener != nil {
+		_ = srv.listener.Close()
+		srv.listener = nil
+	}
+	if srv.discv4 != nil {
+		srv.discv4.Close()
+		srv.discv4 = nil
+	}
+	if srv.discv5 != nil {
+		srv.discv5.Close()
+		srv.discv5 = nil
+	}
+	if srv.discmix != nil {
+		srv.discmix.Close()
+		srv.discmix = nil
+	}
+	if srv.nodedb != nil {
+		srv.nodedb.Close()
+		srv.nodedb = nil
+	}
 }
 
 func (srv *Server) updateLocalNodeStaticAddrCache() {
@@ -501,6 +537,12 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	keepConn := false
+	defer func() {
+		if !keepConn {
+			_ = conn.Close()
+		}
+	}()
 
 	var (
 		sconn     discover.UDPConn = conn
@@ -565,6 +607,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			return err
 		}
 	}
+	keepConn = srv.discv4 != nil || srv.discv5 != nil
 
 	// Add protocol-specific discovery sources.
 	added := make(map[string]bool)
