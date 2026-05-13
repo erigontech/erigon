@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -235,7 +234,7 @@ func TestEIP2930Signer(t *testing.T) {
 
 	tests := []struct {
 		tx             Transaction
-		chainID        *big.Int
+		chainID        *uint256.Int
 		signer         *Signer
 		wantSignerHash common.Hash
 		wantSenderErr  error
@@ -245,7 +244,7 @@ func TestEIP2930Signer(t *testing.T) {
 		{
 			tx:             tx0,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSenderErr:  ErrInvalidChainId,
 			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
@@ -253,7 +252,7 @@ func TestEIP2930Signer(t *testing.T) {
 		{
 			tx:             tx1,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSenderErr:  ErrInvalidSig,
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
@@ -262,7 +261,7 @@ func TestEIP2930Signer(t *testing.T) {
 			// This checks what happens when trying to sign an unsigned txn for the wrong chain.
 			tx:             tx1,
 			signer:         signer2,
-			chainID:        big.NewInt(2),
+			chainID:        uint256.NewInt(2),
 			wantSenderErr:  ErrInvalidChainId,
 			wantSignerHash: common.HexToHash("367967247499343401261d718ed5aa4c9486583e4d89251afce47f4a33c33362"),
 			wantSignErr:    ErrInvalidChainId,
@@ -271,7 +270,7 @@ func TestEIP2930Signer(t *testing.T) {
 			// This checks what happens when trying to re-sign a signed txn for the wrong chain.
 			tx:             tx2,
 			signer:         signer1,
-			chainID:        big.NewInt(1),
+			chainID:        uint256.NewInt(1),
 			wantSenderErr:  ErrInvalidChainId,
 			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSignErr:    ErrInvalidChainId,
@@ -279,7 +278,7 @@ func TestEIP2930Signer(t *testing.T) {
 	}
 
 	for i, test := range tests {
-		sigHash := test.tx.SigningHash(uint256.MustFromBig(test.chainID))
+		sigHash := test.tx.SigningHash(test.chainID)
 		if sigHash != test.wantSignerHash {
 			t.Errorf("test %d: wrong sig hash: got %x, want %x", i, sigHash, test.wantSignerHash)
 		}
