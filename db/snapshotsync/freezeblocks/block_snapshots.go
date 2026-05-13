@@ -494,8 +494,14 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		return false
 	}
 
+	frozenBefore := br.blockReader.FrozenBlocks()
+	if err := br.snapshots().OpenFolder(); err != nil {
+		br.logger.Warn("[snapshots:retire] OpenFolder failed", "err", err)
+	}
+	frozenAfter := br.blockReader.FrozenBlocks()
 	br.logger.Info("[snapshots:retire] scheduled",
-		"requested_min", minBlockNum, "requested_max", maxBlockNum, "frozen", br.blockReader.FrozenBlocks())
+		"requested_min", minBlockNum, "requested_max", maxBlockNum,
+		"frozen_before_reopen", frozenBefore, "frozen_after_reopen", frozenAfter)
 
 	go func() {
 		if onDone != nil {
