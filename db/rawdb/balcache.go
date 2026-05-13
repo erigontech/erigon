@@ -41,6 +41,13 @@ type balRegeneratorSlot struct{ r BALRegenerator }
 
 var balRegenerator atomic.Pointer[balRegeneratorSlot]
 
+// balSyncFetcher holds the optionally-installed eth/71 peer-fetch backend used
+// by sync paths to opportunistically fill the cache with peer-fetched BALs
+// before falling back to local re-execution.
+type balSyncFetcherSlot struct{ f BALSyncFetcher }
+
+var balSyncFetcher atomic.Pointer[balSyncFetcherSlot]
+
 func init() {
 	var err error
 	balCache, err = lru.New[common.Hash, []byte](balCacheSize)
@@ -82,6 +89,43 @@ func getBALRegenerator() BALRegenerator {
 		return nil
 	}
 	return slot.r
+}
+
+// BALSyncFetcher is invoked by sync paths (engine_block_downloader,
+// engine_newPayload) to opportunistically fetch BALs from eth/71 peers and
+// cache them. Implementations are non-blocking: they queue work and return
+// quickly; sync stages don't wait on the fetch.
+//
+// hashes / numbers / expected are aligned positionally — entry i refers to
+// the block at hashes[i] with number numbers[i], whose header committed to
+// BAL hash expected[i]. Each successful fetch is hash-verified against
+// expected before being cached (matches the spec for eth/71 GetBlockAccessLists
+// responses).
+//
+// A missing or nil BALSyncFetcher is fine — the cache will fall through to
+// the BALRegenerator on a later lookup.
+type BALSyncFetcher interface {
+	FetchBALs(ctx context.Context, hashes []common.Hash, numbers []uint64, expected []common.Hash)
+}
+
+// SetBALSyncFetcher installs the eth/71 peer-fetch backend used by sync
+// hooks. Pass nil to clear. Safe to call multiple times.
+func SetBALSyncFetcher(f BALSyncFetcher) {
+	if f == nil {
+		balSyncFetcher.Store(nil)
+		return
+	}
+	balSyncFetcher.Store(&balSyncFetcherSlot{f: f})
+}
+
+// GetBALSyncFetcher returns the installed fetcher, or nil if none is set.
+// Sync hooks call this and dispatch when non-nil.
+func GetBALSyncFetcher() BALSyncFetcher {
+	slot := balSyncFetcher.Load()
+	if slot == nil {
+		return nil
+	}
+	return slot.f
 }
 
 // CacheBlockAccessList stores the block's RLP-encoded BAL bytes in the in-memory
@@ -142,8 +186,10 @@ func BlockAccessListBytes(ctx context.Context, hash common.Hash, number uint64) 
 	return generated, nil
 }
 
-// ResetBALCacheForTest clears the in-memory cache and the regenerator. Test-only.
+// ResetBALCacheForTest clears the in-memory cache, the regenerator, and the
+// sync fetcher. Test-only.
 func ResetBALCacheForTest() {
 	balCache.Purge()
 	balRegenerator.Store(nil)
+	balSyncFetcher.Store(nil)
 }

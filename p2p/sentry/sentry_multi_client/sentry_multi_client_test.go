@@ -291,9 +291,9 @@ func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	hashUnknown := common.Hash{0x02}
 	const knownBlockNum uint64 = 100
 	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP non-empty payload
-	if err := rawdb.WriteBlockAccessListBytes(rwTx, hashKnown, knownBlockNum, bal); err != nil {
-		t.Fatalf("WriteBlockAccessListBytes: %v", err)
-	}
+	rawdb.ResetBALCacheForTest()
+	t.Cleanup(rawdb.ResetBALCacheForTest)
+	rawdb.CacheBlockAccessList(hashKnown, bal)
 	if err := rwTx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

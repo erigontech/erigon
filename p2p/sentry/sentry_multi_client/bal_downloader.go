@@ -304,6 +304,48 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, sentryI i
 	}
 }
 
+// FetchBALs implements rawdb.BALSyncFetcher: picks an eth/71 peer and
+// requests BALs for the given (hash, number, expected) tuples in a single
+// batched call, caching every hash-verified response. Non-blocking by intent
+// — failures (no peer, peer declined, timeout) are silently dropped because
+// the cache miss can still be filled later via the BALRegenerator. Sync
+// stages MUST NOT block on this fetch.
+//
+// Splits the request into batches that stay below the eth/71 softResponseLimit
+// (~2 MiB per response, ~24 BALs / batch).
+func (d *BALDownloader) FetchBALs(ctx context.Context, hashes []common.Hash, numbers []uint64, expected []common.Hash) {
+	if len(hashes) == 0 {
+		return
+	}
+	if len(numbers) != len(hashes) || len(expected) != len(hashes) {
+		d.logger.Debug("[bal-downloader] FetchBALs called with misaligned slices",
+			"hashes", len(hashes), "numbers", len(numbers), "expected", len(expected))
+		return
+	}
+	peer, sentryI, found, err := d.pickEth71Peer(ctx)
+	if err != nil || !found {
+		// No eth/71 peer available — caller can rely on the BALRegenerator
+		// when the cache miss surfaces.
+		return
+	}
+	const batchSize = 24
+	for i := 0; i < len(hashes); i += batchSize {
+		end := i + batchSize
+		if end > len(hashes) {
+			end = len(hashes)
+		}
+		batch := make([]missingBAL, 0, end-i)
+		for j := i; j < end; j++ {
+			batch = append(batch, missingBAL{
+				hash:     hashes[j],
+				number:   numbers[j],
+				expected: expected[j],
+			})
+		}
+		d.fetchBatch(ctx, peer, sentryI, batch)
+	}
+}
+
 // pickEth71Peer iterates all sentries and returns a random peer that
 // advertises the eth/71 capability, plus the index of the sentry that peer
 // is connected via, or (_, _, false, nil) if none is connected. The sentry
