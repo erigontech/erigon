@@ -114,7 +114,7 @@ func TestCapabilities(t *testing.T) {
 	window := func(t *testing.T, f CapabilityField) uint64 {
 		t.Helper()
 		require.NotNil(t, f.DeleteStrategy)
-		require.Equal(t, "window", f.DeleteStrategy.Type)
+		require.Equal(t, deleteStrategyWindow, f.DeleteStrategy.Type)
 		return uint64(f.DeleteStrategy.RetentionBlocks)
 	}
 

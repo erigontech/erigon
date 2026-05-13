@@ -41,6 +41,10 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// deleteStrategyWindow is the only currently defined deleteStrategy type in the
+// execution-apis spec: a sliding window of RetentionBlocks blocks.
+const deleteStrategyWindow = "window"
+
 // DeleteStrategy describes how a node removes old data for a category.
 // Currently only the "window" type is defined: the node keeps a sliding
 // window of RetentionBlocks blocks and discards everything older.
@@ -116,7 +120,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		f := CapabilityField{OldestBlock: &o}
 		if d, ok := dist.(prune.Distance); ok && d != prune.DefaultBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
 			rb := hexutil.Uint64(d)
-			f.DeleteStrategy = &DeleteStrategy{Type: "window", RetentionBlocks: rb}
+			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: rb}
 		}
 		return f
 	}
@@ -139,15 +143,18 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		stateproofs = CapabilityField{Disabled: true}
 	}
 
+	// state, logs and receipts share the same history prune distance.
+	stateField := avail(stateOldest, pruneMode.History)
+	blocksField := avail(blocksOldest, pruneMode.Blocks)
 	return &CapabilitiesResult{
 		Head:  CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
-		State: avail(stateOldest, pruneMode.History),
-		Tx:    avail(blocksOldest, pruneMode.Blocks),
-		Logs:  avail(stateOldest, pruneMode.History),
+		State: stateField,
+		Tx:    blocksField,
+		Logs:  stateField,
 		// receipts are read from DB (RCacheDomain) if --persist.receipts is enabled, otherwise
 		// recalculated via re-execution; in both cases the available range matches state history
-		Receipts:    avail(stateOldest, pruneMode.History),
-		Blocks:      avail(blocksOldest, pruneMode.Blocks),
+		Receipts:    stateField,
+		Blocks:      blocksField,
 		StateProofs: stateproofs,
 	}, nil
 }
