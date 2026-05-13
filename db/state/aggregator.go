@@ -1626,6 +1626,13 @@ func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) 
 	stepSize := a.StepSize()
 	nextStep := kv.Step(endTxNum / stepSize)
 	flushedTxNum := a.lastFlushedCommitmentTxNum.Load()
+	visMin := a.visible.Load().minimaxTxNum
+
+	safeStep := kv.Step(0)
+	if flushedTxNum >= stepSize {
+		safeStep = kv.Step(flushedTxNum/stepSize) - 1
+	}
+
 	logger.Warn("[agg] stepsInDB>2: potential reasons",
 		"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
 		"produce", a.produce,
@@ -1633,8 +1640,10 @@ func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) 
 		"mergingFiles", a.mergingFiles.Load(),
 		"maxCollationTxNum", a.maxCollationTxNum.Load(),
 		"endTxNumMinimax", endTxNum,
+		"visMin", visMin,
 		"stepSize", stepSize,
 		"nextStep", nextStep,
+		"safeStep", safeStep,
 		"stepFullyCommitted", stepFullyCommitted(flushedTxNum, nextStep, stepSize),
 		"lastFlushedCommitmentTxNum", flushedTxNum,
 		"reorgBlockDepth", a.reorgBlockDepth,
@@ -2369,6 +2378,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
+					a.logger.Warn("[snapshots] buildFiles: errStepNotReady", "step", step, "lastInDB", lastInDB)
 					break
 				}
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
