@@ -113,11 +113,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
+		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
+		BootstrapNodes:            cfg.Bootnodes,
+		StaticPeers:               cfg.StaticPeers,
 	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }

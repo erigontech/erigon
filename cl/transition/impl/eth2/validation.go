@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
@@ -61,7 +62,26 @@ func VerifyBlockSignature(s abstract.BeaconState, block *cltypes.SignedBeaconBlo
 	if err != nil {
 		return false, err
 	}
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.Epoch(s))
+	cfg := s.BeaconConfig()
+	blockEpoch := state.GetEpochAtSlot(cfg, block.Block.Slot)
+
+	var domain []byte
+	// Check whether the block belongs to a newer fork than the state currently
+	// knows about.  This happens during gossip validation: the head state has
+	// not yet been advanced through ProcessSlots, so its fork info still
+	// reflects the previous fork.  In that case we derive the signing domain
+	// directly from the beacon-config fork schedule.
+	blockVersion := cfg.GetCurrentStateVersion(blockEpoch)
+	if blockVersion > s.Version() {
+		forkVersion := utils.Uint32ToBytes4(uint32(cfg.GetForkVersionByVersion(blockVersion)))
+		domain, err = fork.ComputeDomain(
+			cfg.DomainBeaconProposer[:],
+			forkVersion,
+			s.GenesisValidatorsRoot(),
+		)
+	} else {
+		domain, err = s.GetDomain(cfg.DomainBeaconProposer, blockEpoch)
+	}
 	if err != nil {
 		return false, err
 	}
