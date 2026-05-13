@@ -411,6 +411,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		if roTx, terr := cfg.db.BeginRo(ctx); terr == nil {
 			c, cerr := roTx.Cursor(kv.HeaderCanonical)
 			if cerr == nil {
+				defer c.Close()
 				if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
 					latestCommitted = binary.BigEndian.Uint64(k)
 				}
