@@ -47,7 +47,9 @@ def main() -> None:
         data = json.load(f)
 
     updated = False
+    matched = False
     for artifact_file in sorted(artifacts_dir.glob(f"disk-usage-*-{prune_mode}.txt")):
+        matched = True
         # filename: disk-usage-<chain>-<mode>.txt  e.g. disk-usage-mainnet-full.txt
         stem = artifact_file.stem                        # disk-usage-mainnet-full
         inner = stem[len("disk-usage-"):]                # mainnet-full
@@ -74,8 +76,11 @@ def main() -> None:
         updated = True
 
     if not updated:
-        print("No updates made — no matching artifact files found")
-        return
+        if matched:
+            print("Error: matching artifact files were found, but none could be applied")
+        else:
+            print("Error: no matching artifact files found")
+        sys.exit(1)
 
     data["ci_last_updated"] = today
     with open(json_path, "w") as f:

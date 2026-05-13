@@ -171,13 +171,15 @@ class ArtifactParsingTests(unittest.TestCase):
             # Run the main logic
             import sys
             old_argv = sys.argv
+            exit_code = 0
             try:
                 sys.argv = ["update-disk-sizes.py", str(artifacts_dir), str(json_path), "full"]
                 u.main()
-            except SystemExit:
-                pass
+            except SystemExit as e:
+                exit_code = e.code
             finally:
                 sys.argv = old_argv
+            self.assertEqual(exit_code, 1)
             
             # Verify JSON was NOT updated (no ci_last_updated field added)
             with open(json_path) as f:
@@ -210,13 +212,15 @@ class ArtifactParsingTests(unittest.TestCase):
             # Run the main logic
             import sys
             old_argv = sys.argv
+            exit_code = 0
             try:
                 sys.argv = ["update-disk-sizes.py", str(artifacts_dir), str(json_path), "full"]
                 u.main()
-            except SystemExit:
-                pass
+            except SystemExit as e:
+                exit_code = e.code
             finally:
                 sys.argv = old_argv
+            self.assertEqual(exit_code, 1)
             
             # Verify JSON was NOT updated (original value preserved)
             with open(json_path) as f:
