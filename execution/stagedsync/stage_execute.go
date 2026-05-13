@@ -156,6 +156,83 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+// findExecutedDiffsetAtHeight locates the DomainEntryDiff set that was stored
+// when the block at `currentBlock` was executed. It looks up the diffset under
+// the current canonical hash first, then falls back to every other header
+// stored at that height.
+//
+// The fallback is required when the headers stage just re-canonicalised the
+// chain to a new hash *before* this unwind reached this height: the diffset
+// was written under the previously-canonical (now sidechain) hash, but
+// br.CanonicalHash() returns the new canonical. Without the fallback the
+// diffset is silently missed, sd.unwindChangesetRaw stays nil at Flush time,
+// and AggregatorRoTx.Unwind never runs — leaving the domain (latest) tables
+// reflecting the sidechain state, which becomes a phantom for any
+// re-execution of the new canonical chain. CREATE2 against a counterfactual
+// address is the typical victim: collision with the phantom contract burns
+// the entire gas limit, surfacing as `gas used mismatch` at the next block.
+//
+// Returns (changeset, executedHash, found, err). When found is false the
+// changeset is the zero value; callers should treat that as "no diffs stored
+// at this height under any known header hash" (an edge case the surrounding
+// loop handles by continuing past the first iteration only).
+func findExecutedDiffsetAtHeight(
+	ctx context.Context,
+	rwTx kv.TemporalRwTx,
+	br services.FullBlockReader,
+	doms *execctx.SharedDomains,
+	currentBlock uint64,
+) (cs [kv.DomainLen][]kv.DomainEntryDiff, executedHash common.Hash, found bool, err error) {
+	currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+	if err != nil {
+		return cs, common.Hash{}, false, err
+	}
+	if !ok {
+		// No canonical hash at this height: we executed a sidechain block
+		// that never got marked canonical. Pick the only known header.
+		nonCanonicalHeaders, herr := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+		if herr != nil {
+			return cs, common.Hash{}, false, herr
+		}
+		switch {
+		case len(nonCanonicalHeaders) == 0:
+			return cs, common.Hash{}, false, fmt.Errorf("can't find diffsets for: %d", currentBlock)
+		case len(nonCanonicalHeaders) == 1:
+			currentHash = nonCanonicalHeaders[0].Hash()
+		default:
+			return cs, common.Hash{}, false, fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
+		}
+	}
+	cs, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
+	if err != nil {
+		return cs, common.Hash{}, false, err
+	}
+	if ok {
+		return cs, currentHash, true, nil
+	}
+	// Diffset not under the (possibly newly re-canonicalised) current hash.
+	// Walk every header we have at this height; the one whose diffset is
+	// stored is the block we actually executed.
+	allHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
+	if err != nil {
+		return cs, common.Hash{}, false, err
+	}
+	for _, h := range allHeaders {
+		hh := h.Hash()
+		if hh == currentHash {
+			continue
+		}
+		cs, ok, err = doms.GetDiffset(rwTx, hh, currentBlock)
+		if err != nil {
+			return cs, common.Hash{}, false, err
+		}
+		if ok {
+			return cs, hh, true, nil
+		}
+	}
+	return cs, common.Hash{}, false, nil
+}
+
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
@@ -168,28 +245,16 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
+	// lastExecHash tracks the hash of the actually-executed block at u.CurrentBlockNumber
+	// (which may differ from the current canonical hash at that height — see comment in
+	// findExecutedDiffsetAtHeight). RevertWithDiffset needs this hash to surgically
+	// invalidate the state cache instead of falling back to a full clear.
+	var lastExecHash common.Hash
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
-		currentHash, ok, err := br.CanonicalHash(ctx, rwTx, currentBlock)
+		currentKeys, executedHash, ok, err := findExecutedDiffsetAtHeight(ctx, rwTx, br, doms, currentBlock)
 		if err != nil {
 			return err
 		}
-		if !ok {
-			// we may have executed blocks which are not in the canonical chain
-			nonCanonicalHeaders, err := rawdb.ReadHeadersByNumber(rwTx, currentBlock)
-			if err != nil {
-				return err
-			}
-			switch {
-			case len(nonCanonicalHeaders) == 0:
-				return fmt.Errorf("can't find diffsets for: %d", currentBlock)
-			case len(nonCanonicalHeaders) == 1:
-				currentHash = nonCanonicalHeaders[0].Hash()
-			default:
-				return fmt.Errorf("diffsets ambiguous for: %d, have %d headers", currentBlock, len(nonCanonicalHeaders))
-			}
-		}
-		var currentKeys [kv.DomainLen][]kv.DomainEntryDiff
-		currentKeys, ok, err = doms.GetDiffset(rwTx, currentHash, currentBlock)
 		if !ok {
 			if changeSet == nil {
 				// this handles the edge case where we're traversing backwards from
@@ -200,10 +265,10 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 				// all previous blocks
 				continue
 			}
-			return fmt.Errorf("domains.GetDiffset(%d, %s): not found", currentBlock, currentHash)
+			return fmt.Errorf("domains.GetDiffset(%d): not found under any known header hash", currentBlock)
 		}
-		if err != nil {
-			return err
+		if currentBlock == u.CurrentBlockNumber {
+			lastExecHash = executedHash
 		}
 		if changeSet == nil {
 			changeSet = &currentKeys
@@ -212,12 +277,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 				changeSet[i] = changeset.MergeDiffSets(changeSet[i], currentKeys[i])
 			}
 		}
-	}
-	// Get the hash of the last executed block (the tip we're unwinding from)
-	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
-	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
-	if err != nil {
-		lastExecHash = common.Hash{}
 	}
 	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
