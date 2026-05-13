@@ -212,7 +212,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
-			OnSystemCallStartV2: t.OnSystemCallStart, // method takes *VMContext, matching V2 signature
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEnd:             t.OnTxEnd,
 			OnEnter:             t.OnEnter,
 			OnExit:              t.OnExit,
@@ -227,12 +227,10 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 // OnTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
 func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
-	t.onExecutionStart(env, 0)
-
-	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
+	t.onExecutionStart(env, tx.GetGasLimit())
 }
 
-func (t *jsTracer) OnSystemCallStart(env *tracing.VMContext) {
+func (t *jsTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.onExecutionStart(env, 0)
 }
 

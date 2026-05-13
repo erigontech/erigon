@@ -53,7 +53,7 @@ func (l *JSONLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           l.OnTxStart,
-			OnSystemCallStartV2: l.OnSystemCallStart, // method takes *VMContext, matching V2 signature
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
 			OnExit:              l.OnExit,
 			OnOpcode:            l.OnOpcode,
 			OnFault:             l.OnFault,
@@ -65,7 +65,7 @@ func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, fro
 	l.env = env
 }
 
-func (l *JSONLogger) OnSystemCallStart(env *tracing.VMContext) {
+func (l *JSONLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 

@@ -80,7 +80,7 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 			OnCodeChangeV2:      t.OnCodeChangeV2,
 			OnStorageChange:     t.OnStorageChange,
 			OnLog:               t.OnLog,
-			OnSystemCallStartV2: t.OnSystemCallStart,
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnSystemCallEnd:     t.OnSystemCallEnd,
 		},
 		GetResult: t.GetResult,
@@ -188,7 +188,7 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *muxTracer) OnSystemCallStart(vm *tracing.VMContext) {
+func (t *muxTracer) OnSystemCallStartV2(vm *tracing.VMContext) {
 	for _, t := range t.tracers {
 		if t.OnSystemCallStartV2 != nil {
 			t.OnSystemCallStartV2(vm)

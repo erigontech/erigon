@@ -111,7 +111,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
-			OnSystemCallStartV2: t.OnSystemCallStart, // method takes *VMContext, matching V2 signature
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEnd:             t.OnTxEnd,
 			OnOpcode:            t.OnOpcode,
 			OnExit:              t.OnExit,
@@ -252,7 +252,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	}
 }
 
-func (t *prestateTracer) OnSystemCallStart(env *tracing.VMContext) {
+func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
 	t.lookupAccount(env.Coinbase)
 }

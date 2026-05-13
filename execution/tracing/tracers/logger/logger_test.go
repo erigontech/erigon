@@ -85,7 +85,7 @@ func TestStoreCapture(t *testing.T) {
 func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewJSONLogger(nil, &buf)
-	logger.OnSystemCallStart(&tracing.VMContext{IntraBlockState: &mockIBS{}})
+	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
 
 	scope := &mockOpContext{}
 	logger.OnOpcode(0, byte(vm.STOP), 100, 0, scope, nil, 0, nil)

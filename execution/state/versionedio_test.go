@@ -810,7 +810,7 @@ func TestApplyVersionedWrites_StorageWriteGeneratesBalanceRead(t *testing.T) {
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: StoragePath, Key: storageKey, Val: *uint256.NewInt(42), BalanceChangeReason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: StoragePath, Key: storageKey, Val: *uint256.NewInt(42)},
 	})
 	require.NoError(t, err)
 
