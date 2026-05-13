@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -75,6 +76,7 @@ type ExecuteBlockCfg struct {
 	badBlockHalt  bool
 	stateStream   bool
 	blockReader   services.FullBlockReader
+	blockRetire   services.BlockRetire
 	hd            headerDownloader
 	author        accounts.Address
 	// last valid number of the stage
@@ -100,6 +102,7 @@ func StageExecuteBlocksCfg(
 
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
@@ -121,6 +124,7 @@ func StageExecuteBlocksCfg(
 		stateStream:     stateStream,
 		badBlockHalt:    badBlockHalt,
 		blockReader:     blockReader,
+		blockRetire:     blockRetire,
 		hd:              hd,
 		genesis:         genesis,
 		historyV3:       true,
@@ -386,6 +390,16 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	}
 	if to < s.BlockNumber {
 		return nil
+	}
+
+	// Pre-trigger block retire so the background freezer has the entire
+	// Execution run as head-start before the next cycle's aggregator collation
+	// gates on FrozenBlocks. No-op if a retire round is already in flight
+	// (the CompareAndSwap inside RetireBlocksInBackground also bumps
+	// maxScheduledBlock). Pass a noop seeder so this pre-trigger doesn't
+	// announce files; SnapshotsPrune's later call uses the real seeder.
+	if cfg.blockRetire != nil {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, to, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
 	}
 
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {

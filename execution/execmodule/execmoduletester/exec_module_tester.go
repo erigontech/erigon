@@ -635,6 +635,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			false, /*badBlockHalt*/
 			dirs,
 			mock.BlockReader,
+			nil, /*blockRetire: builder is in-memory*/
 			mock.sentriesClient.Hd,
 			gspec,
 			cfg.Sync,
@@ -672,6 +673,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				false, /*badBlockHalt*/
 				dirs,
 				mock.BlockReader,
+				blockRetire,
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,

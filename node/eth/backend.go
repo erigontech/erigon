@@ -849,6 +849,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			false, /*badBlockHalt*/
 			dirs,
 			blockReader,
+			nil, // blockRetire: builder is in-memory exec for proposed blocks; no retire needed
 			backend.sentryProvider.Client.Hd,
 			config.Genesis,
 			config.Sync,
