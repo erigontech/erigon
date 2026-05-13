@@ -680,6 +680,12 @@ func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error     { panic("not s
 func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error       { panic("not supported") }
 func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error     { panic("not supported") }
 func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)   { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteKeysBefore(_ []byte) (uint64, error) {
+	panic("not supported")
+}
+func (c *remoteCursorDupSort) DeleteDupBefore(_, _ []byte) (uint64, error) {
+	panic("not supported")
+}
 
 func (c *remoteCursorDupSort) FirstDup() ([]byte, error)          { return c.firstDup() }
 func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)   { return c.nextDup() }

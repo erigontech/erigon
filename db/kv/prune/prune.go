@@ -233,7 +233,27 @@ func TableScanningPrune(
 		}
 	}
 
-	if prevStat.KeyProgress != Done {
+	// Range-del fast path for the keys cursor: when this is a fresh rotation
+	// (not resuming a partial scan), throttling is off and ctx is not yet
+	// cancelled, drop everything with primary key < txTo in one MDBX call.
+	// This is correct because callers maintain the invariant that nothing
+	// below txFrom remains in the table; deleting < txTo equals deleting
+	// [txFrom, txTo) here.
+	rangeDelKeys := keysCursor != nil &&
+		prevStat.KeyProgress == First &&
+		throttling == nil &&
+		ctx.Err() == nil
+	if rangeDelKeys {
+		var txToKey [8]byte
+		binary.BigEndian.PutUint64(txToKey[:], txTo)
+		deleted, err := keysCursor.DeleteKeysBefore(txToKey[:])
+		if err != nil {
+			return nil, fmt.Errorf("range-del %s index keys: %w", filenameBase, err)
+		}
+		stat.PruneCountTx += deleted
+		stat.KeyProgress = Done
+		stat.LastPrunedKey = nil
+	} else if prevStat.KeyProgress != Done {
 		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
@@ -286,7 +306,7 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +336,7 @@ func tableScanningPrune(
 	logger log.Logger,
 	valueProgress Progress,
 	lastPrunedValue []byte,
+	mode StorageMode,
 ) (interrupted []byte, err error) {
 	var val, txNumBytes []byte
 	switch valueProgress {
@@ -374,6 +395,34 @@ func tableScanningPrune(
 				stat.DupsDeleted += dups
 			}
 			stat.PruneCountValues += dups
+		} else if mode == DefaultStorageMode || mode == PrefixValStorageMode {
+			// Range-del fast path: for modes where the dup-value byte-prefix
+			// is txnum-BE (Default: val == txnum_BE; PrefixVal: val[0:8] ==
+			// txnum_BE), position by ExactKeyValueLesserThan and delete in a
+			// single MDBX call. Same delete semantics as the iterative branch
+			// below under the txFrom-already-pruned invariant.
+			var txToB [8]byte
+			binary.BigEndian.PutUint64(txToB[:], txTo)
+			deleted, err := valDelCursor.DeleteDupBefore(val, txToB[:])
+			if err != nil {
+				return nil, fmt.Errorf("range-del dups for %s: %w", filenameBase, err)
+			}
+			if deleted > 0 {
+				stat.MinTxNum = min(stat.MinTxNum, txNum)
+				stat.MaxTxNum = max(stat.MaxTxNum, txTo-1)
+				stat.PruneCountValues += deleted
+				if deleted > 1 {
+					stat.DupsDeleted += deleted
+				}
+			}
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
+			if ctx.Err() != nil {
+				stat.LastPrunedValue = common.Copy(val)
+				stat.ValueProgress = InProgress
+				return common.Copy(val), nil
+			}
 		} else {
 			// Selective per-dup deletion: delete all in-range dups for this key
 			// atomically (no ctx/throttle checks between dups). This prevents
