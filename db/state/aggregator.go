@@ -1052,7 +1052,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	if err != nil {
 		return 0, 0, 0, false, err
 	}
-	if a.frozenBlocks != nil {
+	if a.frozenBlocks != nil && a.frozenBlocks.FrozenBlocks() > 0 {
 		var capTxNum uint64
 		if err = a.db.View(ctx, func(tx kv.Tx) error {
 			var err error
@@ -1618,6 +1618,10 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 }
 
 func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) {
+	frozenBlocks := uint64(0)
+	if a.frozenBlocks != nil {
+		frozenBlocks = a.frozenBlocks.FrozenBlocks()
+	}
 	logger.Warn("[agg] stepsInDB>2: potential reasons",
 		"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
 		"produce", a.produce,
@@ -1627,6 +1631,7 @@ func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) 
 		"endTxNumMinimax", a.EndTxNumMinimax(),
 		"stepSize", a.StepSize(),
 		"reorgBlockDepth", a.reorgBlockDepth,
+		"frozenBlocks", frozenBlocks,
 	)
 }
 
