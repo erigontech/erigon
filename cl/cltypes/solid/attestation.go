@@ -18,6 +18,7 @@ package solid
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 
@@ -32,9 +33,8 @@ import (
 
 const (
 	maxValidatorsPerCommittee  = 2048
-	maxCommitteesPerSlot       = 64
 	aggregationBitsSizeDeneb   = maxValidatorsPerCommittee
-	aggregationBitsSizeElectra = maxCommitteesPerSlot * maxValidatorsPerCommittee
+	aggregationBitsSizeElectra = 64 * maxValidatorsPerCommittee // mainnet MAX_COMMITTEES_PER_SLOT * MAX_VALIDATORS_PER_COMMITTEE
 )
 
 // Attestation type represents a statement or confirmation of some occurrence or phenomenon.
@@ -51,6 +51,16 @@ func (a *Attestation) GetCommitteeIndexFromBits() (uint64, error) {
 		return 0, errors.New("no committee bits set in electra attestation")
 	}
 	return uint64(bits[0]), nil
+}
+
+// SetBeaconConfig sets the beacon config for preset-aware hash computation.
+// This must be called on Electra attestations before computing HashSSZ when the
+// AggregationBits limit needs to match a specific preset (e.g. minimal vs mainnet).
+func (a *Attestation) SetBeaconConfig(cfg *clparams.BeaconChainConfig) {
+	if a == nil || cfg == nil || a.AggregationBits == nil || a.CommitteeBits == nil {
+		return
+	}
+	a.AggregationBits.SetLimit(int(cfg.MaxCommitteesPerSlot) * maxValidatorsPerCommittee)
 }
 
 // Static returns whether the attestation is static or not. For Attestation, it's always false.
@@ -88,10 +98,22 @@ func (a *Attestation) EncodingSizeSSZ() (size int) {
 func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 	clversion := clparams.StateVersion(version)
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
-		// Electra case
+		// The CommitteeBits size depends on MAX_COMMITTEES_PER_SLOT which differs between
+		// mainnet (64) and the minimal preset (4). Instead of hardcoding 64, infer the
+		// CommitteeBits byte count from the SSZ offset table.
+		// Layout: [4-byte offset][AttestationData][Signature][CommitteeBits][AggregationBits]
+		const electraFixedHeaderSize = 4 + AttestationDataSize + length.Bytes96
+		if len(buf) < electraFixedHeaderSize+1 {
+			return ssz.ErrLowBufferSize
+		}
+		aggrBitsOffset := int(binary.LittleEndian.Uint32(buf[:4]))
+		committeeBitsBytes := aggrBitsOffset - electraFixedHeaderSize
+		if committeeBitsBytes <= 0 {
+			return ssz.ErrLowBufferSize
+		}
 		a.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
 		a.Data = &AttestationData{}
-		a.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
+		a.CommitteeBits = NewBitVector(committeeBitsBytes * 8)
 		return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
 	}
 
@@ -142,7 +164,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		// Electra case
 		var temp tempAttestation
 		temp.AggregationBits = NewBitList(0, aggregationBitsSizeElectra)
-		temp.CommitteeBits = NewBitVector(maxCommitteesPerSlot)
+		temp.CommitteeBits = &BitVector{} // UnmarshalJSON self-sizes from the hex bytes
 		if err := json.Unmarshal(data, &temp); err != nil {
 			return err
 		}
@@ -206,8 +228,8 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int) *Attestation {
-	committeeBits := NewBitVector(maxCommitteesPerSlot)
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int) *Attestation {
+	committeeBits := NewBitVector(maxCommittees)
 	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
 	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)

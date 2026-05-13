@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -181,7 +180,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+		tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 	}
 	return result, nil
 }
@@ -254,48 +253,6 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
-func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
-	// Estimate the common case of user address having at most 1 interaction/block and
-	// trace N := remaining page matches as number of blocks to trace concurrently.
-	// TODO: this is not optimimal for big contract addresses; implement some better heuristics.
-	estBlocksToTrace := pageSize - resultCount
-	results := make([]*TransactionsWithReceipts, estBlocksToTrace)
-	totalBlocksTraced := 0
-	hasMore := true
-
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(1024) // we don't want limit much here, but protecting from infinity attack
-	for i := 0; i < int(estBlocksToTrace); i++ {
-		i := i // we will pass it to goroutine
-
-		var nextBlock uint64
-		var err error
-		nextBlock, hasMore, err = callFromToProvider()
-		if err != nil {
-			return nil, false, err
-		}
-		// TODO: nextBlock == 0 seems redundant with hasMore == false
-		if !hasMore && nextBlock == 0 {
-			break
-		}
-
-		totalBlocksTraced++
-
-		eg.Go(func() error {
-			// don't return error from searchTraceBlock - to avoid 1 block fail impact to other blocks
-			// if return error - `errgroup` will interrupt all other goroutines
-			// but passing `ctx` - then user still can cancel request
-			api.searchTraceBlock(ctx, addr, chainConfig, i, nextBlock, results)
-			return nil
-		})
-	}
-	if err := eg.Wait(); err != nil {
-		return nil, false, err
-	}
-
-	return results[:totalBlocksTraced], hasMore, nil
-}
-
 func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil)
 	if !inclTx {
@@ -352,29 +309,26 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 }
 
 func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (*big.Int, error) {
-	fee := big.NewInt(0)
-	gasUsed := big.NewInt(0)
+	var fee, gasUsed, totalFees uint256.Int
+	isLondon := chainConfig.IsLondon(block.NumberU64())
+	baseFee := block.BaseFee()
 
-	totalFees := big.NewInt(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		var effectiveGasPrice uint64
-		if !chainConfig.IsLondon(block.NumberU64()) {
-			effectiveGasPrice = txn.GetTipCap().Uint64()
+		if !isLondon {
+			fee.Set(txn.GetTipCap())
 		} else {
-			baseFee := block.BaseFee()
-			gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
-			effectiveGasPrice = gasPrice.Uint64()
+			effectiveTip := txn.GetEffectiveGasTip(baseFee)
+			fee.Add(baseFee, &effectiveTip)
 		}
 
-		fee.SetUint64(effectiveGasPrice)
 		gasUsed.SetUint64(receipt.GasUsed)
-		fee.Mul(fee, gasUsed)
+		fee.Mul(&fee, &gasUsed)
 
-		totalFees.Add(totalFees, fee)
+		totalFees.Add(&totalFees, &fee)
 	}
 
-	return totalFees, nil
+	return totalFees.ToBig(), nil
 }
 
 func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
@@ -445,12 +399,6 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		result = append(result, marshalledRcpt)
 	}
 
-	// Pruned block attrs
-	prunedBlock := map[string]any{}
-	for _, k := range []string{"timestamp", "miner", "baseFeePerGas"} {
-		prunedBlock[k] = getBlockRes[k]
-	}
-
 	// Crop txn input to 4bytes
 	var txs = getBlockRes["transactions"].([]any)
 	for _, rawTx := range txs {
@@ -470,6 +418,9 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		pageStart = 0
 	}
 
+	if pageEnd > len(result) {
+		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(result), pageEnd)
+	}
 	response := map[string]any{}
 	getBlockRes["transactions"] = getBlockRes["transactions"].([]any)[pageStart:pageEnd]
 	response["fullblock"] = getBlockRes

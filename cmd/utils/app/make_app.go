@@ -87,7 +87,6 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&initCommand,
 		&importCommand,
 		&snapshotCommand,
-		&supportCommand,
 		&backtestCommitmentCommand,
 		//&backupCommand,
 	}
@@ -112,6 +111,7 @@ func appFlags(cliFlags []cli.Flag) []cli.Flag {
 			continue
 		}
 		newFlags = append(newFlags, v)
+		seen[v.String()] = struct{}{}
 	}
 
 	return newFlags

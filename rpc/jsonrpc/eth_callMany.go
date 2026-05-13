@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -94,7 +95,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -150,6 +151,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
+	// evmPtr is updated atomically each time evm is recreated in the loop,
+	// so the AfterFunc callback always cancels the current instance.
+	var evmPtr atomic.Pointer[vm.EVM]
+	evmPtr.Store(evm)
+
 	timeout := api.evmCallTimeout
 
 	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
@@ -168,12 +174,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	defer stop()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -186,6 +188,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+		evmPtr.Store(evm)
 		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
@@ -194,7 +197,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
-		// If the timer caused an abort, return an appropriate error message
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
@@ -225,6 +227,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+			evmPtr.Store(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err

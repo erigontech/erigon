@@ -24,9 +24,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -63,9 +63,15 @@ type GenesisMismatchError struct {
 
 func (e *GenesisMismatchError) Error() string {
 	var advice string
-	spec, err := chainspec.ChainSpecByGenesisHash(e.Stored)
-	if err == nil {
-		advice = fmt.Sprintf(" (try with flag --chain=%s)", spec.Name)
+	specs := chainspec.ChainSpecsByGenesisHash(e.Stored)
+	if len(specs) == 1 {
+		advice = fmt.Sprintf(" (try with flag --chain=%s)", specs[0].Name)
+	} else if len(specs) > 1 {
+		names := make([]string, len(specs))
+		for i, s := range specs {
+			names[i] = s.Name
+		}
+		advice = fmt.Sprintf(" (try with flag --chain=<%s>)", strings.Join(names, "|"))
 	}
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
@@ -83,17 +89,17 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, false, dirs, logger)
+func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -104,18 +110,20 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
+func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}
-	spec, err := chainspec.ChainSpecByGenesisHash(genesisHash)
-	if err != nil {
-		return chain.AllProtocolChanges
+	if chainName != "" {
+		spec, err := chainspec.ChainSpecByName(chainName)
+		if err == nil && spec.GenesisHash == genesisHash {
+			return spec.Config
+		}
 	}
-	return spec.Config
+	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -123,6 +131,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, ov
 	var storedBlock *types.Block
 	if genesis != nil && genesis.Config == nil {
 		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
+	}
+	if genesis != nil && genesis.Config != nil {
+		if err := genesis.Config.Rules.Validate(); err != nil {
+			return nil, nil, err
+		}
 	}
 	// Just commit the new block if there is no stored genesis block.
 	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
@@ -177,7 +190,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, ov
 		}
 	}
 	// Get the existing chain configuration.
-	newCfg := configOrDefault(genesis, storedHash)
+	newCfg := configOrDefault(genesis, chainName, storedHash)
 	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
@@ -199,8 +212,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, ov
 	// In that case, only apply the overrides.
 	if genesis == nil {
 		if !keepStoredChainConfig {
-			_, err := chainspec.ChainSpecByGenesisHash(storedHash)
-			keepStoredChainConfig = err != nil
+			spec, err := chainspec.ChainSpecByName(chainName)
+			if err != nil {
+				// Unknown chain name — always keep stored config
+				keepStoredChainConfig = true
+			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
+				// Known chain name but genesis hash doesn't match (e.g. custom
+				// genesis with chainId 1 in Hive tests) — keep stored config
+				keepStoredChainConfig = true
+			}
 		}
 		if keepStoredChainConfig {
 			newCfg = storedCfg
@@ -314,12 +334,16 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	ctx := context.Background()
 
 	// some users creating > 1Gb custom genesis by `erigon init`.
-	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
-	// so a 2 TB reservation immediately exhausts the pagefile when parallel goroutines open
-	// multiple databases (e.g. during test runs). On Linux/macOS the reservation is backed by
-	// sparse files with copy-on-write, so 2 TB is harmless.
-	// 1 GB is plenty for any practical genesis block; the CI pagefile minimum is 8 GB.
-	genesisMapSize := 2 * datasize.TB
+	// On Windows, MDBX file-mappings are backed by the paging file for their
+	// full map size, so a large reservation immediately exhausts the pagefile
+	// when parallel goroutines open multiple databases. On Linux/macOS the
+	// reservation is sparse, but each open env still eats from the process's
+	// finite virtual address space (~128 TB on x86-64) — enough to matter
+	// when many EngineApiTester instances are alive in one process. 16 GB
+	// keeps headroom for outsized custom genesis allocations while letting
+	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
+	// 8 GB.
+	genesisMapSize := 16 * datasize.GB
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
 	}

@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
-	matches := mf2.FindLongestMatches(input)
+func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+	matches := mf3.FindLongestMatches(input)
 
 	if len(matches) == 0 {
 		output = append(output, 0) // Encoding of 0 in VarUint is 1 zero byte
@@ -179,19 +179,19 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	return output, patterns, uncovered
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ft *patricia.FlatTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
 	cellRing := NewRing()
-	mf2 := patricia.NewMatchFinder2(trie)
+	mf3 := patricia.NewMatchFinder3(ft)
 	var numBuf [binary.MaxVarintLen64]byte
 	for compW := range inputCh {
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cellRing, posMap)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -255,6 +255,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		code2pattern = append(code2pattern, p)
 	})
 	dictBuilder.Close()
+	ft := pt.Flatten()
+	pt = patricia.PatriciaTree{} // release heap nodes for GC
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
@@ -277,7 +279,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
 	cellRing := NewRing()
-	mf2 := patricia.NewMatchFinder2(&pt)
+	mf3 := patricia.NewMatchFinder3(ft)
 
 	var posMaps []map[uint64]uint64
 	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
@@ -288,7 +290,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, ft, inputSize, outputSize, posMap)
 		}
 	}
 	t := time.Now()
@@ -385,7 +387,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf3, output[:0], uncovered, patterns, cellRing, uncompPosMap)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
@@ -854,12 +856,19 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
-	var lcp, sa, inv []int32
-	for superstring := range superstringCh {
+	var lcp, sa, inv, saisBuf []int32
+	for {
+		var (
+			superstring []byte
+			ok          bool
+		)
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case superstring, ok = <-superstringCh:
+			if !ok {
+				return
+			}
 		}
 
 		if cap(sa) < len(superstring) {
@@ -869,7 +878,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		if err := sais.Sais(superstring, sa); err != nil {
+		if err := sais.Sais(superstring, sa, &saisBuf); err != nil {
 			panic(err)
 		}
 		//log.Info("Suffix array built", "in", time.Since(start))
@@ -1061,7 +1070,8 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, 2*etl.BufIOSize)
+	w := getBufioWriter(df)
+	defer putBufioWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err
@@ -1080,7 +1090,8 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return err
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	r := getBufioReader(f)
+	defer putBufioReader(r)
 	buf := make([]byte, 4096)
 	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
 		if e != nil {

@@ -44,7 +44,7 @@ func init() {
 }
 
 type callLog struct {
-	Index    uint64         `json:"index"`
+	Index    hexutil.Uint64 `json:"index"`
 	Address  common.Address `json:"address"`
 	Topics   []common.Hash  `json:"topics"`
 	Data     hexutil.Bytes  `json:"data"`
@@ -112,8 +112,8 @@ type callTracer struct {
 	config      callTracerConfig
 	gasLimit    uint64
 	depth       int
-	interrupt   atomic.Bool // Atomic flag to signal execution interruption
-	reason      error       // Textual reason for the interruption
+	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
+	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
 	logIndex    uint64
 	logGaps     map[uint64]int
 	precompiles []bool // keep track of whether scopes are for pre-compiles or not
@@ -313,7 +313,7 @@ func (t *callTracer) OnLog(log *types.Log) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: t.logIndex, Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
+	t.callstack[len(t.callstack)-1].Logs = append(t.callstack[len(t.callstack)-1].Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data, Index: hexutil.Uint64(t.logIndex), Position: hexutil.Uint(len(t.callstack[len(t.callstack)-1].Calls))})
 	t.logIndex++
 }
 
@@ -333,12 +333,15 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.reason
+	if p := t.reason.Load(); p != nil {
+		return res, *p
+	}
+	return res, nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *callTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 
@@ -349,7 +352,7 @@ func clearFailedLogs(cf *callFrame, parentFailed bool, logGaps map[uint64]int) {
 	if failed {
 		lastIdx := len(cf.Logs) - 1
 		if lastIdx >= 0 && logGaps != nil {
-			idx := cf.Logs[lastIdx].Index
+			idx := uint64(cf.Logs[lastIdx].Index)
 			logGaps[idx] = len(cf.Logs)
 		}
 		// Clear own logs
@@ -384,7 +387,7 @@ func fixLogIndexGap(cf *callFrame, cumulativeGaps []uint64) {
 	}
 	if len(cf.Logs) > 0 {
 		for i := range cf.Logs {
-			cf.Logs[i].Index -= cumulativeGaps[cf.Logs[i].Index]
+			cf.Logs[i].Index = hexutil.Uint64(uint64(cf.Logs[i].Index) - cumulativeGaps[cf.Logs[i].Index])
 		}
 	}
 	for i := range cf.Calls {

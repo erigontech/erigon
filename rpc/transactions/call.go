@@ -19,6 +19,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -77,12 +78,14 @@ func DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(gasCap, header.BaseFee)
+	msg, err := args.ToMessage(gasCap, effectiveHeader.BaseFee)
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {
 			return nil, err
@@ -90,18 +93,26 @@ func DoCall(
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -114,7 +125,7 @@ func DoCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 	return result, nil
@@ -206,10 +217,19 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	timedOut := false
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the shared EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		timedOut = true
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			r.evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
@@ -220,7 +240,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if timedOut {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", r.callTimeout)
 	}
 

@@ -72,6 +72,22 @@ func (b DirectBackend) PendingNonceAt(ctx context.Context, account common.Addres
 	return uint64(*count), nil
 }
 
+func (b DirectBackend) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
+	var blockRef rpc.BlockReference
+	if blockNumber == nil {
+		blockRef = rpc.LatestBlock
+	} else {
+		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
+	}
+
+	count, err := b.api.GetTransactionCount(ctx, account, rpc.BlockNumberOrHash(blockRef))
+	if err != nil {
+		return 0, err
+	}
+
+	return uint64(*count), nil
+}
+
 func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	price, err := b.api.GasPrice(ctx)
 	if err != nil {

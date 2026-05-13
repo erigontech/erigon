@@ -29,11 +29,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -50,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/event"
+	"github.com/erigontech/erigon/polygon/bor"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -83,7 +83,8 @@ type SimulatedBackend struct {
 	pendingReceipts types.Receipts
 	pendingHeader   *types.Header
 	gasPool         *protocol.GasPool
-	pendingBlock    *types.Block // Currently pending block that will be imported on request
+	pendingGasUsed  *protocol.GasUsed // EIP-8037: cumulative per-dimension gas
+	pendingBlock    *types.Block      // Currently pending block that will be imported on request
 	pendingReader   state.StateReader
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
@@ -94,16 +95,16 @@ type SimulatedBackend struct {
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	if !dbg.Exec3Parallel && config.AmsterdamTime != nil {
-		// Amsterdam required parallel processing
-		// - remove this once all tests pass with parallel as default
-		var copy chain.Config
-		copier.Copy(&copy, config)
-		config.AmsterdamTime = nil
-		config = &copy
-	}
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
-	engine := ethash.NewFaker()
+	var engine rules.Engine
+	switch {
+	case config.Bor != nil:
+		engine = bor.NewFaker()
+	case config.TerminalTotalDifficultyPassed:
+		engine = merge.NewFaker(ethash.NewFaker())
+	default:
+		engine = ethash.NewFaker()
+	}
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
@@ -127,7 +128,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 
 // NewSimulatedBackend A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
-	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainConfig, gasLimit)
+	b := NewSimulatedBackendWithConfig(t, alloc, chain.TestChainBerlinConfig, gasLimit)
 	return b
 }
 
@@ -180,6 +181,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
 	b.gasPool = new(protocol.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
+	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -726,6 +728,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*evmtypes.ExecutionResult, error) {
 	const baseFeeUpperLimit = 880000000
+	const defaultCallGas = 50000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = &u256.Num1
@@ -737,10 +740,20 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 		call.TipCap = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
-		call.Gas = 50000000
+		call.Gas = defaultCallGas
+		if call.Gas > params.MaxTxnGasLimit &&
+			b.m.ChainConfig.IsOsaka(block.Time()) &&
+			!b.m.ChainConfig.IsAmsterdam(block.Time()) {
+			// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
+			// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
+			call.Gas = params.MaxTxnGasLimit
+		}
 	}
 	if call.Value == nil {
 		call.Value = new(uint256.Int)
+	}
+	if call.MaxFeePerBlobGas == nil {
+		call.MaxFeePerBlobGas = new(uint256.Int)
 	}
 	// Set infinite balance to the fake caller account.
 	from, err := statedb.GetOrNewStateObject(accounts.InternAddress(call.From))
@@ -759,7 +772,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	return protocol.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
+	return protocol.NewTxnExecutor(vmEnv, msg, gasPool).Execute(true /* refunds */, false /* gasBailout */)
 }
 
 // SendTransaction updates the pending block to include the given transaction.
@@ -784,17 +797,16 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 
 	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
-	gasUsed := protocol.NewGasUsed(b.pendingHeader, 0)
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
-		gasUsed,
+		b.pendingGasUsed,
 		vm.Config{}); err != nil {
 		return err
 	}
-	protocol.SetGasUsed(b.pendingHeader, gasUsed)
+	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {

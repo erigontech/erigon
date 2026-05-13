@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -162,9 +163,9 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 	case *ShortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
-		compactKey := hexToCompact(n.Key)
+		compactKey := nibbles.HexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeStringWithLen(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -298,7 +299,18 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
-	acRlp := make([]byte, ac.EncodingLengthForHashing())
+	encLen := int(ac.EncodingLengthForHashing())
+	const accountRlpScratchSize = 128
+	// Reuse the end of the pre-allocated buffers to avoid heap allocation when
+	// the account RLP fits in the scratch region. Fall back to a dedicated
+	// allocation if the encoding grows beyond the scratch capacity.
+	var acRlp []byte
+	if encLen <= accountRlpScratchSize && len(h.buffers) >= accountRlpScratchSize {
+		start := len(h.buffers) - accountRlpScratchSize
+		acRlp = h.buffers[start : start+encLen]
+	} else {
+		acRlp = make([]byte, encLen)
+	}
 	ac.EncodeForHashing(acRlp)
 	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)

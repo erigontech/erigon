@@ -40,11 +40,7 @@ const minStepsForReferencing = 2
 // ValuesPlainKeyReferencingThresholdReached checks if the range from..to is large enough to use plain key referencing
 // Used for commitment branches - to store references to account and storage keys as shortened keys (file offsets)
 func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
-	return ((to-from)/stepSize)%minStepsForReferencing == 0
-}
-
-func MayContainValuesPlainKeyReferencing(stepSize, from, to uint64) bool {
-	return ((to - from) / stepSize) > minStepsForReferencing
+	return (to-from)/stepSize >= minStepsForReferencing
 }
 
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
@@ -62,12 +58,12 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 
 	sto := aggTx.d[kv.StorageDomain]
 	acc := aggTx.d[kv.AccountsDomain]
-	storageItem, err := sto.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	storageItem, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
 	}
-	accountItem, err := acc.rawLookupFileByRange(fStartTxNum, fEndTxNum)
+	accountItem, err := acc.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
 	if err != nil {
 		logger.Crit("dereference key during commitment read", "failed", err.Error())
 		return nil, err
@@ -207,54 +203,16 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return 0, false
 }
 
-// rawLookupFileByRange searches for a file that contains the given range of tx numbers.
-// Given range should exactly match the range of some file, so expected to be multiple of stepSize.
-// At first it checks range among visible files, then among dirty files.
-// If file is not found anywhere, returns nil
-func (dt *DomainRoTx) rawLookupFileByRange(txFrom uint64, txTo uint64) (*FilesItem, error) {
+// lookupVisibleFileByRange searches only among visible files (those in the RoTx snapshot).
+// Use this during merge operations where constituent files are guaranteed to be visible.
+func (dt *DomainRoTx) lookupVisibleFileByRange(txFrom, txTo uint64) (*FilesItem, error) {
 	for _, f := range dt.files {
 		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
-			return f.src, nil // found in visible files
+			return f.src, nil
 		}
 	}
-	if dirty := dt.lookupDirtyFileByItsRange(txFrom, txTo); dirty != nil {
-		return dirty, nil
-	}
-	return nil, fmt.Errorf("file %s-%s.%d-%d.kv was not found", dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
-}
-
-func (dt *DomainRoTx) lookupDirtyFileByItsRange(txFrom uint64, txTo uint64) *FilesItem {
-	var item *FilesItem
-	if item == nil {
-		dt.d.dirtyFiles.Walk(func(files []*FilesItem) bool {
-			for _, f := range files {
-				if f.startTxNum == txFrom && f.endTxNum == txTo {
-					item = f
-					return false
-				}
-			}
-			return true
-		})
-	}
-
-	if item == nil || item.bindex == nil {
-		var fileStepsss strings.Builder
-		fileStepsss.WriteString("" + dt.d.Name.String() + ": ")
-		for _, item := range dt.d.dirtyFiles.Items() {
-			fromStep, toStep := item.StepRange(dt.d.stepSize)
-			fileStepsss.WriteString(fmt.Sprintf("%d-%d;", fromStep, toStep))
-		}
-		dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file not found",
-			"stepFrom", txFrom/dt.d.stepSize, "stepTo", txTo/dt.d.stepSize,
-			"files", fileStepsss.String(), "filesCount", dt.d.dirtyFiles.Len())
-
-		if item != nil && item.bindex == nil {
-			dt.d.logger.Warn("[agg] lookupDirtyFileByItsRange: file found but not indexed", "f", item.decompressor.FileName())
-		}
-
-		return nil
-	}
-	return item
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv not found in visible files",
+		dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
@@ -268,7 +226,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 			dt.d.logger.Crit("lookupByShortenedKey panics",
 				"err", r,
 				"offset", offset, "short", hex.EncodeToString(shortKey),
-				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
+				"visibleFilesCount", len(dt.files),
 				"file", getter.FileName())
 		}
 	}()
@@ -298,7 +256,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
-		if mergedStorage, err = storage.rawLookupFileByRange(rng.from, rng.to); err != nil {
+		if mergedStorage, err = storage.lookupVisibleFileByRange(rng.from, rng.to); err != nil {
 			// TODO may allow to merge, but storage keys will be stored as plainkeys
 			return nil, err
 		}
@@ -306,7 +264,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	hadToLookupAccount := mergedAccount == nil
 	if mergedAccount == nil {
-		if mergedAccount, err = accounts.rawLookupFileByRange(rng.from, rng.to); err != nil {
+		if mergedAccount, err = accounts.lookupVisibleFileByRange(rng.from, rng.to); err != nil {
 			return nil, err
 		}
 	}
@@ -344,11 +302,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := storage.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
-			if dirty == nil {
-				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
+			f, err := storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			if err != nil {
+				return nil, fmt.Errorf("storage file not found in visible files: %w", err)
 			}
-			sig = storage.dataReader(dirty.decompressor)
+			sig = storage.dataReader(f.decompressor)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
@@ -357,11 +315,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := accounts.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
-			if dirty == nil {
-				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
+			f, err := accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			if err != nil {
+				return nil, fmt.Errorf("account file not found in visible files: %w", err)
 			}
-			aig = accounts.dataReader(dirty.decompressor)
+			aig = accounts.dataReader(f.decompressor)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 

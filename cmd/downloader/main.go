@@ -17,6 +17,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -49,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
-	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -113,6 +114,7 @@ var (
 	seedbox              bool
 	dbWritemap           bool
 	all                  bool
+	diffMode             bool
 )
 
 var cobraFlagValues struct {
@@ -178,6 +180,7 @@ func init() {
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
 		panic(err)
 	}
+	printTorrentHashes.Flags().BoolVar(&diffMode, "diff", false, "show diff against the currently released .toml from erigon-snapshot (GitHub)")
 	rootCmd.AddCommand(printTorrentHashes)
 
 	withChainFlag(&verifyWebseedsCmd)
@@ -272,7 +275,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
-	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+	if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 		webseedsList = append(webseedsList, known...)
 	}
 	if seedbox {
@@ -540,7 +543,7 @@ var torrentMagnet = &cobra.Command{
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
-		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 			for _, s := range known {
 				//TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
@@ -671,6 +674,10 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	for _, t := range torrents {
 		res[t.DisplayName] = t.InfoHash.String()
 	}
+	if diffMode {
+		return doDiffTorrentHashes(ctx, res)
+	}
+
 	serialized, err := toml.Marshal(res)
 	if err != nil {
 		return err
@@ -695,6 +702,59 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	}
 	if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
 		return err
+	}
+	return nil
+}
+
+type hashChange struct{ name, released, local string }
+
+func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
+	branch := version.DefaultSnapshotGitBranch
+	url := snapcfg.ChainTomlGitHubURL(branch, chain)
+	body, err := snapcfg.FetchChainToml(ctx, snapcfg.Github, branch, chain)
+	if err != nil {
+		return fmt.Errorf("diff: %w", err)
+	}
+
+	released := map[string]string{}
+	if err := toml.Unmarshal(body, &released); err != nil {
+		return fmt.Errorf("diff: unmarshal released toml: %w", err)
+	}
+
+	var added, removed []string
+	var changed []hashChange
+	for name, localHash := range local {
+		if relHash, ok := released[name]; !ok {
+			added = append(added, name)
+		} else if relHash != localHash {
+			changed = append(changed, hashChange{name, relHash, localHash})
+		}
+	}
+	for name := range released {
+		if _, ok := local[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+
+	slices.Sort(added)
+	slices.Sort(removed)
+	slices.SortFunc(changed, func(a, b hashChange) int { return cmp.Compare(a.name, b.name) })
+
+	fmt.Printf("released branch: %s  url: %s\n", branch, url)
+	fmt.Printf("released: %d entries, local: %d entries, changed: %d, added: %d, removed: %d\n", len(released), len(local), len(changed), len(added), len(removed))
+
+	if len(added) == 0 && len(removed) == 0 && len(changed) == 0 {
+		fmt.Println("no diff")
+		return nil
+	}
+	for _, c := range changed {
+		fmt.Printf("CHANGED %s released=%s local=%s\n", c.name, c.released, c.local)
+	}
+	for _, name := range added {
+		fmt.Printf("ADDED   %s %s\n", name, local[name])
+	}
+	for _, name := range removed {
+		fmt.Printf("REMOVED %s %s\n", name, released[name])
 	}
 	return nil
 }
@@ -771,7 +831,7 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	}
 	defer db.Close()
 
-	if cc := tool.ChainConfigFromDB(db); cc != nil {
+	if cc := fromdb.ChainConfig(db); cc != nil {
 		spc, err := chainspec.ChainSpecByName(chainName)
 		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)

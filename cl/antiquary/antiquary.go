@@ -19,8 +19,7 @@ package antiquary
 import (
 	"context"
 	"math"
-	"os"
-	"strings"
+
 	"sync/atomic"
 	"time"
 
@@ -95,25 +94,6 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 		stateSn:         stateSn,
 		syncedData:      syncedData,
 	}
-}
-
-// Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
-func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
-	// Iterate over the files in the snapshot directory
-	files, err := os.ReadDir(snapshotDir)
-	if err != nil {
-		return false
-	}
-	for _, file := range files {
-		// Check if the file has a ".seg" extension
-		if file.IsDir() {
-			continue
-		}
-		if strings.Contains(file.Name(), "beaconblock") && strings.HasSuffix(file.Name(), ".seg") {
-			return true
-		}
-	}
-	return false
 }
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.

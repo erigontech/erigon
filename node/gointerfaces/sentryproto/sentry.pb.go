@@ -71,6 +71,12 @@ const (
 	MessageId_STATUS_69             MessageId = 37
 	MessageId_GET_RECEIPTS_69       MessageId = 38
 	MessageId_BLOCK_RANGE_UPDATE_69 MessageId = 39
+	// ======= eth 70 protocol ===========
+	MessageId_GET_RECEIPTS_70 MessageId = 40
+	MessageId_RECEIPTS_70     MessageId = 41
+	// ======= eth 71 protocol (EIP-8159) ===========
+	MessageId_GET_BLOCK_ACCESS_LISTS_71 MessageId = 42
+	MessageId_BLOCK_ACCESS_LISTS_71     MessageId = 43
 )
 
 // Enum value maps for MessageId.
@@ -115,6 +121,10 @@ var (
 		37: "STATUS_69",
 		38: "GET_RECEIPTS_69",
 		39: "BLOCK_RANGE_UPDATE_69",
+		40: "GET_RECEIPTS_70",
+		41: "RECEIPTS_70",
+		42: "GET_BLOCK_ACCESS_LISTS_71",
+		43: "BLOCK_ACCESS_LISTS_71",
 	}
 	MessageId_value = map[string]int32{
 		"STATUS_65":                        0,
@@ -156,6 +166,10 @@ var (
 		"STATUS_69":                        37,
 		"GET_RECEIPTS_69":                  38,
 		"BLOCK_RANGE_UPDATE_69":            39,
+		"GET_RECEIPTS_70":                  40,
+		"RECEIPTS_70":                      41,
+		"GET_BLOCK_ACCESS_LISTS_71":        42,
+		"BLOCK_ACCESS_LISTS_71":            43,
 	}
 )
 
@@ -237,6 +251,8 @@ const (
 	Protocol_ETH67 Protocol = 2
 	Protocol_ETH68 Protocol = 3
 	Protocol_ETH69 Protocol = 4
+	Protocol_ETH70 Protocol = 6
+	Protocol_ETH71 Protocol = 7
 	Protocol_WIT0  Protocol = 5
 )
 
@@ -248,6 +264,8 @@ var (
 		2: "ETH67",
 		3: "ETH68",
 		4: "ETH69",
+		6: "ETH70",
+		7: "ETH71",
 		5: "WIT0",
 	}
 	Protocol_value = map[string]int32{
@@ -256,6 +274,8 @@ var (
 		"ETH67": 2,
 		"ETH68": 3,
 		"ETH69": 4,
+		"ETH70": 6,
+		"ETH71": 7,
 		"WIT0":  5,
 	}
 )
@@ -1778,7 +1798,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fAddPeerReply\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"+\n" +
 	"\x0fRemovePeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\x9e\a\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\xfe\a\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1819,15 +1839,21 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x15NEW_WITNESS_HASHES_W0\x10$\x12\r\n" +
 	"\tSTATUS_69\x10%\x12\x13\n" +
 	"\x0fGET_RECEIPTS_69\x10&\x12\x19\n" +
-	"\x15BLOCK_RANGE_UPDATE_69\x10'*\x17\n" +
+	"\x15BLOCK_RANGE_UPDATE_69\x10'\x12\x13\n" +
+	"\x0fGET_RECEIPTS_70\x10(\x12\x0f\n" +
+	"\vRECEIPTS_70\x10)\x12\x1d\n" +
+	"\x19GET_BLOCK_ACCESS_LISTS_71\x10*\x12\x19\n" +
+	"\x15BLOCK_ACCESS_LISTS_71\x10+*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
-	"\x04Kick\x10\x00*K\n" +
+	"\x04Kick\x10\x00*a\n" +
 	"\bProtocol\x12\t\n" +
 	"\x05ETH65\x10\x00\x12\t\n" +
 	"\x05ETH66\x10\x01\x12\t\n" +
 	"\x05ETH67\x10\x02\x12\t\n" +
 	"\x05ETH68\x10\x03\x12\t\n" +
-	"\x05ETH69\x10\x04\x12\b\n" +
+	"\x05ETH69\x10\x04\x12\t\n" +
+	"\x05ETH70\x10\x06\x12\t\n" +
+	"\x05ETH71\x10\a\x12\b\n" +
 	"\x04WIT0\x10\x052\xd5\n" +
 	"\n" +
 	"\x06Sentry\x127\n" +

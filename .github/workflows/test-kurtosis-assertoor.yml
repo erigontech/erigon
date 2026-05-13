@@ -11,27 +11,49 @@ env:
   ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
 
 on:
-  push:
-    branches:
-        - main
-        - 'release/**'
-  pull_request:
-    branches:
-      - main
-  workflow_call:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 jobs:
-  assertoor_regular_test:
+  assertoor_test:
+    name: assertoor_${{ matrix.suite }}_test
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, 'regular', github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, 'regular', github.ref)
-        }}
-      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
+        # step. Observed happy-path durations are roughly:
+        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
+        # The caps below give ~1.5–2x of the happy path so real regressions still
+        # pass but pathological hangs (e.g. a node that silently stops proposing)
+        # fail in reasonable time instead of burning hours.
+        include:
+          - suite: regular
+            package_args: .github/workflows/kurtosis/regular-assertoor.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 50
+          - suite: pectra
+            package_args: .github/workflows/kurtosis/pectra.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 45
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
+            # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
+            # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+          - suite: caplin-minimal
+            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
+            ethereum_package_url: "github.com/erigontech/ethereum-package"
+            ethereum_package_branch: "erigontech/fix-caplin-launcher"
+            test_timeout_minutes: 20
 
     steps:
       - name: Fast checkout git repository
@@ -46,19 +68,19 @@ jobs:
         if: |
           github.repository == 'erigontech/erigon' &&
           github.actor != 'dependabot[bot]' &&
-          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+          !github.event.pull_request.head.repo.fork
         continue-on-error: true
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Restore cached third-party containers
         id: cache-cl-images
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/docker-cache
           key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
@@ -87,91 +109,62 @@ jobs:
           context: .
           load: true
           tags: test/erigon:current
+          build-args: |
+            BINARIES=erigon caplin
           cache-from: type=gha,scope=kurtosis-erigon-build
           cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
 
-      - name: Run regular Kurtosis + assertoor tests
+      - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
+        # On branch push, tests already passed in the merge queue. This run exists
+        # solely to warm Docker image and BuildKit caches on main for future PRs
+        # and merge queue runs. Skip the actual tests to avoid redundant execution.
+        if: '!inputs.cache-warming-only'
+        # Per-suite cap — see matrix.test_timeout_minutes. Turns multi-hour
+        # hangs (e.g. a node that silently stops proposing) into prompt
+        # failures so the next investigation or retry can start sooner
+        # instead of burning runner hours on a dead chain.
+        timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run1-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
-            ethereum_package_branch: "5.0.1"
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+            ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
+            ethereum_package_args: "${{ matrix.package_args }}"
+            ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
 
-  assertoor_pectra_test:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, 'pectra', github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, 'pectra', github.ref)
-        }}
-      cancel-in-progress: true
-
-    steps:
-      - name: Fast checkout git repository
-        uses: actions/checkout@v6
-
-      - name: Conditional Docker Login
-        # Only login if we can. Workflow works without it but we want to avoid
-        # rate limiting by Docker Hub when possible. External repos don't
-        # have access to our Docker secrets.
-        # continue-on-error: transient Docker Hub network timeouts should not
-        # abort the entire workflow — the run proceeds without login (unlogged pull).
-        if: |
-          github.repository == 'erigontech/erigon' &&
-          github.actor != 'dependabot[bot]' &&
-          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+      - name: Dump Kurtosis enclave on failure
+        # Capture per-service logs (el-*, cl-*, vc-*, spamoor, assertoor,
+        # snooper-*) so test hangs can be diagnosed after the fact. GitHub's
+        # log blob storage purges raw CI logs quickly (BlobNotFound within
+        # hours), and the orchestration output alone doesn't tell us what
+        # each container was actually doing.
+        #
+        # NB: `kurtosis enclave dump` refuses if the target directory already
+        # exists — do NOT pre-create it.
+        if: failure() && !inputs.cache-warming-only
         continue-on-error: true
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Restore cached third-party containers
-        id: cache-cl-images
-        uses: actions/cache@v4
-        with:
-          path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
-
-      - name: Load cached containers into daemon
-        if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
-          docker load -i /tmp/docker-cache/lighthouse.tar
-          docker load -i /tmp/docker-cache/teku.tar
-          docker load -i /tmp/docker-cache/assertoor.tar
+          set -eu
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
+          kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
-      - name: Pull third-party containers and save to cache
-        if: steps.cache-cl-images.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p /tmp/docker-cache
-          docker pull ${{ env.LIGHTHOUSE_IMAGE }}
-          docker pull ${{ env.TEKU_IMAGE }}
-          docker pull ${{ env.ASSERTOOR_IMAGE }}
-          docker save ${{ env.LIGHTHOUSE_IMAGE }} -o /tmp/docker-cache/lighthouse.tar
-          docker save ${{ env.TEKU_IMAGE }}        -o /tmp/docker-cache/teku.tar
-          docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
-
-      - name: Build erigon Docker image (with BuildKit layer cache)
-        uses: docker/build-push-action@v6
+      - name: Upload Kurtosis enclave dump
+        if: failure() && !inputs.cache-warming-only
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
         with:
-          context: .
-          load: true
-          tags: test/erigon:current
-          cache-from: type=gha,scope=kurtosis-erigon-build
-          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+          name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
+          retention-days: 7
+          if-no-files-found: warn
 
-      - name: Run Pectra Kurtosis + assertoor tests
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
-        with:
-            enclave_name: "kurtosis-run2-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
-            ethereum_package_branch: "5.0.1"
-            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            persistent_logs: "true"
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

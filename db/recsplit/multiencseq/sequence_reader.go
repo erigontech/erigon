@@ -140,6 +140,12 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
 }
 
+func (s *SequenceReader) assertSorted() {
+	if s.Count() > 1 && s.Max() < s.Min() {
+		panic(fmt.Sprintf("SequenceReader: corrupt sequence: Max()=%d < Min()=%d, Count=%d, enc=%d", s.Max(), s.Min(), s.Count(), s.currentEnc))
+	}
+}
+
 func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
 	switch s.currentEnc {
 	case SimpleEncoding:

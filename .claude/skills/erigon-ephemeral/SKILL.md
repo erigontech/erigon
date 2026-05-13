@@ -1,6 +1,6 @@
 ---
 name: erigon-ephemeral
-description: Run an ephemeral Erigon instance with a temporary datadir. Checks for port conflicts, applies port offsets, and supports safe cleanup. Use this when the user wants a temporary/throwaway Erigon instance.
+description: Run an ephemeral Erigon instance with a temporary datadir. Use this whenever the user wants to spin up a temporary, throwaway, or sandboxed Erigon node for quick testing, launch a second Erigon instance alongside an existing one, clone a datadir into a temp copy for safe experimentation, or find and clean up leftover ephemeral datadirs and processes from previous sessions. Handles port conflict detection and automatic port offsetting. Trigger on any mention of temporary/throwaway/ephemeral/disposable Erigon instances, running erigon briefly for testing or debugging, starting a second/additional erigon node, or cleaning up old temp erigon data.
 allowed-tools: Bash, Read
 allowed-prompts:
   - tool: Bash
@@ -116,7 +116,8 @@ Run Erigon in the background:
 ./build/bin/erigon --datadir=<path> [port flags if needed] [user extra flags] &
 ```
 
-- The user can pass extra flags (e.g., `--chain=dev --mine`, `--log.console.verbosity=4`) which get appended to the command.
+- The user can pass extra flags (e.g., `--chain=dev --beacon.api=beacon,validator,node,config`,
+  `--log.console.verbosity=4`) which get appended to the command.
 - **Always** print the full CLI command to the user in a formatted code block (one flag per line with `\` continuation) before launching, so they can see exactly what is being run.
 - Report the PID to the user after launching.
 - Use `run_in_background: true` on the Bash tool so the process survives.

@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -60,6 +62,15 @@ type StatusDataProvider struct {
 	timeForks   []uint64
 
 	logger log.Logger
+
+	// cache holds the latest ChainHead, invalidated by new-header
+	// notifications from the execution pipeline (via Run).
+	// Protected by cacheMu for concurrent fetch coalescing.
+	// cacheVer is bumped on each invalidation so that a fetch in
+	// progress doesn't store stale data after a concurrent invalidation.
+	cache    atomic.Pointer[ChainHead]
+	cacheMu  sync.Mutex
+	cacheVer atomic.Uint64
 }
 
 func NewStatusDataProvider(
@@ -118,39 +129,100 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentryproto.StatusD
 		MinimumBlockHeight: head.MinimumHeight,
 		ForkData: &sentryproto.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
-			HeightForks: s.heightForks,
-			TimeForks:   s.timeForks,
+			HeightForks: append([]uint64(nil), s.heightForks...),
+			TimeForks:   append([]uint64(nil), s.timeForks...),
 		},
 	}
 }
 
+// Run listens for new-header notifications and invalidates the cached
+// ChainHead so the next GetStatusData call fetches fresh data from the DB.
+// Blocks until ctx is cancelled.
+func (s *StatusDataProvider) Run(ctx context.Context, headersCh <-chan [][]byte, snapshotsCh <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-headersCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		case <-snapshotsCh:
+			s.cacheVer.Add(1)
+			s.cache.Store(nil)
+		}
+	}
+}
+
 // GetStatusData returns the current StatusData.
-// Uses DB head, falls back to snapshot data when unavailable
+//
+// The ChainHead is cached and invalidated by new-header notifications from
+// the execution pipeline (via Run). Concurrent callers share a single DB
+// fetch through cacheMu. This eliminates repeated MDBX read transactions
+// that previously blocked GC page reclamation.
+//
+// Falls back to snapshot data when the DB head is unavailable.
 func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentryproto.StatusData, error) {
-	var minimumBlock uint64
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
+	}
+
+	// Cache miss — fetch from DB, coalescing concurrent callers.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+
+	// Double-check after acquiring lock.
+	if head := s.cache.Load(); head != nil {
+		return s.makeStatusData(*head), nil
+	}
+
+	ver := s.cacheVer.Load()
+	head, err := s.fetchChainHead(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only store if no invalidation happened during the fetch.
+	if s.cacheVer.Load() == ver {
+		s.cache.Store(&head)
+	}
+	return s.makeStatusData(head), nil
+}
+
+// fetchChainHead reads MinimumBlockAvailable and ChainHead in a single DB
+// read transaction. Falls back to snapshot data when the DB head is missing.
+func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, error) {
+	var (
+		chainHead    ChainHead
+		minimumBlock uint64
+		headErr      error
+	)
+
 	if err := s.db.View(ctx, func(tx kv.Tx) error {
 		var err error
 		minimumBlock, err = s.blockReader.MinimumBlockAvailable(ctx, tx)
-		return err
+		if err != nil {
+			return fmt.Errorf("MinimumBlockAvailable: %w", err)
+		}
+		chainHead, headErr = ReadChainHeadWithTx(tx, minimumBlock)
+		return nil // headErr handled below (ErrNoHead → snapshot fallback)
 	}); err != nil {
-		return nil, fmt.Errorf("GetStatusData: minimumBlock error: %w", err)
+		return ChainHead{}, fmt.Errorf("GetStatusData: %w", err)
 	}
 
-	chainHead, err := ReadChainHead(ctx, s.db, minimumBlock)
-	if err == nil {
-		return s.makeStatusData(chainHead), nil
+	if headErr == nil {
+		return chainHead, nil
 	}
-	if !errors.Is(err, ErrNoHead) {
-		return nil, err
+	if !errors.Is(headErr, ErrNoHead) {
+		return ChainHead{}, headErr
 	}
 
 	s.logger.Warn("sentry.StatusDataProvider: The canonical chain current header not found in the database. Check the database consistency. Using latest available snapshot data.")
 
 	snapHead, err := s.ReadChainHeadFromSnapshots(ctx, minimumBlock)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read chain head from snapshots: %w", err)
+		return ChainHead{}, fmt.Errorf("failed to read chain head from snapshots: %w", err)
 	}
-	return s.makeStatusData(snapHead), nil
+	return snapHead, nil
 }
 
 // ReadChainHeadWithTx reads chain head in DB

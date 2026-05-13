@@ -201,6 +201,9 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
+	if dbg.NoPrune() {
+		return s.Done(tx)
+	}
 	logPrefix := s.LogPrefix()
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
@@ -248,12 +251,24 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return err
 	}
-	if prevStat != nil && prevStat.TxFrom == txFrom && prevStat.TxTo == txTo && prevStat.ValueProgress == prune.Done {
+	// A completed rotation that covers current txTo — nothing more to do.
+	if prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
 		return nil
 	}
 	if prevStat == nil {
 		prevStat = &prune.Stat{}
 	}
+
+	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
+	// is visited sequentially once per rotation instead of restarting from First() on
+	// every prune cycle. Only reset the cursor when a full rotation has completed.
+	if prevStat.ValueProgress == prune.Done {
+		prevStat.ValueProgress = prune.First
+		prevStat.LastPrunedValue = nil
+	}
+	// Sync range params so TableScanningPrune won't reset the cursor mid-rotation.
+	prevStat.TxFrom = txFrom
+	prevStat.TxTo = txTo
 
 	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
 	if err != nil {
@@ -265,7 +280,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	case *mdbx2.MdbxCursor:
 		valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
 	default:
-		return fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, kv.TxLookup)
+		valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
 	}
 
 	logEvery := time.NewTicker(logInterval)

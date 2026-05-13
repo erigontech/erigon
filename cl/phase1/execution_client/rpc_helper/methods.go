@@ -26,5 +26,19 @@ const ForkChoiceUpdatedV2 = "engine_forkchoiceUpdatedV2"
 const ForkChoiceUpdatedV3 = "engine_forkchoiceUpdatedV3"
 const ForkChoiceUpdatedV4 = "engine_forkchoiceUpdatedV4"
 
+const EngineGetPayloadV1 = "engine_getPayloadV1"
+const EngineGetPayloadV2 = "engine_getPayloadV2"
+const EngineGetPayloadV3 = "engine_getPayloadV3"
+const EngineGetPayloadV4 = "engine_getPayloadV4"
+const EngineGetPayloadV5 = "engine_getPayloadV5"
+
 const GetPayloadBodiesByHashV1 = "engine_getPayloadBodiesByHashV1"
+const GetPayloadBodiesByHashV2 = "engine_getPayloadBodiesByHashV2"
 const GetPayloadBodiesByRangeV1 = "engine_getPayloadBodiesByRangeV1"
+const GetPayloadBodiesByRangeV2 = "engine_getPayloadBodiesByRangeV2"
+
+const EngineGetBlobsV1 = "engine_getBlobsV1"
+const EngineGetBlobsV2 = "engine_getBlobsV2"
+const EngineGetBlobsV3 = "engine_getBlobsV3"
+
+const EngineGetClientVersionV1 = "engine_getClientVersionV1"

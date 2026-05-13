@@ -235,7 +235,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.wbuf.reset()
 
 	// Write header.
-	fsize := rlp.IntSize(code) + len(data)
+	fsize := rlp.U64Len(code) + len(data)
 	if fsize > maxUint24 {
 		return errPlainMessageTooLarge
 	}
@@ -636,7 +636,7 @@ func (h *handshakeState) sealEIP8(msg any) ([]byte, error) {
 	// the message distinguishable from pre-EIP-8 handshakes.
 	h.wbuf.appendZero(mrand.Intn(100) + 100) //nolint:gosec
 
-	prefix := make([]byte, 2)
+	prefix := make([]byte, 2) //nolint:prealloc
 	binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
 
 	enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)

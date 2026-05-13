@@ -315,7 +315,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())

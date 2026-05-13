@@ -67,7 +67,7 @@ func oneBlockStep(mockSentry *execmoduletester.ExecModuleTester, require *requir
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 }
 
 func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient) *jsonrpc.APIImpl {
@@ -126,14 +126,14 @@ func TestGetBlobsV1(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
+	executionRpc := mockSentry.ExecModule
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, txPool, fcuTimeout, maxReorgDepth)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -142,7 +142,7 @@ func TestGetBlobsV1(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -181,14 +181,14 @@ func TestGetBlobsV2(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
+	executionRpc := mockSentry.ExecModule
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, txPool, fcuTimeout, maxReorgDepth)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -197,7 +197,7 @@ func TestGetBlobsV2(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -245,14 +245,14 @@ func TestGetBlobsV3(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
+	executionRpc := mockSentry.ExecModule
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, txPool, fcuTimeout, maxReorgDepth)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -261,7 +261,7 @@ func TestGetBlobsV3(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -316,9 +316,9 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	req := require.New(t)
 	oneBlockStep(mockSentry, req)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
+	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
 	const blockNum = 1
 	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
@@ -350,9 +350,9 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req := require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
+	executionRpc := mockSentry.ExecModule
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
 	const (
 		start = 1

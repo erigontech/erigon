@@ -136,12 +136,11 @@ func MakeWrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
-	wrappedTxn.Tx.Value = uint256.NewInt(0)
 	wrappedTxn.Tx.Data = []byte{4, 247}
-	wrappedTxn.Tx.ChainID = chainId
-	wrappedTxn.Tx.TipCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
+	wrappedTxn.Tx.ChainID = *chainId
+	wrappedTxn.Tx.TipCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.FeeCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.MaxFeePerBlobGas = *uint256.NewInt(123)
 
 	wrappedTxn.Blobs = make(Blobs, 2)
 	wrappedTxn.Commitments = make(BlobKzgs, 2)
@@ -183,12 +182,11 @@ func MakeV1WrappedBlobTxn(chainId *uint256.Int) *BlobTxWrapper {
 	wrappedTxn.Tx.To = &common.Address{129, 26, 117, 44, 140, 214, 151, 227, 203, 39, 39, 156, 51, 14, 209, 173, 167, 69, 168, 215}
 	wrappedTxn.Tx.Nonce = 0
 	wrappedTxn.Tx.GasLimit = 100000
-	wrappedTxn.Tx.Value = uint256.NewInt(0)
 	wrappedTxn.Tx.Data = []byte{4, 247}
-	wrappedTxn.Tx.ChainID = chainId
-	wrappedTxn.Tx.TipCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.FeeCap = uint256.NewInt(10000000000)
-	wrappedTxn.Tx.MaxFeePerBlobGas = uint256.NewInt(123)
+	wrappedTxn.Tx.ChainID = *chainId
+	wrappedTxn.Tx.TipCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.FeeCap = *uint256.NewInt(10000000000)
+	wrappedTxn.Tx.MaxFeePerBlobGas = *uint256.NewInt(123)
 
 	// Wrapper version = 0x1
 	wrappedTxn.WrapperVersion = 1

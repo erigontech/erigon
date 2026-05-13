@@ -56,8 +56,21 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		}
 	}
 
+	// [EIP-7594] Convert legacy (v0) blob sidecar to v1 cell proofs when Osaka is active.
+	// This allows users with tooling that has not yet been updated for PeerDAS to still
+	// submit blob transactions. The node computes the cell proofs on their behalf.
+	// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+	txBytes := []byte(encodedTx)
+	if wrapper, ok := txn.(*types.BlobTxWrapper); ok && wrapper.WrapperVersion == 0 && cc.IsOsaka(uint64(time.Now().Unix())) {
+		converted, err := wrapper.ConvertToV1()
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("blob sidecar v0→v1 conversion failed: %w", err)
+		}
+		txBytes = converted
+	}
+
 	hash := txn.Hash()
-	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{txBytes}})
 	if err != nil {
 		return common.Hash{}, err
 	}

@@ -17,6 +17,7 @@
 package httpcfg
 
 import (
+	"net"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -59,7 +60,8 @@ type HttpCfg struct {
 
 	API                               []string
 	Gascap                            uint64
-	RangeLimit                        int
+	BlockRangeLimit                   int
+	GetLogsMaxResults                 int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int
@@ -71,6 +73,8 @@ type HttpCfg struct {
 	RpcStreamingDisable               bool
 	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
+	RpcMaxConcurrentRequests          int  // HTTP admission control limit; -1 = unlimited
+	WsMaxConnections                  int  // WebSocket connection limit; 0 = unlimited
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	TxPoolApiAddr                     string
@@ -112,6 +116,8 @@ type HttpCfg struct {
 	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
 	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
 
-	// TestingEnabled enables the testing_ RPC namespace. Should only be used in test/dev environments.
-	TestingEnabled bool
+	// Pre-created listeners for testing (avoids TOCTOU port races).
+	// When set, these listeners are passed to StartHTTPEndpoint instead of binding a new port.
+	HttpListener    net.Listener
+	AuthRpcListener net.Listener
 }

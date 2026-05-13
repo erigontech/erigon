@@ -379,14 +379,3 @@ func truncateHash(hash string) string {
 	}
 	return hash[:maxLen]
 }
-
-// URL encoding
-
-// ParseURL parses an enrtree:// URL and returns its components.
-func ParseURL(url string) (domain string, pubkey *ecdsa.PublicKey, err error) {
-	le, err := parseLink(url)
-	if err != nil {
-		return "", nil, err
-	}
-	return le.domain, le.pubkey, nil
-}

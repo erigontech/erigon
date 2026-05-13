@@ -70,10 +70,12 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	stateSlots := s.accessList.addresses[address]
-	for s := range stateSlots {
-		if _, slotPresent := slotMap[s]; !slotPresent {
-			t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+	idx := s.accessList.addresses[address]
+	if idx >= 0 {
+		for s := range s.accessList.slots[idx] {
+			if _, slotPresent := slotMap[s]; !slotPresent {
+				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+			}
 		}
 	}
 }
@@ -91,7 +93,7 @@ func TestAccessList(t *testing.T) {
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
 
-	state.accessList = newAccessList()
+	state.accessList.Reset()
 
 	state.AddAddressToAccessList(addr("aa"))          // 1
 	state.AddSlotToAccessList(addr("bb"), slot("01")) // 2,3
@@ -187,4 +189,53 @@ func TestAccessList(t *testing.T) {
 	if got, exp := len(state.accessList.addresses), 0; got != exp {
 		t.Fatalf("expected empty, got %d", got)
 	}
+}
+
+func BenchmarkAccessListReset(b *testing.B) {
+	sender := accounts.InternAddress(common.HexToAddress("0x1111"))
+	dst := accounts.InternAddress(common.HexToAddress("0x2222"))
+	precompiles := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0x0001")),
+		accounts.InternAddress(common.HexToAddress("0x0002")),
+		accounts.InternAddress(common.HexToAddress("0x0003")),
+		accounts.InternAddress(common.HexToAddress("0x0004")),
+		accounts.InternAddress(common.HexToAddress("0x0005")),
+		accounts.InternAddress(common.HexToAddress("0x0006")),
+		accounts.InternAddress(common.HexToAddress("0x0007")),
+		accounts.InternAddress(common.HexToAddress("0x0008")),
+		accounts.InternAddress(common.HexToAddress("0x0009")),
+	}
+	slots := []accounts.StorageKey{
+		accounts.InternKey(common.HexToHash("0xabc1")),
+		accounts.InternKey(common.HexToHash("0xabc2")),
+		accounts.InternKey(common.HexToHash("0xabc3")),
+	}
+
+	populate := func(al *accessList) {
+		al.AddAddress(sender)
+		al.AddAddress(dst)
+		for _, p := range precompiles {
+			al.AddAddress(p)
+		}
+		for _, s := range slots {
+			al.AddSlot(dst, s)
+		}
+	}
+
+	b.Run("new", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			al := newAccessList()
+			populate(al)
+		}
+	})
+
+	b.Run("reset", func(b *testing.B) {
+		b.ReportAllocs()
+		al := newAccessList()
+		for i := 0; i < b.N; i++ {
+			al.Reset()
+			populate(al)
+		}
+	})
 }

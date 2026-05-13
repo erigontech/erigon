@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -39,6 +40,8 @@ func (p AccountPath) String() string {
 		return "Destruct"
 	case StoragePath:
 		return "Storage"
+	case CreateContractPath:
+		return "CreateContract"
 	default:
 		return fmt.Sprintf(" Unknown %d", p)
 	}
@@ -60,6 +63,7 @@ const (
 	CodeHashPath
 	CodeSizePath
 	StoragePath
+	CreateContractPath
 )
 
 type AccountKey struct {
@@ -93,6 +97,26 @@ func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 
 func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
+}
+
+// StorageKeys returns every storage slot key recorded for addr. Used by
+// normalizeWriteSet to emit synthetic delete entries for every slot of a
+// selfdestructed contract, matching DomainDelPrefix behaviour from the
+// sequential path.
+func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	addrMap, ok := vm.s[addr]
+	if !ok {
+		return nil
+	}
+	var keys []accounts.StorageKey
+	for ak := range addrMap {
+		if ak.Path == StoragePath {
+			keys = append(keys, ak.Key)
+		}
+	}
+	return keys
 }
 
 func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
@@ -232,6 +256,33 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	return
 }
 
+// LatestTxIndex returns the largest TxIndex (≤ txIdxLimit) at which a write
+// exists for the given (addr, path, key). Returns ok=false when no entry
+// exists at or below the limit. Used to detect account revival after a
+// SelfDestruct: any newer non-SelfDestruct write at a strictly higher
+// TxIndex re-creates the account.
+func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdxLimit int) (int, bool) {
+	if vm == nil {
+		return 0, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+
+	cells := vm.getKeyCells(addr, path, key, nil)
+	if cells == nil {
+		return 0, false
+	}
+	highest := UnknownDep
+	cells.Descend(txIdxLimit, func(k int, _ *WriteCell) bool {
+		highest = k
+		return false
+	})
+	if highest == UnknownDep {
+		return 0, false
+	}
+	return highest, true
+}
+
 // FlushVersionedWrites atomically flushes all writes to the version map
 // under a single lock acquisition. This prevents concurrent readers from
 // observing a partially-flushed state (e.g. seeing an AddressPath write
@@ -328,6 +379,7 @@ const (
 )
 
 func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	readVal any,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
 
@@ -352,7 +404,15 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				valid = VersionInvalid
+				// Value tiebreaker: if the StorageRead value matches the
+				// versionMap Done value, the read is still valid despite
+				// the source mismatch. This avoids unnecessary invalidation
+				// when a prior TX wrote the same value that was in storage.
+				if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+					// Values match — read is valid
+				} else {
+					valid = VersionInvalid
+				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
@@ -370,16 +430,16 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						version, nil, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
 						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, checkVersion, traceInvalid, tracePrefix)
+							version, nil, checkVersion, traceInvalid, tracePrefix)
 					} else {
 						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, checkVersion, traceInvalid, tracePrefix)
+							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix)
+						version, nil, checkVersion, traceInvalid, tracePrefix)
 
 					// If a prior tx created this account, BalancePath will
 					// have an entry at a lower txIndex (from BAL pre-population
@@ -428,12 +488,54 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
 			valid = vm.validateRead(txIdx, vr.Address, vr.Path, vr.Key, vr.Source, vr.Version,
-				checkVersion, traceInvalid, tracePrefix)
+				vr.Val, checkVersion, traceInvalid, tracePrefix)
 			return valid == VersionValid
 		})
 	}
 
 	return
+}
+
+// valuesEqual compares a read value with a versionMap write value for the
+// same path. Used as a tiebreaker: when the version/source check would
+// invalidate but the actual values match, the read is still valid.
+func valuesEqual(path AccountPath, readVal, writeVal any) bool {
+	if readVal == nil || writeVal == nil {
+		return readVal == nil && writeVal == nil
+	}
+	switch path {
+	case BalancePath:
+		rv, ok1 := readVal.(uint256.Int)
+		wv, ok2 := writeVal.(uint256.Int)
+		return ok1 && ok2 && rv.Eq(&wv)
+	case NoncePath:
+		rv, ok1 := readVal.(uint64)
+		wv, ok2 := writeVal.(uint64)
+		return ok1 && ok2 && rv == wv
+	case IncarnationPath:
+		rv, ok1 := readVal.(uint64)
+		wv, ok2 := writeVal.(uint64)
+		return ok1 && ok2 && rv == wv
+	case CodeHashPath:
+		rv, ok1 := readVal.(accounts.CodeHash)
+		wv, ok2 := writeVal.(accounts.CodeHash)
+		return ok1 && ok2 && rv == wv
+	case AddressPath:
+		// Record-level comparison — both should be *accounts.Account
+		rv, ok1 := readVal.(*accounts.Account)
+		wv, ok2 := writeVal.(*accounts.Account)
+		if !ok1 || !ok2 || rv == nil || wv == nil {
+			return false
+		}
+		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
+			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+	case StoragePath:
+		rv, ok1 := readVal.(uint256.Int)
+		wv, ok2 := writeVal.(uint256.Int)
+		return ok1 && ok2 && rv.Eq(&wv)
+	default:
+		return false
+	}
 }
 
 type WriteCell struct {
@@ -451,8 +553,8 @@ type Version struct {
 
 var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
-func (v Version) blockAccessIndex() uint16 {
-	return uint16(v.TxIndex + 1)
+func (v Version) blockAccessIndex() uint32 {
+	return uint32(v.TxIndex + 1)
 }
 
 const (

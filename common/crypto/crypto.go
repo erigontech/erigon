@@ -67,14 +67,9 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh keccak.KeccakState, data []byte) (h common.Hash) {
-	kh.Reset()
-	//nolint:errcheck
-	kh.Write(data)
-	//nolint:errcheck
-	kh.Read(h[:])
-	return h
+// HashData hashes the provided data and returns a 32 byte hash.
+func HashData(data []byte) common.Hash {
+	return keccak.Sum256(data)
 }
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
@@ -91,12 +86,12 @@ func Keccak256(data ...[]byte) []byte {
 
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) (h common.Hash) {
+func Keccak256Hash(data ...[]byte) common.Hash {
 	d := NewKeccakState()
 	for _, b := range data {
 		d.Write(b)
 	}
-	d.Read(h[:]) //nolint:errcheck
+	h := FinalizeHash(d)
 	ReturnToPool(d)
 	return h
 }
@@ -113,14 +108,6 @@ func Keccak512(data ...[]byte) []byte {
 // ToECDSA creates a private key with the given D value.
 func ToECDSA(d []byte) (*ecdsa.PrivateKey, error) {
 	return toECDSA(d, true)
-}
-
-// ToECDSAUnsafe blindly converts a binary blob to a private key. It should almost
-// never be used unless you are sure the input is valid and want to avoid hitting
-// errors due to bad origin encoding (0 prefixes cut off).
-func ToECDSAUnsafe(d []byte) *ecdsa.PrivateKey {
-	priv, _ := toECDSA(d, false)
-	return priv
 }
 
 // toECDSA creates a private key with the given D value. The strict parameter
@@ -187,8 +174,10 @@ func MarshalPubkeyStd(pub *ecdsa.PublicKey) []byte {
 // The input slice must be 64 bytes long and have this format: [X..., Y...]
 // See MarshalPubkey.
 func UnmarshalPubkey(keyBytes []byte) (*ecdsa.PublicKey, error) {
-	keyBytes = append([]byte{0x4}, keyBytes...)
-	return UnmarshalPubkeyStd(keyBytes)
+	buf := make([]byte, 1+len(keyBytes))
+	buf[0] = 0x4
+	copy(buf[1:], keyBytes)
+	return UnmarshalPubkeyStd(buf)
 }
 
 // MarshalPubkey converts a public key into a 64 bytes "uncompressed" format.
@@ -328,3 +317,14 @@ func NewKeccakState() keccak.KeccakState {
 	return h
 }
 func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
+
+// FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
+// avoiding the heap escape that occurs when passing h[:] to an interface Read method.
+func FinalizeHash(sha keccak.KeccakState) common.Hash {
+	if h, ok := sha.(*keccak.Hasher); ok {
+		return h.Sum256()
+	}
+	var out common.Hash
+	sha.Read(out[:]) //nolint:errcheck
+	return out
+}

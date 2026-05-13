@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -58,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -367,15 +367,14 @@ func ConvertH512ToPeerID(h512 *typesproto.H512) [64]byte {
 
 func makeP2PServer(
 	p2pConfig p2p.Config,
-	genesisHash common.Hash,
+	bootnodes []string,
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
-	if len(p2pConfig.BootstrapNodes) == 0 {
-		spec, err := chainspec.ChainSpecByGenesisHash(genesisHash)
-		if err != nil {
-			return nil, fmt.Errorf("no config for given genesis hash: %w", err)
-		}
-		bootstrapNodes, err := enode.ParseNodesFromURLs(spec.Bootnodes)
+	// Only fall back to chain-default bootnodes when the caller didn't configure
+	// BootstrapNodes at all (nil slice). An empty non-nil slice signals explicit
+	// opt-out (e.g., --bootnodes= on the CLI) and must be preserved.
+	if p2pConfig.BootstrapNodes == nil && len(bootnodes) > 0 {
+		bootstrapNodes, err := enode.ParseNodesFromURLs(bootnodes)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
@@ -470,6 +469,29 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			givePermit = true
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case eth.GetBlockAccessListsMsg:
+			// eth/71 (EIP-8159) — inbound BAL request. Mirrors GetBlockBodiesMsg:
+			// read-only request, no permit change, forward to subscribers.
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case eth.BlockAccessListsMsg:
+			// eth/71 (EIP-8159) — inbound BAL response. Mirrors BlockBodiesMsg:
+			// completes an in-flight request so release a request permit.
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -756,7 +778,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	return grpcServer, nil
 }
 
-func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
+func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger, bootnodes []string, dnsNetwork string) *GrpcServer {
 	ss := &GrpcServer{
 		ctx:                   ctx,
 		p2p:                   cfg,
@@ -764,6 +786,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		logger:                logger,
 		goodPeers:             make(map[[64]byte]*PeerInfo),
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
+		bootnodes:             bootnodes,
+		dnsNetwork:            dnsNetwork,
 	}
 
 	var disc enode.Iterator
@@ -922,7 +946,7 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 		return d
 	}
 	cfg.DiscoveryDNS = discoveryDNS
-	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger)
+	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger, nil, "")
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
@@ -951,6 +975,8 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
+	bootnodes            []string // chain-specific bootnodes, used if p2pConfig has none
+	dnsNetwork           string   // chain-specific DNS discovery URL
 	// witness request tracking
 	activeWitnessRequests map[common.Hash]*WitnessRequest
 	witnessRequestMutex   sync.RWMutex
@@ -1078,6 +1104,18 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
+		// Async enqueue can win the race against Remove closing pi.removed, so a
+		// queued task may be scheduled to run on a peer we have already asked
+		// p2p to disconnect. Without this check, one last frame would slip out
+		// after Disconnect — which Hive's devp2p BlobViolations asserts against.
+		// Matches go-ethereum, where Disconnect runs on the same goroutine as
+		// detection so nothing further can be sent.
+		select {
+		case <-peerInfo.removed:
+			return
+		default:
+		}
+
 		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
 		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
@@ -1360,16 +1398,11 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.H
 	return reply, nil
 }
 
-func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
+func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			s, err := chainspec.ChainSpecByGenesisHash(genesisHash)
-			if err != nil {
-				ss.logger.Debug("[sentry] Could not get chain spec for genesis hash", "genesisHash", genesisHash, "err", err)
-			} else {
-				if url := s.DNSNetwork; url != "" {
-					ss.p2p.DiscoveryDNS = []string{url}
-				}
+			if url := ss.dnsNetwork; url != "" {
+				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
 			for i := range ss.Protocols {
@@ -1382,7 +1415,7 @@ func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, erro
 		}
 	}
 
-	srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	srv, err := makeP2PServer(*ss.p2p, ss.bootnodes, ss.Protocols)
 	if err != nil {
 		return nil, err
 	}
@@ -1401,6 +1434,11 @@ func (ss *GrpcServer) getP2PServer() *p2p.Server {
 	return ss.p2pServer
 }
 
+// GetP2PServer returns the P2P server if it has been started, nil otherwise.
+func (ss *GrpcServer) GetP2PServer() *p2p.Server {
+	return ss.getP2PServer()
+}
+
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
@@ -1409,7 +1447,7 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 	ss.p2pServerLock.Lock()
 	defer ss.p2pServerLock.Unlock()
 	if ss.p2pServer == nil {
-		srv, err := ss.startP2PServer(genesisHash)
+		srv, err := ss.startP2PServer()
 		if err != nil {
 			return reply, err
 		}
@@ -1527,15 +1565,10 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
-		if len(ch) > MessagesQueueSize/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop 50% of old messages", "msgID", msgID.String())
-			// evict old messages from channel
-			for j := 0; j < MessagesQueueSize/4; j++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
+		before := len(ch)
+		libsentry.EvictOldestIfHalfFull(ch)
+		if before > cap(ch)/2 {
+			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
 		}
 	}
 }
@@ -1574,10 +1607,9 @@ func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *se
 	}
 }
 
-const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentryproto.Sentry_MessagesServer) error {
 	ss.logger.Trace("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *sentryproto.InboundMessage, MessagesQueueSize)
+	ch := make(chan *sentryproto.InboundMessage, libsentry.MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -57,7 +58,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare txn so it works with our test
-	signer1 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer1 := types.MakeSigner(chain.TestChainBerlinConfig, *chain.TestChainBerlinConfig.BerlinBlock, 0)
 	header := &types.Header{Number: *common.Num1}
 	hash := header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -68,10 +69,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    1,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 1,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer1),
 			mustSign(&types.AccessListTx{
@@ -79,17 +80,17 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    2,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 2,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer1),
 		},
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer2 := types.MakeSigner(chain.TestChainBerlinConfig, *chain.TestChainBerlinConfig.BerlinBlock, 0)
 	header.Number = *common.Num2
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -100,10 +101,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    3,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 3,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -111,10 +112,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    4,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 4,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -122,10 +123,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    5,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 5,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 		},
@@ -145,7 +146,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(chain.TestChainConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil)
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil, exec.NewBlockReadAheader())
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

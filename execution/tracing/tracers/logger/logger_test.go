@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -57,13 +58,13 @@ func TestStoreCapture(t *testing.T) {
 
 	var (
 		logger   = NewStructLogger(nil)
-		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
 	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	_, _, err := evm.Run(contract, 100000, []byte{}, false)
+	_, _, err := evm.Run(contract, mdgas.MdGas{Regular: 100000}, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestStoreCapture(t *testing.T) {
 //	c := vm.NewJumpDestCache()
 //	var (
 //		logger   = NewStructLogger(nil)
-//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 //		mem      = vm.NewMemory()
 //		stack    = vm.New()
 //		contract = vm.NewContract(&dummyContractRef{}, accounts.ZeroAddress, new(uint256.Int), 0, c)

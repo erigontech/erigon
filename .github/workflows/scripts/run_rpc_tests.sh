@@ -3,7 +3,7 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE] [TRANSPORT_TYPES]"
   echo
   echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
   echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
@@ -14,6 +14,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
   echo "  REFERENCE_HOST:        Host address of client node used as reference system (optional, default: empty)"
   echo "  COMPARE_ERROR_MESSAGE: Verify the error message (optional, default: empty, possible values: do-not-compare-error-message)"
   echo "  DUMP_RESPONSE:         Dump each test response (optional, default: empty, possible values: always-dump-response)"
+  echo "  TRANSPORT_TYPES:       Comma-separated list of transport types (optional, default: empty, e.g. http,http_comp,websocket)"
   echo
   exit 1
 fi
@@ -27,9 +28,10 @@ TEST_TYPE="$6"
 REFERENCE_HOST="$7"
 COMPARE_ERROR_MESSAGE="$8"
 DUMP_RESPONSE="$9"
+TRANSPORT_TYPES="${10:-${RPC_TRANSPORT_TYPES:-}}"
 
 OPTIONAL_FLAGS=""
-NUM_OF_RETRIES=1
+NUM_OF_RETRIES=2
 
 # Check if REFERENCE_HOST is not empty (-n)
 if [ -n "$REFERENCE_HOST" ]; then
@@ -59,27 +61,58 @@ if [ "$DUMP_RESPONSE" = "always-dump-response" ]; then
     OPTIONAL_FLAGS+=" --dump-response"
 fi
 
-echo "Setup the test execution environment..."
-
-# Clone rpc-tests repository at specific tag/branch
-rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
-git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
-cd "$WORKSPACE/rpc-tests"
-
-# Try to create and activate a Python virtual environment or install packages globally if it fails
-if python3 -m venv .venv >/dev/null 2>&1; then :
-elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
-elif virtualenv .venv >/dev/null 2>&1; then :
-else
-  echo "Failed to create a virtual environment, installing packages globally."
-  pip3 install -r requirements.txt 1>/dev/null
+if [ -n "$TRANSPORT_TYPES" ]; then
+    OPTIONAL_FLAGS+=" --transport-type $TRANSPORT_TYPES"
 fi
 
-# Activate virtual environment if it was created
-if [ -f ".venv/bin/activate" ]; then
+if [ "${RPC_COMMITMENT_HISTORY:-false}" = "true" ]; then
+    OPTIONAL_FLAGS+=" --erigon.commitment-history"
+fi
+
+echo "Setup the test execution environment..."
+
+# Clone rpc-tests repository at specific tag/branch, reusing existing clone if already at the right version
+_rpc_tests_cached=false
+if [ -d "$WORKSPACE/rpc-tests/.git" ]; then
+  _exact_tag="$(git -C "$WORKSPACE/rpc-tests" describe --tags --exact-match 2>/dev/null || true)"
+  _current_branch="$(git -C "$WORKSPACE/rpc-tests" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [ "$_exact_tag" = "$RPC_VERSION" ] || [ "$_current_branch" = "$RPC_VERSION" ]; then
+    _rpc_tests_cached=true
+  fi
+fi
+if $_rpc_tests_cached; then
+  echo "Using cached rpc-tests at $RPC_VERSION"
+  # Remove stale untracked test fixtures left by runs using a different branch/version,
+  # but preserve .venv/ and build/ which are the expensive parts of the cache.
+  git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
+else
+  rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
+  git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
+fi
+cd "$WORKSPACE/rpc-tests"
+
+# Create and activate Python virtual environment, reusing existing one if already set up for this version
+VENV_MARKER=".venv/.installed-${RPC_VERSION//\//_}"
+if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
+  echo "Using cached Python virtual environment"
   source .venv/bin/activate
-  pip3 install --upgrade pip 1>/dev/null
-  pip3 install -r requirements.txt 1>/dev/null
+else
+  # Try to create a Python virtual environment or install packages globally if it fails
+  if python3 -m venv .venv >/dev/null 2>&1; then :
+  elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
+  elif virtualenv .venv >/dev/null 2>&1; then :
+  else
+    echo "Failed to create a virtual environment, installing packages globally."
+    pip3 install -r requirements.txt 1>/dev/null
+  fi
+
+  # Activate virtual environment if it was created
+  if [ -f ".venv/bin/activate" ]; then
+    source .venv/bin/activate
+    pip3 install --upgrade pip 1>/dev/null
+    pip3 install -r requirements.txt 1>/dev/null
+    touch "$VENV_MARKER"
+  fi
 fi
 
 # Remove the local results directory if any
@@ -98,9 +131,14 @@ fi
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
+
+# Move to home dir of rpc-tests
+cd ..
+make rpc_int
+
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then

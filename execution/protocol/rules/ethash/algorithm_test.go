@@ -745,7 +745,7 @@ func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
 	b.Run(name, func(b *testing.B) {
 		tmpdir := b.TempDir()
 		d := &dataset{epoch: 0}
-		d.generate(tmpdir, 1, lock, false)
+		d.generate(tmpdir, 1, lock, testing.Short())
 		var hash [length.Hash]byte
 		b.ResetTimer()
 		for i := 0; b.Loop(); i++ {

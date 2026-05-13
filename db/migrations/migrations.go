@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -53,6 +55,7 @@ var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
+		dbSchemaVersion6,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},
@@ -76,10 +79,16 @@ var (
 // directory. Only the kv.Migrations table is opened; all other tables are excluded. The DB
 // survives deletion of any other sub-database (e.g. chaindata) so migration state persists
 // across datadir clean-ups.
+//
+// MapSize is capped at 1 GB: the DB only tracks migration names (kilobytes
+// even with thousands of migrations) and the default 2 TB MDBX reservation
+// would otherwise consume process address space at a rate that limits how
+// many engine-api testers can coexist in one process.
 func OpenMigrationsDB(migrationsDir string, logger log.Logger) (kv.RwDB, error) {
 	dir.MustExist(migrationsDir)
 	return kv2.New(dbcfg.MigrationsDB, logger).
 		Path(migrationsDir).
+		MapSize(1 * datasize.GB).
 		Open(context.Background())
 }
 

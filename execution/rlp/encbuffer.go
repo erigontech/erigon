@@ -118,19 +118,19 @@ func (buf *encBuffer) writeBool(b bool) {
 	if b {
 		buf.str = append(buf.str, 0x01)
 	} else {
-		buf.str = append(buf.str, 0x80)
+		buf.str = append(buf.str, EmptyStringCode)
 	}
 }
 
 func (buf *encBuffer) writeUint64(i uint64) {
 	if i == 0 {
-		buf.str = append(buf.str, 0x80)
-	} else if i < 128 {
+		buf.str = append(buf.str, EmptyStringCode)
+	} else if i < SingleByteThreshold {
 		// fits single byte
 		buf.str = append(buf.str, byte(i))
 	} else {
 		s := putint(buf.sizebuf[1:], i)
-		buf.sizebuf[0] = 0x80 + byte(s)
+		buf.sizebuf[0] = EmptyStringCode + byte(s)
 		buf.str = append(buf.str, buf.sizebuf[:s+1]...)
 	}
 }
@@ -179,7 +179,7 @@ func (buf *encBuffer) writeUint256(z *uint256.Int) {
 	binary.BigEndian.PutUint64(b[9:17], z[2])
 	binary.BigEndian.PutUint64(b[17:25], z[1])
 	binary.BigEndian.PutUint64(b[25:33], z[0])
-	b[32-nBytes] = 0x80 + nBytes
+	b[32-nBytes] = EmptyStringCode + nBytes
 	buf.str = append(buf.str, b[32-nBytes:]...)
 }
 
@@ -196,7 +196,7 @@ func (buf *encBuffer) listEnd(index int) {
 	if lh.size < 56 {
 		buf.lhsize++ // length encoded into kind tag
 	} else {
-		buf.lhsize += 1 + intsize(uint64(lh.size))
+		buf.lhsize += ListPrefixLen(lh.size)
 	}
 }
 
@@ -211,10 +211,10 @@ func (buf *encBuffer) encode(val interface{}) error {
 
 func (buf *encBuffer) encodeStringHeader(size int) {
 	if size < 56 {
-		buf.str = append(buf.str, 0x80+byte(size))
+		buf.str = append(buf.str, EmptyStringCode+byte(size))
 	} else {
 		sizesize := putint(buf.sizebuf[1:], uint64(size))
-		buf.sizebuf[0] = 0xB7 + byte(sizesize)
+		buf.sizebuf[0] = LongStringCode + byte(sizesize)
 		buf.str = append(buf.str, buf.sizebuf[:sizesize+1]...)
 	}
 }

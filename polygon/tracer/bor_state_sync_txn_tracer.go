@@ -141,24 +141,6 @@ func (bsstt *borStateSyncTxnTracer) OnGasChange(old, new uint64, reason tracing.
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnBlockStart(event tracing.BlockEvent) {
-	if bsstt.Tracer.OnBlockStart != nil {
-		bsstt.Tracer.OnBlockStart(event)
-	}
-}
-
-func (bsstt *borStateSyncTxnTracer) OnBlockEnd(err error) {
-	if bsstt.Tracer.OnBlockEnd != nil {
-		bsstt.Tracer.OnBlockEnd(err)
-	}
-}
-
-func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
-	if bsstt.Tracer.OnGenesisBlock != nil {
-		bsstt.Tracer.OnGenesisBlock(b, alloc)
-	}
-}
-
 func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	if bsstt.Tracer.OnBalanceChange != nil {
 		bsstt.Tracer.OnBalanceChange(a, prev, new, reason)

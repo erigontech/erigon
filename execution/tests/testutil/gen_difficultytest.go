@@ -16,11 +16,11 @@ var _ = (*difficultyTestMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (d DifficultyTest) MarshalJSON() ([]byte, error) {
 	type DifficultyTest struct {
-		ParentTimestamp    math.HexOrDecimal64  `json:"parentTimestamp"`
+		ParentTimestamp    math.HexOrDecimal64   `json:"parentTimestamp"`
 		ParentDifficulty   *math.HexOrDecimal256 `json:"parentDifficulty"`
-		ParentUncles       math.HexOrDecimal64  `json:"parentUncles"`
-		CurrentTimestamp   math.HexOrDecimal64  `json:"currentTimestamp"`
-		CurrentBlockNumber math.HexOrDecimal64  `json:"currentBlockNumber"`
+		ParentUncles       math.HexOrDecimal64   `json:"parentUncles"`
+		CurrentTimestamp   math.HexOrDecimal64   `json:"currentTimestamp"`
+		CurrentBlockNumber math.HexOrDecimal64   `json:"currentBlockNumber"`
 		CurrentDifficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
 	}
 	var enc DifficultyTest

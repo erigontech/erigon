@@ -18,6 +18,7 @@ package rpchelper
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/c2h5oh/datasize"
 
@@ -35,49 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
-
-// splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
-// data and account/storage/code data.
-type splitStateReader struct {
-	commitmentReader commitmentdb.StateReader
-	plainStateReader commitmentdb.StateReader
-	withHistory      bool
-}
-
-var _ commitmentdb.StateReader = (*splitStateReader)(nil)
-
-func (r splitStateReader) WithHistory() bool {
-	return r.withHistory
-}
-
-func (r splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
-	return nil
-}
-
-func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d == kv.CommitmentDomain {
-		return r.commitmentReader.Read(d, plainKey, stepSize)
-	}
-	return r.plainStateReader.Read(d, plainKey, stepSize)
-}
-
-func (r splitStateReader) Clone(kv.TemporalTx) commitmentdb.StateReader {
-	// Do *NOT* propagate kv.TemporalTx because each reader may need its own
-	return NewCommitmentSplitStateReader(r.commitmentReader, r.plainStateReader, r.withHistory)
-}
-
-func NewCommitmentSplitStateReader(commitmentReader commitmentdb.StateReader, plainStateReader commitmentdb.StateReader, withHistory bool) commitmentdb.StateReader {
-	return splitStateReader{
-		commitmentReader: commitmentReader,
-		plainStateReader: plainStateReader,
-		withHistory:      withHistory,
-	}
-}
-
-func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd *execctx.SharedDomains, plainStateAsOf uint64) commitmentdb.StateReader {
-	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewHistoryStateReader(tx, plainStateAsOf), false)
-}
 
 type CommitmentReplay struct {
 	dirs        datadir.Dirs
@@ -102,9 +60,16 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	baseBlockNum uint64,
 	deltaComputation func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error),
 ) ([]byte, error) {
-	// Prepare a temporary data storage for commitment replay computation
+	// Prepare a temporary data storage for commitment replay computation.
+	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
+	// so a 2 TB reservation immediately exhausts the pagefile. On Linux/macOS the reservation
+	// is backed by sparse files with copy-on-write, so 2 TB is harmless.
+	mapSize := 2 * datasize.TB
+	if runtime.GOOS == "windows" {
+		mapSize = 1 * datasize.GB
+	}
 	db := mdbx.New(dbcfg.TemporaryDB, r.logger).
-		InMem(nil, r.dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+		InMem(nil, r.dirs.Tmp).MapSize(mapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)
@@ -162,7 +127,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
 		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 		if err != nil {

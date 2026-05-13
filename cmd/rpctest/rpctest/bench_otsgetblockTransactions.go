@@ -17,9 +17,7 @@
 package rpctest
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 )
 
 // BenchOtsGetBlockTransactions compares response of Erigon with Geth
@@ -31,30 +29,13 @@ import (
 func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitAllPages bool, latest bool, blockFrom, blockTo uint64, recordFileName string, errorFileName string) error {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	var errs *bufio.Writer
+	rec, _, cleanup, err := openWriters(recordFileName, errorFileName)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
 	var resultsCh chan CallResult = nil
-
-	if errorFileName != "" {
-		f, err := os.Create(errorFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for errorFileName: %v\n", errorFileName, err)
-		}
-		defer f.Sync()
-		defer f.Close()
-		errs = bufio.NewWriter(f)
-		defer errs.Flush()
-	}
-
-	if recordFileName != "" {
-		frec, err := os.Create(recordFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for errorFile: %v\n", recordFileName, err)
-		}
-		defer frec.Close()
-		rec = bufio.NewWriter(frec)
-		defer rec.Flush()
-	}
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)

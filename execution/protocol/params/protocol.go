@@ -94,11 +94,15 @@ const (
 	SelfdestructRefundGas uint64 = 24000 // Refunded following a selfdestruct operation.
 	MemoryGas             uint64 = 3     // Times the address of the (highest referenced byte in memory + 1). NOTE: referencing happens on read, write and in instructions such as RETURN and CALL.
 
-	TxDataNonZeroGasFrontier  uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
-	TxDataNonZeroGasEIP2028   uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
-	TxAccessListAddressGas    uint64 = 2400 // Per address specified in EIP 2930 access list
-	TxAccessListStorageKeyGas uint64 = 1900 // Per storage key specified in EIP 2930 access list
-	TxTotalCostFloorPerToken  uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxDataNonZeroGasFrontier        uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
+	TxDataNonZeroGasEIP2028         uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
+	TxAccessListAddressGas          uint64 = 2400 // Per address specified in EIP 2930 access list
+	TxAccessListStorageKeyGas       uint64 = 1900 // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken        uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxTotalCostFloorPerTokenEIP7976 uint64 = 16   // Per token of calldata floor cost (EIP-7976, reused by EIP-7981)
+	TxAccessListAddressBytes        uint64 = 20   // Byte length of an access list address (EIP-7981)
+	TxAccessListStorageKeyBytes     uint64 = 32   // Byte length of an access list storage key (EIP-7981)
+	TxStandardTokensPerByte         uint64 = 4    // Tokens per byte for EIP-7976 / EIP-7981 floor calculation
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
@@ -136,14 +140,13 @@ const (
 	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
-	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
-	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
-	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
+	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
+	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
-
-	TendermintHeaderValidateGas uint64 = 3000 // Gas for validate tendermiint consensus state
-	IAVLMerkleProofValidateGas  uint64 = 3000 // Gas for validate merkle proof
 
 	EcrecoverGas        uint64 = 3000 // Elliptic curve sender recovery gas price
 	Sha256BaseGas       uint64 = 60   // Base price for a SHA256 operation
@@ -208,6 +211,17 @@ const (
 	MaxBlockSize             = 10_485_760 // 10 MiB
 	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
 	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
+
+	// EIP-8037: State Creation Gas Cost Increase
+	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
+	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
+	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
+	CreateGasEIP8037                = CallValueTransferGas
+	Create2GasEIP8037               = CallValueTransferGas
+	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
+	PerAuthBaseCostEIP8037          = 7_500
+	StateBytesNewAccount            = 112 // bytes per new account creation
+	StateBytesAuthBase              = 23  // bytes per authorization base cost
 )
 
 // EIP-7702: Set EOA account code
@@ -228,19 +242,6 @@ var WithdrawalRequestAddress = accounts.InternAddress(common.HexToAddress("0x000
 
 // EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
 var ConsolidationRequestAddress = accounts.InternAddress(common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251"))
-
-var systemAddresses = map[accounts.Address]struct{}{
-	SystemAddress:               {},
-	BeaconRootsAddress:          {},
-	HistoryStorageAddress:       {},
-	WithdrawalRequestAddress:    {},
-	ConsolidationRequestAddress: {},
-}
-
-func IsSystemAddress(address accounts.Address) bool {
-	_, ok := systemAddresses[address]
-	return ok
-}
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}

@@ -25,7 +25,6 @@ import (
 	"errors"
 	"hash/crc32"
 	"math"
-	"math/big"
 	"reflect"
 	"slices"
 	"strings"
@@ -86,26 +85,10 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 	return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
-	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
-	if id.Next == 0 {
-		return id.Hash
-	} else {
-		hash := binary.BigEndian.Uint32(id.Hash[:])
-		return ChecksumToBytes(ChecksumUpdate(hash, id.Next))
-	}
-}
-
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
 func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
-}
-
-// NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *chain.Config, genesisHash common.Hash, genesisTime uint64) Filter {
-	heightForks, timeForks := GatherForks(config, genesisTime)
-	return newFilter(heightForks, timeForks, genesisHash, 0 /* headHeight */, genesisTime)
 }
 
 // Simple heuristic returning true if the value is a Unix time after 2 Dec 2022.
@@ -229,19 +212,18 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 			}
 			time = true
 		}
-		if field.Type != reflect.TypeFor[*big.Int]() {
+		if field.Type != reflect.TypeFor[*uint64]() {
 			continue
 		}
 		// Extract the fork rule block number and aggregate it
-		rule := conf.Field(i).Interface().(*big.Int)
+		rule := conf.Field(i).Interface().(*uint64)
 		if rule != nil {
 			if time {
-				t := rule.Uint64()
-				if t > genesisTime {
-					timeForks = append(timeForks, t)
+				if *rule > genesisTime {
+					timeForks = append(timeForks, *rule)
 				}
 			} else {
-				heightForks = append(heightForks, rule.Uint64())
+				heightForks = append(heightForks, *rule)
 			}
 		}
 	}
@@ -252,13 +234,13 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 
 	if config.Bor != nil {
 		if config.Bor.GetAgraBlock() != nil {
-			heightForks = append(heightForks, config.Bor.GetAgraBlock().Uint64())
+			heightForks = append(heightForks, *config.Bor.GetAgraBlock())
 		}
 		if config.Bor.GetNapoliBlock() != nil {
-			heightForks = append(heightForks, config.Bor.GetNapoliBlock().Uint64())
+			heightForks = append(heightForks, *config.Bor.GetNapoliBlock())
 		}
 		if config.Bor.GetBhilaiBlock() != nil {
-			heightForks = append(heightForks, config.Bor.GetBhilaiBlock().Uint64())
+			heightForks = append(heightForks, *config.Bor.GetBhilaiBlock())
 		}
 	}
 

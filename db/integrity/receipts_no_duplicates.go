@@ -14,7 +14,7 @@ import (
 
 // CheckReceiptsNoDups performs integrity checks on receipts to ensure no duplicates exist.
 // This function uses parallel processing for improved performance.
-func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, seed int64, sampleRatio float64) (err error) {
+func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
@@ -36,7 +36,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, seed, sampleRatio, string(ReceiptsNoDups), ReceiptsNoDupsRange)
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)
 }
 
 func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
