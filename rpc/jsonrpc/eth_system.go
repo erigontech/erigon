@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -84,6 +85,11 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return nil, err
 	}
 
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
 	headBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, err
@@ -98,10 +104,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return CapabilityField{OldestBlock: &o}
 	}
 
-	// PruneTo returns 0 when the distance is MaxUint64 (archive/full-blocks), so these two
-	// lines handle all prune modes without branching.
+	// For KeepAllBlocksPruneMode (MaxUint64-1) and DefaultBlocksPruneMode (MaxUint64),
+	// PruneTo returns 0 because distance > headBlock.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
+	// DefaultBlocksPruneMode uses chain-specific history expiry: on chains that have
+	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
+	// never downloaded, so the oldest available block is the merge point, not 0.
+	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && chainConfig.MergeHeight != nil {
+		blocksOldest = *chainConfig.MergeHeight
+	}
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
