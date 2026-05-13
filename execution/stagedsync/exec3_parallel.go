@@ -2602,7 +2602,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
 						for i, w := range txResult.CollectorWrites {
 							if w.Path == state.BalancePath {
-								balIdx[w.Address] = i
+								// First match wins — mirrors the old per-entry
+								// CollectorWrites.SetBalance(addr) linear scan.
+								if _, seen := balIdx[w.Address]; !seen {
+									balIdx[w.Address] = i
+								}
 							}
 						}
 						for _, w := range addWrites {
