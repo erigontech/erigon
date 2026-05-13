@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
@@ -177,16 +178,6 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 	return err
 }
 
-// Execute runs the payload execution for a test (NewPayload + FCU)
-// without any tester setup. The tester must already exist.
-func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
-	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
-	if err != nil {
-		return err
-	}
-	return extr.execute(ctx, tester, test)
-}
-
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
 	for _, newPayload := range test.NewPayloads {
 		err := processNewPayload(ctx, tester, newPayload)
@@ -301,6 +292,8 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		},
 		DisableTxPool: true,
 		DisableSentry: true,
+		// 8 GiB headroom for benchmark fixtures with large pre-alloc bytecode.
+		MdbxDBSizeLimit: 8 * datasize.GB,
 	})
 	if err != nil {
 		// Best-effort: drop the temp dir we just created. The tester wasn't

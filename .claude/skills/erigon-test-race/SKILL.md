@@ -9,9 +9,11 @@ Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that n
 
 ## Prerequisite: Test fixtures
 
-`make test-all-race` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+`make test-all-race` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
 
-Two side prerequisites still apply:
+If you want race coverage on the EEST or consensus spec suites specifically, run them via their dedicated targets (those don't apply `-race` automatically — pass `GOFLAGS='-race'` or invoke `go test -race` against the relevant package directly).
+
+Two side prerequisites still apply for tests `make test-all-race` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
