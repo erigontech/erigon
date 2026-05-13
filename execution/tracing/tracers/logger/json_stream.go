@@ -67,7 +67,7 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           l.OnTxStart,
-			OnSystemCallStartV2: l.OnSystemCallStart,
+			OnSystemCallStartV2: l.OnSystemCallStart, // method takes *VMContext, matching V2 signature
 			OnExit:              l.OnExit,
 			OnOpcode:            l.OnOpcode,
 		},

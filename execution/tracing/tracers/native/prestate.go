@@ -111,7 +111,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
-			OnSystemCallStartV2: t.OnSystemCallStart,
+			OnSystemCallStartV2: t.OnSystemCallStart, // method takes *VMContext, matching V2 signature
 			OnTxEnd:             t.OnTxEnd,
 			OnOpcode:            t.OnOpcode,
 			OnExit:              t.OnExit,

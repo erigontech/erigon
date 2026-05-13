@@ -425,14 +425,20 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 	}
 
 	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
-		random := header.MixDigest
-		vmContext := &tracing.VMContext{
-			Coinbase:        accounts.InternAddress(header.Coinbase),
-			BlockNumber:     header.Number.Uint64(),
-			Time:            header.Time,
-			Random:          &random,
-			ChainConfig:     config,
-			IntraBlockState: state,
+		// Only allocate VMContext when a tracer is attached; this avoids a
+		// heap allocation on every Cancun block during normal (un-traced) import.
+		var vmContext *tracing.VMContext
+		if tracer != nil {
+			random := header.MixDigest
+			// GasPrice is intentionally zero — system calls have no gas price.
+			vmContext = &tracing.VMContext{
+				Coinbase:        accounts.InternAddress(header.Coinbase),
+				BlockNumber:     header.Number.Uint64(),
+				Time:            header.Time,
+				Random:          &random,
+				ChainConfig:     config,
+				IntraBlockState: state,
+			}
 		}
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)

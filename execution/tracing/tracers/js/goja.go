@@ -212,7 +212,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
-			OnSystemCallStartV2: t.OnSystemCallStart,
+			OnSystemCallStartV2: t.OnSystemCallStart, // method takes *VMContext, matching V2 signature
 			OnTxEnd:             t.OnTxEnd,
 			OnEnter:             t.OnEnter,
 			OnExit:              t.OnExit,

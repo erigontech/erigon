@@ -150,7 +150,7 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 func (l *StructLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnTxStart:           l.OnTxStart,
-		OnSystemCallStartV2: l.OnSystemCallStart,
+		OnSystemCallStartV2: l.OnSystemCallStart, // method takes *VMContext, matching V2 signature
 		OnTxEnd:             l.OnTxEnd,
 		OnExit:              l.OnExit,
 		OnOpcode:            l.OnOpcode,
@@ -401,7 +401,7 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 func (t *mdLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnTxStart:           t.OnTxStart,
-		OnSystemCallStartV2: t.OnSystemCallStart,
+		OnSystemCallStartV2: t.OnSystemCallStart, // method takes *VMContext, matching V2 signature
 		OnEnter:             t.OnEnter,
 		OnExit:              t.OnExit,
 		OnOpcode:            t.OnOpcode,
