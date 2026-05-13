@@ -65,6 +65,10 @@ if [ -n "$TRANSPORT_TYPES" ]; then
     OPTIONAL_FLAGS+=" --transport-type $TRANSPORT_TYPES"
 fi
 
+if [ "${RPC_COMMITMENT_HISTORY:-false}" = "true" ]; then
+    OPTIONAL_FLAGS+=" --erigon.commitment-history"
+fi
+
 echo "Setup the test execution environment..."
 
 # Clone rpc-tests repository at specific tag/branch, reusing existing clone if already at the right version

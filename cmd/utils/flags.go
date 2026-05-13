@@ -2341,7 +2341,7 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 				}
 				flags.StringSlice(f.Name, val, f.Usage)
 			case *cli.BoolFlag:
-				flags.Bool(f.Name, false, f.Usage)
+				flags.Bool(f.Name, f.Value, f.Usage)
 			default:
 				panic(fmt.Errorf("unexpected type: %T", flag))
 			}
