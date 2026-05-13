@@ -306,15 +306,15 @@ if convertRestore {
 - Modify: `cmd/integration/commands/flags.go`
 - Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] in `flags.go`, add `var convertRestore bool` near the existing convert flag vars.
-- [ ] in `flags.go`'s `withConvertFlags`, register: `cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")`.
-- [ ] in `commitment.go`, add `commitmentRestore(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error` sibling to `commitmentConvert`. It calls `agg.BeginFilesRo()`/`defer acRo.Close()` (no `PresetOfflineMerge`, no `ForTestReplaceKeysInValues`) and then `dbstate.RestoreCommitmentFiles(ctx, acRo, logger)`.
-- [ ] in `cmdCommitmentConvert.Run`, after `db` is open: **first** check flag conflicts — if `convertRestore` and (`cmd.Flags().Changed("squeeze")` or `cmd.Flags().Changed("nibbles.v2")`): `logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2"); return`. Then dispatch: `if convertRestore { ... commitmentRestore(...); return }`. Existing convert path follows.
-- [ ] extend the `Long:` help text on `cmdCommitmentConvert`:
+- [x] in `flags.go`, add `var convertRestore bool` near the existing convert flag vars.
+- [x] in `flags.go`'s `withConvertFlags`, register: `cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")`.
+- [x] in `commitment.go`, add `commitmentRestore(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error` sibling to `commitmentConvert`. It calls `agg.BeginFilesRo()`/`defer acRo.Close()` (no `PresetOfflineMerge`, no `ForTestReplaceKeysInValues`) and then `dbstate.RestoreCommitmentFiles(ctx, acRo, logger)`.
+- [x] in `cmdCommitmentConvert.Run`, after `db` is open: **first** check flag conflicts — if `convertRestore` and (`cmd.Flags().Changed("squeeze")` or `cmd.Flags().Changed("nibbles.v2")`): `logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2"); return`. Then dispatch: `if convertRestore { ... commitmentRestore(...); return }`. Existing convert path follows.
+- [x] extend the `Long:` help text on `cmdCommitmentConvert`:
   - mention `--restore` as a sibling mode that is **mutually exclusive** with `--squeeze`/`--nibbles.v2`
   - add example: `integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`
-- [ ] build: `make integration`
-- [ ] no new unit tests (cobra wiring; covered manually + by build)
+- [x] build: `make integration`
+- [x] no new unit tests (cobra wiring; covered manually + by build)
 
 ### Task 6: Lint pass and acceptance
 

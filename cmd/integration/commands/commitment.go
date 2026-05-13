@@ -470,18 +470,36 @@ so the operation is idempotent and re-runnable after crashes.
 
 Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
 
+--restore is a sibling mode that moves the originals back into place and
+removes the converted files. It is mutually exclusive with --squeeze and
+--nibbles.v2.
+
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
-  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true`,
+  integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
+			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
+			return
+		}
 		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		defer db.Close()
+
+		if convertRestore {
+			if err := commitmentRestore(db, cmd.Context(), logger); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Error(err.Error())
+				}
+			}
+			return
+		}
 
 		opts := dbstate.ConvertOpts{
 			TargetSqueeze:   convertSqueeze,
@@ -518,6 +536,13 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+}
+
+func commitmentRestore(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	acRo := agg.BeginFilesRo()
+	defer acRo.Close()
+	return dbstate.RestoreCommitmentFiles(ctx, acRo, logger)
 }
 
 // integration commitment visualize
