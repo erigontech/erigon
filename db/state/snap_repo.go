@@ -3,7 +3,6 @@ package state
 import (
 	"fmt"
 	"path/filepath"
-	"sync"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -356,78 +355,73 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 // private methods
 
 func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
-	invalidFilesMu := sync.Mutex{}
-	invalidFileItems := make([]*FilesItem, 0)
+	var invalidFileItems []*FilesItem
 	p := f.schema
 	dir := f.schema.DataDirectory()
-	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor == nil {
-				fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
-				_, fNameMask := filepath.Split(fPathMask)
-				fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
-				if err != nil || !ok {
-					_, fName := filepath.Split(fPath)
-					if err == nil {
-						f.logger.Debug("SnapshotRepo.openDirtyFiles: file doesn't exist", "f", fName)
-					} else {
-						f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
-					}
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-				if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
-					_, fName := filepath.Split(fPath)
-					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-			}
-
-			accessors := p.AccessorList()
-
-			if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
-				fPath, err := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles accessor path", "err", err, "f", fPath)
-				} else if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-					// don't interrupt on error. other files maybe good
-				}
-			}
-
-			if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
-				fPath, err := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
+	iter := f.dirtyFiles.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		if item.decompressor == nil {
+			fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+			_, fNameMask := filepath.Split(fPathMask)
+			fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
+			if err != nil || !ok {
+				_, fName := filepath.Split(fPath)
+				if err == nil {
+					f.logger.Debug("SnapshotRepo.openDirtyFiles: file doesn't exist", "f", fName)
 				} else {
-					r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
-					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
-						_, fName := filepath.Split(fPath)
-						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files maybe good
-					}
+					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
+				invalidFileItems = append(invalidFileItems, item)
+				continue
 			}
-			if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
-				fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
-				} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+			if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+		}
+
+		accessors := p.AccessorList()
+
+		if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
+			fPath, err := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles accessor path", "err", err, "f", fPath)
+			} else if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				// don't interrupt on error. other files maybe good
+			}
+		}
+
+		if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
+			fPath, err := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
+			} else {
+				r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files maybe good
 				}
 			}
 		}
-		return true
-	})
+		if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
+			fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
+			} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				// don't interrupt on error. other files maybe good
+			}
+		}
+	}
+	iter.Release()
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()

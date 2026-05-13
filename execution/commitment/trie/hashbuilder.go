@@ -497,8 +497,6 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 func (hb *HashBuilder) branch(set uint16) error {
 	if hb.trace {
 		fmt.Printf("BRANCH (%b)\n", set)
-	}
-	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	f := &FullNode{}
