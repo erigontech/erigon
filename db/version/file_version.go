@@ -204,7 +204,7 @@ func (v Versions) MustSupport(ver Version, filename string) {
 	} else {
 		msg = fmt.Sprintf(
 			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-			filename, ver,
+			filename, v.Current,
 		)
 	}
 	mustSupportLogOnce.Do(func() { log.Error(msg) })
