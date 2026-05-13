@@ -877,6 +877,11 @@ var (
 		Usage: "Enable NAT porting for Caplin",
 		Value: false,
 	}
+	CaplinLocalDiscoveryFlag = cli.BoolFlag{
+		Name:  "caplin.local-discovery",
+		Usage: "Enable to also attempt to find peers over private IPs. Turning this on may cause issues with hosts such as Hetzner",
+		Value: false,
+	}
 	CaplinNATFlag = cli.StringFlag{
 		Name: "caplin.nat",
 		Usage: `NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p
@@ -1918,6 +1923,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
 	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
+	cfg.CaplinConfig.LocalDiscovery = ctx.Bool(CaplinLocalDiscoveryFlag.Name)
 	cfg.CaplinConfig.CaplinNAT = ctx.String(CaplinNATFlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))

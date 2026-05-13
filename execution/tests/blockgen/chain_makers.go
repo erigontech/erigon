@@ -474,7 +474,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		if chainreader.Config().IsAmsterdam(parent.Time()) {
+		if chainreader.Config().IsAmsterdam(parent.Time()) && !chainreader.Config().IsEIPDisabled(7928) {
 			b.blockIO = &state.VersionedIO{}
 		}
 
@@ -569,7 +569,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			var bal types.BlockAccessList
 			var balBytes []byte
-			if config.IsAmsterdam(b.header.Time) {
+			if config.IsAmsterdam(b.header.Time) && !config.IsEIPDisabled(7928) {
 				bal = b.blockIO.AsBlockAccessList()
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash

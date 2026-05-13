@@ -417,8 +417,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		panic(err)
 	}
 	if tb != nil {
-		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
-		// produces test names that cause 'file name too long' errors
+		// we can't use tb.TempDir() here because some tests produce names long
+		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
 			dir.RemoveAll(tmpdir)
 		})

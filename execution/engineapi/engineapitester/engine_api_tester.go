@@ -257,6 +257,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("load/generate node key: %w", err)
 	}
+	mdbxDBSizeLimit := args.MdbxDBSizeLimit
+	if mdbxDBSizeLimit == 0 {
+		mdbxDBSizeLimit = 1 * datasize.GB
+	}
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -270,7 +274,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
-		MdbxDBSizeLimit: 1 * datasize.GB,
+		MdbxDBSizeLimit: mdbxDBSizeLimit,
 		DisableSentry:   args.DisableSentry,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
@@ -407,6 +411,7 @@ type EngineApiTesterInitArgs struct {
 	EngineApiClientTimeout *time.Duration
 	DisableTxPool          bool
 	DisableSentry          bool
+	MdbxDBSizeLimit        datasize.ByteSize
 }
 
 type EngineApiTester struct {
