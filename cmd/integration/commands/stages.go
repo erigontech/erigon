@@ -825,6 +825,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
+			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, pruneTx, s.CurrentSyncCycle.IsInitialCycle, 0)
+			}, logger); err != nil {
+				return err
+			}
 		}
 
 		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
