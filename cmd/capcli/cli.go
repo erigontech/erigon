@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/afero"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -92,11 +91,6 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, err error) {
-	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
-	return
-}
-
 type outputFolder struct {
 	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
 }
@@ -122,10 +116,6 @@ func (w *withSentinel) connectSentinel() (sentinelproto.SentinelClient, error) {
 		return nil, err
 	}
 	return sentinelproto.NewSentinelClient(gconn), nil
-}
-
-func openFs(fsName string, path string) (afero.Fs, error) {
-	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
 }
 
 type Chain struct {

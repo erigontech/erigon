@@ -38,9 +38,26 @@ type CommonTx struct {
 	Nonce    uint64          // nonce of sender account
 	GasLimit uint64          // gas limit
 	To       *common.Address `rlp:"nil"` // nil means contract creation
-	Value    *uint256.Int    // wei amount
+	Value    uint256.Int     // wei amount
 	Data     []byte          // contract invocation input data
 	V, R, S  uint256.Int     // signature values
+}
+
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
 }
 
 func (ct *CommonTx) GetNonce() uint64 {
@@ -60,7 +77,7 @@ func (ct *CommonTx) GetGasLimit() uint64 {
 }
 
 func (ct *CommonTx) GetValue() *uint256.Int {
-	return ct.Value
+	return &ct.Value
 }
 
 func (ct *CommonTx) GetData() []byte {
@@ -94,26 +111,13 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
-	GasPrice *uint256.Int // wei per gas
+	GasPrice uint256.Int // wei per gas
 }
 
-func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
-func (tx *LegacyTx) GetFeeCap() *uint256.Int { return tx.GasPrice }
+func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
+func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *LegacyTx) GetAccessList() AccessList {
@@ -136,57 +140,59 @@ func (tx *LegacyTx) Unwrap() Transaction {
 //
 // Deprecated: use NewTx instead.
 func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
-	return &LegacyTx{
+	tx := &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    nonce,
 			To:       &to,
-			Value:    amount,
 			GasLimit: gasLimit,
 			Data:     data,
 		},
-		GasPrice: gasPrice,
 	}
+	if amount != nil {
+		tx.Value = *amount
+	}
+	if gasPrice != nil {
+		tx.GasPrice = *gasPrice
+	}
+	return tx
 }
 
 // NewContractCreation creates an unsigned legacy transaction.
 //
 // Deprecated: use NewTx instead.
 func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
-	return &LegacyTx{
+	tx := &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce:    nonce,
-			Value:    amount,
 			GasLimit: gasLimit,
 			Data:     data,
 		},
-		GasPrice: gasPrice,
 	}
+	if amount != nil {
+		tx.Value = *amount
+	}
+	if gasPrice != nil {
+		tx.GasPrice = *gasPrice
+	}
+	return tx
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (tx *LegacyTx) copy() *LegacyTx {
-	cpy := &LegacyTx{
+	return &LegacyTx{
 		CommonTx: CommonTx{
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
-			// These are initialized below.
-			Value: new(uint256.Int),
+			Value:           tx.Value,
+			V:               tx.V,
+			R:               tx.R,
+			S:               tx.S,
 		},
-		GasPrice: new(uint256.Int),
+		GasPrice: tx.GasPrice,
 	}
-	if tx.Value != nil {
-		cpy.Value.Set(tx.Value)
-	}
-	if tx.GasPrice != nil {
-		cpy.GasPrice.Set(tx.GasPrice)
-	}
-	cpy.V.Set(&tx.V)
-	cpy.R.Set(&tx.R)
-	cpy.S.Set(&tx.S)
-	return cpy
 }
 
 func (tx *LegacyTx) EncodingSize() int {
@@ -195,13 +201,13 @@ func (tx *LegacyTx) EncodingSize() int {
 
 func (tx *LegacyTx) payloadSize() (payloadSize int) {
 	payloadSize += rlp.U64Len(tx.Nonce)
-	payloadSize += rlp.Uint256Len(*tx.GasPrice)
+	payloadSize += rlp.Uint256Len(tx.GasPrice)
 	payloadSize += rlp.U64Len(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
-	payloadSize += rlp.Uint256Len(*tx.Value)
+	payloadSize += rlp.Uint256Len(tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
@@ -211,8 +217,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -221,32 +227,22 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
-	}
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
@@ -267,8 +263,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -280,46 +276,33 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("legacy txn must be a list: %w", err)
 	}
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
-	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
 	}
@@ -327,7 +310,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress
@@ -337,11 +320,11 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
-		gasPrice:         *tx.GasPrice,
-		tipCap:           *tx.GasPrice,
-		feeCap:           *tx.GasPrice,
+		gasPrice:         tx.GasPrice,
+		tipCap:           tx.GasPrice,
+		feeCap:           tx.GasPrice,
 		to:               to,
-		amount:           *tx.Value,
+		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       nil,
 		checkNonce:       true,
@@ -371,12 +354,12 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]any{
+	hash := RlpHash([]any{
 		tx.Nonce,
-		tx.GasPrice,
+		&tx.GasPrice,
 		tx.GasLimit,
 		tx.To,
-		tx.Value,
+		&tx.Value,
 		tx.Data,
 		tx.V, tx.R, tx.S,
 	})
@@ -398,24 +381,24 @@ type legacyTxSigHash struct {
 
 func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash(&legacyTxSigHash{
+		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,
-			GasPrice: tx.GasPrice,
+			GasPrice: &tx.GasPrice,
 			Gas:      tx.GasLimit,
 			To:       tx.To,
-			Value:    tx.Value,
+			Value:    &tx.Value,
 			Data:     tx.Data,
 			ChainID:  chainID,
 			V:        uint(0),
 			R:        uint(0),
 		})
 	}
-	return rlpHash([]any{
+	return RlpHash([]any{
 		tx.Nonce,
-		tx.GasPrice,
+		&tx.GasPrice,
 		tx.GasLimit,
 		tx.To,
-		tx.Value,
+		&tx.Value,
 		tx.Data,
 	})
 }

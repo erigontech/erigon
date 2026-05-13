@@ -135,10 +135,6 @@ func createMockDataColumnSidecar(slot uint64, index uint64) *cltypes.DataColumnS
 }
 
 func TestDataColumnSidecarService(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	suite.Run(t, &dataColumnSidecarTestSuite{})
 }
 
@@ -186,9 +182,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.NoError(err)
 
-	// Second call with same sidecar should return ErrIgnore
+	// Second call with same sidecar should return nil (silent ignore)
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.Equal(ErrIgnore, err)
+	t.NoError(err)
 }
 
 // TestProcessMessage_WhenInvalidDataColumnSidecar_ReturnsError tests validation failure

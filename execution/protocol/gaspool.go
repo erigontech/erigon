@@ -27,6 +27,14 @@ import (
 
 // GasPool tracks the amount of gas available during execution of the transactions
 // in a block. The zero value is a pool with zero gas available.
+//
+// EIP-8037 introduces two-dimensional block gas: regular and state. The pool's
+// net per-tx deduction is blockRegularGasUsed, so it effectively tracks only
+// the regular dimension. buyGas temporarily reserves the full tx.gas (which
+// funds both dimensions), but the return path adds back tx.gas −
+// blockRegularGasUsed, so only regular gas is permanently consumed from the
+// pool. State gas is enforced separately in applyTransaction, which checks
+// max(Σ regular, Σ state) <= gas_limit before finalizing each transaction.
 type GasPool struct {
 	mu           sync.RWMutex
 	gas, blobGas uint64

@@ -19,7 +19,7 @@ package chaos_monkey
 import (
 	"fmt"
 
-	rand2 "golang.org/x/exp/rand"
+	"math/rand/v2"
 
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
@@ -29,7 +29,7 @@ const (
 )
 
 func ThrowRandomConsensusError(IsInitialCycle bool, txIndex int, badBlockHalt bool, txTaskErr error) error {
-	if !IsInitialCycle && rand2.Int()%consensusFailureRate == 0 && txIndex == 0 && !badBlockHalt {
+	if !IsInitialCycle && rand.Int()%consensusFailureRate == 0 && txIndex == 0 && !badBlockHalt {
 		return fmt.Errorf("monkey in the datacenter: %w: %v", rules.ErrInvalidBlock, txTaskErr)
 	}
 	return nil

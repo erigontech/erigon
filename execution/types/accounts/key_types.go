@@ -42,6 +42,9 @@ func (a Address) IsZero() bool {
 }
 
 func (a Address) Value() common.Address {
+	if a == NilAddress {
+		return common.Address{}
+	}
 	return unique.Handle[common.Address](a).Value()
 }
 
@@ -122,6 +125,9 @@ func (k StorageKey) IsNil() bool {
 }
 
 func (k StorageKey) Value() common.Hash {
+	if k == NilKey {
+		return common.Hash{}
+	}
 	return unique.Handle[common.Hash](k).Value()
 }
 
@@ -179,6 +185,9 @@ func (h CodeHash) IsZero() bool {
 }
 
 func (h CodeHash) Value() common.Hash {
+	if h == NilCodeHash {
+		return common.Hash{}
+	}
 	return unique.Handle[common.Hash](h).Value()
 }
 

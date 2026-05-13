@@ -319,7 +319,7 @@ func (m *UnmarkedTx) Unwind(ctx context.Context, from RootNum, tx kv.RwTx) (fs F
 	if err != nil {
 		return fs, err
 	}
-	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, 0, nil, ap.logger, tx)
+	delCnt, err := DeleteRangeFromTbl(ctx, ap.valsTbl, ap.encTs(fromN), nil, MaxUint64, nil, ap.logger, tx)
 	fs.Set(fromN, Num(MaxUint64), delCnt)
 	return
 }
@@ -368,7 +368,7 @@ func (m *UnmarkedTx) DebugDb() UnmarkedDbTxI {
 
 func (m *UnmarkedTx) BufferedWriter() *UnmarkedBufferedWriter {
 	return &UnmarkedBufferedWriter{
-		values:  etl.NewCollector(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers.Get(), m.a.logger).LogLvl(log.LvlTrace),
+		values:  etl.NewCollectorWithAllocator(Registry.Name(m.id)+".etl.flush", m.ap.dirs.Tmp, etl.SmallSortableBuffers, m.a.logger).LogLvl(log.LvlTrace),
 		valsTbl: m.ap.valsTbl,
 	}
 }

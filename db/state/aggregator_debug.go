@@ -11,7 +11,7 @@ import (
 type aggDirtyFilesRoTx struct {
 	agg    *Aggregator
 	domain []*domainDirtyFilesRoTx
-	ii     []*iiDirtyFilesRoTx
+	ii     [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
 }
 
 type domainDirtyFilesRoTx struct {
@@ -35,7 +35,6 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	ac := &aggDirtyFilesRoTx{
 		agg:    a,
 		domain: make([]*domainDirtyFilesRoTx, len(a.d)),
-		ii:     make([]*iiDirtyFilesRoTx, len(a.iis)),
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -44,8 +43,8 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 		ac.domain[i] = d.DebugBeginDirtyFilesRo()
 	}
 
-	for i, ii := range a.iis {
-		ac.ii[i] = ii.DebugBeginDirtyFilesRo()
+	for i := 0; i < a.iisCount; i++ {
+		ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
 	}
 
 	return ac
@@ -64,6 +63,9 @@ func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 		}
 	}
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		for _, f := range ii.files {
 			f.MadvNormal()
 		}
@@ -83,6 +85,9 @@ func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
 		}
 	}
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		for _, f := range ii.files {
 			f.DisableReadAhead()
 		}
@@ -94,15 +99,17 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 		domain: make(map[kv.Domain]*MissedAccessorDomainFiles),
 		ii:     make(map[kv.InvertedIdx]*MissedAccessorIIFiles),
 	}
-
+	domainDL := readDirNames(ac.agg.dirs.SnapDomain)
+	accessorDL := readDirNames(ac.agg.dirs.SnapAccessors)
 	for _, d := range ac.domain {
-		mf.domain[d.d.Name] = d.FilesWithMissedAccessors()
+		mf.domain[d.d.Name] = d.filesWithMissedAccessors(domainDL, accessorDL)
 	}
-
 	for _, ii := range ac.ii {
-		mf.ii[ii.ii.Name] = ii.FilesWithMissedAccessors()
+		if ii == nil {
+			continue
+		}
+		mf.ii[ii.ii.Name] = ii.filesWithMissedAccessors(accessorDL)
 	}
-
 	return
 }
 
@@ -110,18 +117,19 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	if ac.agg == nil {
 		return
 	}
-	// not doing closeAndRemove() because that needs dirtyFilesLock.
-	// if canDelete is true, it'll get removed in the AggRoTx.Close() path.
 	for _, d := range ac.domain {
 		d.Close()
 	}
 
 	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
 		ii.Close()
 	}
 	ac.agg = nil
 	ac.domain = nil
-	ac.ii = nil
+	ac.ii = [kv.StandaloneIdxLen]*iiDirtyFilesRoTx{}
 }
 
 func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
@@ -140,13 +148,13 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	}
 }
 
-func (d *domainDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorDomainFiles) {
+func (d *domainDirtyFilesRoTx) filesWithMissedAccessors(domainDL, accessorDL dirListing) *MissedAccessorDomainFiles {
 	return &MissedAccessorDomainFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files),
-			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files),
+			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files, domainDL),
+			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files, domainDL),
 		},
-		history: d.history.FilesWithMissedAccessors(),
+		history: d.history.filesWithMissedAccessors(accessorDL),
 	}
 }
 
@@ -156,7 +164,10 @@ func (d *domainDirtyFilesRoTx) Close() {
 	}
 	d.history.Close()
 	for _, item := range d.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	d.files = nil
 	d.d = nil
@@ -178,11 +189,11 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	}
 }
 
-func (f *historyDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorHistoryFiles) {
+func (f *historyDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) *MissedAccessorHistoryFiles {
 	return &MissedAccessorHistoryFiles{
-		ii: f.ii.FilesWithMissedAccessors(),
+		ii: f.ii.filesWithMissedAccessors(dl),
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files),
+			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files, dl),
 		},
 	}
 }
@@ -193,7 +204,10 @@ func (f *historyDirtyFilesRoTx) Close() {
 	}
 	f.ii.Close()
 	for _, item := range f.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	f.files = nil
 	f.h = nil
@@ -214,10 +228,10 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	}
 }
 
-func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
+func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) (mf *MissedAccessorIIFiles) {
 	return &MissedAccessorIIFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files),
+			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, dl),
 		},
 	}
 }
@@ -227,7 +241,10 @@ func (f *iiDirtyFilesRoTx) Close() {
 		return
 	}
 	for _, item := range f.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	f.files = nil
 	f.ii = nil
@@ -347,9 +364,9 @@ func (m *MissedAccessorIIFiles) IsEmpty() bool {
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
 func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
 func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
-	for _, iit := range at.iis {
-		if iit.name == idx {
-			return iit
+	for i := 0; i < at.iisCount; i++ {
+		if at.iis[i].name == idx {
+			return at.iis[i]
 		}
 	}
 	return nil

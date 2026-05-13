@@ -197,31 +197,6 @@ func IsValidIndexedAttestation(b abstract.BeaconStateBasic, att *cltypes.Indexed
 	return true, nil
 }
 
-// GetUnslashedParticipatingIndices returns set of currently unslashed participating indexes.
-func GetUnslashedParticipatingIndices(b abstract.BeaconState, flagIndex int, epoch uint64) (validatorSet []uint64, err error) {
-	var participation *solid.ParticipationBitList
-	// Must be either previous or current epoch
-	switch epoch {
-	case Epoch(b):
-		participation = b.EpochParticipation(true)
-	case PreviousEpoch(b):
-		participation = b.EpochParticipation(false)
-	default:
-		return nil, errors.New("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
-	}
-	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
-		if !validator.Active(epoch) ||
-			!cltypes.ParticipationFlags(participation.Get(i)).HasFlag(flagIndex) ||
-			validator.Slashed() {
-			return true
-		}
-		validatorSet = append(validatorSet, uint64(i))
-		return true
-	})
-	return
-}
-
 // IsValidatorEligibleForActivationQueue returns whether the validator is eligible to be placed into the activation queue.
 // Implementation of is_eligible_for_activation_queue.
 // Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
@@ -234,14 +209,6 @@ func IsValidatorEligibleForActivationQueue(b abstract.BeaconState, validator sol
 	// Electra and after
 	return validator.ActivationEligibilityEpoch() == b.BeaconConfig().FarFutureEpoch &&
 		validator.EffectiveBalance() >= b.BeaconConfig().MinActivationBalance
-}
-
-// IsValidatorEligibleForActivation returns whether the validator is eligible for activation.
-// Implementation of is_eligible_for_activation.
-// Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
-func IsValidatorEligibleForActivation(b abstract.BeaconState, validator solid.Validator) bool {
-	return validator.ActivationEligibilityEpoch() <= b.FinalizedCheckpoint().Epoch &&
-		validator.ActivationEpoch() == b.BeaconConfig().FarFutureEpoch
 }
 
 // IsMergeTransitionComplete returns whether a merge transition is complete by verifying the presence of a valid execution payload header.

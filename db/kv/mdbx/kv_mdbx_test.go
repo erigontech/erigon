@@ -72,7 +72,7 @@ func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
 	db := BaseCaseDB(t)
 	table := "Table"
 
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
@@ -257,12 +257,67 @@ func TestRangeDupSort(t *testing.T) {
 	})
 }
 
+// TestRangeRwTxInterleavedWrite verifies that Range iterators remain correct
+// when writes are interleaved with Next() calls on a read-write transaction.
+// Without cursor.Current()-based iteration, the stored raw MDBX nextK pointer
+// can be invalidated by copy-on-write page operations triggered by writes,
+// causing HasNext() or Next() to return stale/wrong data.
+func TestRangeRwTxInterleavedWrite(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	table := "Plain"
+	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+		return kv.TableCfg{table: kv.TableCfgItem{}}
+	}).MapSize(128 * datasize.MB).MustOpen()
+	t.Cleanup(db.Close)
+
+	ctx := t.Context()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	require.NoError(t, tx.Put(table, []byte{1}, []byte{10}))
+	require.NoError(t, tx.Put(table, []byte{3}, []byte{30}))
+	require.NoError(t, tx.Put(table, []byte{5}, []byte{50}))
+
+	it, err := tx.Range(table, nil, nil, order.Asc, kv.Unlim)
+	require.NoError(t, err)
+	defer it.Close()
+
+	// Read first item; internally cursor advances to {3}.
+	require.True(t, it.HasNext())
+	k, v, err := it.Next()
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, k)
+	require.Equal(t, []byte{10}, v)
+
+	// Write to {3} - the key cursor is now sitting on.
+	// This triggers MDBX copy-on-write page operations that would invalidate a
+	// stored raw nextK pointer (the bug before using cursor.Current()).
+	require.NoError(t, tx.Put(table, []byte{3}, []byte{31}))
+
+	// Iterator must survive the write and reflect the updated value.
+	require.True(t, it.HasNext())
+	k, v, err = it.Next()
+	require.NoError(t, err)
+	require.Equal(t, []byte{3}, k)
+	require.Equal(t, []byte{31}, v)
+
+	require.True(t, it.HasNext())
+	k, v, err = it.Next()
+	require.NoError(t, err)
+	require.Equal(t, []byte{5}, k)
+	require.Equal(t, []byte{50}, v)
+
+	require.False(t, it.HasNext())
+}
+
 func TestLastDup(t *testing.T) {
 	db, tx, _ := BaseCase(t)
 
 	err := tx.Commit()
 	require.NoError(t, err)
-	roTx, err := db.BeginRo(context.Background())
+	roTx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
@@ -629,21 +684,21 @@ func TestDupDelete(t *testing.T) {
 func TestBeginRoAfterClose(t *testing.T) {
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	db.Close()
-	_, err := db.BeginRo(context.Background())
+	_, err := db.BeginRo(t.Context())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	db.Close()
-	_, err := db.BeginRw(context.Background())
+	_, err := db.BeginRw(t.Context())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	defer db.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := db.BeginRo(ctx)
 	require.ErrorIs(t, err, context.Canceled)
@@ -652,7 +707,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 func TestBeginRwWithDoneContext(t *testing.T) {
 	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
 	defer db.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := db.BeginRw(ctx)
 	require.ErrorIs(t, err, context.Canceled)
@@ -696,7 +751,7 @@ func testCloseWaitsAfterTxBegin(
 }
 
 func TestCloseWaitsAfterTxBegin(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("BeginRoAndCommit", func(t *testing.T) {
 		testCloseWaitsAfterTxBegin(
 			t,
@@ -779,7 +834,7 @@ func TestDB_Batch(t *testing.T) {
 	}
 
 	// Ensure data is correct.
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(t.Context(), func(tx kv.Tx) error {
 		for i := 0; i < n; i++ {
 			v, err := tx.GetOne(table, u64tob(uint64(i)))
 			if err != nil {
@@ -867,7 +922,7 @@ func TestDB_BatchFull(t *testing.T) {
 	}
 
 	// Ensure data is correct.
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(t.Context(), func(tx kv.Tx) error {
 		for i := 1; i <= size; i++ {
 			v, err := tx.GetOne(table, u64tob(uint64(i)))
 			if err != nil {
@@ -912,7 +967,7 @@ func TestDB_BatchTime(t *testing.T) {
 	}
 
 	// Ensure data is correct.
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(t.Context(), func(tx kv.Tx) error {
 		for i := 1; i <= size; i++ {
 			v, err := tx.GetOne(table, u64tob(uint64(i)))
 			if err != nil {
@@ -932,9 +987,8 @@ func BenchmarkDB_BeginRO(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	db := _db.(*MdbxKV)
 
-	b.ResetTimer()
 	for b.Loop() {
-		tx, _ := db.BeginRo(context.Background())
+		tx, _ := db.BeginRo(b.Context())
 		tx.Rollback()
 	}
 }
@@ -945,7 +999,7 @@ func BenchmarkDB_Get(b *testing.B) {
 	db := _db.(*MdbxKV)
 
 	// buffered so we never leak goroutines
-	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		return tx.Put(table, u64tob(uint64(1)), u64tob(uint64(1)))
 	})
 	if err != nil {
@@ -953,9 +1007,8 @@ func BenchmarkDB_Get(b *testing.B) {
 	}
 
 	// Ensure data is correct.
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(b.Context(), func(tx kv.Tx) error {
 		key := u64tob(uint64(1))
-		b.ResetTimer()
 		for b.Loop() {
 			v, err := tx.GetOne(table, key)
 			if err != nil {
@@ -976,14 +1029,13 @@ func BenchmarkDB_Put(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	// Ensure data is correct.
-	keys := make([][]byte, b.N)
-	for i := 1; i <= b.N; i++ {
+	const keyCount = 10000
+	keys := make([][]byte, keyCount)
+	for i := 1; i <= keyCount; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
-	b.ResetTimer()
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
 			err := tx.Put(table, keys[idx%len(keys)], keys[idx%len(keys)])
@@ -1004,7 +1056,7 @@ func BenchmarkDB_PutRandom(b *testing.B) {
 	db := _db.(*MdbxKV)
 
 	// Ensure data is correct.
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		keys := make(map[string]struct{}, b.N)
 		for len(keys) < b.N {
 			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
@@ -1027,12 +1079,13 @@ func BenchmarkDB_Delete(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	keys := make([][]byte, b.N)
-	for i := 1; i <= b.N; i++ {
+	const keyCount = 10000
+	keys := make([][]byte, keyCount)
+	for i := 1; i <= keyCount; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		for i := 0; i < len(keys); i++ {
 			err := tx.Put(table, keys[i], keys[i])
 			if err != nil {
@@ -1044,9 +1097,7 @@ func BenchmarkDB_Delete(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// Ensure data is correct.
-	b.ResetTimer()
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
 			err := tx.Delete(table, keys[idx%len(keys)])
@@ -1114,10 +1165,11 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	table := "Table"
 	//db := _db.(*MdbxKV)
-	ctx := context.Background()
+	ctx := b.Context()
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
+	defer tx.Rollback()
 
 	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
@@ -1125,7 +1177,6 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	tx.Rollback()
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {
@@ -1138,7 +1189,7 @@ func TestMdbxWithSyncBytes(t *testing.T) {
 		SyncBytes(20_000).
 		DirtySpace(uint64(64 * datasize.MB)).
 		// WithMetrics().
-		Open(context.Background())
+		Open(t.Context())
 	if err != nil {
 		t.Fatalf("failed to open mdbx")
 	}

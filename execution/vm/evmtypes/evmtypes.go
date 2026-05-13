@@ -17,11 +17,10 @@
 package evmtypes
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -40,15 +39,17 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase    accounts.Address // Provides information for COINBASE
-	GasLimit    uint64           // Provides information for GASLIMIT
-	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64           // Provides information for NUMBER
-	Time        uint64           // Provides information for TIME
-	Difficulty  *big.Int         // Provides information for DIFFICULTY
-	BaseFee     uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
-	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
+	Coinbase         accounts.Address // Provides information for COINBASE
+	GasLimit         uint64           // Provides information for GASLIMIT
+	MaxGasLimit      bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber      uint64           // Provides information for NUMBER
+	Time             uint64           // Provides information for TIME
+	Difficulty       uint256.Int      // Provides information for DIFFICULTY
+	BaseFee          uint256.Int      // Provides information for BASEFEE
+	PrevRanDao       *common.Hash     // Provides information for PREVRANDAO
+	BlobBaseFee      uint256.Int      // Provides information for BLOBBASEFEE
+	SlotNumber       uint64           // Provides information for SLOTNUM
+	CostPerStateByte uint64           // Holds the calculated cost per state byte for the given block
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -65,7 +66,10 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	GasUsed              uint64 // Total used gas but include the refunded gas
+	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
+	BlockRegularGasUsed  uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	BlockStateGasUsed    uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
@@ -74,6 +78,11 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+
+	// SelfDestructedWithBalance holds accounts that were selfdestructed during
+	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
+	// Captured before SoftFinalise clears the journal.
+	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -108,7 +117,7 @@ type (
 	CanTransferFunc func(IntraBlockState, accounts.Address, uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool) error
+	TransferFunc func(IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.
@@ -116,14 +125,21 @@ type (
 
 	// PostApplyMessageFunc is an extension point to execute custom logic at the end of core.ApplyMessage.
 	// It's used in Bor for AddFeeTransferLog or in ethereum to clear out the authority code at end of tx.
-	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult)
+	PostApplyMessageFunc func(ibs IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *ExecutionResult, chainRules *chain.Rules)
 )
+
+type AddressAndBalance struct {
+	Address common.Address
+	Balance uint256.Int
+}
 
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	GetBalance(accounts.Address) (uint256.Int, error)
+
+	GetRemovedAccountsWithBalance() []AddressAndBalance
 
 	AddLog(*types.Log)
 

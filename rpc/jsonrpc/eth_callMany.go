@@ -21,8 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
-	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -38,12 +37,11 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Bundle struct {
 	Transactions  []ethapi.CallArgs
-	BlockOverride transactions.BlockOverrides
+	BlockOverride ethapi.BlockOverrides
 }
 
 type StateContext struct {
@@ -88,6 +86,16 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +151,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
+	// evmPtr is updated atomically each time evm is recreated in the loop,
+	// so the AfterFunc callback always cancels the current instance.
+	var evmPtr atomic.Pointer[vm.EVM]
+	evmPtr.Store(evm)
+
 	timeout := api.evmCallTimeout
 
 	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
@@ -161,12 +174,8 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
-	go func() {
-		<-ctx.Done()
-		evm.Cancel()
-	}()
+	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
+	defer stop()
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -179,6 +188,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+		evmPtr.Store(evm)
 		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
@@ -187,7 +197,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
-		// If the timer caused an abort, return an appropriate error message
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
@@ -206,27 +215,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	for _, bundle := range bundles {
 		// first change blockContext
-		if bundle.BlockOverride.BlockNumber != nil {
-			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
-		}
-		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
-		}
-		if bundle.BlockOverride.Coinbase != nil {
-			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
-		}
-		if bundle.BlockOverride.Difficulty != nil {
-			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
-		}
-		if bundle.BlockOverride.Timestamp != nil {
-			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)
-		}
-		if bundle.BlockOverride.GasLimit != nil {
-			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
-		}
-		if bundle.BlockOverride.BlockHash != nil {
-			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
-		}
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
@@ -238,6 +227,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+			evmPtr.Store(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err

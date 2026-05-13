@@ -21,19 +21,18 @@ package trie
 
 import (
 	"errors"
-	"hash"
 	"sync"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type hasher struct {
-	sha                  crypto.KeccakState
+	sha                  keccak.KeccakState
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
@@ -43,18 +42,10 @@ type hasher struct {
 
 const rlpPrefixLength = 4
 
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
-
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{
-			sha: sha3.NewLegacyKeccak256().(crypto.KeccakState),
+			sha: keccak.NewFastKeccak(),
 			bw:  &ByteArrayWriter{},
 		}
 	},
@@ -172,9 +163,9 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 	case *ShortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
-		compactKey := hexToCompact(n.Key)
+		compactKey := nibbles.HexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeStringWithLen(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -308,7 +299,18 @@ func (h *hasher) valueNodeToBuffer(vn ValueNode, buffer []byte, pos int) (int, e
 }
 
 func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (int, error) {
-	acRlp := make([]byte, ac.EncodingLengthForHashing())
+	encLen := int(ac.EncodingLengthForHashing())
+	const accountRlpScratchSize = 128
+	// Reuse the end of the pre-allocated buffers to avoid heap allocation when
+	// the account RLP fits in the scratch region. Fall back to a dedicated
+	// allocation if the encoding grows beyond the scratch capacity.
+	var acRlp []byte
+	if encLen <= accountRlpScratchSize && len(h.buffers) >= accountRlpScratchSize {
+		start := len(h.buffers) - accountRlpScratchSize
+		acRlp = h.buffers[start : start+encLen]
+	} else {
+		acRlp = make([]byte, encLen)
+	}
 	ac.EncodeForHashing(acRlp)
 	enc := rlp.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)

@@ -1,5 +1,9 @@
 ---
 description: 'Quick Start: Running a Gnosis Chain Node with Erigon'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/easy-nodes/how-to-run-a-gnosis-chain-node
 ---
 
 # How to run a Gnosis Chain node
@@ -69,4 +73,4 @@ When you get familiar with running Erigon from CLI you may also consider [stakin
 
 {% include "../../../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
 
-Additional flags can be added to [configure](../../../fundamentals/configuring-erigon.md) Erigon with several options.
+Additional flags can be added to [configure](../../../fundamentals/configuring-erigon/) Erigon with several options.

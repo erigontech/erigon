@@ -146,6 +146,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
 	}
 	if len(failures) > 0 {
@@ -164,6 +169,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 }
 
 func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
+	log.Debug("[Beacon REST] posting attestations")
 	v := r.Header.Get("Eth-Consensus-Version")
 	if v == "" {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing version header")).WriteTo(w)
@@ -219,7 +225,13 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
+		log.Debug("[Beacon REST] published attestation to gossip", "slot", slot, "committeeIndex", cIndex)
 	}
 	if len(failures) > 0 {
 		errResp := poolingError{
@@ -383,8 +395,10 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
-		}); err != nil && !errors.Is(err, services.ErrIgnore) {
-			log.Warn("[Beacon REST] failed to process bls-change", "err", err)
+		}); errors.Is(err, services.ErrIgnore) {
+			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
+		} else if err != nil {
+			log.Warn("[Beacon REST] failed to process aggregate", "err", err)
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}

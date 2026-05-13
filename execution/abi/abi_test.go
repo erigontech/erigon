@@ -1133,6 +1133,9 @@ func TestUnpackRevert(t *testing.T) {
 		{"", "", errors.New("invalid data for unpacking")},
 		{"08c379a1", "", errors.New("invalid data for unpacking")},
 		{"08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d72657665727420726561736f6e00000000000000000000000000000000000000", "revert reason", nil},
+		{"4e487b710000000000000000000000000000000000000000000000000000000000000000", "generic panic", nil},
+		{"4e487b710000000000000000000000000000000000000000000000000000000000000011", "arithmetic underflow or overflow", nil},
+		{"4e487b7100000000000000000000000000000000000000000000000000000000000000ff", "unknown panic code: 0xff", nil},
 	}
 	for index, c := range cases {
 		t.Run(fmt.Sprintf("case %d", index), func(t *testing.T) {
@@ -1165,4 +1168,49 @@ func TestCustomErrors(t *testing.T) {
 		}
 	}
 	check("MyError", "MyError(uint256)")
+}
+
+// TestCrashers contains some ABI definitions which previously caused the codec to panic.
+func TestCrashers(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{
+			name:    "underscore_digit",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"_1"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "ampersand",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"&"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "dashes",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"----"}]}]}]`,
+			wantErr: true,
+		},
+		{
+			name:    "dotted",
+			input:   `[{"inputs":[{"type":"tuple[]","components":[{"type":"bool","name":"foo.Bar"}]}]}]`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := JSON(strings.NewReader(tc.input))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for input %q, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected success for input %q, got error: %v", tc.input, err)
+			}
+		})
+	}
 }

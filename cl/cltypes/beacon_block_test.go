@@ -19,7 +19,6 @@ package cltypes
 import (
 	_ "embed"
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -49,12 +48,12 @@ func TestBeaconBody(t *testing.T) {
 	attestations := solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
 	deposits := solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 	voluntaryExits := solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	syncAggregate := &SyncAggregate{}
+	syncAggregate := NewSyncAggregate()
 	executionChanges := solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	version := clparams.DenebVersion
 	block := types.NewBlock(&types.Header{
-		BaseFee: big.NewInt(1),
+		BaseFee: uint256.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
 	}})
@@ -137,4 +136,21 @@ func TestBeaconBlockJson(t *testing.T) {
 
 	assert.Equal(t, map1, map2)
 	assert.Equal(t, common.Hash(r), common.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))
+}
+
+func TestBeaconBodyGetExecutionRequestsListElectraNil(t *testing.T) {
+	body := NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
+	body.ExecutionRequests = nil
+
+	requests := body.GetExecutionRequestsList()
+	require.NotNil(t, requests)
+	require.Len(t, requests, 0)
+}
+
+func TestBeaconBodyGetExecutionRequestsListDenebNil(t *testing.T) {
+	body := NewBeaconBody(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	body.ExecutionRequests = nil
+
+	requests := body.GetExecutionRequestsList()
+	require.Nil(t, requests)
 }

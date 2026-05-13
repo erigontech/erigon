@@ -19,31 +19,13 @@
 package debug
 
 import (
-	"io"
 	"os"
-	"os/signal"
 
-	"github.com/erigontech/erigon/common/dbg"
+	g "github.com/anacrolix/generics"
+
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func ListenSignals(stack io.Closer, logger log.Logger) {
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, os.Interrupt)
-	dbg.GetSigC(&sigc)
-	defer signal.Stop(sigc)
-
-	<-sigc
-	logger.Info("Got interrupt, shutting down...")
-	if stack != nil {
-		go stack.Close()
-	}
-	for i := 10; i > 0; i-- {
-		<-sigc
-		if i > 1 {
-			logger.Warn("Already shutting down, interrupt more to panic.", "times", i-1)
-		}
-	}
-	Exit() // ensure trace and CPU profile data is flushed.
-	LoudPanic("boom")
+func ListenSignals(stack func(), logger log.Logger) {
+	listenSignalsInner(stack, logger, []os.Signal{os.Interrupt}, g.None[os.Signal]())
 }

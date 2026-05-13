@@ -23,30 +23,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 )
-
-func ReadDataFromTable(tx kv.Tx, table string, key []byte) ([]byte, error) {
-	bytes, err := tx.GetOne(table, key)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
-func PutDataToTable(table string, key []byte, info any) func(tx kv.RwTx) error {
-	return func(tx kv.RwTx) error {
-		infoBytes, err := json.Marshal(info)
-
-		if err != nil {
-			return err
-		}
-
-		return tx.Put(table, key, infoBytes)
-	}
-}
 
 func InitStagesFromList(list []string) []SyncStage {
 	stages := make([]SyncStage, 0, len(list))
@@ -94,17 +71,6 @@ func CalculateTime(amountLeft, rate uint64) string {
 	}
 
 	return fmt.Sprintf("%dh:%dm", hours, minutes)
-}
-
-func SecondsToHHMMString(seconds uint64) string {
-	if seconds == 0 {
-		return "0hrs:0m"
-	}
-
-	hours := seconds / 3600
-	minutes := (seconds / 60) % 60
-
-	return fmt.Sprintf("%dhrs:%dm", hours, minutes)
 }
 
 func ParseData(data []byte, v any) {

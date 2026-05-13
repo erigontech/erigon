@@ -261,6 +261,9 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	panic("not implemented")
 }
+func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	panic("not implemented")
+}
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
 func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	panic("not implemented")
@@ -674,6 +677,7 @@ func (c *remoteCursorDupSort) SeekBothRange(k, v []byte) ([]byte, error) {
 func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error    { panic("not supported") }
 func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error { panic("not supported") }
 func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error     { panic("not supported") }
+func (c *remoteCursorDupSort) PutCurrent(k, v []byte) error       { panic("not supported") }
 func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error     { panic("not supported") }
 func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)   { panic("not supported") }
 

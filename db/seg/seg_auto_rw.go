@@ -16,6 +16,17 @@
 
 package seg
 
+import (
+	"bufio"
+	"context"
+	"encoding/binary"
+	"errors"
+	"io"
+	"sort"
+
+	"github.com/c2h5oh/datasize"
+)
+
 //Reader and Writer - decorators on Getter and Compressor - which
 //can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 
@@ -26,6 +37,8 @@ type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
 	c         FileCompression // compressed
+
+	Buf []byte // reusable buffer for callers (e.g. BpsTree binary search)
 }
 
 func NewReader(g *Getter, c FileCompression) *Reader {
@@ -39,11 +52,37 @@ func (g *Reader) MatchPrefix(prefix []byte) bool {
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
-func (g *Reader) MatchCmp(prefix []byte) int {
+func (g *Reader) MatchCmp(buf []byte) int {
+	var cmp int
 	if g.c.Has(CompressKeys) {
-		return g.Getter.MatchCmp(prefix)
+		cmp = g.Getter.MatchCmp(buf)
+	} else {
+		cmp = g.Getter.MatchCmpUncompressed(buf)
 	}
-	return g.Getter.MatchCmpUncompressed(prefix)
+	if cmp == 0 {
+		g.nextValue = true // key consumed, next read is value
+	}
+	return cmp
+}
+
+func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
+	foundItem := sort.Search(count, func(i int) bool {
+		offset := getOffset(uint64(i))
+		g.Reset(offset)
+		if g.HasNext() {
+			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); <=0 means word >= seek
+		}
+		return false
+	})
+	if foundItem == count {
+		return 0, false
+	}
+	foundOffset = getOffset(uint64(foundItem))
+	g.Reset(foundOffset)
+	if !g.HasNext() {
+		return 0, false
+	}
+	return foundOffset, true
 }
 
 func (g *Reader) MadvNormal() MadvDisabler {
@@ -174,4 +213,72 @@ func DetectCompressType(getter *Getter) (compressed FileCompression) {
 		compressed |= CompressVals
 	}
 	return compressed
+}
+
+// Decompressor2bufio reads words from a Decompressor in a background goroutine
+// and returns a bufio.Reader producing uvarint-length-prefixed words.
+// The returned cleanup function must be deferred by the caller.
+func Decompressor2bufio(d *Decompressor) (*bufio.Reader, func()) {
+	pr, pw := io.Pipe()
+	go func() {
+		wr := bufio.NewWriterSize(pw, int(128*datasize.MB))
+		var numBuf [binary.MaxVarintLen64]byte
+		g := d.MakeGetter()
+		buf := make([]byte, 0, 1*datasize.MB)
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+			if _, err := wr.Write(numBuf[:n]); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			if _, err := wr.Write(buf); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
+		wr.Flush()
+		pw.Close()
+	}()
+	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { pr.Close() }
+}
+
+// Bufio2compressor reads uvarint-length-prefixed words from src and writes them to a Writer.
+// Optional wordFunc transforms each word before writing; return nil to skip writing the word.
+func Bufio2compressor(ctx context.Context, src *bufio.Reader, w *Writer, wordFunc func(word []byte) ([]byte, error)) error {
+	word := make([]byte, 0, int(1*datasize.MB))
+	var l uint64
+	var err error
+	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if cap(word) < int(l) {
+			word = make([]byte, l)
+		} else {
+			word = word[:l]
+		}
+		if _, err = io.ReadFull(src, word); err != nil {
+			return err
+		}
+		if wordFunc != nil {
+			word, err = wordFunc(word)
+			if err != nil {
+				return err
+			}
+			if word == nil {
+				continue
+			}
+		}
+		if _, err := w.Write(word); err != nil {
+			return err
+		}
+	}
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }

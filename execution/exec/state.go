@@ -282,9 +282,9 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 		case withTx:
 			typedWriter.SetTx(rw.chainTx)
 		default:
-			if rw.stateWriter != nil {
-				return fmt.Errorf("can't set tx for writer: %T", rw.stateWriter)
-			}
+			// Writers that don't implement withPutter or withTx (e.g.
+			// NoopWriter, LightCollector) don't need a DB transaction —
+			// they accumulate writes in memory only. This is not an error.
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -332,7 +332,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 		rw.notifier.Wait()
 	}
 
-	if rw.metrics != nil {
+	if rw.metrics != nil && dbg.KVReadLevelledMetrics {
 		rw.metrics.Active.Add(1)
 		start := time.Now()
 		defer func() {
@@ -348,7 +348,9 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil {
-				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.GasUsed))
+				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
+				// (max of sums, not sum of maxes), but is a safe upper bound for metrics.
+				rw.metrics.GasUsed.Add(int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed)))
 			}
 			rw.metrics.Active.Add(-1)
 		}()
@@ -442,12 +444,19 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		result.TraceTos = callTracer.Tos()
 	}
 
+	// Capture collector-format writes from LightCollector (parallel workers).
+	// MakeWriteSet already wrote to rw.stateWriter; extract the accumulated
+	// writes so finalize can use them directly without IBS reconstruction.
+	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
+		result.CollectorWrites = lc.TakeWrites()
+	}
+
 	return result
 }
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, isMining bool, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
 	reconWorkers = make([]*Worker, workerCount)
 
 	resultsSize := workerCount * 8

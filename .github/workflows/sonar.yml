@@ -1,0 +1,65 @@
+name: SonarCloud
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sonar:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          # SonarCloud uses JGit for git blame, which cannot lazy-fetch blobs
+          # from partial/blobless clones (known JGit limitation, no fix planned).
+          # A full clone (filter: '') ensures all blobs are present upfront.
+          filter: ''
+          submodules: true
+          lfs: tests
+          cleanup-space: true
+          ramdisk: true
+
+      - name: Run tests with coverage
+        if: '!inputs.cache-warming-only'
+        env:
+          SKIP_FLAKY_TESTS: 'true'
+        run: make test-sonar-coverage
+
+      - name: Build test binaries (cache warming)
+        if: inputs.cache-warming-only
+        run: go test -run=^$ -cover ./...
+
+      - name: SonarCloud scan
+        if: '!inputs.cache-warming-only'
+        uses: SonarSource/sonarqube-scan-action@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

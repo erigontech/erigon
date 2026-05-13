@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
@@ -69,7 +70,7 @@ func generateOverviewPage(agg crossPageAggMetrics, chartsPageFilePaths []string)
 	branchKeyLenCountsBarChart.SetGlobalOptions(widthOpts("90vw"))
 	page.AddCharts(branchKeyLenCountsBarChart)
 	// footer catalogue
-	catalogue := generateChartPagesCatalogue(chartsPageFilePaths)
+	catalogue := generateChartPagesCatalogue("detailed charts catalogue (clickable)", "500px", chartsPageFilePaths, true)
 	page.AddCharts(catalogue)
 	return page
 }
@@ -302,17 +303,17 @@ func generateBranchKeyLenCountsBarChart(branchKeyLenCounts *[128]uint64) *charts
 	return chart
 }
 
-func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
+func generateChartPagesCatalogue(title string, width string, chartsPageFilePaths []string, withBasePath bool) *charts.Bar {
 	// we use a vertical bar chart as a catalogue index with hyperlinks
 	barWidth := 25
 	chart := charts.NewBar()
 	chart.SetGlobalOptions(
-		titleOpts("detailed charts catalogue (clickable)"),
+		titleOpts(title),
 		charts.WithLegendOpts(opts.Legend{
 			Show: opts.Bool(false),
 		}),
 		charts.WithInitializationOpts(opts.Initialization{
-			Width:  "500px",
+			Width:  width,
 			Height: fmt.Sprintf("%dpx", 130+len(chartsPageFilePaths)*(barWidth+5)),
 		}),
 		charts.WithYAxisOpts(opts.YAxis{
@@ -338,8 +339,13 @@ func generateChartPagesCatalogue(chartsPageFilePaths []string) *charts.Bar {
 	names := make([]string, len(chartsPageFilePaths))
 	vals := make([]opts.BarData, len(chartsPageFilePaths))
 	for i, filePath := range chartsPageFilePaths {
-		base := path.Base(filePath)
-		names[i] = base
+		var name string
+		if withBasePath {
+			name = path.Base(filePath)
+		} else {
+			name = filePath
+		}
+		names[i] = name
 		vals[i] = opts.BarData{Value: 1}
 	}
 	chart.SetXAxis(names).
@@ -542,6 +548,60 @@ func generateDbRwChart(mv []MetricValues) *charts.Line {
 			charts.WithAreaStyleOpts(opts.AreaStyle{Opacity: opts.Float(0.2)}),
 		)
 	return chart
+}
+
+func renderComparisonPage(runIds []string, blockNums []uint64, processingTimes [][]time.Duration, runOverviewPages []string, outputDir string) (string, error) {
+	return renderChartsPageToFile(
+		generateComparisonPage(runIds, blockNums, processingTimes, runOverviewPages),
+		path.Join(outputDir, "comparison.html"),
+	)
+}
+
+func generateComparisonPage(runIds []string, blockNums []uint64, processingTimes [][]time.Duration, runOverviewPages []string) *components.Page {
+	page := components.NewPage()
+	page.SetPageTitle("commitment backtest results overview")
+	page.SetLayout(components.PageFlexLayout)
+
+	var overviewPagesJsArray strings.Builder
+	overviewPagesJsArray.WriteString("var overviewPages = [];\n")
+	for i, runOverviewPage := range runOverviewPages {
+		overviewPagesJsArray.WriteString(fmt.Sprintf("overviewPages[%d] = '%s';\n", i, runOverviewPage))
+	}
+	processingTimesChart := charts.NewLine()
+	processingTimesChart.SetGlobalOptions(
+		titleOpts("processing times"),
+		legendOpts(),
+		dataZoomOpts(),
+		charts.WithEventListeners(event.Listener{
+			EventName: "click",
+			Handler: opts.FuncOpts(fmt.Sprintf(
+				`function(params) {
+					console.log(params.name);
+					console.log(params.value);
+					console.log(params.seriesIndex);
+					%s
+					window.open(overviewPages[params.seriesIndex], '_blank');
+				}`,
+				overviewPagesJsArray.String(),
+			)),
+		}),
+	)
+	processingTimesChartLine := processingTimesChart.SetXAxis(blockNums)
+	for i, ri := range runIds {
+		times := processingTimes[i]
+		lineData := make([]opts.LineData, len(times))
+		for j, t := range times {
+			lineData[j] = opts.LineData{Value: t.Milliseconds()}
+		}
+		processingTimesChartLine = processingTimesChartLine.AddSeries(ri, lineData)
+	}
+	// place 1 per row
+	processingTimesChart.SetGlobalOptions(widthOpts("90vw"))
+	page.AddCharts(processingTimesChart)
+	// footer catalogue
+	overviewPagesCatalogue := generateChartPagesCatalogue("overview pages catalogue (clickable)", "900px", runOverviewPages, false)
+	page.AddCharts(overviewPagesCatalogue)
+	return page
 }
 
 func titleOpts(title string) charts.GlobalOpts {

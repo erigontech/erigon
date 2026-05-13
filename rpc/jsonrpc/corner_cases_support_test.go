@@ -20,41 +20,22 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
-
-func newEthAPIForTest(mockSentry *mock.MockSentry) *APIImpl {
-	gasCap := uint64(5_000_000)
-	returnDataLimit := 100_000
-	maxGetProofRewindBlockCount := 100_000
-	subscribeLogsChannelSize := 128
-	return NewEthAPI(newBaseApiForTest(mockSentry),
-		mockSentry.DB,
-		nil,
-		nil,
-		nil,
-		gasCap,
-		ethconfig.Defaults.RPCTxFeeCap,
-		returnDataLimit,
-		false,
-		maxGetProofRewindBlockCount,
-		subscribeLogsChannelSize,
-		log.New())
-}
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
 // see https://github.com/erigontech/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assertions := require.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := newEthAPIForTest(m)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
@@ -98,8 +79,8 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 // see https://github.com/erigontech/erigon/issues/18225
 func TestNotFoundMustReturnError(t *testing.T) {
 	assertions := require.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := newEthAPIForTest(m)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
 	a, err := api.GetBalance(ctx, common.Address{}, rpc.BlockNumberOrHashWithNumber(10_000))

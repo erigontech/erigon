@@ -99,6 +99,13 @@ func (s *Server) RegisterName(name string, receiver any) error {
 //
 // Note that codec options are no longer supported.
 func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
+	s.ServeCodecWithContext(context.Background(), codec, options)
+}
+
+// ServeCodecWithContext is like ServeCodec but uses connCtx as the base context for all
+// handler goroutines spawned for this connection. Values set on connCtx (e.g.
+// kv.WithNonBlockingAcquire) propagate to every method call on the connection.
+func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
 	// Don't serve if server is stopped.
@@ -110,7 +117,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClient(codec, s.idgen, &s.services, s.batchLimit, s.logger)
+	c := initClientWithBaseCtx(connCtx, codec, s.idgen, &s.services, s.batchLimit, s.logger)
 	<-codec.closed()
 	c.Close()
 }

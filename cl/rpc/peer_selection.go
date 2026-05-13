@@ -129,17 +129,18 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 			data := &peerData{pid: pid, mask: custodyIndices}
 			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
-			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
+			log.Trace("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
 		}
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers
 		c.peersIndex = 0
 		c.peersMutex.Unlock()
-		custodies := []uint64{}
-		for _, peer := range newPeers {
-			custodies = append(custodies, uint64(len(peer.mask)))
-		}
-		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
+		//custodies := []uint64{}
+		//for _, peer := range newPeers {
+		//	custodies = append(custodies, uint64(len(peer.mask)))
+		//}
+		//log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "custodies", custodies, "elapsedTime", time.Since(begin))
+		log.Debug("[peerSelector] updated peers", "totalPeers", len(peers.Peers), "peerCount", len(newPeers), "elapsedTime", time.Since(begin))
 	}
 
 	// begin

@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -108,7 +109,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 }
 
 func TestEviction(t *testing.T) {
-	require, ctx := require.New(t), context.Background()
+	require, ctx := require.New(t), t.Context()
 	cfg := DefaultCoherentConfig
 	cfg.CacheSize = 21
 	cfg.NewBlockWait = 0
@@ -175,7 +176,7 @@ func TestAPI(t *testing.T) {
 	require := require.New(t)
 
 	// Create a context with timeout for the entire test
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	c := New(DefaultCoherentConfig)
@@ -241,7 +242,7 @@ func TestAPI(t *testing.T) {
 			}
 			defer d.Close()
 			txNum := uint64(0)
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil); err != nil {
 				return err
 			}
 			return d.Flush(ctx, tx)
@@ -443,8 +444,8 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done4: \n")
 	}()
 	// TODO: Used in other places too cant modify this.
-	// err := db.View(context.Background(), func(tx kv.Tx) error {
-	// 	_, err := AssertCheckValues(context.Background(), tx, c)
+	// err := db.View(t.Context(), func(tx kv.Tx) error {
+	// 	_, err := AssertCheckValues(t.Context(), tx, c)
 	// 	require.NoError(err)
 	// 	return nil
 	// })
@@ -465,9 +466,60 @@ func TestAPI(t *testing.T) {
 	}
 }
 
+func TestOnNewBlockCodeHashKey(t *testing.T) {
+	require := require.New(t)
+	cfg := DefaultCoherentConfig
+	cfg.NewBlockWait = 0
+	c := New(cfg)
+
+	code := []byte{0x01, 0x02, 0x03, 0x04}
+	addr := common.Address{0xAA}
+
+	batch := &remoteproto.StateChangeBatch{
+		StateVersionId: 1,
+		ChangeBatch: []*remoteproto.StateChange{
+			{
+				Direction: remoteproto.Direction_FORWARD,
+				Changes: []*remoteproto.AccountChange{
+					{
+						Action:  remoteproto.Action_CODE,
+						Address: gointerfaces.ConvertAddressToH160(addr),
+						Code:    code,
+					},
+				},
+			},
+		},
+	}
+
+	c.OnNewBlock(batch)
+
+	c.lock.Lock()
+	defer c.lock.Unlock()
+
+	require.NotNil(c.latestStateView)
+	require.Equal(uint64(1), c.latestStateVersionID)
+
+	var elems []*Element
+	c.latestStateView.codeCache.Walk(func(items []*Element) bool {
+		if len(items) > 0 {
+			elems = append(elems, items...)
+		}
+		return true
+	})
+
+	require.Len(elems, 1)
+
+	h := keccak.NewFastKeccak()
+	h.Write(code)
+	expectedKey := h.Sum(nil)
+
+	require.Equal(expectedKey, elems[0].K)
+	require.Equal(code, elems[0].V)
+}
+
 func TestCode(t *testing.T) {
 	t.Skip("TODO: use state reader/writer instead of Put()")
-	require, ctx := require.New(t), context.Background()
+	require, ctx := require.New(t), t.Context()
 	c := New(DefaultCoherentConfig)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}

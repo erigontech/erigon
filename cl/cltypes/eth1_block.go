@@ -19,7 +19,6 @@ package cltypes
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -66,6 +64,38 @@ func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChain
 		version:   version,
 		beaconCfg: beaconCfg,
 	}
+}
+
+// NewEth1BlockFromExecutionHeader creates a genesis-style Eth1Block from an
+// Eth1Header. This keeps the field mapping in sync across forks — any new field
+// added to Eth1Header is automatically picked up here.
+func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
+	block := NewEth1Block(version, beaconCfg)
+	block.ParentHash = header.ParentHash
+	block.FeeRecipient = header.FeeRecipient
+	block.StateRoot = header.StateRoot
+	block.ReceiptsRoot = header.ReceiptsRoot
+	block.LogsBloom = header.LogsBloom
+	block.PrevRandao = header.PrevRandao
+	block.BlockNumber = header.BlockNumber
+	block.GasLimit = header.GasLimit
+	block.GasUsed = header.GasUsed
+	block.Time = header.Time
+	block.BaseFeePerGas = header.BaseFeePerGas
+	block.BlockHash = header.BlockHash
+	if header.Extra != nil {
+		block.Extra = solid.NewExtraData()
+		block.Extra.SetBytes(header.Extra.Bytes())
+	}
+	block.Transactions = &solid.TransactionsSSZ{}
+	if version >= clparams.CapellaVersion {
+		block.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+	}
+	if version >= clparams.DenebVersion {
+		block.BlobGasUsed = header.BlobGasUsed
+		block.ExcessBlobGas = header.ExcessBlobGas
+	}
+	return block
 }
 
 // NewEth1BlockFromHeaderAndBody with given header/body.
@@ -115,25 +145,32 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		ParentHash    common.Hash                 `json:"parent_hash"`
-		FeeRecipient  common.Address              `json:"fee_recipient"`
-		StateRoot     common.Hash                 `json:"state_root"`
-		ReceiptsRoot  common.Hash                 `json:"receipts_root"`
-		LogsBloom     types.Bloom                 `json:"logs_bloom"`
-		PrevRandao    common.Hash                 `json:"prev_randao"`
-		BlockNumber   uint64                      `json:"block_number,string"`
-		GasLimit      uint64                      `json:"gas_limit,string"`
-		GasUsed       uint64                      `json:"gas_used,string"`
-		Time          uint64                      `json:"timestamp,string"`
-		Extra         *solid.ExtraData            `json:"extra_data"`
-		BaseFeePerGas string                      `json:"base_fee_per_gas"`
-		BlockHash     common.Hash                 `json:"block_hash"`
-		Transactions  *solid.TransactionsSSZ      `json:"transactions"`
-		Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-		BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
-		ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
-	}{
+	baseFeePerGas := uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:])
+	baseFeePerGas.ReverseBytes(baseFeePerGas)
+
+	// Ensure withdrawals is never nil for Capella+ (spec requires empty array, not absent)
+	withdrawals := b.Withdrawals
+	if withdrawals == nil && b.version >= clparams.CapellaVersion {
+		withdrawals = solid.NewStaticListSSZ[*Withdrawal](0, 44)
+	}
+
+	type bellatrixPayload struct {
+		ParentHash    common.Hash            `json:"parent_hash"`
+		FeeRecipient  common.Address         `json:"fee_recipient"`
+		StateRoot     common.Hash            `json:"state_root"`
+		ReceiptsRoot  common.Hash            `json:"receipts_root"`
+		LogsBloom     types.Bloom            `json:"logs_bloom"`
+		PrevRandao    common.Hash            `json:"prev_randao"`
+		BlockNumber   uint64                 `json:"block_number,string"`
+		GasLimit      uint64                 `json:"gas_limit,string"`
+		GasUsed       uint64                 `json:"gas_used,string"`
+		Time          uint64                 `json:"timestamp,string"`
+		Extra         *solid.ExtraData       `json:"extra_data"`
+		BaseFeePerGas string                 `json:"base_fee_per_gas"`
+		BlockHash     common.Hash            `json:"block_hash"`
+		Transactions  *solid.TransactionsSSZ `json:"transactions"`
+	}
+	base := bellatrixPayload{
 		ParentHash:    b.ParentHash,
 		FeeRecipient:  b.FeeRecipient,
 		StateRoot:     b.StateRoot,
@@ -145,13 +182,34 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 		GasUsed:       b.GasUsed,
 		Time:          b.Time,
 		Extra:         b.Extra,
-		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
+		BaseFeePerGas: baseFeePerGas.Dec(),
 		BlockHash:     b.BlockHash,
 		Transactions:  b.Transactions,
-		Withdrawals:   b.Withdrawals,
-		BlobGasUsed:   b.BlobGasUsed,
-		ExcessBlobGas: b.ExcessBlobGas,
-	})
+	}
+
+	if b.version >= clparams.DenebVersion {
+		return json.Marshal(struct {
+			bellatrixPayload
+			Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
+			BlobGasUsed   uint64                      `json:"blob_gas_used,string"`
+			ExcessBlobGas uint64                      `json:"excess_blob_gas,string"`
+		}{
+			bellatrixPayload: base,
+			Withdrawals:      withdrawals,
+			BlobGasUsed:      b.BlobGasUsed,
+			ExcessBlobGas:    b.ExcessBlobGas,
+		})
+	}
+	if b.version >= clparams.CapellaVersion {
+		return json.Marshal(struct {
+			bellatrixPayload
+			Withdrawals *solid.ListSSZ[*Withdrawal] `json:"withdrawals"`
+		}{
+			bellatrixPayload: base,
+			Withdrawals:      withdrawals,
+		})
+	}
+	return json.Marshal(base)
 }
 
 func (b *Eth1Block) UnmarshalJSON(data []byte) error {
@@ -193,9 +251,8 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmpBaseFee := tmp.Bytes32()
-	b.BaseFeePerGas = common.Hash{}
-	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
+	tmp.ReverseBytes(tmp)
+	tmp.WriteToArray32((*[32]byte)(&b.BaseFeePerGas))
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals
@@ -312,7 +369,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
-	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
@@ -338,8 +395,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
 		ReceiptHash:           b.ReceiptsRoot,
 		Bloom:                 b.LogsBloom,
-		Difficulty:            merge.ProofOfStakeDifficulty,
-		Number:                new(big.Int).SetUint64(b.BlockNumber),
+		Difficulty:            *merge.ProofOfStakeDifficulty,
 		GasLimit:              b.GasLimit,
 		GasUsed:               b.GasUsed,
 		Time:                  b.Time,
@@ -350,6 +406,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		WithdrawalsHash:       withdrawalsHash,
 		ParentBeaconBlockRoot: parentRoot,
 	}
+	header.Number.SetUint64(b.BlockNumber)
 
 	if b.version >= clparams.DenebVersion {
 		blobGasUsed := b.BlobGasUsed

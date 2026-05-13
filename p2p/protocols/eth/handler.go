@@ -30,7 +30,16 @@ import (
 
 const (
 	// softResponseLimit is the target maximum size of replies to data retrievals.
+	// It is a soft, per-block-boundary limit: once the running total exceeds this
+	// threshold the server stops adding more blocks, but the current block is
+	// still included in full. Used by all protocol versions (eth/68–70).
 	softResponseLimit = 2 * 1024 * 1024
+
+	// Eth70ResponseSizeLimit is the hard, per-receipt limit introduced in eth/70.
+	// Unlike softResponseLimit, it can cut a block's receipt list short (setting
+	// LastBlockIncomplete in the response). It is based on maxMessageSize minus
+	// room for the packet envelope (request-id, flag, list prefixes).
+	Eth70ResponseSizeLimit = maxMessageSize - 512
 
 	// estHeaderSize is the approximate size of an RLP encoded block header.
 	estHeaderSize = 500

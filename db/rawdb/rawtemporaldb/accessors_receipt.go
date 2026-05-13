@@ -60,7 +60,7 @@ func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlo
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumGasUsedInBlock)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, buf[:i], txNum, nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeGasUsedInBlockKey, buf[:i], txNum, nil); err != nil {
 			return err
 		}
 	}
@@ -68,7 +68,7 @@ func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlo
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], cumBlobGasUsed)
-		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, buf[:i], txNum, nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, CumulativeBlobGasUsedInBlockKey, buf[:i], txNum, nil); err != nil {
 			return err
 		}
 	}
@@ -76,7 +76,7 @@ func AppendReceipt(tx kv.TemporalPutDel, logIndexAfterTx uint32, cumGasUsedInBlo
 	{
 		var buf [binary.MaxVarintLen64]byte
 		i := binary.PutUvarint(buf[:], uint64(logIndexAfterTx))
-		if err := tx.DomainPut(kv.ReceiptDomain, LogIndexAfterTxKey, buf[:i], txNum, nil, 0); err != nil {
+		if err := tx.DomainPut(kv.ReceiptDomain, LogIndexAfterTxKey, buf[:i], txNum, nil); err != nil {
 			return err
 		}
 	}

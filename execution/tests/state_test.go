@@ -23,14 +23,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"syscall"
 	"testing"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -46,19 +52,22 @@ func TestStateCornerCases(t *testing.T) {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
 
-	st := new(testMatcher)
+	st := new(testutil.TestMatcher)
 
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, cornersDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	testDir := path.Join(cornersDir, "state")
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
+					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
@@ -66,7 +75,7 @@ func TestStateCornerCases(t *testing.T) {
 						// Ignore expected errors
 						return nil
 					}
-					return st.checkFailure(t, err)
+					return st.CheckFailure(t, err)
 				})
 			})
 		}
@@ -85,28 +94,30 @@ func TestState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	st := new(testMatcher)
+	st := new(testutil.TestMatcher)
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
+	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
 
 	// Slow tests
-	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
 
 	// Very slow tests
-	st.skipLoad(`^stTimeConsuming/`)
+	st.SkipLoad(`^stTimeConsuming/`)
 
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
+					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
@@ -114,11 +125,41 @@ func TestState(t *testing.T) {
 						// Ignore expected errors
 						return nil
 					}
-					return st.checkFailure(t, err)
+					return st.CheckFailure(t, err)
 				})
 			})
 		}
 	})
+}
+
+// temporalRwTry is implemented by *temporal.DB when the underlying MDBX env
+// supports non-blocking write-tx opens.
+type temporalRwTry interface {
+	BeginTemporalRwTry(ctx context.Context) (kv.TemporalRwTx, error)
+}
+
+// beginRwNoContention opens a write tx and fatals immediately on EBUSY, which
+// indicates that two goroutines are racing on the same DB — a sign of
+// unintended db sharing between parallel subtests.
+func beginRwNoContention(t *testing.T, db kv.TemporalRwDB) kv.TemporalRwTx {
+	t.Helper()
+	if tryDB, ok := db.(temporalRwTry); ok {
+		tx, err := tryDB.BeginTemporalRwTry(context.Background())
+		if err != nil {
+			if errors.Is(err, syscall.EBUSY) {
+				t.Fatal("write lock contention: multiple goroutines sharing one db")
+			}
+			t.Fatal(err)
+		}
+		t.Cleanup(tx.Rollback)
+		return tx
+	}
+	tx, err := db.BeginTemporalRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return tx
 }
 
 func withTrace(t *testing.T, test func(vm.Config) error) {
@@ -133,7 +174,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{EnableMemory: false}, w)
 	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

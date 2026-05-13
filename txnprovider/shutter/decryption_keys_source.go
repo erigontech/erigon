@@ -164,11 +164,9 @@ func (dks *PubSubDecryptionKeysSource) Subscribe(ctx context.Context) (Decryptio
 		return nil, err
 	}
 	go func() {
-		select {
-		case <-ctx.Done():
-			dks.logger.Debug("cancelling pubsub decryption keys subscription")
-			sub.Cancel()
-		}
+		<-ctx.Done()
+		dks.logger.Debug("cancelling pubsub decryption keys subscription")
+		sub.Cancel()
 	}()
 	return sub, nil
 }

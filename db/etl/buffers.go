@@ -21,14 +21,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 const (
@@ -42,7 +44,39 @@ const (
 
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
+
+	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
 )
+
+// writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
+func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
+	var numBuf [binary.MaxVarintLen64]byte
+	for _, entry := range entries {
+		lk := int64(len(entry.key))
+		if entry.key == nil {
+			lk = -1
+		}
+		n := binary.PutVarint(numBuf[:], lk)
+		if _, err := w.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write(entry.key); err != nil {
+			return err
+		}
+		lv := int64(len(entry.value))
+		if entry.value == nil {
+			lv = -1
+		}
+		n = binary.PutVarint(numBuf[:], lv)
+		if _, err := w.Write(numBuf[:n]); err != nil {
+			return err
+		}
+		if _, err := w.Write(entry.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
@@ -63,7 +97,9 @@ var LargeSortableBuffers = NewAllocator(&sync.Pool{
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
+	// Get returns direct references to the internal key/value storage without copying.
+	// The returned slices must not be modified by the caller.
+	Get(i int) ([]byte, []byte)
 	Len() int
 	Reset()
 	SizeLimit() int
@@ -84,109 +120,103 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
+// entryLoc stores the location of a key/value pair within sortableBuffer.data.
+// Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
+// keyLen/valLen of -1 indicates nil.
+type entryLoc struct {
+	insertionOrder int32 // enables stable sort via unstable SortFunc
+	offset         int32
+	keyLen         int32
+	valLen         int32
+}
+
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
+	if bufferOptimalSize.Bytes() > math.MaxInt32 {
+		panic(fmt.Sprintf("etl: sortableBuffer size %d exceeds MaxInt32", bufferOptimalSize.Bytes()))
+	}
 	return &sortableBuffer{
 		optimalSize: int(bufferOptimalSize.Bytes()),
 	}
 }
 
 type sortableBuffer struct {
-	offsets     []int
-	lens        []int
+	entries     []entryLoc
 	data        []byte
-	size        int
 	optimalSize int
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	lk, lv := len(k), len(v)
+	e := entryLoc{
+		offset:         int32(len(b.data)),    //nolint:gosec
+		keyLen:         int32(len(k)),         //nolint:gosec
+		valLen:         int32(len(v)),         //nolint:gosec
+		insertionOrder: int32(len(b.entries)), //nolint:gosec
+	}
 	if k == nil {
-		lk = -1
+		e.keyLen = -1
 	}
 	if v == nil {
-		lv = -1
+		e.valLen = -1
 	}
-	b.lens = append(b.lens, lk, lv)
-
-	b.offsets = append(b.offsets, len(b.data))
-	b.data = append(b.data, k...)
-	b.offsets = append(b.offsets, len(b.data))
-	b.data = append(b.data, v...)
-	b.size += lk + lv + 32 // size = len(b.data) + 8*len(b.offsets) + 8*len(b.lens)
+	b.entries = append(b.entries, e)
+	b.data = append(append(b.data, k...), v...)
 }
 
-func (b *sortableBuffer) Size() int { return b.size }
+func (b *sortableBuffer) Size() int { return len(b.data) + len(b.entries)*entryLocSize }
 
 func (b *sortableBuffer) Len() int {
-	return len(b.offsets) / 2
+	return len(b.entries)
 }
 
-func (b *sortableBuffer) Less(i, j int) bool {
-	i2, j2 := i*2, j*2
-	ki := b.data[b.offsets[i2] : b.offsets[i2]+b.lens[i2]]
-	kj := b.data[b.offsets[j2] : b.offsets[j2]+b.lens[j2]]
-	return bytes.Compare(ki, kj) < 0
-}
-
-func (b *sortableBuffer) Swap(i, j int) {
-	i2, j2 := i*2, j*2
-	b.offsets[i2], b.offsets[j2] = b.offsets[j2], b.offsets[i2]
-	b.offsets[i2+1], b.offsets[j2+1] = b.offsets[j2+1], b.offsets[i2+1]
-	b.lens[i2], b.lens[j2] = b.lens[j2], b.lens[i2]
-	b.lens[i2+1], b.lens[j2+1] = b.lens[j2+1], b.lens[i2+1]
-}
-
-func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	i2 := i * 2
-	keyOffset, valOffset := b.offsets[i2], b.offsets[i2+1]
-	keyLen, valLen := b.lens[i2], b.lens[i2+1]
-	if keyLen > 0 {
-		keyBuf = append(keyBuf, b.data[keyOffset:keyOffset+keyLen]...)
-	} else if keyLen == 0 {
-		if keyBuf != nil {
-			keyBuf = keyBuf[:0]
-		} else {
-			keyBuf = []byte{}
-		}
-	} else {
-		keyBuf = nil
+func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
+	e := &b.entries[i]
+	kLen, vLen := int(e.keyLen), int(e.valLen)
+	keyOffset := int(e.offset)
+	valOffset := keyOffset
+	if kLen > 0 {
+		valOffset += kLen
 	}
-	if valLen > 0 {
-		valBuf = append(valBuf, b.data[valOffset:valOffset+valLen]...)
-	} else if valLen == 0 {
-		if valBuf != nil {
-			valBuf = valBuf[:0]
-		} else {
-			valBuf = []byte{}
-		}
-	} else {
-		valBuf = nil
+	var key, val []byte
+	if kLen > 0 {
+		key = b.data[keyOffset : keyOffset+kLen]
+	} else if kLen == 0 {
+		key = []byte{}
 	}
-	return keyBuf, valBuf
+	if vLen > 0 {
+		val = b.data[valOffset : valOffset+vLen]
+	} else if vLen == 0 {
+		val = []byte{}
+	}
+	return key, val
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.lens = make([]int, 0, predictKeysAmount)
-	b.offsets = make([]int, 0, predictKeysAmount)
+	b.entries = make([]entryLoc, 0, predictKeysAmount)
 	b.data = make([]byte, 0, predictDataSize)
-	b.size = 0
 	return b
 }
 
 func (b *sortableBuffer) Reset() {
-	b.offsets = b.offsets[:0]
-	b.lens = b.lens[:0]
+	b.entries = b.entries[:0]
 	b.data = b.data[:0]
-	b.size = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
-	if sort.IsSorted(b) {
+	data := b.data
+	cmp := func(a, b entryLoc) int {
+		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+		if c := bytes.Compare(aKey, bKey); c != 0 {
+			return c
+		}
+		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+	}
+	if slices.IsSortedFunc(b.entries, cmp) {
 		return
 	}
-	sort.Stable(b)
+	slices.SortFunc(b.entries, cmp)
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
@@ -195,17 +225,33 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 
 func (b *sortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
-	for i, offset := range b.offsets {
-		l := b.lens[i]
-		n := binary.PutVarint(numBuf[:], int64(l))
+	for i := range b.entries {
+		e := &b.entries[i]
+		kLen, vLen := int(e.keyLen), int(e.valLen)
+		keyOffset := int(e.offset)
+		valOffset := keyOffset
+		if kLen > 0 {
+			valOffset += kLen
+		}
+		// write key
+		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
-		if l <= 0 {
-			continue
+		if kLen > 0 {
+			if _, err := w.Write(b.data[keyOffset : keyOffset+kLen]); err != nil {
+				return err
+			}
 		}
-		if _, err := w.Write(b.data[offset : offset+l]); err != nil {
+		// write value
+		n = binary.PutVarint(numBuf[:], int64(e.valLen))
+		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
+		}
+		if vLen > 0 {
+			if _, err := w.Write(b.data[valOffset : valOffset+vLen]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -249,7 +295,7 @@ func (b *appendSortableBuffer) Sort() {
 	for key, val := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(key), value: val})
 	}
-	sort.Stable(b)
+	sort.Sort(b) // Doesn't need `sort.Stable` because this buffer type can't produce duplicated values
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
@@ -260,10 +306,8 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *appendSortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
+func (b *appendSortableBuffer) Get(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
@@ -277,33 +321,7 @@ func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) 
 }
 
 func (b *appendSortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeSortedEntries(w, b.sortedBuf)
 }
 
 func (b *appendSortableBuffer) CheckFlushSize() bool {
@@ -351,7 +369,7 @@ func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
-	sort.Stable(b)
+	sort.Sort(b) // Doesn't need `sort.Stable` because this buffer type can't produce duplicated values
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
@@ -362,10 +380,8 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *oldestEntrySortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
+func (b *oldestEntrySortableBuffer) Get(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
@@ -379,33 +395,7 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 }
 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
-	var numBuf [binary.MaxVarintLen64]byte
-	entries := b.sortedBuf
-	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeSortedEntries(w, b.sortedBuf)
 }
 func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize

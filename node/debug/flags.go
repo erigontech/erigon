@@ -29,11 +29,12 @@ import (
 	"strings"
 
 	"github.com/felixge/fgprof"
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/yaml.v2"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/fdlimit"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -218,6 +219,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 			StartPProf(address, nil)
 		}
 	}
+	go dbg.SaveHeapProfileNearOOMPeriodically(cmd.Context(), dbg.SaveHeapWithLogger(&logger))
 	return logger
 }
 
@@ -291,7 +293,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	}
 
 	if metricsEnabled || pprofEnabled {
-		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
+		torrentMsg := fmt.Sprintf("curl -fSs http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
 		log.Info("To get torrent client status", "command", torrentMsg)
 	}
 
@@ -320,7 +322,15 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 		}
 	}
 
+	go dbg.SaveHeapProfileNearOOMPeriodically(ctx.Context, dbg.SaveHeapWithLogger(&logger))
+
 	return logger, tracer, metricsMux, pprofMux, nil
+}
+
+// SetupSimple is like Setup but only returns the logger, discarding the tracer and muxes.
+func SetupSimple(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
+	logger, _, _, _, err := Setup(ctx, rootLogger)
+	return logger, err
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {

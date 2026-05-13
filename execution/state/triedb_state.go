@@ -314,11 +314,11 @@ func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
 // modifications of the contract's storage. In such case, all previously modified storage
 // item updates would be inclided.
 func (tds *TrieDbState) BuildStorageReads() common.StorageKeys {
-	storageTouches := common.StorageKeys{}
+	storageTouches := make(common.StorageKeys, 0, len(tds.aggregateBuffer.storageReads))
 	for storageKey := range tds.aggregateBuffer.storageReads {
 		storageTouches = append(storageTouches, storageKey)
 	}
-	sort.Sort(storageTouches)
+	storageTouches.Sort()
 	return storageTouches
 }
 
@@ -339,7 +339,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 			storageTouches = append(storageTouches, storageKey)
 		}
 	}
-	sort.Sort(storageTouches)
+	storageTouches.Sort()
 	var addrHash common.Hash
 	var keyHash common.Hash
 	var values = make([][]byte, len(storageTouches))
@@ -373,11 +373,11 @@ func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
 // (or also just read, if tds.resolveReads flags is turned one) within the
 // period for which we are aggregating update
 func (tds *TrieDbState) BuildAccountReads() common.Hashes {
-	accountTouches := common.Hashes{}
+	accountTouches := make(common.Hashes, 0, len(tds.aggregateBuffer.accountReads))
 	for addrHash := range tds.aggregateBuffer.accountReads {
 		accountTouches = append(accountTouches, addrHash)
 	}
-	sort.Sort(accountTouches)
+	accountTouches.Sort()
 	return accountTouches
 }
 
@@ -440,7 +440,7 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 		}
 		accountTouches = append(accountTouches, addrHash)
 	}
-	sort.Sort(accountTouches)
+	accountTouches.Sort()
 	aValues := make([]*accounts.Account, len(accountTouches))
 	aCodes := make([][]byte, len(accountTouches))
 	for i, addrHash := range accountTouches {
@@ -736,7 +736,7 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
@@ -761,7 +761,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash := crypto.HashData(code)
 
 		addrHash, err1 := common.HashData(addressValue[:])
 		if err1 != nil {

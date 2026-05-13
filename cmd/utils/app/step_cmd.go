@@ -11,26 +11,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/node/debug"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
@@ -38,6 +35,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	currentStepSize := settings.StepSize
 	newStepSize := cliCtx.Uint64("new-step-size")
 	logger.Info("Rebasing step size", "current", currentStepSize, "new", newStepSize)
+
+	if newStepSize == 0 {
+		logger.Crit("Invalid step size", "new-step-size", newStepSize)
+		return fmt.Errorf("new step size must be greater than 0")
+	}
 
 	if newStepSize == currentStepSize {
 		logger.Info("Step size is already at the desired value; exiting", "new-step-size", newStepSize)
@@ -114,7 +116,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	dels = append(dels, idxTorrents...)
 
 	// include whole chaindata directory for deletion
-	dels = append(dels, dirs.Chaindata)
+	dels = append(dels, dirs.Chaindata) //nolint:gocritic
+
+	// include erigondb.toml.torrent which is invalidated by the rebase
+	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
+
 	for _, f := range dels {
 		fmt.Printf("D: %s\n", f)
 	}
@@ -204,13 +210,16 @@ func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor u
 	})
 
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, fmt.Errorf("scanning %s: %w", domainPath, walkErr)
 	}
 	return renList, nil
 }
 
 // collectTorrentFiles walks given root and returns absolute paths to files ending with .torrent
 func collectTorrentFiles(root string) ([]string, error) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil, nil
+	}
 	list := make([]string, 0, 100)
 	walkErr := fs.WalkDir(os.DirFS(root), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -225,7 +234,7 @@ func collectTorrentFiles(root string) ([]string, error) {
 		return nil
 	})
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, fmt.Errorf("scanning %s: %w", root, walkErr)
 	}
 	return list, nil
 }

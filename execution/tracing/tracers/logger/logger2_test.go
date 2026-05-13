@@ -22,7 +22,7 @@ package logger
 //func TestStoreCapture2(t *testing.T) {
 //	var (
 //		logger   = NewStructLogger(nil)
-//		env      = vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: logger})
+//		env      = vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, &dummyStatedb{}, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: logger})
 //		contract = vm.NewContract(&dummyContractRef{}, &dummyContractRef{}, new(big.Int), 100000)
 //	)
 //	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}

@@ -25,7 +25,7 @@ func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader ser
 	}
 
 	if stateFileProgress > blockFileProgress {
-		return fmt.Errorf("state files progress (%d) is ahead of blocks files progress (%d)", stateFileProgress, blockFileProgress)
+		return fmt.Errorf("state files progress (%d) is ahead of blocks files progress (%d). To recover: erigon seg rm-state --latest --datadir=<datadir>, then run integration stage_exec --reset --datadir=<datadir>", stateFileProgress, blockFileProgress)
 	}
 
 	return nil

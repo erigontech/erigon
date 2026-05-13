@@ -27,6 +27,9 @@ import (
 	"unicode"
 
 	"github.com/c2h5oh/datasize"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -37,9 +40,12 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+// PeerBanner is an interface for banning misbehaving peers.
+type PeerBanner interface {
+	BanPeer(pid string)
+}
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
@@ -52,6 +58,7 @@ type GossipManager struct {
 	registeredServices []GossipService
 	stats              *gossipMessageStats
 	p2p                p2p.P2PManager
+	peerBanner         PeerBanner
 
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
@@ -90,8 +97,13 @@ func NewGossipManager(
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
-	gm.stats.goPrintStats(cctx)
+	//gm.stats.goPrintStats(cctx)
 	return gm
+}
+
+// SetPeerBanner sets the peer banner used to ban peers that fail message verification.
+func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
+	g.peerBanner = pb
 }
 
 // Close gracefully shuts down the GossipManager and all its goroutines
@@ -101,7 +113,22 @@ func (g *GossipManager) Close() error {
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
-	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	var selfID peer.ID
+	if h := g.p2p.Host(); h != nil {
+		selfID = h.ID()
+	}
+	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[GossipManager] panic in validator, rejecting message", "err", r, "topic", msg.GetTopic())
+				result = pubsub.ValidationReject
+			}
+		}()
+		// Skip validation for self-published messages: they were already validated
+		// by ProcessMessage before Publish was called.
+		if selfID != "" && pid == selfID {
+			return pubsub.ValidationAccept
+		}
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()
@@ -161,8 +188,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
-			log.Warn("[GossipManager] reject message", "topic", name, "err", err)
+			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
+			if g.peerBanner != nil {
+				g.peerBanner.BanPeer(string(pid))
+			}
 			return pubsub.ValidationReject
 		}
 
@@ -174,7 +204,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
-	validator := g.newPubsubValidator(service)
+	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
@@ -246,7 +276,18 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
-	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	// Log peer count for attestation topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) {
+		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
+		if peerCount == 0 {
+			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
+		} else if peerCount < 3 {
+			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
+		}
+	}
+	// Note: before publishing the message to the network, Publish() internally runs the validator function.
+	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
+	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {

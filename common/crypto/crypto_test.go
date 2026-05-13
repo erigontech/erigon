@@ -22,17 +22,17 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha3"
 	"encoding/hex"
 	"errors"
+	"hash"
 	"os"
 	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -53,14 +53,13 @@ func TestKeccak256Hash(t *testing.T) {
 func TestKeccak256Hasher(t *testing.T) {
 	msg := []byte("abc")
 	exp, _ := hex.DecodeString("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
-	hasher := NewKeccakState()
-	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashData(hasher, in); return h[:] }, msg, exp)
+	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashData(in); return h[:] }, msg, exp)
 }
 
 func TestKeccak256HasherNew(t *testing.T) {
 	msg := []byte("abc")
 	exp, _ := hex.DecodeString("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
-	hasher := sha3.New256()
+	hasher := hash.Hash(sha3.New256())
 	hasher.Write(msg)
 	var h common.Hash
 	if !bytes.Equal(exp, hasher.Sum(h[:0])) {
@@ -221,8 +220,9 @@ func TestLoadECDSA(t *testing.T) {
 		},
 	}
 
+	tempdir := t.TempDir()
 	for _, test := range tests {
-		f, err := os.CreateTemp("", "loadecdsa_test.*.txt")
+		f, err := os.CreateTemp(tempdir, "loadecdsa_test.*.txt")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,13 +243,12 @@ func TestLoadECDSA(t *testing.T) {
 }
 
 func TestSaveECDSA(t *testing.T) {
-	f, err := os.CreateTemp("", "saveecdsa_test.*.txt")
+	f, err := os.CreateTemp(t.TempDir(), "saveecdsa_test.*.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := f.Name()
 	f.Close()
-	defer dir.RemoveFile(file)
 
 	key, _ := HexToECDSA(testPrivHex)
 	if e := SaveECDSA(file, key); e != nil {
@@ -332,4 +331,35 @@ func TestPythonIntegration(t *testing.T) {
 
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg0, kh, sig0)
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)
+}
+
+var benchPayload = make([]byte, 500)
+var benchPayload1 = make([]byte, 1)
+
+func BenchmarkHashBytes(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		HashData(benchPayload)
+	}
+}
+
+func BenchmarkKeccak256Hash(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		Keccak256Hash(benchPayload)
+	}
+}
+
+func BenchmarkHashBytes1(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		HashData(benchPayload1)
+	}
+}
+
+func BenchmarkKeccak256Hash1(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		Keccak256Hash(benchPayload1)
+	}
 }

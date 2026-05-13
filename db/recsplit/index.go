@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"math/bits"
 	"os"
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type Features byte
@@ -281,7 +281,16 @@ func (idx *Index) init() (err error) {
 	validationPassed = true
 	return nil
 }
-
+func (idx *Index) ForceExistenceFilterWillNeed() {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		idx.existenceV1.MadvWillNeed()
+	}
+}
+func (idx *Index) ForceExistenceFilterNormal() {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		idx.existenceV1.MadvNormal()
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
 		return idx.existenceV1.ForceInMem()

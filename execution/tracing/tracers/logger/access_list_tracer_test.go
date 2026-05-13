@@ -53,5 +53,5 @@ func TestTracer_AccessList_Order(t *testing.T) {
 	al.addSlot(addr, slot2)
 	require.NotEqual(t, ordered, al.accessList())
 	require.Equal(t, ordered, al.accessListSorted())
-	require.True(t, al.Equal(al))
+	require.True(t, al.Equal(al)) //nolint:gocritic
 }

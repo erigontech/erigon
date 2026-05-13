@@ -1,11 +1,13 @@
 package fusefilter
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/FastFilter/xorfilter"
 	"github.com/stretchr/testify/require"
 )
 
@@ -207,6 +209,42 @@ func TestWriterClose(t *testing.T) {
 	writer.Close()
 }
 
+// requireFilterEqual asserts every header field and fingerprint count match between two filters.
+func requireFilterEqual(t *testing.T, expected, got *xorfilter.BinaryFuse[uint8]) {
+	t.Helper()
+	require.Equal(t, expected.SegmentCount, got.SegmentCount)
+	require.Equal(t, expected.SegmentCountLength, got.SegmentCountLength)
+	require.Equal(t, expected.Seed, got.Seed)
+	require.Equal(t, expected.SegmentLength, got.SegmentLength)
+	require.Equal(t, expected.SegmentLengthMask, got.SegmentLengthMask)
+	require.Equal(t, len(expected.Fingerprints), len(got.Fingerprints))
+}
+
+// Regression: reader previously decoded SegmentCount from offset 8 instead of 4, silently reading SegmentCountLength.
+func TestHeaderRoundTrip(t *testing.T) {
+	require := require.New(t)
+
+	w, err := NewWriterOffHeap(filepath.Join(t.TempDir(), "hdr_rt"))
+	require.NoError(err)
+	defer w.Close()
+
+	for i := uint64(0); i < 50; i++ {
+		require.NoError(w.AddHash(i))
+	}
+
+	original, err := w.build()
+	require.NoError(err)
+
+	var buf bytes.Buffer
+	_, err = w.write(original, &buf)
+	require.NoError(err)
+
+	r, _, err := NewReaderOnBytes(buf.Bytes(), "test")
+	require.NoError(err)
+
+	requireFilterEqual(t, original, r.inner)
+}
+
 func TestMultipleFilters(t *testing.T) {
 	require := require.New(t)
 
@@ -219,7 +257,6 @@ func TestMultipleFilters(t *testing.T) {
 
 		writer, err := NewWriter(filePath)
 		require.NoError(err, "Failed to create writer %d", i)
-		defer writer.Close()
 
 		// Add some keys
 		for j := 0; j < 100; j++ {
@@ -233,7 +270,6 @@ func TestMultipleFilters(t *testing.T) {
 		// Read back and verify
 		reader, err := NewReader(filePath)
 		require.NoError(err, "Failed to create reader for filter %d", i)
-		defer reader.Close()
 		for j := 0; j < 100; j++ {
 			key := baseKey + uint64(j)
 			require.True(reader.ContainsHash(key), "Key %d not found in filter %d", key, i)

@@ -72,11 +72,9 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 	a0.Balance.SetUint64(100000)
 	a0.Root = EmptyRoot
 	a0.CodeHash = accounts.InternCodeHash(emptyState)
-	a0.Initialised = true
 	a1.Balance.SetUint64(200000)
 	a1.Root = EmptyRoot
 	a1.CodeHash = accounts.InternCodeHash(emptyState)
-	a1.Initialised = true
 	v := []byte("VALUE")
 	for i, key := range keys {
 		if i%2 == 0 {
@@ -130,11 +128,9 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	a0.Balance.SetUint64(100000)
 	a0.Root = EmptyRoot
 	a0.CodeHash = accounts.InternCodeHash(emptyState)
-	a0.Initialised = true
 	a1.Balance.SetUint64(200000)
 	a1.Root = EmptyRoot
 	a1.CodeHash = accounts.InternCodeHash(emptyState)
-	a1.Initialised = true
 	v := []byte("VALUE")
 	for i, key := range keys {
 		if i%2 == 0 {
@@ -150,13 +146,11 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	tr.Hash()
 	// Generate account change
 	binary.BigEndian.PutUint32(preimage[:], 5000000)
-	var insertKey common.Hash
-	copy(insertKey[:], crypto.Keccak256(preimage[:]))
+	insertKey := crypto.HashData(preimage[:])
 	var insertA accounts.Account
 	insertA.Balance.SetUint64(300000)
 	insertA.Root = EmptyRoot
 	insertA.CodeHash = accounts.InternCodeHash(emptyState)
-	insertA.Initialised = true
 
 	// Build the root
 	var stream Stream

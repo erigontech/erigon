@@ -24,6 +24,7 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tidwall/btree"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -117,12 +119,14 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // findMergeRange
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
-func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-
+//
+// domainMaxSpan caps the domain values merge range; historyMaxSpan is forwarded to the history
+// (and underlying inverted index) merge. They are passed separately so that the
+// --erigondb.domain.steps-in-frozen-file CLI flag can relax the domain cap without affecting
+// history/II, which keep using the erigondb.toml stepsInFrozenFile value.
+func (dt *DomainRoTx) findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan uint64) DomainRanges {
 	r := DomainRanges{
 		name:    dt.name,
-		history: hr,
 		aggStep: dt.stepSize,
 	}
 	for _, item := range dt.files {
@@ -131,22 +135,36 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		}
 		endStep := item.endTxNum / dt.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
-		span := spanStep * dt.stepSize
-		fromTxNum := item.endTxNum - span
+		span := min(spanStep*dt.stepSize, domainMaxSpan)
+		fromTxNum := clipMergeStartToFileBoundary(dt.files, item.endTxNum-span)
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
-		if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
+		if r.values.needMerge && fromTxNum > r.values.from { //skip small files inside `span`
 			continue
 		}
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
+
+	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
+	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
+	if !r.any() {
+		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
 	return r
 }
 
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
+	if dbg.NoMergeHistory() {
+		return r
+	}
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*ht.stepSize)
+	}
+
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
 	r.index = *mr
 
@@ -157,7 +175,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		endStep := item.endTxNum / ht.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*ht.stepSize, maxSpan)
-		startTxNum := item.endTxNum - span
+		startTxNum := clipMergeStartToFileBoundary(ht.files, item.endTxNum-span)
 
 		foundSuperSet := r.history.from == item.startTxNum && item.endTxNum >= r.history.to
 		if foundSuperSet {
@@ -167,7 +185,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if startTxNum >= item.startTxNum {
 			continue
 		}
-		if r.history.needMerge && startTxNum >= r.history.from {
+		if r.history.needMerge && startTxNum > r.history.from {
 			continue
 		}
 		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
@@ -198,6 +216,9 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 //
 // 0-2,2-3: nothing to merge
 func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *MergeRange {
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*iit.stepSize)
+	}
 	var minFound bool
 	var startTxNum, endTxNum uint64
 	for _, item := range iit.files {
@@ -207,7 +228,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		endStep := item.endTxNum / iit.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
 		span := min(spanStep*iit.stepSize, maxSpan)
-		start := item.endTxNum - span
+		start := clipMergeStartToFileBoundary(iit.files, item.endTxNum-span)
 		foundSuperSet := startTxNum == item.startTxNum && item.endTxNum >= endTxNum
 		if foundSuperSet {
 			minFound = false
@@ -218,7 +239,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if start >= item.startTxNum {
 			continue
 		}
-		if minFound && start >= startTxNum {
+		if minFound && start > startTxNum {
 			continue
 		}
 		minFound = true
@@ -229,6 +250,24 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		panic(fmt.Sprintf("assert: startTxNum(%d) == endTxNum(%d)", startTxNum, endTxNum))
 	}
 	return &MergeRange{iit.name.String(), minFound, startTxNum, endTxNum}
+}
+
+// clipMergeStartToFileBoundary bumps start up to the endTxNum of any visible
+// file that straddles it (startTxNum < start < endTxNum). visibleFiles are
+// non-overlapping, so at most one straddling file can exist; the loop returns
+// as soon as it is found. Files are sorted by endTxNum ascending, so the first
+// file with endTxNum > start is the only straddler candidate.
+func clipMergeStartToFileBoundary(files visibleFiles, start uint64) uint64 {
+	for _, f := range files {
+		if f.endTxNum <= start {
+			continue
+		}
+		if f.startTxNum < start {
+			return f.endTxNum
+		}
+		return start
+	}
+	return start
 }
 
 type HistoryRanges struct {
@@ -314,8 +353,6 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
-		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
-		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -325,13 +362,21 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
-			if ok {
-				indexFiles = append(indexFiles, idxFile)
-			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
-				return nil, nil, walkErr
+
+			found := false
+			for _, iiItem := range ht.iit.files {
+				if iiItem.startTxNum == item.startTxNum && iiItem.endTxNum == item.endTxNum {
+					indexFiles = append(indexFiles, iiItem.src)
+					found = true
+					break
+				}
 			}
+			if found {
+				continue
+			}
+
+			walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
+			return nil, nil, walkErr
 		}
 
 		for _, f := range historyFiles {
@@ -357,30 +402,6 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 		}
 	}
 	return
-}
-
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
-	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
-	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
-	preIt := preSeq.Iterator(0)
-	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
-	for preIt.HasNext() {
-		v, err := preIt.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	for efIt.HasNext() {
-		v, err := efIt.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	newSeq.Build()
-	return newSeq.AppendBytes(buf), nil
 }
 
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
@@ -445,7 +466,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -535,6 +556,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, err
 		}
 	}
+
 	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -550,11 +572,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
-		btM := DefaultBtreeM
+		btM := btindex.DefaultBtreeM
 		if toStep == 0 && dt.d.FilenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -623,7 +645,12 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 
 	write := iit.dataWriter(comp, false)
-	p := ps.AddNew(path.Base(datPath), 1)
+
+	cnt := 0
+	for _, item := range files {
+		cnt += item.decompressor.Count()
+	}
+	p := ps.AddNew(path.Base(datPath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -648,72 +675,62 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 	}
 
-	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
+	var seqReader multiencseq.SequenceReader
+	var builder multiencseq.SequenceBuilder
+	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
+	var sameKeyItems []*CursorItem
+	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.
+	var mergeBaseNums []uint64
+	var mergeSeqs [][]byte
+	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
-		lastVal = append(lastVal[:0], cp[0].val...)
 
-		// Pre-rebase the first sequence
-		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
-		preIt := preSeq.Iterator(0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
-		for preIt.HasNext() {
-			v, err := preIt.Next()
-			if err != nil {
-				return nil, err
-			}
-			newSeq.AddOffset(v)
-		}
-		newSeq.Build()
-		lastVal = newSeq.AppendBytes(nil)
-		var mergedOnce bool
-
-		// Advance all the items that have this key (including the top)
+		// Collect all items sharing this key. The heap orders same-key items by
+		// descending endTxNum (reverse=true), so sameKeyItems[0] has the highest range.
+		sameKeyItems = sameKeyItems[:0]
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := heap.Pop(&cp).(*CursorItem)
-			if mergedOnce {
-				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
-					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, err)
-				}
-			} else {
-				mergedOnce = true
-			}
-			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.kvReader.HasNext() {
-				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
-				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
-				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-				heap.Push(&cp, ci1)
-			}
+			sameKeyItems = append(sameKeyItems, heap.Pop(&cp).(*CursorItem))
 		}
-		if keyBuf != nil {
-			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
-			if _, err = write.Write(keyBuf); err != nil {
-				return nil, err
-			}
-			if _, err = write.Write(valBuf); err != nil {
-				return nil, err
-			}
+
+		// Reverse to ascending txNum order (heap gives descending), then build MergeSorted inputs.
+		slices.Reverse(sameKeyItems)
+		mergeBaseNums = mergeBaseNums[:0]
+		mergeSeqs = mergeSeqs[:0]
+		for _, ci := range sameKeyItems {
+			mergeBaseNums = append(mergeBaseNums, ci.startTxNum)
+			mergeSeqs = append(mergeSeqs, ci.val)
 		}
-		keyBuf = append(keyBuf[:0], lastKey...)
-		if keyBuf == nil {
-			keyBuf = []byte{}
-		}
-		valBuf = append(valBuf[:0], lastVal...)
-	}
-	if keyBuf != nil {
-		// fmt.Printf("Put %x->%x\n", keyBuf, valBuf)
-		if _, err = write.Write(keyBuf); err != nil {
+
+		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
+		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
 			return nil, err
 		}
-		if _, err = write.Write(valBuf); err != nil {
+		for i := range mergeSeqs { // allow for GC
+			mergeSeqs[i] = nil
+		}
+		lastVal = builder.AppendBytes(lastVal[:0])
+
+		if _, err = write.Write(lastKey); err != nil {
 			return nil, err
+		}
+		if _, err = write.Write(lastVal); err != nil {
+			return nil, err
+		}
+		lastVal = lastVal[:0]
+
+		// Advance each item's reader and return non-exhausted ones to the heap.
+		for _, ci := range sameKeyItems {
+			if ci.kvReader.HasNext() {
+				ci.key, _ = ci.kvReader.Next(ci.key[:0])
+				ci.val, _ = ci.kvReader.Next(ci.val[:0])
+				i += 2
+				heap.Push(&cp, ci)
+			}
+		}
+		if i%1024 == 0 {
+			p.Processed.Store(i)
 		}
 	}
 	if err = write.Compress(); err != nil {
@@ -752,8 +769,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
-		return nil, nil, err
+	if r.index.needMerge {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+			return nil, nil, err
+		}
 	}
 	if r.history.needMerge {
 		var comp *seg.Compressor
@@ -789,8 +808,14 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp)
-		p := ps.AddNew(path.Base(datPath), 1)
+
+		pagedWr := ht.dataWriter(ctx, comp)
+
+		cnt := 0
+		for _, item := range indexFiles {
+			cnt += item.decompressor.Count()
+		}
+		p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
 		defer ps.Delete(p)
 
 		var cp CursorHeap
@@ -834,28 +859,40 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var lastKey, valBuf []byte
-		var keyCount int
+		var lastKey, valBuf, histKeyBuf []byte
+		var seq multiencseq.SequenceReader
+		var ss multiencseq.SequenceIterator
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := multiencseq.Count(ci1.startTxNum, ci1.val)
-				for i := uint64(0); i < count; i++ {
-					if !ci1.hist.HasNext() {
-						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
+
+				seq.Reset(ci1.startTxNum, ci1.val)
+				ss.Reset(&seq, 0)
+
+				for ss.HasNext() {
+					txNum, err := ss.Next()
+					if err != nil {
+						panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
 					}
 
-					var k, v []byte
-					k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
-					if err = pagedWr.Add(k, v); err != nil {
+					if !ci1.hist.HasNext() {
+						panic(fmt.Errorf("assert: no value??? %s, txNum=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, lastKey, ci1.key))
+					}
+
+					var v []byte
+					_, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
+
+					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+
+					if err = pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-				keyCount += int(count)
+				p.Processed.Add(1)
 				if ci1.kvReader.HasNext() {
 					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
@@ -1036,10 +1073,10 @@ func hasCoverVisibleFile(visibleFiles []visibleFile, item *FilesItem) bool {
 
 type Ranges struct {
 	domain        [kv.DomainLen]DomainRanges
-	invertedIndex []*MergeRange
+	invertedIndex [kv.StandaloneIdxLen]*MergeRange
 }
 
-func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex []*MergeRange) Ranges {
+func NewRanges(domain [kv.DomainLen]DomainRanges, invertedIndex [kv.StandaloneIdxLen]*MergeRange) Ranges {
 	return Ranges{domain: domain, invertedIndex: invertedIndex}
 }
 
@@ -1068,6 +1105,15 @@ func (r Ranges) any() bool {
 	}
 	for _, ii := range r.invertedIndex {
 		if ii != nil && ii.needMerge {
+			return true
+		}
+	}
+	return false
+}
+
+func (r Ranges) anyDomainValues() bool {
+	for _, d := range &r.domain {
+		if d.values.needMerge {
 			return true
 		}
 	}

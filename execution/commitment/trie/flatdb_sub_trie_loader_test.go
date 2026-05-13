@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -38,7 +39,6 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
 	acc1.Incarnation = 1
-	acc1.Initialised = true
 	tr.UpdateAccount(kAcc1, &acc1)
 	tr.Update(concat(kAcc1, ks1...), []byte{1, 2, 3})
 
@@ -48,15 +48,14 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc2 := accounts.NewAccount()
 	acc2.Balance.SetUint64(6789)
 	acc2.Incarnation = 1
-	acc2.Initialised = true
 	tr.UpdateAccount(kAcc2, &acc2)
 	tr.Update(concat(kAcc2, ks2...), []byte{4, 5, 6})
 	tr.Update(concat(kAcc2, ks22...), []byte{7, 8, 9})
 	tr.Hash()
 
 	// Evict accounts only
-	tr.EvictNode(keybytesToHex(kAcc1))
-	tr.EvictNode(keybytesToHex(kAcc2))
+	tr.EvictNode(nibbles.KeybytesToHex(kAcc1))
+	tr.EvictNode(nibbles.KeybytesToHex(kAcc2))
 	rs := NewRetainList(0)
 	rs.AddKey(concat(concat(kAcc1, kInc...), ks1...))
 	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))

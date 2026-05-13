@@ -33,7 +33,6 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised     bool
 	Nonce           uint64
 	Balance         uint256.Int
 	Root            common.Hash // merkle root of the storage trie
@@ -45,7 +44,6 @@ type Account struct {
 const (
 	MimetypeDataWithValidator = "data/validator"
 	MimetypeTypedData         = "data/typed"
-	MimetypeClique            = "application/x-clique-header"
 	MimetypeBor               = "application/x-bor-header"
 	MimetypeTextPlain         = "text/plain"
 )
@@ -258,7 +256,6 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
-	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
@@ -284,7 +281,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		)
 	}
 
-	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
@@ -440,7 +436,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 }
 
 func (a *Account) Reset() {
-	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.Clear()
@@ -608,16 +603,6 @@ func (a *Account) Equals(acc *Account) bool {
 		a.Incarnation == acc.Incarnation
 }
 
-func ConvertV3toV2(v []byte) ([]byte, error) {
-	var a Account
-	if err := DeserialiseV3(&a, v); err != nil {
-		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
-	}
-	v = make([]byte, a.EncodingLengthForStorage())
-	a.EncodeForStorage(v)
-	return v, nil
-}
-
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
@@ -721,108 +706,4 @@ func SerialiseV3(a *Account) []byte {
 		}
 	}
 	return value
-}
-
-func SerialiseV3Len(a *Account) (l int) {
-	l++
-	if a.Nonce > 0 {
-		l += common.BitLenToByteLen(bits.Len64(a.Nonce))
-	}
-	l++
-	if !a.Balance.IsZero() {
-		l += a.Balance.ByteLen()
-	}
-	l++
-	if !a.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if a.Incarnation > 0 {
-		l += common.BitLenToByteLen(bits.Len64(a.Incarnation))
-	}
-	return l
-}
-
-func SerialiseV3To(a *Account, value []byte) {
-	pos := 0
-	if a.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := common.BitLenToByteLen(bits.Len64(a.Nonce))
-		value[pos] = byte(nonceBytes)
-		var nonce = a.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if a.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := a.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if a.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		codeHashValue := a.CodeHash.Value()
-		copy(value[pos:pos+32], codeHashValue[:])
-		pos += 32
-	}
-	if a.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := common.BitLenToByteLen(bits.Len64(a.Incarnation))
-		value[pos] = byte(incBytes)
-		var inc = a.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
-}
-
-// Decode the sender's balance and nonce from encoded byte-slice
-func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
-	if len(enc) == 0 {
-		return
-	}
-
-	var fieldSet = enc[0]
-	var pos = 1
-
-	if fieldSet&1 > 0 {
-		decodeLength := int(enc[pos])
-
-		if len(enc) < pos+decodeLength+1 {
-			return nonce, balance, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		nonce = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&2 > 0 {
-		decodeLength := int(enc[pos])
-
-		if len(enc) < pos+decodeLength+1 {
-			return nonce, balance, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		(&balance).SetBytes(enc[pos+1 : pos+decodeLength+1])
-	}
-	return
 }

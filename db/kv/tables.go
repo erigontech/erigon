@@ -61,6 +61,8 @@ const (
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
+	// BlockAccessList stores RLP-encoded block access lists, keyed by block_num_u64 + hash.
+	BlockAccessList = "BlockAccessList"
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
@@ -86,9 +88,6 @@ const (
 
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
-
-	CliqueSeparate     = "CliqueSeparate"
-	CliqueLastSnapshot = "CliqueLastSnapshot"
 
 	// Node database tables (see nodedb.go)
 
@@ -187,6 +186,8 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
+	// tableName -> txTo;last pruned val
+	TblPruningValsProg = "PruningValsProgress"
 
 	// Erigon-CL Objects
 
@@ -303,6 +304,7 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
+	BlockAccessList,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -377,6 +379,7 @@ var ChaindataTables = []string{
 	TblTracesToIdx,
 
 	TblPruningProgress,
+	TblPruningValsProg,
 
 	MaxTxNum,
 
@@ -434,23 +437,20 @@ const (
 	RecentLocalTransaction = "RecentLocalTransaction" // sequence_u64 -> tx_hash
 	PoolTransaction        = "PoolTransaction"        // txHash -> sender+tx_rlp
 	PoolInfo               = "PoolInfo"               // option_key -> option_value
+	SenderLastActivity     = "SenderLastActivity"     // senderID_u64 -> last_on_chain_block_u64
 )
 
 var TxPoolTables = []string{
 	RecentLocalTransaction,
 	PoolTransaction,
 	PoolInfo,
+	SenderLastActivity,
 }
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = append([]string{
-	CliqueSeparate,
-	CliqueLastSnapshot,
-},
-	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
-)
+var ConsensusTables = ChaindataTables //TODO: move bor tables from chaintables to `ConsensusTables`
 var HeimdallTables = ChaindataTables
 var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
@@ -485,35 +485,14 @@ const (
 )
 
 type TableCfgItem struct {
-	Flags TableFlags
-	// AutoDupSortKeysConversion - enables some keys transformation - to change db layout without changing app code.
-	// Use it wisely - it helps to do experiments with DB format faster, but better reduce amount of Magic in app.
-	// If good DB format found, push app code to accept this format and then disable this property.
-	AutoDupSortKeysConversion bool
-	IsDeprecated              bool
-	DBI                       DBI
-	// DupFromLen - if user provide key of this length, then next transformation applied:
-	// v = append(k[DupToLen:], v...)
-	// k = k[:DupToLen]
-	// And opposite at retrieval
-	// Works only if AutoDupSortKeysConversion enabled
-	DupFromLen int
-	DupToLen   int
+	Flags        TableFlags
+	IsDeprecated bool
+	DBI          DBI
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                72,
-		DupToLen:                  40,
-	},
-	PlainState: {
-		Flags:                     DupSort,
-		AutoDupSortKeysConversion: true,
-		DupFromLen:                60,
-		DupToLen:                  28,
-	},
+	HashedStorageDeprecated: {Flags: DupSort},
+	PlainState:              {Flags: DupSort},
 
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
@@ -582,11 +561,14 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
+var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
 	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
+	case dbcfg.MigrationsDB:
+		return MigrationsTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
 	case dbcfg.SentryDB:
@@ -710,6 +692,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {

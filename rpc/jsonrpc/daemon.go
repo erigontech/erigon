@@ -23,25 +23,38 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
+	return &EthApiConfig{
+		GasCap:                      cfg.Gascap,
+		FeeCap:                      cfg.Feecap,
+		ReturnDataLimit:             cfg.ReturnDataLimit,
+		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
+		MaxGetProofRewindBlockCount: cfg.MaxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    cfg.WebsocketSubscribeLogsChannelSize,
+		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
+	}
+}
+
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
+	testingEntry *rpc.API,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.Feecap, cfg.ReturnDataLimit, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, cfg.WebsocketSubscribeLogsChannelSize, logger)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.BlockRangeLimit, cfg.GetLogsMaxResults)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
+	debugImpl := NewPrivateDebugAPI(base, db, eth, cfg.Gascap, cfg.GethCompatibility)
 	traceImpl := NewTraceAPI(base, db, cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	adminImpl := NewAdminAPI(eth)
@@ -173,8 +186,6 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Service:   InternalAPI(internalImpl),
 				Version:   "1.0",
 			})
-		case "clique":
-			list = append(list, clique.NewCliqueAPI(db, engine, blockReader))
 		case "overlay":
 			list = append(list, rpc.API{
 				Namespace: "overlay",
@@ -182,6 +193,11 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Service:   OverlayAPI(overlayImpl),
 				Version:   "1.0",
 			})
+		case "testing":
+			if testingEntry != nil {
+				logger.Warn("[HTTP API] testing_ RPC namespace is ENABLED — do not use on production networks")
+				list = append(list, *testingEntry)
+			}
 		}
 	}
 

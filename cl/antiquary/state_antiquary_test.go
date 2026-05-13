@@ -18,7 +18,6 @@ package antiquary
 
 import (
 	"context"
-	_ "embed"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,7 +41,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 	sn.OnHeadState(postState)
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
+	a := NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, true, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 }
 
@@ -57,13 +56,11 @@ func TestStateAntiquaryCapella(t *testing.T) {
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
-	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }

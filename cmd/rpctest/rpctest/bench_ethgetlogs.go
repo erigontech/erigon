@@ -17,14 +17,15 @@
 package rpctest
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
-	"os"
+	"slices"
+	"sort"
+	"sync"
 	"time"
 
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -44,26 +45,11 @@ import (
 func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, gethURL)
 
-	var rec *bufio.Writer
-	if recordFile != "" {
-		f, err := os.Create(recordFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFile != "" {
-		ferr, err := os.Create(errorFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer cleanup()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
@@ -219,7 +205,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				sawAddr[l.Address] = struct{}{}
 			}
 
-			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, maps.Keys(sawAddr)), &resp)
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
 			if res.Err != nil {
 				if failFast {
 					return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
@@ -331,6 +317,102 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 		}
 	}
 	return nil
+}
+
+func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
+	setRoutes(erigonURL, "")
+
+	reqGen := &RequestGenerator{}
+
+	var res CallResult
+
+	var blockNumber EthBlockNumber
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+
+	latencyLen := 1000
+	latency := make([]int, 0, latencyLen)
+	var m sync.Mutex
+	var finishedRequests uint64
+
+	go func() {
+		lastPrint := time.Now()
+		p50 := float64(0)
+		p90 := float64(0)
+		p99 := float64(0)
+		rps := float64(0)
+
+		for {
+
+			time.Sleep(time.Second)
+			m.Lock()
+
+			toPrint := make([]int, len(latency))
+			copy(toPrint, latency)
+
+			if len(toPrint) > 0 {
+				sort.Ints(toPrint)
+
+				p50 = float64(toPrint[len(toPrint)/2]) / 1000 // convert to ms
+				p90 = float64(toPrint[len(toPrint)/10*9]) / 1000
+				p99 = float64(toPrint[len(toPrint)/100*99]) / 1000
+				rps = float64(finishedRequests) / float64(time.Since(lastPrint).Seconds())
+
+				lastPrint = time.Now()
+				finishedRequests = 0
+			}
+
+			m.Unlock()
+
+			fmt.Printf("Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+				p50,
+				p90,
+				p99,
+				rps,
+			)
+
+		}
+
+	}()
+
+	reqQueue := make(chan struct{}, concurentRequests)
+
+	for {
+		bn := uint64(rand.Intn(
+			int(blockNumber.Number.Uint64()),
+		))
+
+		reqQueue <- struct{}{}
+
+		go func(bn uint64, launchedAt time.Time) {
+			var resp EthGetLogs
+			res := reqGen.Erigon("eth_getLogs", reqGen.getLogsNoFilters(bn, bn), &resp)
+			if res.Err != nil {
+				panic(fmt.Errorf("[ethGetLogsRandomBlock] could not get logs bn %d err %s", bn, res.Err.Error()))
+			}
+			if resp.Error != nil {
+				panic(fmt.Errorf("Error getting logs (Erigon): %d %s", resp.Error.Code, resp.Error.Message))
+			}
+
+			reqLatency := int(time.Since(launchedAt).Microseconds())
+			<-reqQueue
+
+			m.Lock()
+			finishedRequests += 1
+
+			if len(latency) >= latencyLen {
+				latency = latency[1:]
+			}
+
+			latency = append(latency, reqLatency)
+			m.Unlock()
+		}(bn, time.Now())
+	}
 }
 
 func filterLogsByAddr(logs []Log, addr common.Address) (filtered []Log) {

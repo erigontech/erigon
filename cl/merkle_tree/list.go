@@ -22,8 +22,6 @@ import (
 	"github.com/prysmaticlabs/gohashtree"
 
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -48,26 +46,6 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 		elements = elements[:outputLen]
 	}
 	return elements[0], nil
-}
-
-// MerkleizeVector uses our optimized routine to hash a list of 32-byte
-// elements.
-func MerkleizeVectorFlat(in []byte, limit uint64) ([32]byte, error) {
-	elements := make([]byte, len(in))
-	copy(elements, in)
-	for i := uint8(0); i < GetDepth(limit); i++ {
-		// Sequential
-		layerLen := len(elements)
-		if layerLen%64 == 32 {
-			elements = append(elements, ZeroHashes[i][:]...)
-		}
-		outputLen := len(elements) / 2
-		if err := HashByteSlice(elements, elements); err != nil {
-			return [32]byte{}, err
-		}
-		elements = elements[:outputLen]
-	}
-	return common.BytesToHash(elements[:length.Hash]), nil
 }
 
 // BitlistRootWithLimit computes the HashSSZ merkleization of

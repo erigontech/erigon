@@ -215,13 +215,17 @@ func (s *CaplinStateSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
 
+	var stats seg.Stats
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
-			for _, seg := range roTx.Segments {
-				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
+			for _, sn := range roTx.Segments {
+				d := sn.src.Decompressor
+				s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+				stats.Add(d)
 			}
 		}
 	}
+	s.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
@@ -703,32 +707,37 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir)
-	if err != nil {
-		return err
-	}
+
 	noneDone := true
-	for index := range segments {
-		segment := segments[index]
-		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
-		if segment.Type != nil && segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+
+	for caplinType, filesTree := range s.dirty {
+		files := filesTree.Items()
+		_, ok := s.snapshotTypes.KeyValueGetters[caplinType]
+		if !ok {
+			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType)
 			continue
 		}
-		if segment.CaplinTypeString == "" {
-			continue
-		}
+		for _, df := range files {
+			if df.Decompressor == nil {
+				return fmt.Errorf("segment %s is not opened", df.FilePath())
+			}
+			if isIndexed(df) {
+				continue
+			}
+			sn, _, _ := snaptype.ParseFileName(s.dir, filepath.Base(df.FilePath()))
 
-		indexFile := filepath.Join(segment.Dir(), snaptype.IdxFileName(segment.Version, segment.From, segment.To, segment.CaplinTypeString))
-		if _, err := os.Stat(indexFile); err == nil {
-			continue
-		}
-		logger.Info("building index file", "seg", segment.Name())
+			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.CaplinTypeString))
+			if _, err := os.Stat(indexFile); err == nil {
+				logger.Info("index file already exists, yet dirtyFile didn't have it opened", "seg", sn.Name())
+				continue
+			}
+			logger.Info("building index file", "seg", sn.Name())
+			p := &background.Progress{}
+			noneDone = false
 
-		p := &background.Progress{}
-		noneDone = false
-
-		if err := simpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
-			return err
+			if err := simpleIdx(ctx, sn, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+				return err
+			}
 		}
 	}
 	if noneDone {

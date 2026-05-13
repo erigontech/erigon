@@ -29,7 +29,7 @@ network_params:
   bpo_5_target_blobs: 6
   withdrawal_type: "0x01"
   genesis_delay: 30
-  seconds_per_slot: 3
+  seconds_per_slot: 8
 
 snooper_enabled: true
 

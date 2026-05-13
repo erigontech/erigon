@@ -30,7 +30,7 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -230,7 +230,7 @@ const (
 )
 
 func subdomain(e entry) string {
-	h := sha3.NewLegacyKeccak256()
+	h := keccak.NewFastKeccak()
 	io.WriteString(h, e.String())
 	return b32format.EncodeToString(h.Sum(nil)[:16])
 }
@@ -240,7 +240,7 @@ func (e *rootEntry) String() string {
 }
 
 func (e *rootEntry) sigHash() []byte {
-	h := sha3.NewLegacyKeccak256()
+	h := keccak.NewFastKeccak()
 	fmt.Fprintf(h, rootPrefix+" e=%s l=%s seq=%d", e.eroot, e.lroot, e.seq)
 	return h.Sum(nil)
 }
@@ -378,15 +378,4 @@ func truncateHash(hash string) string {
 		panic(fmt.Errorf("dnsdisc: hash %q is too short", hash))
 	}
 	return hash[:maxLen]
-}
-
-// URL encoding
-
-// ParseURL parses an enrtree:// URL and returns its components.
-func ParseURL(url string) (domain string, pubkey *ecdsa.PublicKey, err error) {
-	le, err := parseLink(url)
-	if err != nil {
-		return "", nil, err
-	}
-	return le.domain, le.pubkey, nil
 }

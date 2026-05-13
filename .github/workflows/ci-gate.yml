@@ -1,0 +1,117 @@
+name: CI Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  # For PRs: one run per branch; new push cancels the old run.
+  # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  group: >-
+    ${{
+      github.event_name == 'pull_request' &&
+      format('{0}-{1}', github.workflow, github.head_ref) ||
+      format('{0}-{1}', github.workflow, github.run_id)
+    }}
+  cancel-in-progress: true
+
+# actions: write lets merge-queue runs call `gh run cancel` on a leaf
+# failure so the gate doesn't stall waiting for still-running siblings.
+# Reusable leaves inherit these from the caller.
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  lint:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+
+  tests:
+    uses: ./.github/workflows/test-all-erigon.yml
+    secrets: inherit
+
+  race-tests:
+    uses: ./.github/workflows/test-all-erigon-race.yml
+    secrets: inherit
+
+  hive:
+    uses: ./.github/workflows/test-hive.yml
+    secrets: inherit
+
+  hive-eest:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/test-hive-eest.yml
+    secrets: inherit
+
+  caplin:
+    uses: ./.github/workflows/test-integration-caplin.yml
+    secrets: inherit
+
+  # Only meaningful for PRs: needs github.event.pull_request.base.sha.
+  large-files:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/check-large-files.yml
+    secrets: inherit
+
+  bench:
+    uses: ./.github/workflows/test-bench.yml
+    secrets: inherit
+
+  kurtosis:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    secrets: inherit
+
+  repro:
+    uses: ./.github/workflows/reproducible-build.yml
+    secrets: inherit
+
+  sonar:
+    # SONAR_TOKEN is a repo secret unavailable to fork PRs and Dependabot PRs
+    # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
+    # so skip the scan for those to avoid a guaranteed failure in ci-gate.
+    if: |
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]') ||
+      github.event_name != 'pull_request'
+    uses: ./.github/workflows/sonar.yml
+    secrets: inherit
+
+  ci-gate:
+    if: always()
+    needs:
+      - lint
+      - tests
+      - race-tests
+      - hive
+      - hive-eest
+      - caplin
+      - large-files
+      - bench
+      - kurtosis
+      - repro
+      - sonar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all required jobs
+        run: |
+          echo '${{ toJSON(needs) }}' > needs.json
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
+          if [ -n "$failed" ]; then
+            echo "The following jobs failed or were cancelled:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped."

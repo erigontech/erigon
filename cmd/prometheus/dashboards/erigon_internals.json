@@ -2638,7 +2638,7 @@
                   }
                 ]
               },
-              "unit": "µs"
+              "unit": "\u00b5s"
             },
             "overrides": []
           },
@@ -2929,7 +2929,7 @@
                   }
                 ]
               },
-              "unit": "µs"
+              "unit": "\u00b5s"
             },
             "overrides": [
               {
@@ -3052,7 +3052,7 @@
                   }
                 ]
               },
-              "unit": "µs"
+              "unit": "\u00b5s"
             },
             "overrides": []
           },
@@ -5056,6 +5056,521 @@
         "x": 0,
         "y": 6
       },
+      "id": 9204,
+      "panels": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 7
+          },
+          "id": 9200,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "commit_key_rate{instance=~\"$instance\"}",
+              "legendFormat": "total keys",
+              "range": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_account_key_rate{instance=~\"$instance\"}",
+              "legendFormat": "account keys",
+              "range": true,
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_storage_key_rate{instance=~\"$instance\"}",
+              "legendFormat": "storage keys",
+              "range": true,
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Commitment: key throughput (keys/sec)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 7
+          },
+          "id": 9201,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "commit_fold_rate{instance=~\"$instance\"}",
+              "legendFormat": "fold",
+              "range": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_unfold_rate{instance=~\"$instance\"}",
+              "legendFormat": "unfold",
+              "range": true,
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Commitment: fold/unfold rate (ops/sec)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ops"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 15
+          },
+          "id": 9202,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "commit_branch_read_rate{instance=~\"$instance\"}",
+              "legendFormat": "branch reads",
+              "range": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_branch_write_rate{instance=~\"$instance\"}",
+              "legendFormat": "branch writes",
+              "range": true,
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_read_rate{instance=~\"$instance\"}",
+              "legendFormat": "total reads",
+              "range": true,
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_account_read_rate{instance=~\"$instance\"}",
+              "legendFormat": "account reads",
+              "range": true,
+              "refId": "D",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_storage_read_rate{instance=~\"$instance\"}",
+              "legendFormat": "storage reads",
+              "range": true,
+              "refId": "E",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Commitment: branch read/write rate (ops/sec)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "ns"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "mgas/s"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "none"
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 15
+          },
+          "id": 9203,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "editorMode": "code",
+              "expr": "commit_block_dur{instance=~\"$instance\"}",
+              "legendFormat": "block dur (ns)",
+              "range": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            },
+            {
+              "editorMode": "code",
+              "expr": "commit_mgas_sec{instance=~\"$instance\"}",
+              "legendFormat": "mgas/s",
+              "range": true,
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              }
+            }
+          ],
+          "title": "Commitment: block duration (ns) and mgas/s",
+          "type": "timeseries"
+        }
+      ],
+      "title": "State: Commitment internals",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
       "id": 171,
       "panels": [
         {
@@ -6615,7 +7130,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 7
+        "y": 8
       },
       "id": 242,
       "panels": [
@@ -6849,7 +7364,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 17,
       "panels": [
@@ -7879,7 +8394,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 134,
       "panels": [
@@ -9154,7 +9669,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 11
       },
       "id": 183,
       "panels": [
@@ -9865,7 +10380,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 11
+        "y": 12
       },
       "id": 75,
       "panels": [
@@ -10160,7 +10675,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 13
       },
       "id": 173,
       "panels": [
@@ -10927,7 +11442,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 13
+        "y": 14
       },
       "id": 249,
       "panels": [

@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"slices"
 
-	"golang.org/x/exp/constraints"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 )
+
+type integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
 
 type (
 	Empty[T any]             struct{}
@@ -87,11 +89,11 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	return v, nil
 }
 
-func Range[T constraints.Integer](from, to T) *RangeIter[T] {
+func Range[T integer](from, to T) *RangeIter[T] {
 	return &RangeIter[T]{i: from, to: to}
 }
 
-type RangeIter[T constraints.Integer] struct {
+type RangeIter[T integer] struct {
 	i, to T
 }
 
@@ -103,11 +105,11 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-func ReverseRange[T constraints.Integer](from, to T) *ReverseRangeIter[T] {
+func ReverseRange[T integer](from, to T) *ReverseRangeIter[T] {
 	return &ReverseRangeIter[T]{i: from, to: to}
 }
 
-type ReverseRangeIter[T constraints.Integer] struct {
+type ReverseRangeIter[T integer] struct {
 	i, to T
 }
 

@@ -68,7 +68,7 @@ type CurrentSyncCycleInfo struct {
 
 // StageState is the state of the stage.
 type StageState struct {
-	state       *Sync
+	State       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
 
@@ -79,14 +79,14 @@ func (s *StageState) LogPrefix() string {
 	if s == nil {
 		return ""
 	}
-	return s.state.LogPrefix()
+	return s.State.LogPrefix()
 }
 
 func (s *StageState) SyncMode() stages.Mode {
 	if s == nil {
 		return stages.ModeUnknown
 	}
-	return s.state.mode
+	return s.State.mode
 }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
@@ -146,10 +146,6 @@ func BadBlock(badBlock common.Hash, err error) UnwindReason {
 
 func OperationalErr(err error) UnwindReason {
 	return UnwindReason{ErrOperational: err}
-}
-
-func ForkReset(badBlock common.Hash) UnwindReason {
-	return UnwindReason{Block: &badBlock}
 }
 
 // Unwinder allows the stage to cause an unwind.

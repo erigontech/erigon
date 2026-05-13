@@ -19,7 +19,6 @@
 package mdbx_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -76,6 +75,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	c, err := tx.RwCursor(deprecatedBucket)
 	require.NoError(err)
+	defer c.Close()
 	err = c.Put([]byte{1}, []byte{1})
 	require.NoError(err)
 	v, err := tx.GetOne(deprecatedBucket, []byte{1})
@@ -116,7 +116,7 @@ func TestReadOnlyMode(t *testing.T) {
 	}).MustOpen()
 	defer db2.Close()
 
-	tx, err := db2.BeginRo(context.Background())
+	tx, err := db2.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 

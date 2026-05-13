@@ -1,5 +1,9 @@
 ---
 description: Run a Gnosis Chain node with Erigon and an external Consensus Layer (CL).
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl
 ---
 
 # Gnosis Chain with an external CL

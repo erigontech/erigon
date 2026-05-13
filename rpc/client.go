@@ -115,8 +115,8 @@ type clientConn struct {
 	handler *handler
 }
 
-func (c *Client) newClientConn(conn ServerCodec) *clientConn {
-	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
+func (c *Client) newClientConn(conn ServerCodec, connCtx context.Context) *clientConn {
+	ctx := context.WithValue(connCtx, clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
 	handler := newHandler(ctx, conn, c.idgen, c.services, c.batchLimit, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
@@ -135,7 +135,7 @@ type readOp struct {
 type requestOp struct {
 	ids         []json.RawMessage
 	err         error
-	resp        chan []*jsonrpcMessage // receives up to len(ids) responses
+	resp        chan []*jsonrpcMessage // batch response channel
 	sub         *ClientSubscription    // only set for EthSubscribe requests
 	hadResponse bool                   // true when the request was responded to
 }
@@ -195,7 +195,9 @@ func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client
 // 'reverse calls' in a handler method.
 func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
-	client.logger = logger
+	if ok {
+		client.logger = logger
+	}
 	return client, ok
 }
 
@@ -210,6 +212,10 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 }
 
 func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
+	return initClientWithBaseCtx(context.Background(), conn, idgen, services, batchLimit, logger)
+}
+
+func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		idgen:       idgen,
@@ -229,7 +235,7 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, ba
 		logger:      logger,
 	}
 	if !isHTTP {
-		go c.dispatch(conn)
+		go c.dispatch(conn, baseCtx)
 	}
 	return c
 }
@@ -298,7 +304,7 @@ func (c *Client) Call(result any, method string, args ...any) error {
 // The result must be a pointer so that package json can unmarshal into it. You
 // can also pass nil, in which case the result is ignored.
 func (c *Client) CallContext(ctx context.Context, result any, method string, args ...any) error {
-	if result != nil && reflect.TypeOf(result).Kind() != reflect.Ptr {
+	if result != nil && reflect.TypeOf(result).Kind() != reflect.Pointer {
 		return fmt.Errorf("call result parameter must be pointer or nil interface: %v", result)
 	}
 	msg, err := c.newMessage(method, args...)
@@ -331,7 +337,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 	case len(resp.Result) == 0:
 		return ErrNoResult
 	default:
-		return json.Unmarshal(resp.Result, &result)
+		if result == nil {
+			return nil
+		}
+		return json.Unmarshal(resp.Result, result)
 	}
 }
 
@@ -363,7 +372,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	)
 	op := &requestOp{
 		ids:  make([]json.RawMessage, len(b)),
-		resp: make(chan []*jsonrpcMessage, len(b)),
+		resp: make(chan []*jsonrpcMessage, 1),
 	}
 	for i, elem := range b {
 		msg, err := c.newMessage(elem.Method, elem.Args...)
@@ -565,11 +574,11 @@ func (c *Client) reconnect(ctx context.Context) error {
 // dispatch is the main loop of the client.
 // It sends read messages to waiting calls to Call and BatchCall
 // and subscription notifications to registered subscriptions.
-func (c *Client) dispatch(codec ServerCodec) {
+func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 	var (
 		lastOp      *requestOp  // tracks last send operation
 		reqInitLock = c.reqInit // nil while the send lock is held
-		conn        = c.newClientConn(codec)
+		conn        = c.newClientConn(codec, connCtx)
 		reading     = true
 	)
 	defer func() {
@@ -618,7 +627,7 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 			go c.read(newcodec)
 			reading = true
-			conn = c.newClientConn(newcodec)
+			conn = c.newClientConn(newcodec, connCtx)
 			// Re-register the in-flight request on the new handler because that's where it will be sent.
 			conn.handler.addRequestOp(lastOp)
 
