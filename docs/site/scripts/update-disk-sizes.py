@@ -25,7 +25,10 @@ def format_bytes(b: int) -> str:
         return f"{b / 1_000_000_000_000:.2f} TB"
     if b >= 1_000_000_000:
         return f"{b / 1_000_000_000:.2f} GB"
-    return f"{round(b / 1_000_000)} MB"
+    mb = round(b / 1_000_000)
+    if mb >= 1000:
+        return f"{b / 1_000_000_000:.2f} GB"
+    return f"{mb} MB"
 
 
 def main() -> None:

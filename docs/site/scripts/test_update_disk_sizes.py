@@ -46,6 +46,10 @@ class FormatBytesTests(unittest.TestCase):
         # 500.5 MB -> rounds to 500 MB (banker's rounding)
         self.assertEqual(u.format_bytes(500_500_000), "500 MB")
 
+    def test_megabytes_promote_to_gigabytes_at_rounded_boundary(self):
+        # Avoid formatting just-below-1 GB values as "1000 MB"
+        self.assertEqual(u.format_bytes(999_900_000), "1.00 GB")
+
     def test_megabytes_small(self):
         # 50 MB
         self.assertEqual(u.format_bytes(50_000_000), "50 MB")
