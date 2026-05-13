@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -115,6 +116,7 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withYes(cmdCommitmentRebuild)
 	withClearCommitment(cmdCommitmentRebuild)
 	withResume(cmdCommitmentRebuild)
 	withNoHistory(cmdCommitmentRebuild)
@@ -202,10 +204,11 @@ Examples:
 		}
 		defer tx.Rollback()
 
+		stepSize := tx.Debug().StepSize()
 		if txnumFlag > 0 {
 			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
 			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
-			if err := readBranch(reader, prefix, logger); err != nil {
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -218,7 +221,7 @@ Examples:
 			}
 			defer sd.Close()
 			reader := commitmentdb.NewLatestStateReader(tx, sd)
-			if err := readBranch(reader, prefix, logger); err != nil {
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
 			}
@@ -226,11 +229,11 @@ Examples:
 	},
 }
 
-func readBranch(stateReader commitmentdb.StateReader, prefix []byte, logger interface {
+func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	compactKey := nibbles.HexToCompact(prefix)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -279,9 +282,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
-	if noHistory && resume {
-		return errors.New("--no-history and --resume are mutually exclusive")
-	}
 	if noHistory && clearCommitment {
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
@@ -315,9 +315,13 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil {
 		return err
 	}
+	if commitmentHistoryEnabled {
+		statecfg.EnableHistoricalCommitment()
+	}
 
-	if resume && !commitmentHistoryEnabled {
-		return errors.New("--resume requires commitment history to be enabled")
+	if resume && !commitmentHistoryEnabled && !noHistory {
+		logger.Info("[commitment_rebuild] commitment history not enabled in DB; resuming in --no-history mode")
+		noHistory = true
 	}
 
 	withHistory := false
@@ -325,7 +329,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		// --no-history explicitly requested: skip history regeneration entirely
 		withHistory = false
 	} else if commitmentHistoryEnabled {
-		if clearCommitment || resume {
+		if clearCommitment || resume || yes {
 			withHistory = true
 		} else {
 			fmt.Print("commitment history is enabled. Rebuild with history? (yes/no): ")
@@ -348,7 +352,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
 			Dirs:                   dirs,
 			RemoveLatest:           false,
-			PromptUserBeforeDelete: true,
+			PromptUserBeforeDelete: !yes,
 			DryRun:                 false,
 			StepRange:              "0-999999",
 			OnlyDomain:             !withHistory,
@@ -385,6 +389,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -615,11 +620,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
+	stepSize := tx.Debug().StepSize()
 
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, config3.DefaultStepSize)
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -672,7 +678,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 
 	// Convert hex nibbles to compact bytes for commitment lookup
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 
 	seed := benchHistorySeed
 	if seed == 0 {
@@ -762,6 +768,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 // benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
 func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
 	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
+	stepSize := tx.Debug().StepSize()
 
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()
@@ -806,7 +813,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -892,6 +899,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
 	// The reader has logic to determine whether to look in snapshots or MDBX
 	durations := make([]time.Duration, 0, sampleCount)
+	stepSize := tx.Debug().StepSize()
 
 	benchStart := time.Now()
 	for _, txNum := range sampledTxNums {
@@ -899,7 +907,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {

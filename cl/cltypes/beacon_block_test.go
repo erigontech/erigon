@@ -48,7 +48,7 @@ func TestBeaconBody(t *testing.T) {
 	attestations := solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
 	deposits := solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
 	voluntaryExits := solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
-	syncAggregate := &SyncAggregate{}
+	syncAggregate := NewSyncAggregate()
 	executionChanges := solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	version := clparams.DenebVersion

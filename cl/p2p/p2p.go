@@ -111,7 +111,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 
 	// pubsub
-	pubsub.TimeCacheDuration = 550 * gossipSubHeartbeatInterval
+	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
 	p.pubsub, err = pubsub.NewGossipSub(ctx, host, p.pubsubOptions(cfg.BeaconConfig)...)
 	if err != nil {
 		return nil, err
@@ -223,6 +223,10 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 		return
 	}
 	subnetField = common.Copy(subnetField)
+	if subnetIndex < 0 {
+		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
+		return
+	}
 	if len(subnetField) <= subnetIndex/8 {
 		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
@@ -233,5 +237,5 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
 	s.udpv5.LocalNode().Set(enr.WithEntry(subnetKey, &subnetField))
-	log.Info("[Sentinel] Updated subnet", "subnetKey", subnetKey, "subnetIndex", subnetIndex, "on", on)
+	log.Debug("[Sentinel] Updated subnet", "subnetKey", subnetKey, "subnetIndex", subnetIndex, "on", on)
 }

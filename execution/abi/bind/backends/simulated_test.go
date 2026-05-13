@@ -45,6 +45,8 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/program"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -70,7 +72,7 @@ func TestSimulatedBackend(t *testing.T) {
 	// generate a transaction and confirm you can retrieve it
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewContractCreation(0, &u256.Num0, gas, &u256.Num1, common.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, key)
 
@@ -132,8 +134,8 @@ func TestNewSimulatedBackend(t *testing.T) {
 	expectedBal := uint256.NewInt(10000000000)
 	sim := simTestBackend(t, testAddr.Value())
 
-	if sim.m.ChainConfig != chain.TestChainConfig {
-		t.Errorf("expected sim config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
+	if sim.m.ChainConfig != chain.TestChainBerlinConfig {
+		t.Errorf("expected sim config to equal chain.TestChainBerlinConfig, got %v", sim.m.ChainConfig)
 	}
 	tx, err1 := sim.DB().BeginTemporalRo(context.Background())
 	if err1 != nil {
@@ -181,7 +183,7 @@ func TestNewSimulatedBackend_AdjustTimeFail(t *testing.T) {
 	// Create txn and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -304,7 +306,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(nonce, testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -345,7 +347,7 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -379,7 +381,7 @@ func TestSimulatedBackend_TransactionByHash(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -687,7 +689,7 @@ func TestSimulatedBackend_TransactionCount(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -742,7 +744,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -797,7 +799,7 @@ func TestSimulatedBackend_PendingNonceAt(t *testing.T) {
 	}
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -849,7 +851,7 @@ func TestSimulatedBackend_TransactionReceipt(t *testing.T) {
 	bgCtx := context.Background()
 
 	// create a signed transaction to send
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(uint64(0), testAddr, uint256.NewInt(1000), params.TxGas, uint256.NewInt(1), nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {
@@ -1020,6 +1022,99 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	}
 }
 
+func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{testAddr: {Balance: big.NewInt(common.Ether)}},
+		chain.TestChainOsakaConfig,
+		50000000,
+	)
+	bgCtx := context.Background()
+
+	parsed, err := abi.JSON(strings.NewReader(abiJSON))
+	require.NoError(t, err)
+
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	require.NoError(t, err)
+	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
+	contractAuth.GasLimit = params.MaxTxnGasLimit
+
+	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
+	require.NoError(t, err)
+
+	input, err := parsed.Pack("receive", []byte("X"))
+	require.NoError(t, err)
+
+	call := ethereum.CallMsg{
+		From: testAddr,
+		To:   &addr,
+		Data: input,
+	}
+
+	res, err := sim.PendingCallContract(bgCtx, call)
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+
+	sim.Commit()
+
+	res, err = sim.CallContract(bgCtx, call, nil)
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+}
+
+func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	sim := NewSimulatedBackendWithConfig(
+		t,
+		types.GenesisAlloc{testAddr: {Balance: big.NewInt(common.Ether)}},
+		chain.AllProtocolChanges,
+		50000000,
+	)
+	bgCtx := context.Background()
+
+	const sstoresPerCall = 448
+
+	runtime := program.New()
+	for i := 0; i < sstoresPerCall; i++ {
+		runtime.Sstore(i, 1)
+	}
+	runtime.Op(vm.STOP)
+
+	constructor := program.New().ReturnViaCodeCopy(runtime.Bytes()).Bytes()
+
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	require.NoError(t, err)
+	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
+	contractAuth.GasLimit = 5_000_000
+
+	addr, _, _, err := bind.DeployContract(contractAuth, abi.ABI{}, constructor, sim)
+	require.NoError(t, err)
+
+	call := ethereum.CallMsg{
+		From: testAddr,
+		To:   &addr,
+	}
+	cappedCall := call
+	cappedCall.Gas = params.MaxTxnGasLimit
+
+	_, err = sim.PendingCallContract(bgCtx, cappedCall)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	res, err := sim.PendingCallContract(bgCtx, call)
+	require.NoError(t, err)
+	require.Empty(t, res)
+
+	sim.Commit()
+
+	_, err = sim.CallContract(bgCtx, cappedCall, nil)
+	require.ErrorIs(t, err, vm.ErrOutOfGas)
+
+	res, err = sim.CallContract(bgCtx, call, nil)
+	require.NoError(t, err)
+	require.Empty(t, res)
+}
+
 // This test is based on the following contract:
 /*
 contract Reverter {
@@ -1135,7 +1230,7 @@ func TestNewSimulatedBackend_AdjustTimeFailWithPostValidationSkip(t *testing.T) 
 	// Create txn and send
 	amount, _ := uint256.FromBig(big.NewInt(1000))
 	gasPrice, _ := uint256.FromBig(big.NewInt(1))
-	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
 	var txn types.Transaction = types.NewTransaction(0, testAddr, amount, params.TxGas, gasPrice, nil)
 	signedTx, err := types.SignTx(txn, *signer, testKey)
 	if err != nil {

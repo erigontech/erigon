@@ -11,9 +11,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func convertDataToStringP(abstractMap map[string]any, field string) *string {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result string
 
 	switch v := abstractMap[field].(type) {
@@ -35,14 +39,21 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 			return nil
 		}
 		result = v.String()
+	case accounts.Address:
+		result = v.String()
 	case common.Address:
 		result = v.String()
 	case common.Hash:
 		result = v.String()
+	case *common.Hash:
+		if v == nil {
+			return nil
+		}
+		result = v.String()
 	case types.Bloom:
 		result = hex.EncodeToString(v.Bytes())
 	case types.BlockNonce:
-		result = "0x" + fmt.Sprintf("%016x", int64(v.Uint64()))
+		result = "0x" + fmt.Sprintf("%016x", v.Uint64())
 	case []uint8:
 		result = "0x" + hex.EncodeToString(v)
 	case *uint256.Int:
@@ -53,7 +64,6 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 	case uint64:
 		result = "0x" + strconv.FormatInt(int64(v), 16)
 	default:
-		fmt.Println("unhandled/string", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = "unhandled"
 	}
 
@@ -61,6 +71,9 @@ func convertDataToStringP(abstractMap map[string]any, field string) *string {
 }
 
 func convertDataToIntP(abstractMap map[string]any, field string) *int {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result int
 
 	switch v := abstractMap[field].(type) {
@@ -81,7 +94,6 @@ func convertDataToIntP(abstractMap map[string]any, field string) *int {
 	case int:
 		result = v
 	default:
-		fmt.Println("unhandled/int", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 
@@ -89,6 +101,9 @@ func convertDataToIntP(abstractMap map[string]any, field string) *int {
 }
 
 func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
+	if abstractMap[field] == nil {
+		return nil
+	}
 	var result uint64
 
 	switch v := abstractMap[field].(type) {
@@ -99,6 +114,8 @@ func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 		} else {
 			result = resultUint
 		}
+	case *hexutil.Uint64:
+		result = uint64(*v)
 	case hexutil.Uint:
 		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {
@@ -109,11 +126,10 @@ func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 	case *hexutil.Big:
 		result = v.ToInt().Uint64()
 	case int:
-		result = abstractMap[field].(uint64)
+		result = uint64(v)
 	case uint64:
-		result = abstractMap[field].(uint64)
+		result = v
 	default:
-		fmt.Println("unhandled/uint64", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 

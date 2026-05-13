@@ -1,19 +1,34 @@
 name: QA - Stage Exec Smoke Test
 
 on:
+  schedule:
+    - cron: '0 4 * * *'  # Run daily at 04:00 UTC
   workflow_dispatch:     # Run manually
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
   stage-exec-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - mode_name: resume-nonchaintip
+            extra_flags: ""
+            test_name: stage_exec_resume_nonchaintip
+          - mode_name: from-0
+            extra_flags: "--rm-state-all"
+            test_name: stage_exec_from_0
+          - mode_name: chaintip
+            extra_flags: "--chaintip"
+            test_name: stage_exec_resume_chaintip
     env:
-      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir-${{ matrix.mode_name }}
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TIMEOUT_SECONDS: 600
+      TIMEOUT_SECONDS: 360
       CHAIN: mainnet
 
     steps:
@@ -69,7 +84,9 @@ jobs:
         set +e
 
         python3 $ERIGON_QA_PATH/test_system/qa-tests/stage-exec/run_and_check_stage_exec.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN \
+          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json \
+          ${{ matrix.extra_flags }}
 
         test_exit_status=$?
 
@@ -97,25 +114,25 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
-          --test_name stage_exec_resume_nonchaintip \
+          --test_name ${{ matrix.test_name }} \
           --chain $CHAIN \
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN.json
+          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: test-results
-        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
+        name: test-results-${{ matrix.mode_name }}
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}-${{ matrix.mode_name }}.json
 
     - name: Upload erigon logs
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v7
       with:
-        name: erigon-logs
+        name: erigon-logs-${{ matrix.mode_name }}
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Delete Erigon Testbed Data Directory

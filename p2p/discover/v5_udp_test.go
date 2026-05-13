@@ -260,6 +260,30 @@ func TestUDPv5_findnodeHandling(t *testing.T) {
 	test.expectNodes([]byte{5}, 1, nodes)
 }
 
+// TestUDPv5_findnodeLivenessCheck verifies that collectTableNodes does not
+// return nodes that have not passed a liveness check.
+func TestUDPv5_findnodeLivenessCheck(t *testing.T) {
+	t.Parallel()
+	test := newUDPV5Test(t)
+	defer test.close()
+
+	// Insert nodes that have NOT been validated live (setLive=false).
+	nodes253 := nodesAtDistance(test.table.self().ID(), 253, 5)
+	fillTable(test.table, nodes253, false)
+
+	// FINDNODE at distance 253 should return no nodes because none are live.
+	test.packetIn(&v5wire.Findnode{ReqID: []byte{0}, Distances: []uint{253}})
+	test.expectNodes([]byte{0}, 1, nil)
+
+	// Now insert live nodes at distance 249.
+	nodes249 := nodesAtDistance(test.table.self().ID(), 249, 3)
+	fillTable(test.table, nodes249, true)
+
+	// FINDNODE at 253 still returns nothing (non-live), but 249 returns the live nodes.
+	test.packetIn(&v5wire.Findnode{ReqID: []byte{1}, Distances: []uint{253, 249}})
+	test.expectNodes([]byte{1}, 1, nodes249)
+}
+
 func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes []*enode.Node) {
 	nodeSet := make(map[enode.ID]*enr.Record, len(wantNodes))
 	for _, n := range wantNodes {

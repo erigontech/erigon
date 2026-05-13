@@ -3,7 +3,7 @@ set -e # Enable exit on error
 
 # Sanity check for mandatory parameters
 if [ -z "$1" ] || [ -z "$2" ]; then
-  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE]"
+  echo "Usage: $0 <CHAIN> <RPC_VERSION> [DISABLED_TESTS] [WORKSPACE] [RESULT_DIR] [TESTS_TYPE] [REFERENCE_HOST] [COMPARE_ERROR_MESSAGE] [DUMP_RESPONSE] [TRANSPORT_TYPES]"
   echo
   echo "  CHAIN:                 The chain identifier (possible values: mainnet, gnosis, polygon)"
   echo "  RPC_VERSION:           The rpc-tests repository version or branch (e.g., v1.66.0, main)"
@@ -14,6 +14,7 @@ if [ -z "$1" ] || [ -z "$2" ]; then
   echo "  REFERENCE_HOST:        Host address of client node used as reference system (optional, default: empty)"
   echo "  COMPARE_ERROR_MESSAGE: Verify the error message (optional, default: empty, possible values: do-not-compare-error-message)"
   echo "  DUMP_RESPONSE:         Dump each test response (optional, default: empty, possible values: always-dump-response)"
+  echo "  TRANSPORT_TYPES:       Comma-separated list of transport types (optional, default: empty, e.g. http,http_comp,websocket)"
   echo
   exit 1
 fi
@@ -27,6 +28,7 @@ TEST_TYPE="$6"
 REFERENCE_HOST="$7"
 COMPARE_ERROR_MESSAGE="$8"
 DUMP_RESPONSE="$9"
+TRANSPORT_TYPES="${10:-${RPC_TRANSPORT_TYPES:-}}"
 
 OPTIONAL_FLAGS=""
 NUM_OF_RETRIES=2
@@ -59,11 +61,30 @@ if [ "$DUMP_RESPONSE" = "always-dump-response" ]; then
     OPTIONAL_FLAGS+=" --dump-response"
 fi
 
+if [ -n "$TRANSPORT_TYPES" ]; then
+    OPTIONAL_FLAGS+=" --transport-type $TRANSPORT_TYPES"
+fi
+
+if [ "${RPC_COMMITMENT_HISTORY:-false}" = "true" ]; then
+    OPTIONAL_FLAGS+=" --erigon.commitment-history"
+fi
+
 echo "Setup the test execution environment..."
 
 # Clone rpc-tests repository at specific tag/branch, reusing existing clone if already at the right version
-if [ -d "$WORKSPACE/rpc-tests/.git" ] && [ "$(git -C "$WORKSPACE/rpc-tests" describe --tags --exact-match 2>/dev/null)" = "$RPC_VERSION" ]; then
+_rpc_tests_cached=false
+if [ -d "$WORKSPACE/rpc-tests/.git" ]; then
+  _exact_tag="$(git -C "$WORKSPACE/rpc-tests" describe --tags --exact-match 2>/dev/null || true)"
+  _current_branch="$(git -C "$WORKSPACE/rpc-tests" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [ "$_exact_tag" = "$RPC_VERSION" ] || [ "$_current_branch" = "$RPC_VERSION" ]; then
+    _rpc_tests_cached=true
+  fi
+fi
+if $_rpc_tests_cached; then
   echo "Using cached rpc-tests at $RPC_VERSION"
+  # Remove stale untracked test fixtures left by runs using a different branch/version,
+  # but preserve .venv/ and build/ which are the expensive parts of the cache.
+  git -C "$WORKSPACE/rpc-tests" clean -fd -e .venv -e build >/dev/null 2>&1
 else
   rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
   git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
@@ -110,9 +131,14 @@ fi
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
+
+# Move to home dir of rpc-tests
+cd ..
+make rpc_int
+
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   ./build/bin/rpc_int --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then

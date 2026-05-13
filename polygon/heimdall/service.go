@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -54,7 +53,7 @@ type Service struct {
 	spanScraper               *Scraper[*Span]
 	spanBlockProducersTracker *spanBlockProducersTracker
 	client                    Client
-	ready                     ready
+	ready                     common.Ready
 }
 
 func NewService(config ServiceConfig) *Service {
@@ -302,39 +301,6 @@ func (s *Service) RegisterSpanObserver(callback func(*Span), opts ...ObserverOpt
 	})
 }
 
-type ready struct {
-	mu     sync.Mutex
-	on     chan struct{}
-	state  bool
-	inited bool
-}
-
-func (r *ready) On() <-chan struct{} {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	return r.on
-}
-
-func (r *ready) init() {
-	if r.inited {
-		return
-	}
-	r.on = make(chan struct{})
-	r.inited = true
-}
-
-func (r *ready) set() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.init()
-	if r.state {
-		return
-	}
-	r.state = true
-	close(r.on)
-}
-
 func (s *Service) Ready(ctx context.Context) <-chan error {
 	errc := make(chan error)
 
@@ -360,7 +326,7 @@ func (s *Service) Run(ctx context.Context) error {
 		return nil
 	}
 
-	s.ready.set()
+	s.ready.Set()
 
 	if err := s.replayUntrackedSpans(ctx); err != nil {
 		return err

@@ -20,6 +20,7 @@ import (
 	"bytes"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -141,6 +142,9 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
+	if c == nil {
+		return
+	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
 	}

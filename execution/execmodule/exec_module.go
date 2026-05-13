@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -49,13 +48,12 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/node/shards"
 )
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
+
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
 
 func makeErrMissingChainSegment(blockHash common.Hash) error {
 	return errors.Join(ErrMissingChainSegment, errors.New("block hash: "+blockHash.String()))
@@ -94,8 +92,28 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	return common.HexToHash(hashStr), true
 }
 
+// Cache bridges RPC reads to the execution module's in-memory state via
+// SharedDomains. When View is called, it grabs the current SD under a read
+// lock so that domain reads (accounts, storage, code) see uncommitted writes
+// from the pipeline, falling through to the caller's DB tx for committed data.
+//
+// OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
+// the SD is the authoritative source, so the coherent cache's state-tracking
+// machinery is unnecessary.
+//
+// This shim predates SharedDomains' current capabilities and will be simplified
+// as part of #19623 (2-cache IBS rationalization) once the StateReader/CacheView
+// interfaces stabilize. See also #19798 (event stream extraction) and #19855
+// (TransactionState/BlockState separation).
 type Cache struct {
-	execModule *ExecModule
+	execModule  *ExecModule
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
+}
+
+// SetPublishedSD wires the Cache to fall back to the published SD from Events
+// when the exec module's currentContext is nil (e.g. during background commit).
+func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
+	c.publishedSD = provider
 }
 
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
@@ -105,8 +123,13 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 	var context *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
-		defer c.execModule.lock.RUnlock()
 		context = c.execModule.currentContext
+		c.execModule.lock.RUnlock()
+	}
+	// Fall back to the published SD from Events during background commits
+	// (currentContext is nil but the SD is still valid in memory).
+	if context == nil && c.publishedSD != nil {
+		context = c.publishedSD()
 	}
 
 	return &CacheView{context: context, tx: tx}, nil
@@ -182,10 +205,8 @@ type ExecModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// Changes accumulator
-	hook                *stageloop.Hook
-	accumulator         *shards.Accumulator
-	recentReceipts      *shards.RecentReceipts
-	stateChangeConsumer shards.StateChangeConsumer
+	hook  *stageloop.Hook
+	accum *Accumulation
 
 	// configuration
 	config  *chain.Config
@@ -201,14 +222,16 @@ type ExecModule struct {
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
+	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache *cache.StateCache
+	stateCache  *cache.StateCache
+	readAheader *exec.BlockReadAheader
 
 	stopNode func() error
-
-	executionproto.UnimplementedExecutionServer
 }
+
+var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
 func NewExecModule(
 	ctx context.Context,
@@ -219,16 +242,15 @@ func NewExecModule(
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook,
-	accumulator *shards.Accumulator,
-	recentReceipts *shards.RecentReceipts,
+	accum *Accumulation,
 	stateCache *Cache,
-	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
+	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
@@ -245,9 +267,7 @@ func NewExecModule(
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,
-		accumulator:             accumulator,
-		recentReceipts:          recentReceipts,
-		stateChangeConsumer:     stateChangeConsumer,
+		accum:                   accum,
 		engine:                  engine,
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
@@ -255,6 +275,7 @@ func NewExecModule(
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
+		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
 
@@ -275,6 +296,12 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
+
+// SetPublishedSD wires the ExecModule to fall back to the published SD from Events
+// when currentContext is nil (e.g. during background commit).
+func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
+	e.publishedSD = provider
+}
 
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
@@ -356,21 +383,19 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	return nil
 }
 
-func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
-		return &executionproto.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: executionproto.ExecutionStatus_Busy,
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
 
-	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
+	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))
+	e.forkValidator.ClearWithUnwind()
+	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
 		body               *types.Body
@@ -384,86 +409,106 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 		defer roTx.Rollback()
 		overlay.UpdateTxn(roTx)
-		header, err = e.blockReader.Header(ctx, overlay, blockHash, req.Number)
+		header, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, req.Number)
+		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
-		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
+		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
 
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-			exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
+			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 			return nil
 		}); err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 	}
 	if header == nil || body == nil {
-		return &executionproto.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: executionproto.ExecutionStatus_MissingSegment,
+		return ValidationResult{
+			LatestValidHash:  common.Hash{},
+			ValidationStatus: ExecutionStatusMissingSegment,
 		}, nil
 	}
 
-	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= e.syncCfg.MaxReorgDepth {
-		return &executionproto.ValidationReceipt{
-			ValidationStatus: executionproto.ExecutionStatus_TooFarAway,
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
+	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusTooFarAway,
+			LatestValidHash:  common.Hash{},
 		}, nil
 	}
 
-	tx, err := e.db.BeginTemporalRwNosync(ctx)
+	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
+	// a fresh BlockOverlay on a new SharedDomains. This mirrors updateForkChoice
+	// (forkchoice.go:239-251) and is required by the parallel exec path —
+	// executeBlocks opens its own roTx in a separate goroutine and reads
+	// recently-inserted block data via te.doms.BlockOverlay().NewReadView,
+	// which shares the overlay's mem layer. A plain BeginTemporalRwNosync
+	// would leave doms with no overlay and the parallel goroutine could not
+	// see uncommitted block headers/bodies.
+	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return nil, err
+		return ValidationResult{}, err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	if err != nil {
+		return ValidationResult{}, err
+	}
+	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
+	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
+	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
+	// We Close explicitly only on the early-return error paths below.
+	doms.SetInMemHistoryReads(inMemHistoryReads)
+
+	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		doms.Close()
+		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
+	}
+	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
-	// this RW tx so that unwindToCommonCanonical and ValidatePayload can see
-	// the block data without it being committed to DB. This tx will be rolled
-	// back, so the flush is temporary — the overlay retains all data.
+	// the validation overlay so unwindToCommonCanonical and ValidatePayload —
+	// and the parallel exec goroutine via NewReadView — see this block data.
+	// The InsertBlocks overlay on e.currentContext retains its data unchanged.
+	// Do NOT UpdateTxn on e.currentContext.BlockOverlay() here — that would
+	// reassign its backing db to our soon-to-be-rolled-back roTx and leave
+	// e.currentContext in an inconsistent state for UpdateForkChoice.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			return nil, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
+			doms.Close()
+			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-	if err != nil {
-		return nil, err
-	}
-	doms.SetInMemHistoryReads(inMemHistoryReads)
-
 	// Set state cache in SharedDomains for use during state reading
-	if e.stateCache != nil && dbg.UseStateCache {
-		doms.SetStateCache(e.stateCache)
-	}
+	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
-		return nil, err
+		return ValidationResult{}, err
 	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
-		return nil, criticalError
+		return ValidationResult{}, criticalError
 	}
 
 	// Clear state cache on invalid block
@@ -472,41 +517,50 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
-	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
-	tx.Rollback()
-	tx, err = e.db.BeginTemporalRwNosync(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+	// Validation tx is the SD's BlockOverlay; defer doms.Close() above handles
+	// its rollback. By design we do not persist validation-run writes — there
+	// is no Flush/Commit on this path.
 
-	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
-	validationStatus := executionproto.ExecutionStatus_Success
+	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {
-		validationStatus = executionproto.ExecutionStatus_MissingSegment
+		validationStatus = ExecutionStatusMissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
-		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
-			return nil, err
-		}
-	}
+
+	// Only open a second tx when we actually need to write (bad-chain purge).
+	// On the valid-chain path (the common case at tip) opening + empty-committing
+	// a second RwTx just produces no-op commits with openTxs>=2, pinning freelist
+	// pages against concurrent readers.
 	if isInvalidChain {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
-		validationStatus = executionproto.ExecutionStatus_BadBlock
+		purgeTx, err := e.db.BeginTemporalRwNosync(ctx)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		defer purgeTx.Rollback()
+
+		if (lvh != common.Hash{}) && lvh != blockHash {
+			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
+				return ValidationResult{}, err
+			}
+		}
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
+		validationStatus = ExecutionStatusBadBlock
 		// Discard the block overlay — it may contain the bad block's data.
 		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 			e.currentContext.BlockOverlay().Close()
 		}
+		if err := purgeTx.Commit(); err != nil {
+			return ValidationResult{}, err
+		}
 	}
-	validationReceipt := &executionproto.ValidationReceipt{
+	result := ValidationResult{
 		ValidationStatus: validationStatus,
-		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
+		LatestValidHash:  lvh,
 	}
 	if validationError != nil {
-		validationReceipt.ValidationError = validationError.Error()
+		result.ValidationError = validationError.Error()
 	}
-	return validationReceipt, tx.Commit()
+	return result, nil
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
@@ -582,8 +636,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 }
 
-func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
-
+func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 	// setup a timeout for the context to avoid waiting indefinitely
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -591,47 +644,46 @@ func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionpro
 	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			e.logger.Trace("ethereumExecutionModule.Ready: context deadline exceeded")
-			return &executionproto.ReadyResponse{Ready: false}, nil
+			return false, nil
 		}
-		return &executionproto.ReadyResponse{Ready: false}, err
+		return false, err
 	}
 
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
-		return &executionproto.ReadyResponse{Ready: false}, nil
+		return false, nil
 	}
 	defer e.semaphore.Release(1)
-	return &executionproto.ReadyResponse{Ready: true}, nil
+	return true, nil
 }
 
-func (e *ExecModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
+func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *uint64) (bool, error) {
+	if blockHash == nil {
+		return false, errors.New("block hash is nil, HasBlock supports lookup by hash only")
+	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	defer tx.Rollback()
-	if in.BlockHash == nil {
-		return nil, errors.New("block hash is nil, hasBlock support only by hash")
-	}
-	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 	if num == nil {
-		return &executionproto.HasBlockResponse{HasBlock: false}, nil
+		return false, nil
 	}
 	if *num <= e.blockReader.FrozenBlocks() {
-		return &executionproto.HasBlockResponse{HasBlock: true}, nil
+		return true, nil
 	}
-	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	if !has {
-		return &executionproto.HasBlockResponse{HasBlock: false}, nil
+		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	return &executionproto.HasBlockResponse{HasBlock: has}, nil
+	return has, nil
 }

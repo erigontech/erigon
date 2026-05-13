@@ -95,7 +95,3 @@ func (rc *RecordingContext) PutBranch(prefix []byte, data []byte, prevData []byt
 	}
 	return rc.inner.PutBranch(prefix, data, prevData)
 }
-
-func (rc *RecordingContext) TxNum() uint64 {
-	return rc.inner.TxNum()
-}

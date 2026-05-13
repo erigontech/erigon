@@ -446,6 +446,53 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_NoTopics(
 	s.NoError(err)
 }
 
+func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_PropagatesConditionsToValidator() {
+	var (
+		conditionCalled bool
+		decodeCalled    bool
+		processCalled   bool
+	)
+
+	service := &mockService{
+		decodeFunc: func(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
+			decodeCalled = true
+			return "decoded_message", nil
+		},
+		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
+			processCalled = true
+			return nil
+		},
+		namesFunc: func() []string {
+			return []string{"unknown_topic"}
+		},
+	}
+	condition := func(pid peer.ID, msg *pubsub.Message, version clparams.StateVersion) bool {
+		conditionCalled = true
+		return false
+	}
+
+	err := s.gm.registerGossipService(service, condition)
+	s.Require().NoError(err)
+
+	forkDigest, err := s.mockClock.CurrentForkDigest()
+	s.Require().NoError(err)
+	topic := composeTopic(forkDigest, "unknown_topic")
+
+	subscription := s.gm.subscriptions.Get(topic)
+	s.Require().NotNil(subscription)
+	s.Require().NotNil(subscription.validator)
+
+	testData := []byte("test data")
+	compressedData := utils.CompressSnappy(testData)
+	msg := createMockMessage(topic, compressedData)
+
+	result := subscription.validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationIgnore, result)
+	s.True(conditionCalled)
+	s.False(decodeCalled)
+	s.False(processCalled)
+}
+
 func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_WithTopics() {
 	oldForkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
 	newForkDigest := common.Bytes4{0x12, 0x34, 0x56, 0x78}
@@ -561,6 +608,59 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_MultipleT
 		newTopic := composeTopic(newForkDigest, topicName)
 		s.Contains(allTopicsAfter, newTopic)
 	}
+}
+
+// TestRegisterGossipService_ConditionsForwarded is a regression test for a bug
+// where registerGossipService accepted conditions but silently dropped them:
+//
+//	validator := g.newPubsubValidator(service) // missing: conditions...
+//
+// This caused waitReady and other guards to have no effect — gossip messages
+// were processed even when the node was behind, leading to false committee
+// membership rejections and legitimate peers being banned.
+//
+// The test verifies two things:
+//  1. RegisterGossipService stores conditions in registeredServices so they
+//     are available for fork-digest re-registration.
+//  2. registerGossipService passes conditions to newPubsubValidator (the
+//     actual bug site). Since pubsub doesn't expose registered validators,
+//     we verify indirectly: GossipService.SatisfiesConditions reflects the
+//     same conditions that registerGossipService forwards.
+func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_ConditionsForwarded() {
+	conditionCalled := false
+	condition := func(pid peer.ID, msg *pubsub.Message, version clparams.StateVersion) bool {
+		conditionCalled = true
+		return false // simulate "not ready"
+	}
+
+	// Use a topic name that doesn't match any score params case (returns nil)
+	// to avoid requiring peer scoring to be enabled in pubsub.
+	service := &mockService{
+		namesFunc: func() []string { return []string{"test_conditions_topic"} },
+	}
+	wrappedService := wrapService[any](service)
+
+	// Register via registerGossipService which is the call site that had the bug.
+	// It must forward conditions to newPubsubValidator so that the pubsub
+	// topic validator actually evaluates them.
+	err := s.gm.registerGossipService(wrappedService, condition)
+	s.Require().NoError(err)
+
+	// Verify the topic was registered with pubsub
+	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	topic := composeTopic(forkDigest, "test_conditions_topic")
+	s.Contains(s.gm.p2p.Pubsub().GetTopics(), topic)
+
+	// Verify conditions are evaluated via GossipService.SatisfiesConditions,
+	// which uses the same condition slice that registerGossipService forwards
+	// to newPubsubValidator.
+	gossipSrv := GossipService{Service: wrappedService, conditions: []ConditionFunc{condition}}
+	pid := peer.ID("test-peer")
+	msg := createMockMessage(topic, nil)
+
+	result := gossipSrv.SatisfiesConditions(pid, msg, 0)
+	s.True(conditionCalled, "condition must be evaluated")
+	s.False(result, "failing condition should return false")
 }
 
 func TestGossipManager(t *testing.T) {

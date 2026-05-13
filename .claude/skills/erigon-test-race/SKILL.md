@@ -7,10 +7,37 @@ description: Run Erigon tests with Go race detector to find data races and concu
 
 Runs the full test suite with Go's `-race` flag. Catches concurrency bugs that normal tests miss. Takes 30–60 minutes.
 
+## Prerequisite: Test fixtures
+
+`make test-all-race` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
+
+If you want race coverage on the EEST or consensus spec suites specifically, run them via their dedicated targets (those don't apply `-race` automatically — pass `GOFLAGS='-race'` or invoke `go test -race` against the relevant package directly).
+
+Two side prerequisites still apply for tests `make test-all-race` does run:
+
+```bash
+git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
+```
+
+The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
+
+## Prerequisite: Create RAM Disk
+
+Before running `make test-all-race`, create a RAM disk and export its path as `ERIGON_EXECUTION_TESTS_TMPDIR`:
+
+```bash
+path=$(bash tools/create-ramdisk)
+```
+
+Then prepend `ERIGON_EXECUTION_TESTS_TMPDIR=$path` to the test command (see below). The `execution/tests` suite does heavy temp-file I/O; backing that with tmpfs avoids disk bottlenecks and matches how CI runs the same workflow (`ramdisk: true` in `test-all-erigon-race.yml`, which invokes the same `tools/create-ramdisk` script via `setup-erigon`).
+
+The script is cross-platform (Linux tmpfs, macOS hdiutil, Windows ImDisk). Linux requires `sudo` to mount tmpfs at `/mnt/erigon-ramdisk`. Override size with `RAMDISK_SIZE_MB` (default 2048).
+
 ## Command
 
 ```bash
-make test-all-race
+ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race
 ```
 
 ## When Tests Fail — Drill Down
@@ -57,7 +84,7 @@ Areas historically susceptible to races in Erigon:
 
 - After changes to the parallel executor or concurrent code paths
 - For concurrency-sensitive fixes before merging
-- Race check gate: `make lint && make test-all-race`
+- Race check gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && ERIGON_EXECUTION_TESTS_TMPDIR=$path make test-all-race`
 
 ## CI Equivalent
 

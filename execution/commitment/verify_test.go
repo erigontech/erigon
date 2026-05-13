@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -61,17 +63,14 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	row := [16]*cell{}
-	row[nibble] = c
-	readCell := func(nib int, skip bool) (*cell, error) {
-		return row[nib], nil
-	}
-	branchData, _, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, readCell)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 	require.True(t, len(branchData) > 0)
 
 	// Build the branchKey (compacted nibbles for depth=0 means empty path)
-	branchKey := HexNibblesToCompactBytes(nil) // empty path
+	branchKey := nibbles.HexToCompact(nil) // empty path
 
 	// Serialize the account value
 	accVal := accounts.SerialiseV3(&acc)
@@ -165,12 +164,9 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	row := [16]*cell{}
-	row[nibble] = c
-	readCell := func(nib int, skip bool) (*cell, error) {
-		return row[nib], nil
-	}
-	branchData, _, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, readCell)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// branchKey for depth=2: depth-1 = 1 nibble of the hashed account key path
@@ -178,7 +174,7 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 		t.Fatal(err)
 	}
 	branchNibbles := []byte{c.hashedExtension[0]}
-	branchKey := HexNibblesToCompactBytes(branchNibbles)
+	branchKey := nibbles.HexToCompact(branchNibbles)
 
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
@@ -254,16 +250,13 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	row := [16]*cell{}
-	row[nibble] = c
-	readCell := func(nib int, skip bool) (*cell, error) {
-		return row[nib], nil
-	}
-	branchData, _, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, readCell)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// branchKey for root branch: empty path (0 nibbles → depth = 0 + 1 = 1)
-	branchKey := HexNibblesToCompactBytes(nil)
+	branchKey := nibbles.HexToCompact(nil)
 
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
@@ -320,12 +313,9 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	touchMap := uint16(1 << nibble)
 	afterMap := touchMap
 
-	row := [16]*cell{}
-	row[nibble] = c
-	readCell := func(nib int, skip bool) (*cell, error) {
-		return row[nib], nil
-	}
-	branchData, _, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, readCell)
+	var cellData [16]cellEncodeData
+	cellData[nibble] = cellEncodeDataFromCell(c)
+	branchData, err := encoder.EncodeBranch(touchMap, afterMap, touchMap, &cellData)
 	require.NoError(t, err)
 
 	// Build branchKey for depth=65: depth-1 = 64 nibbles (hash of account address).
@@ -334,12 +324,12 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	keccak.Write(addr[:])
 	var hashBuf2 [32]byte
 	keccak.Read(hashBuf2[:])
-	var nibbles [64]byte
+	var nib [64]byte
 	for i := 0; i < 32; i++ {
-		nibbles[i*2] = hashBuf2[i] >> 4
-		nibbles[i*2+1] = hashBuf2[i] & 0x0f
+		nib[i*2] = hashBuf2[i] >> 4
+		nib[i*2+1] = hashBuf2[i] & 0x0f
 	}
-	branchKey := HexNibblesToCompactBytes(nibbles[:])
+	branchKey := nibbles.HexToCompact(nib[:])
 
 	// Build domain values map
 	storageValues := map[string][]byte{

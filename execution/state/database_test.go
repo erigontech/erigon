@@ -1489,7 +1489,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
 			},

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
@@ -304,9 +303,10 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
-	syncCommitteePubKeys := make([]common.Bytes48, 0, cltypes.SyncCommitteeSize)
+	syncCommitteeSize := int(beaconConfig.SyncCommitteeSize)
+	syncCommitteePubKeys := make([]common.Bytes48, 0, syncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
-	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
+	for len(syncCommitteePubKeys) < syncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
 			b.BeaconConfig(),
 			i%activeValidatorCount,
@@ -351,7 +351,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		i++
 	}
 	// Format public keys.
-	formattedKeys := make([][]byte, cltypes.SyncCommitteeSize)
+	formattedKeys := make([][]byte, syncCommitteeSize)
 	for i := range formattedKeys {
 		formattedKeys[i] = make([]byte, 48)
 		copy(formattedKeys[i], syncCommitteePubKeys[i][:])

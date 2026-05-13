@@ -16,16 +16,7 @@
 
 package stagedsync
 
-import (
-	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-)
+import "github.com/erigontech/erigon/execution/notifications"
 
-type ChainEventNotifier interface {
-	OnNewHeader(newHeadersRlp [][]byte)
-	OnNewPendingLogs(types.Logs)
-	OnLogs([]*remoteproto.SubscribeLogsReply)
-	HasLogSubscriptions() bool
-	OnReceipts([]*remoteproto.SubscribeReceiptsReply)
-	HasReceiptSubscriptions() bool
-}
+// ChainEventNotifier re-exports notifications.ChainEventNotifier for backward compatibility.
+type ChainEventNotifier = notifications.ChainEventNotifier

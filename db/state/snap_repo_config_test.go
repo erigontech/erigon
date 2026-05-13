@@ -16,6 +16,7 @@ import (
 // 4. preverifiedparsed is respected
 
 func TestFreezingRangeNoPreverified(t *testing.T) {
+	t.Parallel()
 	cfg := createConfig(t)
 
 	cases := []struct {
@@ -77,6 +78,7 @@ func TestFreezingRangeNoPreverified(t *testing.T) {
 }
 
 func TestFreezingRangeWithPreverified(t *testing.T) {
+	t.Parallel()
 	cfg := createConfig(t)
 	cfg.LoadPreverified([]snapcfg.PreverifiedItem{
 		{

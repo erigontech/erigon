@@ -118,11 +118,7 @@ func (ethash *Ethash) Author(header *types.Header) (accounts.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 func (ethash *Ethash) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, seal bool) error {
-	// Short circuit if the header is known, or its parent not
 	number := header.Number.Uint64()
-	if chain.GetHeader(header.Hash(), number) != nil {
-		return nil
-	}
 	if number == 0 {
 		return nil
 	}
