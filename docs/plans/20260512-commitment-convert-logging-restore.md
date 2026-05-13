@@ -320,12 +320,12 @@ if convertRestore {
 
 **Files:** none (verification only).
 
-- [ ] `make lint` — run repeatedly until clean (linter is non-deterministic per CLAUDE.md)
-- [ ] `make integration` — must succeed
-- [ ] `go test ./db/state/ -run "TestRestoreCommitmentFiles|TestConvertCommitmentFiles" -count=1` — all pass
-- [ ] eyeball every log site reads correctly with a constructed example (hand-substitute numbers into the format strings)
-- [ ] verify the changed `cleanupRebuildParent` → `cleanupParentIfEmpty` rename has no lingering references: `grep -n cleanupRebuildParent db/state/commitment_convert.go` returns empty
-- [ ] verify `--restore` flag is visible in CLI help: `./build/bin/integration commitment convert --help | grep restore` must show the flag
+- [x] `make lint` — run repeatedly until clean (linter is non-deterministic per CLAUDE.md)
+- [x] `make integration` — must succeed
+- [x] `go test ./db/state/ -run "TestRestoreCommitmentFiles|TestConvertCommitmentFiles" -count=1` — all pass
+- [x] eyeball every log site reads correctly with a constructed example (hand-substitute numbers into the format strings)
+- [x] verify the changed `cleanupRebuildParent` → `cleanupParentIfEmpty` rename has no lingering references: `grep -n cleanupRebuildParent db/state/commitment_convert.go` returns empty
+- [x] verify `--restore` flag is visible in CLI help: `./build/bin/integration commitment convert --help | grep restore` must show the flag
 
 ### Task 7: [Final] Commit + housekeeping
 
