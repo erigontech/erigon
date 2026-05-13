@@ -268,31 +268,59 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
+	// unwoundLatest returns the pre-unwound-block value for a key that was
+	// modified by the unwound block. Only fires when ts is at-or-after the
+	// unwind point — for ts < unwindToTxNum the caller falls through to the
+	// underlying tx (chain DB / files) which holds the older committed value
+	// that was never unwound. Without this fallback, when the unwound block's
+	// writes were already committed to chain DB before the in-memory unwind
+	// the chain DB still holds the post-change value, and the commitment
+	// calculator's asOfStateReader (committer.go) reads those stale values
+	// for unwound keys and computes a wrong trie root.
+	unwoundLatest := func(domain kv.Domain, key string) (v []byte, ok bool, err error) {
+		if sd.unwindChangeset == nil || ts < sd.unwindToTxNum {
+			return nil, false, nil
+		}
+		values := sd.unwindChangeset[domain]
+		if values == nil {
+			return nil, false, nil
+		}
+		value, found := values[key]
+		if !found {
+			return nil, false, nil
+		}
+		if len(value.Value) == 0 {
+			// Pre-unwind state had no value at this key.
+			return nil, true, nil
+		}
+		return value.Value, true, nil
+	}
+
 	keyS := common.ToStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
 		if !ok {
-			return nil, false, nil
+			return unwoundLatest(domain, keyS)
 		}
 		for i, dataWithTxNum := range dataWithTxNums {
 			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
 				return dataWithTxNum.data, true, nil
 			}
 		}
-		return nil, false, nil
+		return unwoundLatest(domain, keyS)
 	}
 
 	dataWithTxNums, ok = sd.domains[domain][keyS]
 	if !ok {
-		return nil, false, nil
+		return unwoundLatest(domain, keyS)
 	}
 	for i, dataWithTxNum := range dataWithTxNums {
 		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
 			return dataWithTxNum.data, true, nil
 		}
 	}
-	return nil, false, nil
+	return unwoundLatest(domain, keyS)
 }
 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
@@ -335,7 +363,32 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 		ramIter = sd.storage.Iter()
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
+	// Wrap the callback to respect sd.unwindChangeset: when iterating the
+	// underlying tx + ramIter, the chain DB may still hold values written by
+	// blocks that were unwound in-memory but committed earlier. Without this
+	// wrapper, createContract's DomainDelPrefix sees the stale value via
+	// IteratePrefix and records it as the prev value in the new block's diff
+	// — which on the next unwind restores that stale value, masking a
+	// freshly-written same-value SSTORE as a no-op and producing a wrong
+	// trie root. See GetAsOf's unwoundLatest for the equivalent point-read
+	// fix.
+	wrappedIt := it
+	if sd.unwindChangeset != nil {
+		if values := sd.unwindChangeset[domain]; len(values) > 0 {
+			wrappedIt = func(k []byte, v []byte) (cont bool, err error) {
+				if entry, ok := values[common.ToStringZeroCopy(k)]; ok {
+					if len(entry.Value) == 0 {
+						// Pre-unwind state had no value at this key — skip it.
+						return true, nil
+					}
+					// Restore the pre-unwind value.
+					return it(k, entry.Value)
+				}
+				return it(k, v)
+			}
+		}
+	}
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, wrappedIt, roTx)
 }
 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
