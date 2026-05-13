@@ -223,10 +223,10 @@ if convertRestore {
 
 **Files:** none (verification only).
 
-- [ ] confirm current branch is `awskii/r36converter`: `git rev-parse --abbrev-ref HEAD` returns `awskii/r36converter`
-- [ ] confirm `db/state/commitment_convert.go` is at the expected revision: `git log -1 --oneline -- db/state/commitment_convert.go` shows `c8b470607f db/state: address commitment-convert third-pass review`
-- [ ] `git status` is clean except for the pre-existing modified submodule pointer `execution/tests/execution-spec-tests`. Do NOT reset or otherwise touch the submodule — it's an intentional pointer divergence on this branch.
-- [ ] no tests to run yet (verification only)
+- [x] confirm current branch is `awskii/r36converter`: `git rev-parse --abbrev-ref HEAD` returns `awskii/r36converter`
+- [x] confirm `db/state/commitment_convert.go` is at the expected revision: `git log -1 --oneline -- db/state/commitment_convert.go` shows `c8b470607f db/state: address commitment-convert third-pass review`
+- [x] `git status` is clean except for the pre-existing modified submodule pointer `execution/tests/execution-spec-tests`. Do NOT reset or otherwise touch the submodule — it's an intentional pointer divergence on this branch.
+- [x] no tests to run yet (verification only)
 
 ### Task 1: Wire `grandTotalKeys` pre-pass and thread state through phase 1
 
