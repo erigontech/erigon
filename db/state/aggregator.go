@@ -1705,6 +1705,7 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		// yet retired, or cap prevents collation). Exit to let execution
 		// continue and retry next cycle.
 		if stepsInDB >= prevSteps && prevSteps > 0 {
+			a.logger.Warn("[agg] CollateAndPrune: no progress, exiting", "stepsInDB", fmt.Sprintf("%.2f", stepsInDB), "prevSteps", fmt.Sprintf("%.2f", prevSteps))
 			return nil
 		}
 		prevSteps = stepsInDB
