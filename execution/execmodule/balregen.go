@@ -50,7 +50,7 @@ type BALRegeneratorDeps struct {
 	Logger       log.Logger
 }
 
-// BALRegenerator implements rawdb.BALRegenerator by re-executing the requested
+// BALRegenerator implements balcache.BALRegenerator by re-executing the requested
 // block against its parent state with VersionMap-enabled IBS read tracking.
 // Uses transactions.ComputeBlockContext to construct a state reader rooted at
 // the parent state — same approach as RPC tracing / receipts generation, so

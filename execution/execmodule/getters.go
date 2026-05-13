@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -263,7 +264,7 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.BlockAccessListBytes(ctx, h, *number)
+		balBytes, err := balcache.BlockAccessListBytes(ctx, h, *number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: BlockAccessListBytes error %w", err)
 		}
@@ -309,7 +310,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.BlockAccessListBytes(ctx, hash, blockNum)
+		balBytes, err := balcache.BlockAccessListBytes(ctx, hash, blockNum)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: BlockAccessListBytes error %w", err)
 		}

@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -212,7 +212,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		// runs (avoids local BAL regeneration). Non-blocking: if no
 		// eth/71 peer is available or the request fails, the cache miss
 		// will fall through to the BALRegenerator later.
-		if fetcher := rawdb.GetBALSyncFetcher(); fetcher != nil {
+		if fetcher := balcache.GetBALSyncFetcher(); fetcher != nil {
 			hashes, numbers, expected := collectBALFetchRequests(blocks)
 			if len(hashes) > 0 {
 				go fetcher.FetchBALs(ctx, hashes, numbers, expected)
@@ -283,7 +283,7 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 // collectBALFetchRequests pulls (hash, number, expectedBALHash) for every
 // block in the batch whose header commits to a BAL. Pre-Amsterdam blocks
 // (BlockAccessListHash == nil) are skipped. Returns positionally-aligned
-// slices for rawdb.BALSyncFetcher.FetchBALs.
+// slices for balcache.BALSyncFetcher.FetchBALs.
 func collectBALFetchRequests(blocks []*types.Block) (hashes []common.Hash, numbers []uint64, expected []common.Hash) {
 	for _, b := range blocks {
 		h := b.HeaderNoCopy()

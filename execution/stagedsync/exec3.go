@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -606,7 +607,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// BALs are cache-only (see db/rawdb/balcache.go). If the engine_newPayload
 			// path cached one for this block (via execmodule.InsertBlocks), pick it up
 			// here for the parallel exec's BAL validation.
-			data, _ := rawdb.CachedBlockAccessList(b.Hash())
+			data, _ := balcache.CachedBlockAccessList(b.Hash())
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
