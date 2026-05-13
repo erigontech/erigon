@@ -408,17 +408,21 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 				latestRw = binary.BigEndian.Uint64(k)
 			}
 		}
-		if roTx, terr := cfg.db.BeginRo(ctx); terr == nil {
-			c, cerr := roTx.Cursor(kv.HeaderCanonical)
-			if cerr == nil {
-				defer c.Close()
-				if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
-					latestCommitted = binary.BigEndian.Uint64(k)
-				}
-				c.Close()
+		func() {
+			roTx, terr := cfg.db.BeginRo(ctx)
+			if terr != nil {
+				return
 			}
-			roTx.Rollback()
-		}
+			defer roTx.Rollback()
+			c, cerr := roTx.Cursor(kv.HeaderCanonical)
+			if cerr != nil {
+				return
+			}
+			defer c.Close()
+			if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
+				latestCommitted = binary.BigEndian.Uint64(k)
+			}
+		}()
 		logger.Info("[exec] stage entry",
 			"exec.blockNumber", s.BlockNumber,
 			"senders.progress", prevStageProgress,
