@@ -30,6 +30,30 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 )
 
+// UpgradeSegHeadersV2 patches all V1 snapshot files (both E3 state files and
+// block/caplin .seg files) to V2 in-place.  It is the manual equivalent of the
+// SegHeaderV2 + SegHeaderV2Seg migrations.  Run it once after upgrading:
+//
+//	erigon snapshots upgrade-seg-headers --datadir=<path>
+func UpgradeSegHeadersV2(dirs datadir.Dirs, logger log.Logger) error {
+	for _, d := range []string{
+		dirs.Snap,
+		dirs.SnapDomain,
+		dirs.SnapHistory,
+		dirs.SnapIdx,
+		dirs.SnapAccessors,
+		dirs.SnapCaplin,
+	} {
+		if err := upgradeAndSmokeTestSegFilesInDir(d, logger); err != nil {
+			return err
+		}
+	}
+	if err := upgradeAndSmokeTestDotSegFilesInDir(dirs.Snap, false, logger); err != nil {
+		return err
+	}
+	return upgradeAndSmokeTestDotSegFilesInDir(dirs.SnapCaplin, true, logger)
+}
+
 // SegHeaderV2 upgrades all V1 .kv/.v/.ef snapshot files to V2 by patching
 // the two-byte file header in-place.  V2 is identical to V1 except that the
 // featureFlagBitmask byte now reliably encodes WordLevelKeyCompressionEnabled /

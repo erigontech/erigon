@@ -64,6 +64,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -221,6 +222,25 @@ var snapshotCommand = cli.Command{
 				return doRemoveOverlap(c, dirs)
 			},
 			Usage: "remove overlaps from e3 files",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
+			Name: "upgrade-seg-headers",
+			Action: func(c *cli.Context) error {
+				logger, err := debug.SetupSimple(c, true)
+				if err != nil {
+					return err
+				}
+				dirs, l, err := datadir.New(c.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+				return migrations.UpgradeSegHeadersV2(dirs, logger)
+			},
+			Usage: "Patch all V1 snapshot files to V2 header format (sets word-level compression bits). Run once after upgrading to the version that introduced this format.",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 			}),
