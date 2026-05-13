@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -1354,7 +1355,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
 		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	}
-	if evm.ChainRules().IsAmsterdam && !balance.IsZero() { // EIP-7708
+	if evm.ChainRules().IsAmsterdam && !evm.ChainRules().IsEIPDisabled(7708) && !balance.IsZero() { // EIP-7708
 		if self != beneficiaryAddr {
 			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 		} else if newContract {
@@ -1491,7 +1492,7 @@ func makeLog(size int) executionFunc {
 			Data:    d,
 			// This is a non-consensus field, but assigned here because
 			// execution/state doesn't know the current block number.
-			BlockNumber: evm.Context.BlockNumber,
+			BlockNumber: hexutil.Uint64(evm.Context.BlockNumber),
 		})
 
 		return pc, nil, nil
@@ -1500,13 +1501,10 @@ func makeLog(size int) executionFunc {
 
 // opPush1 is a specialized version of pushN
 func opPush1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		codeLen = uint64(len(scope.Contract.Code))
-		integer = new(uint256.Int)
-	)
+	codeLen := uint64(len(scope.Contract.Code))
 	pc++
 	if pc < codeLen {
-		scope.Stack.push(*integer.SetUint64(uint64(scope.Contract.Code[pc])))
+		scope.Stack.push(uint256.Int{uint64(scope.Contract.Code[pc])})
 	} else {
 		scope.Stack.push(uint256.Int{})
 	}
@@ -1528,17 +1526,14 @@ func stPush1(pc uint64, scope *CallContext) string {
 
 // opPush2 is a specialized version of pushN
 func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		codeLen = uint64(len(scope.Contract.Code))
-		integer = new(uint256.Int)
-	)
-
+	codeLen := uint64(len(scope.Contract.Code))
+	var integer uint256.Int
 	if pc+2 < codeLen {
 		integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3])
 	} else if pc+1 < codeLen {
 		integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8)
 	}
-	scope.Stack.push(*integer)
+	scope.Stack.push(integer)
 	pc += 2
 	return pc, nil, nil
 }
@@ -1551,12 +1546,13 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		startMin := min(int(pc+1), codeLen)
 		endMin := min(startMin+pushByteSize, codeLen)
 
-		integer := new(uint256.Int).SetBytes(scope.Contract.Code[startMin:endMin])
+		var integer uint256.Int
+		integer.SetBytes(scope.Contract.Code[startMin:endMin])
 		// Missing bytes: pushByteSize - len(pushData)
 		if missing := pushByteSize - (endMin - startMin); missing > 0 {
-			integer.Lsh(integer, uint(8*missing))
+			integer.ILsh(uint(8 * missing))
 		}
-		scope.Stack.push(*integer)
+		scope.Stack.push(integer)
 
 		pc += size
 		return pc, nil, nil

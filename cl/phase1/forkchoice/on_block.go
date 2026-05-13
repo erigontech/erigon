@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -47,6 +49,9 @@ var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
+	ErrMissingSegment                = errors.New("missing segment: parent state not available")
+	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
+	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -86,13 +91,21 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			f.mu.Unlock()
+		}
+	}()
 	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
 	}
+	// Use the store's current slot (set via OnTick) to validate the block is not from the future.
+	// The spec says: assert get_current_slot(store) >= block.slot
 	if f.Slot() < block.Block.Slot {
 		return errors.New("block is too early compared to current_slot")
 	}
@@ -100,116 +113,145 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
 	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
 	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// After checkpoint sync, the anchor block may sit inside (not at the start of)
+	// the finalized epoch. The fork graph only contains the anchor and its descendants,
+	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
+	// so the descendant check stays within the fork graph's horizon.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
 	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorRoot := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorRoot != finalizedCheckpoint.Root {
-		return fmt.Errorf("block is not a descendant of the finalized checkpoint")
+	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return ErrNotFinalizedDescendant
 	}
-	// Now we find the versioned hashes
-	var versionedHashes []common.Hash
-	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
-		versionedHashes = []common.Hash{}
-		if err := solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		}); err != nil {
+
+	// Validate parent payload status path early (before expensive operations)
+	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
+	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
+	isGloas := blockVersion >= clparams.GloasVersion
+	if isGloas {
+		if err := f.validateParentPayloadPath(block.Block); err != nil {
 			return err
 		}
 	}
 
-	elHasBlobs := false
-	if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
-		if err != nil {
-			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
-		}
-		elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
-		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
-	}
-
-	// Check if blob data is available (skip if blobs are in txpool)
-	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-			if err != nil {
-				return err
-			}
-			if !available {
-				if f.syncedDataManager.Syncing() {
-					return ErrEIP7594ColumnDataNotAvailable
-				} else {
-					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
-						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
-					}
-				}
-			}
-		} else if block.Version() >= clparams.DenebVersion {
-			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-				if errors.Is(err, ErrEIP4844DataNotAvailable) {
+	// Pre-GLOAS execution payload processing.
+	// In GLOAS, ExecutionPayload and BlobKzgCommitments are nil in BeaconBlock.
+	// These fields are handled separately in OnExecutionPayload when the envelope arrives.
+	startEngine := time.Now()
+	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
+	if blockVersion < clparams.GloasVersion {
+		// Find the versioned hashes from blob commitments
+		var versionedHashes []common.Hash
+		if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
+			versionedHashes = []common.Hash{}
+			solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+				versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
+				if err != nil {
 					return err
 				}
-				return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
-			}
-			if f.highestSeen.Load() < block.Block.Slot {
-				collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
-			}
+				versionedHashes = append(versionedHashes, versionedHash)
+				return nil
+			})
 		}
-	}
 
-	var executionRequestsList []hexutil.Bytes
-	if block.Version() >= clparams.ElectraVersion {
-		executionRequestsList = block.Block.Body.GetExecutionRequestsList()
-		if executionRequestsList == nil {
-			executionRequestsList = []hexutil.Bytes{}
+		// Check if EL has blobs
+		elHasBlobs := false
+		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+			if err != nil {
+				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
+			}
+			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 		}
-	}
 
-	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
-	startEngine := time.Now()
-	if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
-		if block.Version() >= clparams.DenebVersion {
-			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
-				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
+		// Check if blob data is available (skip if blobs are in txpool)
+		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
+			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
+				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+				if err != nil {
+					return err
+				}
+				if !available {
+					if f.syncedDataManager.Syncing() {
+						return ErrEIP7594ColumnDataNotAvailable
+					} else {
+						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
+							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+						}
+					}
+				}
+			} else if block.Version() >= clparams.DenebVersion {
+				if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+					if errors.Is(err, ErrEIP4844DataNotAvailable) {
+						return err
+					}
+					return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
+				}
+				if f.highestSeen.Load() < block.Block.Slot {
+					collectOnBlockLatencyToUnixTime(f.ethClock, block.Block.Slot)
+				}
 			}
 		}
-		timeStartExec := time.Now()
-		payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
-		monitor.ObserveNewPayloadTime(timeStartExec)
-		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
-		switch payloadStatus {
-		case execution_client.PayloadStatusNone:
-			log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
-			return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
-		case execution_client.PayloadStatusNotValidated:
-			log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
-			// optimistic block candidate
-			if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
-				return fmt.Errorf("failed to add block to optimistic store: %v", err)
+
+		// Get execution requests list for Electra+
+		var executionRequestsList []hexutil.Bytes
+		if block.Version() >= clparams.ElectraVersion {
+			executionRequestsList = block.Block.Body.GetExecutionRequestsList()
+			if executionRequestsList == nil {
+				executionRequestsList = []hexutil.Bytes{}
 			}
-		case execution_client.PayloadStatusInvalidated:
-			log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
-			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-			// remove from optimistic candidate
-			if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
-				return fmt.Errorf("failed to remove block from optimistic store: %v", err)
-			}
-			return errors.New("block is invalid")
-		case execution_client.PayloadStatusValidated:
-			log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
-			// remove from optimistic candidate
-			if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
-				return fmt.Errorf("failed to validate block in optimistic store: %v", err)
-			}
-			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 		}
-		if err != nil {
-			return fmt.Errorf("newPayload failed: %v", err)
+
+		// Call NewPayload to validate execution payload
+		if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
+			if block.Version() >= clparams.DenebVersion {
+				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
+					return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
+				}
+			}
+			timeStartExec := time.Now()
+			payloadStatus, err := f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			monitor.ObserveNewPayloadTime(timeStartExec)
+			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+
+			// Track payload status by execution block hash for GLOAS parent payload validation
+			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
+			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+
+			switch payloadStatus {
+			case execution_client.PayloadStatusNone:
+				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
+				return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
+			case execution_client.PayloadStatusNotValidated:
+				log.Trace("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
+				// optimistic block candidate
+				if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
+					return fmt.Errorf("failed to add block to optimistic store: %v", err)
+				}
+			case execution_client.PayloadStatusInvalidated:
+				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
+				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+				// remove from optimistic candidate
+				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
+					return fmt.Errorf("failed to remove block from optimistic store: %v", err)
+				}
+				return errors.New("block is invalid")
+			case execution_client.PayloadStatusValidated:
+				log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
+				// remove from optimistic candidate
+				if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
+					return fmt.Errorf("failed to validate block in optimistic store: %v", err)
+				}
+				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+			}
+			if err != nil {
+				return fmt.Errorf("newPayload failed: %v", err)
+			}
 		}
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
@@ -217,8 +259,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// latest slot even if AddChainSegment returns PreValidated.
 	if block.Block.Slot > f.highestSeen.Load() {
 		f.highestSeen.Store(block.Block.Slot)
+		f.highestSeenRoot.Store(common.Hash(blockRoot))
 	}
 	startStateProcess := time.Now()
+
+	// [Modified in Gloas:EIP7732 defer-payload] With deferred payload processing,
+	// there is only one state per block root. The execution effects from the parent's
+	// payload are applied during ProcessParentExecutionPayload (called by TransitionState),
+	// not via a separate execution_payload_state. We still validate that the parent's
+	// payload was received (store.payloads check) via validateParentPayloadPath above.
+
 	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if err != nil {
 		return err
@@ -235,11 +285,21 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
+	case fork_graph.MissingSegment:
+		return ErrMissingSegment
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	} else if blockVersion >= clparams.GloasVersion {
+		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block (GLOAS separates them).
+		// Inherit parent's execution head as a placeholder so FCU sends a valid (non-zero) hash.
+		// OnExecutionPayload will overwrite this with the real payload hash if the envelope arrives (FULL path).
+		// If the envelope never arrives (EMPTY path), the parent hash is the correct EL head anyway.
+		if parentHash, ok := f.eth2Roots.Get(block.Block.ParentRoot); ok {
+			f.eth2Roots.Add(blockRoot, parentHash)
+		}
 	}
 	// Note: highestSeen was already updated before AddChainSegment (line ~216)
 	// so aggregates/attestations for this slot are accepted promptly. No second
@@ -248,11 +308,61 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
-	// Add proposer score boost if the block is timely
-	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
-	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
-		f.proposerBoostRoot.Store(common.Hash(blockRoot))
+	// record_block_timeliness: store [block_timely, ptc_timely] vector.
+	// [Modified in Gloas:EIP7732] Post-GLOAS stores a two-element timeliness vector;
+	// pre-GLOAS stores [block_timely, false]. See recordBlockTimeliness for details.
+	f.recordBlockTimeliness(block.Block, common.Hash(blockRoot))
+	// update_proposer_boost_root: conditionally set proposer boost root.
+	// Separated from recordBlockTimeliness per spec: checks timeliness + proposer index.
+	f.updateProposerBoostRoot(block.Block, common.Hash(blockRoot))
+
+	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
+	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
+	if blockVersion >= clparams.GloasVersion {
+		// Initialize payload timeliness and data availability votes for this block
+		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
+		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
+
+		// Notify PTC messages from payload attestations in the block.
+		// Skip during forward sync (newPayload=false) — PTC votes only matter
+		// for fork choice at the chain tip, not for historical blocks.
+		if block.Block.Body.PayloadAttestations != nil && newPayload {
+			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
+		}
+
+		// [New in Gloas:EIP7732] Check if there's a pending envelope waiting for this block.
+		// This handles the case where envelope arrives before the block via gossip.
+		// IMPORTANT: must run BEFORE ProcessJustificationBitsAndFinality below, which
+		// temporarily mutates the state for unrealized justification. The envelope's
+		// ProcessExecutionPayloadEnvelope spec check requires state.HashSSZ() to match
+		// the block's state_root, and the mutation+restoration cycle can cause the
+		// incremental hash cache to diverge.
+		// Check for pending envelopes: first the local self-build queue (skip BLS),
+		// then the general gossip queue (full BLS verification). These are separate
+		// queues so that origin is determined by which queue wrote the entry, not by
+		// inspecting envelope contents (which an attacker could forge).
+		if pending, ok := f.pendingLocalSelfBuildEnvelopes.Get(common.Hash(blockRoot)); ok {
+			f.pendingLocalSelfBuildEnvelopes.Remove(common.Hash(blockRoot))
+			log.Trace("OnBlock: processing pending local self-build envelope", "blockRoot", common.Hash(blockRoot))
+			applied, applyErr := f.applyLocalSelfBuildEnvelopeLocked(ctx, pending)
+			if applyErr != nil {
+				log.Warn("OnBlock: failed to process pending local self-build envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+			} else if applied {
+				appliedEnvelope = pending.Message
+			}
+		} else if pending, ok := f.pendingEnvelopes.Get(common.Hash(blockRoot)); ok {
+			f.pendingEnvelopes.Remove(common.Hash(blockRoot))
+			log.Trace("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
+			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
+			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
+			// otherwise the EL never learns about this block and the chain stalls.
+			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
+			if applyErr != nil {
+				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
+			} else if applied {
+				appliedEnvelope = pending.Message
+			}
+		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes
@@ -317,7 +427,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	lastProcessedState.SetJustificationBits(justificationBits)
 
 	// If the block is from a prior epoch, apply the realized values
-	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
@@ -339,6 +448,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.peerDas.UpdateValidatorsCustody(custodyRequirement)
 		}
 	}
+
+	// Release lock (via defer) before writing DB indices for the applied envelope.
+	unlocked = true
+	f.mu.Unlock()
+
+	// Write execution payload envelope indices outside f.mu to avoid deadlock
+	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
+	if appliedEnvelope != nil && f.db != nil {
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), appliedEnvelope)
+		}); err != nil {
+			log.Warn("OnBlock: failed to write execution payload indices for pending envelope",
+				"blockRoot", common.Hash(blockRoot), "err", err)
+		}
+	}
+
 	return nil
 }
 

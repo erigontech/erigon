@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -468,6 +469,29 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			givePermit = true
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case eth.GetBlockAccessListsMsg:
+			// eth/71 (EIP-8159) — inbound BAL request. Mirrors GetBlockBodiesMsg:
+			// read-only request, no permit change, forward to subscribers.
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case eth.BlockAccessListsMsg:
+			// eth/71 (EIP-8159) — inbound BAL response. Mirrors BlockBodiesMsg:
+			// completes an in-flight request so release a request permit.
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -1080,6 +1104,18 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
+		// Async enqueue can win the race against Remove closing pi.removed, so a
+		// queued task may be scheduled to run on a peer we have already asked
+		// p2p to disconnect. Without this check, one last frame would slip out
+		// after Disconnect — which Hive's devp2p BlobViolations asserts against.
+		// Matches go-ethereum, where Disconnect runs on the same goroutine as
+		// detection so nothing further can be sent.
+		select {
+		case <-peerInfo.removed:
+			return
+		default:
+		}
+
 		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
 		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
@@ -1529,15 +1565,10 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
 		ch <- req
-		if len(ch) > MessagesQueueSize/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop 50% of old messages", "msgID", msgID.String())
-			// evict old messages from channel
-			for j := 0; j < MessagesQueueSize/4; j++ {
-				select {
-				case <-ch:
-				default:
-				}
-			}
+		before := len(ch)
+		libsentry.EvictOldestIfHalfFull(ch)
+		if before > cap(ch)/2 {
+			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
 		}
 	}
 }
@@ -1576,10 +1607,9 @@ func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *se
 	}
 }
 
-const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentryproto.Sentry_MessagesServer) error {
 	ss.logger.Trace("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *sentryproto.InboundMessage, MessagesQueueSize)
+	ch := make(chan *sentryproto.InboundMessage, libsentry.MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
 	defer clean()

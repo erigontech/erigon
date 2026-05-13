@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const reorgTooDeepDepth = 3
@@ -219,6 +220,9 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
+		if errors.Is(err, txpool.ErrPoolDisabled) {
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs
