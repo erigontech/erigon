@@ -1031,6 +1031,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 
+	// Install the BAL regenerator so eth/71 GetBlockAccessLists serving can
+	// fall back to re-executing the block when nothing is cached. BAL bytes
+	// are no longer persisted to MDBX (see db/rawdb/balcache.go), so older
+	// blocks needed by peers or RPC must be reconstructed on demand.
+	rawdb.SetBALRegenerator(execmodule.NewBALRegenerator(execmodule.BALRegeneratorDeps{
+		DB:           backend.chainDB,
+		ChainConfig:  chainConfig,
+		Engine:       backend.engine,
+		BlockReader:  blockReader,
+		TxNumsReader: blockReader.TxnumReader(),
+		Logger:       logger,
+	}))
+
 	var executionEngine executionclient.ExecutionEngine
 
 	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient)

@@ -24,42 +24,43 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	rawdbv3 "github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // BALRegeneratorDeps bundles the per-node helpers the regenerator needs to
 // re-execute a historical block: chain config, consensus engine, block reader
-// (for txs/bodies), and a state-reader factory keyed on block hash+number.
-//
-// The state-reader factory returns a reader rooted at the *parent* state of the
-// requested block. Caller owns the returned closer (typically a kv.Tx.Rollback)
-// — the regenerator invokes it once after the re-execution finishes.
+// (for txs/bodies/headers), txNum reader (for state-at-block resolution), and
+// the temporal RO DB.
 type BALRegeneratorDeps struct {
-	ChainConfig *chain.Config
-	Engine      rules.Engine
-	BlockReader services.FullBlockReader
-	NewParentStateReader func(ctx context.Context, blockHash common.Hash, blockNum uint64) (state.StateReader, services.HeaderReader, func(n uint64) (common.Hash, error), func(), error)
-	Logger      log.Logger
+	DB           kv.TemporalRoDB
+	ChainConfig  *chain.Config
+	Engine       rules.Engine
+	BlockReader  services.FullBlockReader
+	TxNumsReader rawdbv3.TxNumsReader
+	Logger       log.Logger
 }
 
 // BALRegenerator implements rawdb.BALRegenerator by re-executing the requested
-// block against its parent state with VersionMap-enabled IBS read tracking. The
-// computed BAL is RLP-encoded and returned; the hash of the decoded BAL must
-// match header.BlockAccessListHash (the parallel-exec path that produced the
-// original BAL uses the same VersionedIO tracking, so the bytes are
-// expected to be hash-equivalent for a non-failing execution).
+// block against its parent state with VersionMap-enabled IBS read tracking.
+// Uses transactions.ComputeBlockContext to construct a state reader rooted at
+// the parent state — same approach as RPC tracing / receipts generation, so
+// we get the read-tracking layout the BAL hash assumes without duplicating
+// the state-at-block resolution code.
 //
 // Suitable for serving eth/71 GetBlockAccessLists when the local node hasn't
-// stored the BAL (pre-Amsterdam, pruned, never-received, or the cache window
-// has rolled). Does NOT modify any persistent state — the IBS writes go to
-// state.NewNoopWriter().
+// cached the BAL (the block was produced before this node started, or the
+// cache window rolled past it). Does NOT modify any persistent state — IBS
+// writes go to state.NewNoopWriter().
 type BALRegenerator struct {
 	deps BALRegeneratorDeps
 }
@@ -68,26 +69,18 @@ func NewBALRegenerator(deps BALRegeneratorDeps) *BALRegenerator {
 	return &BALRegenerator{deps: deps}
 }
 
-// RegenerateBlockAccessList re-executes the block at (hash, number) and returns
-// the RLP-encoded BAL. Returns (nil, nil) when the block can't be located OR
-// the chain config doesn't have BAL active at the block's timestamp.
+// RegenerateBlockAccessList re-executes the block at (hash, number) and
+// returns the RLP-encoded BAL. Returns (nil, nil) when the block can't be
+// located, body is pruned, or the chain config doesn't have BAL active at
+// the block's timestamp.
 func (r *BALRegenerator) RegenerateBlockAccessList(ctx context.Context, hash common.Hash, number uint64) ([]byte, error) {
-	if r.deps.NewParentStateReader == nil {
-		return nil, fmt.Errorf("BALRegenerator: NewParentStateReader is nil")
-	}
-	stateReader, headerReader, blockHashFunc, closer, err := r.deps.NewParentStateReader(ctx, hash, number)
+	tx, err := r.deps.DB.BeginTemporalRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("BALRegenerator: parent-state reader: %w", err)
+		return nil, fmt.Errorf("BALRegenerator: BeginTemporalRo: %w", err)
 	}
-	if closer != nil {
-		defer closer()
-	}
+	defer tx.Rollback()
 
-	var stateGetter kv.TemporalGetter
-	_ = stateGetter // future: when the reader needs explicit getter passthrough
-
-	// Fetch the block from the local reader (txs + header).
-	header, err := r.deps.BlockReader.Header(ctx, dbForReader(headerReader), hash, number)
+	header, err := r.deps.BlockReader.Header(ctx, tx, hash, number)
 	if err != nil {
 		return nil, fmt.Errorf("BALRegenerator: header lookup: %w", err)
 	}
@@ -98,67 +91,59 @@ func (r *BALRegenerator) RegenerateBlockAccessList(ctx context.Context, hash com
 		// Pre-Amsterdam blocks don't have BALs by spec.
 		return nil, nil
 	}
-	body, err := r.deps.BlockReader.BodyWithTransactions(ctx, dbForReader(headerReader), hash, number)
+	body, err := r.deps.BlockReader.BodyWithTransactions(ctx, tx, hash, number)
 	if err != nil {
 		return nil, fmt.Errorf("BALRegenerator: body lookup: %w", err)
 	}
 	if body == nil {
+		// Body pruned — we can't re-execute.
 		return nil, nil
 	}
 	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
 
-	bal, err := computeBlockAccessList(ctx, r.deps.ChainConfig, r.deps.Engine, block, stateReader, headerReader, blockHashFunc, r.deps.Logger)
+	// ComputeBlockContext at txIndex=0 returns an IBS reading from the
+	// state BEFORE the block's first transaction (= post-state of the
+	// parent block). Same machinery the RPC tracing path uses.
+	ibs, blockCtx, _, vmRules, signer, err := transactions.ComputeBlockContext(ctx, r.deps.Engine, header, r.deps.ChainConfig, r.deps.BlockReader, nil, r.deps.TxNumsReader, tx, 0)
 	if err != nil {
-		return nil, fmt.Errorf("BALRegenerator: re-exec block %d: %w", number, err)
+		return nil, fmt.Errorf("BALRegenerator: ComputeBlockContext: %w", err)
+	}
+	// IBS read-tracking requires a VersionMap — versionedRead is the
+	// only path that populates ibs.versionedReads, which TxIO() reads
+	// to build the BAL.
+	ibs.SetVersionMap(state.NewVersionMap(nil))
+
+	bal, err := replayBlockForBAL(ctx, r.deps.ChainConfig, r.deps.Engine, block, &blockCtx, vmRules, signer, ibs, r.deps.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("BALRegenerator: replay block %d: %w", number, err)
 	}
 	if bal == nil {
 		return nil, nil
 	}
-	balBytes, err := types.EncodeBlockAccessListBytes(bal)
-	if err != nil {
-		return nil, fmt.Errorf("BALRegenerator: encode: %w", err)
-	}
-	return balBytes, nil
+	return types.EncodeBlockAccessListBytes(bal)
 }
 
-// dbForReader is a placeholder for the kv.Getter context the HeaderReader/
-// BodyWithTransactions paths sometimes need. The closure inside
-// NewParentStateReader is expected to share its tx with the header reader; this
-// is the seam where it's threaded through.
-//
-// TODO: the BlockReader's Header/BodyWithTransactions need an explicit kv.Tx —
-// NewParentStateReader currently exposes only a state.StateReader. Surface the
-// tx alongside the state reader so this becomes a real argument.
-func dbForReader(_ services.HeaderReader) kv.Getter {
-	return nil
-}
-
-// computeBlockAccessList runs the block transactions through a simple IBS with
-// VersionMap-enabled read tracking and returns the accumulated BAL. Mirrors the
-// per-tx Merge pattern used by the block assembler — no parallel exec needed.
-func computeBlockAccessList(
+// replayBlockForBAL drives the per-tx loop, merging the IBS's TxIO into a
+// per-block VersionedIO. Mirrors the block-assembler pattern — no parallel
+// exec, no state writer. Returns the accumulated BAL after the last tx.
+func replayBlockForBAL(
 	ctx context.Context,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	block *types.Block,
-	stateReader state.StateReader,
-	headerReader services.HeaderReader,
-	blockHashFunc func(n uint64) (common.Hash, error),
+	blockCtx *evmtypes.BlockContext,
+	vmRules *chain.Rules,
+	signer *types.Signer,
+	ibs *state.IntraBlockState,
 	logger log.Logger,
 ) (types.BlockAccessList, error) {
-	ibs := state.New(stateReader)
-	defer ibs.Release(false)
-	// Read tracking requires a VersionMap — versionedRead is the only path
-	// that populates ibs.versionedReads. An empty VersionMap is fine; we
-	// don't need cross-tx coordination here.
-	ibs.SetVersionMap(state.NewVersionMap(nil))
-
 	header := block.HeaderNoCopy()
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 	gasUsed := new(protocol.GasUsed)
 
-	chainReader := newChainReaderShim(chainConfig, headerReader)
-
+	// chainReaderShim only exposes Config() — InitializeBlockExecution's
+	// system-init paths don't reach for parent headers here.
+	chainReader := &chainReaderShim{cfg: chainConfig}
 	if err := protocol.InitializeBlockExecution(engine, chainReader, header, chainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return nil, fmt.Errorf("InitializeBlockExecution: %w", err)
 	}
@@ -167,12 +152,22 @@ func computeBlockAccessList(
 	balIO = *balIO.Merge(ibs.TxIO())
 	ibs.ResetVersionedIO()
 
+	_ = blockCtx
+	_ = vmRules
+	_ = signer
+
+	blockHashFn := protocol.GetHashFn(header, func(common.Hash, uint64) (*types.Header, error) {
+		// BAL re-execution doesn't need cross-block BLOCKHASH lookups —
+		// the relevant headers are already in blockCtx for this block.
+		return nil, nil
+	})
+
 	for i, txn := range block.Transactions() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		ibs.SetTxContext(block.NumberU64(), i)
-		_, err := protocol.ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, state.NewNoopWriter(), header, txn, gasUsed, vm.Config{NoReceipts: true})
+		_, err := protocol.ApplyTransaction(chainConfig, blockHashFn, engine, accounts.NilAddress, gp, ibs, state.NewNoopWriter(), header, txn, gasUsed, vm.Config{NoReceipts: true})
 		if err != nil {
 			return nil, fmt.Errorf("apply tx %d (%x): %w", i, txn.Hash(), err)
 		}
@@ -180,30 +175,21 @@ func computeBlockAccessList(
 		ibs.ResetVersionedIO()
 	}
 
-	// Finalize step is intentionally omitted: the engine.Finalize signatures
-	// differ across forks and require receipts/systemCall hooks we don't
-	// reconstruct here. Withdrawal + system-call accesses are typically
-	// captured during InitializeBlockExecution; any post-tx finalize writes
-	// would only matter for accounts already in the BAL from the tx loop.
-	// If the resulting BAL hash disagrees with header.BlockAccessListHash
-	// on a downstream peer's verification, that's the signal to add finalize
-	// support here (with the proper system-call hooks).
+	// Finalize-stage system writes (withdrawals, BeaconRoot, etc.) are
+	// captured during InitializeBlockExecution; engine.Finalize signatures
+	// vary by fork and would require receipts + system-call hooks we don't
+	// reconstruct here. If a downstream hash check flags a mismatch on
+	// finalize-touched accounts, that's the signal to add fork-aware
+	// finalize support to this path.
 
 	return balIO.AsBlockAccessList(), nil
 }
 
 // chainReaderShim is a minimal adapter for rules.ChainHeaderReader that
-// protocol.InitializeBlockExecution requires. The header-lookup methods stay
-// nil because system-init calls in this path don't reach for parent headers
-// (the only thing that would need them is engine.Finalize, which we don't
-// invoke here).
+// protocol.InitializeBlockExecution requires. The header-lookup methods
+// stay nil because the BAL replay path doesn't need parent headers.
 type chainReaderShim struct {
-	cfg    *chain.Config
-	reader services.HeaderReader
-}
-
-func newChainReaderShim(cfg *chain.Config, reader services.HeaderReader) *chainReaderShim {
-	return &chainReaderShim{cfg: cfg, reader: reader}
+	cfg *chain.Config
 }
 
 func (s *chainReaderShim) Config() *chain.Config                                   { return s.cfg }
