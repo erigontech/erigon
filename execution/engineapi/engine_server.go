@@ -195,23 +195,38 @@ func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types
 	return withdrawals != nil
 }
 
-func (s *EngineServer) validatePayloadAttributes(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
-	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-		return &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-	}
-	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-		return &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-	}
-
+// validatePayloadAttributesPreFCU runs the request-level "wrong version of the
+// structure" checks defined by engine_forkchoiceUpdatedV2's Request section.
+// These are independent of fork-choice sync state and so MUST run before the
+// SYNCING short-circuit, otherwise a CL that sends mismatched-version attrs
+// would never see the spec-mandated -38003/-38005.
+func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // V1/V2 attrs MUST NOT carry parentBeaconBlockRoot
 	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
-		return &engine_helpers.InvalidPayloadAttributesErr
+		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
+	}
+	return nil
+}
+
+// validatePayloadAttributesPostFCU runs the checks the engine API spec defines
+// under "Extend point (8)" of engine_forkchoiceUpdatedV1, which the spec gates
+// on the head being VALID. They MUST run only after the SYNCING short-circuit,
+// so that an unknown head is reported as SYNCING (no -38003/-38005). See the
+// hive engine-cancun "Invalid PayloadAttributes, Missing BeaconRoot,
+// Syncing=True" tests for the canonical scenario.
+func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // V3 attrs require parentBeaconBlockRoot (cancun.md point 8.1)
+	}
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
@@ -252,7 +267,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
-	txs := [][]byte{}
+	txs := make([][]byte, 0, len(req.Transactions))
 	for _, transaction := range req.Transactions {
 		txs = append(txs, transaction)
 	}
@@ -327,7 +342,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var blockAccessList types.BlockAccessList
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion {
+	if version >= clparams.GloasVersion && !s.config.IsEIPDisabled(7928) {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
@@ -725,13 +740,14 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
 	}
 
-	// Per the engine API spec, payloadAttributes must be validated against the
-	// fork schedule regardless of the fork-choice sync state. Doing this before
-	// the SYNCING short-circuit below lets the CL detect misconfigured attributes
-	// (e.g. fcuV2 with nil withdrawals at a Shanghai timestamp) even when the
-	// head is still syncing.
+	// engine_forkchoiceUpdatedV2's Request section makes the "wrong version of
+	// structure" rule independent of fork-choice sync state, so run those
+	// checks before the SYNCING short-circuit below. The remaining attribute
+	// checks live under "Extend point (8)" of engine_forkchoiceUpdatedV1,
+	// which the spec gates on the head being VALID — those run after the
+	// short-circuit so a SYNCING head is not turned into -38003/-38005.
 	if payloadAttributes != nil {
-		if err := s.validatePayloadAttributes(version, payloadAttributes); err != nil {
+		if err := s.validatePayloadAttributesPreFCU(version, payloadAttributes); err != nil {
 			return nil, err
 		}
 	}
@@ -739,6 +755,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
+	}
+
+	if err := s.validatePayloadAttributesPostFCU(version, payloadAttributes); err != nil {
+		return nil, err
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
@@ -1131,6 +1151,9 @@ func (e *EngineServer) HandleForkChoice(
 	}
 	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
+	}
+	if status == execmodule.ExecutionStatusReorgTooDeep {
+		return nil, &engine_helpers.ReorgTooDeepErr
 	}
 	if status == execmodule.ExecutionStatusBusy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil

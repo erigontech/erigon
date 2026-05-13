@@ -446,6 +446,53 @@ func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_NoTopics(
 	s.NoError(err)
 }
 
+func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_PropagatesConditionsToValidator() {
+	var (
+		conditionCalled bool
+		decodeCalled    bool
+		processCalled   bool
+	)
+
+	service := &mockService{
+		decodeFunc: func(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
+			decodeCalled = true
+			return "decoded_message", nil
+		},
+		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
+			processCalled = true
+			return nil
+		},
+		namesFunc: func() []string {
+			return []string{"unknown_topic"}
+		},
+	}
+	condition := func(pid peer.ID, msg *pubsub.Message, version clparams.StateVersion) bool {
+		conditionCalled = true
+		return false
+	}
+
+	err := s.gm.registerGossipService(service, condition)
+	s.Require().NoError(err)
+
+	forkDigest, err := s.mockClock.CurrentForkDigest()
+	s.Require().NoError(err)
+	topic := composeTopic(forkDigest, "unknown_topic")
+
+	subscription := s.gm.subscriptions.Get(topic)
+	s.Require().NotNil(subscription)
+	s.Require().NotNil(subscription.validator)
+
+	testData := []byte("test data")
+	compressedData := utils.CompressSnappy(testData)
+	msg := createMockMessage(topic, compressedData)
+
+	result := subscription.validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationIgnore, result)
+	s.True(conditionCalled)
+	s.False(decodeCalled)
+	s.False(processCalled)
+}
+
 func (s *subscribeUpcomingTopicsTestSuite) TestSubscribeUpcomingTopics_WithTopics() {
 	oldForkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
 	newForkDigest := common.Bytes4{0x12, 0x34, 0x56, 0x78}

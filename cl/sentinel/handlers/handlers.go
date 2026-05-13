@@ -129,6 +129,9 @@ func NewConsensusHandlers(
 		// data column sidecars
 		hm[communication.DataColumnSidecarsByRangeProtocolV1] = c.dataColumnSidecarsByRangeHandler
 		hm[communication.DataColumnSidecarsByRootProtocolV1] = c.dataColumnSidecarsByRootHandler
+		// execution payload envelopes
+		hm[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = c.executionPayloadEnvelopesByRangeHandler
+		hm[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = c.executionPayloadEnvelopesByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -197,7 +200,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 					log.Debug("failed to write resource unavailable prefix", "err", err)
 				}
 			}
-			log.Debug("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
+			log.Trace("[pubsubhandler] stream handler returned error", "protocol", name, "peer", s.Conn().RemotePeer().String(), "err", err)
 			_ = s.Reset()
 			_ = s.Close()
 			return

@@ -7,15 +7,39 @@ description: Run the full Erigon test suite locally using GOGC=80 make test-all.
 
 Runs the complete test suite with 60-minute timeout and coverage output. Takes ~30 minutes.
 
-## Prerequisite: Update Submodules
+## Prerequisite: Test fixtures
 
-Before running `make test-all`, always sync git submodules:
+`make test-all` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
+
+To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
 
 ```bash
-git submodule update --init --recursive --force
+make eest-spec-statetests-stable             # state tests vs eest_stable fixtures
+make eest-spec-blocktests-stable             # blockchain tests vs eest_stable fixtures (serial exec3)
+make eest-spec-blocktests-stable-parallel    # same, but with ERIGON_EXEC3_PARALLEL=true
+make eest-spec-enginextests-stable           # engine-x tests vs eest_stable fixtures
+make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
+make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
+make eest-spec-enginextests-benchmark-1m     # engine-x benchmark fixtures @ 1M gas target
+                                             # (with per-test --time stats);
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too
+make eest-spec-blocktests-stable-race-cancun # race-detector variant, sharded per fork:
+                                             # -pre-cancun/-cancun/-prague/-osaka, plus
+                                             # eest-spec-blocktests-devnet-race-amsterdam
+                                             # each also has a "-parallel" sibling
+                                             # (e.g. ...-race-cancun-parallel)
 ```
 
-Most tests in `execution/tests` load test fixtures from a git submodule (`execution/tests/execution-spec-tests`). Without this step the fixture files are missing or stale and tests will fail or skip silently. The CI workflow clones submodules automatically (`submodules: true` in `test-all-erigon.yml`); locally you must do it yourself.
+The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-spec-shards.json` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
+
+Two side prerequisites still apply for tests `make test-all` does run:
+
+```bash
+git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
+git lfs pull --include='execution/tests/test-corners/**'   # for TestInvalidReceiptHashHighMgas
+```
+
+The CI workflow handles both in `setup-erigon`; locally you must do them yourself.
 
 ## Prerequisite: Create RAM Disk
 
@@ -76,15 +100,19 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 
 - Before marking a PR ready for review
 - After significant logic changes to verify no edge cases break
-- Full gate: `git submodule update --init --recursive --force && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
+- Full gate: `git submodule update --init --recursive --force && git lfs pull --include='execution/tests/test-corners/**' && path=$(bash tools/create-ramdisk) && make lint && make erigon integration && ERIGON_EXECUTION_TESTS_TMPDIR=$path GOGC=80 make test-all`
 
 ## CI Equivalent
 
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `GOGC=80 make test-all` | All tests | `test-all-erigon.yml` |
+| `make eest-spec-<suite>-<fixtures>` | EEST spec tests | `test-eest-spec.yml` |
+| `cd cl/spectest && make tests && make mainnet` | Consensus spec | `test-integration-caplin.yml` |
 
 To dispatch remotely:
 ```bash
 gh workflow run "All tests" --ref <branch>
+gh workflow run "EEST spec tests" --ref <branch>
+gh workflow run "Consensus spec" --ref <branch>
 ```

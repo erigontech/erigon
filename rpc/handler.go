@@ -677,6 +677,11 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return msg.response(result)
 	}
 
+	// Switch gzip middleware to streaming mode before writing any response data.
+	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok {
+		flush()
+	}
+
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString("2.0")

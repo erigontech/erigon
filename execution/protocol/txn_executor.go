@@ -328,7 +328,8 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	if st.msg.BlobGas() > 0 && rules.IsCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
-		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
+		skipBlobCheck := st.evm.Config().NoBaseFee && (maxFeePerBlobGas == nil || maxFeePerBlobGas.IsZero())
+		if !skipBlobCheck && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
 				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
 		}
@@ -610,9 +611,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
-			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
-			// regularGasConsumed tracks only regular-dimension opcode gas.
 			blockState := imdGas.State + st.evm.StateGasConsumed()
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
@@ -728,9 +726,15 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 		stateIgasRefundInc = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
 	}
 	verifiedAuthorities := make([]accounts.Address, 0)
-	if len(auths) > 0 {
+	if auths != nil {
+		if !st.evm.ChainRules().IsPrague {
+			return nil, stateIgasRefund, errors.New("SetCode transaction not allowed before Prague fork")
+		}
 		if contractCreation {
 			return nil, stateIgasRefund, errors.New("contract creation not allowed with type4 txs")
+		}
+		if len(auths) == 0 {
+			return nil, stateIgasRefund, errors.New("SetCode transaction must have at least one authorization")
 		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
@@ -844,6 +848,7 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP3860:          vmConfig.HasEip3860(rules),
 		IsEIP7623:          rules.IsPrague,
 		IsEIP7976:          rules.IsAmsterdam,
+		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP8037:          rules.IsAmsterdam,
 	})
 }

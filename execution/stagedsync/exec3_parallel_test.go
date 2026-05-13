@@ -526,8 +526,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -588,7 +587,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 	applyResults := make(chan applyResult, 1000)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
 
 	// TODO get results back
 
@@ -650,8 +649,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())

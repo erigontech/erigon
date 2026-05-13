@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,13 +34,13 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -116,7 +118,7 @@ func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clpar
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
-	log.Debug("Received block via gossip", "slot", msg.Block.Slot)
+	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
 	if b.syncedData.Syncing() {
@@ -170,7 +172,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return ErrBlockYoungerThanParent
 	}
 
-	// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer -- i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
 	var maxBlobsPerBlock uint64
@@ -179,13 +180,51 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	} else {
 		maxBlobsPerBlock = b.beaconCfg.MaxBlobsPerBlockByVersion(blockVersion)
 	}
-	if msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
-		return ErrInvalidCommitmentsCount
+
+	// [Modified in Gloas:EIP7732] KZG commitments and execution payload validations moved from block.body to bid
+	if blockVersion >= clparams.GloasVersion {
+		// GLOAS: validate using bid = signed_execution_payload_bid.message
+		bid := msg.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			return errors.New("missing signed_execution_payload_bid in GLOAS block")
+		}
+
+		// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
+		// i.e. validate that len(bid.blob_kzg_commitments) <= get_blob_parameters(get_current_epoch(state)).max_blobs_per_block
+		if bid.Message.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
+			return ErrInvalidCommitmentsCount
+		}
+
+		// [REJECT] The bid's parent (defined by bid.parent_block_root) equals the block's parent (defined by block.parent_root)
+		if bid.Message.ParentBlockRoot != msg.Block.ParentRoot {
+			return errors.New("bid.parent_block_root does not match block.parent_root")
+		}
+
+		// [IGNORE] The block's parent execution payload (defined by bid.parent_block_hash) has been seen
+		// (via gossip or non-gossip sources). A client MAY queue blocks for processing once the parent payload is retrieved.
+		// If execution_payload verification of block's execution payload parent by an execution node is complete:
+		// [REJECT] The block's execution payload parent (defined by bid.parent_block_hash) passes all validation.
+		parentBlockHash := bid.Message.ParentBlockHash
+		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(parentBlockHash)
+		if !seen {
+			// Parent execution payload not seen yet, queue for later
+			b.scheduleBlockForLaterProcessing(msg)
+			return fmt.Errorf("%w: parent execution payload not seen: %v", ErrIgnore, parentBlockHash)
+		}
+		if status == execution_client.PayloadStatusInvalidated {
+			return errors.New("parent execution payload is invalid")
+		}
+	} else {
+		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
+		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
+		if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
+			return ErrInvalidCommitmentsCount
+		}
 	}
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
@@ -213,7 +252,12 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	log.Debug("Block scheduled for later processing", "slot", block.Block.Slot, "block", block.Block.Body.ExecutionPayload.BlockNumber)
+	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
+	var blockNum uint64
+	if block.Block.Body.ExecutionPayload != nil {
+		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
+	}
+	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
@@ -277,7 +321,7 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 		}
 		return true
 	})
-	log.Debug("import operations", "time", time.Since(start))
+	log.Trace("import operations", "time", time.Since(start))
 }
 
 // loop is the main loop of the block service

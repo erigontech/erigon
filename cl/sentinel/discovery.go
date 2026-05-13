@@ -121,8 +121,8 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		checked++
 		node := filteredIterator.Node()
 
-		// Skip private IPs
-		if node.IP().IsPrivate() {
+		// Skip private IPs unless local discovery is enabled
+		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
 			continue
 		}
 
@@ -237,7 +237,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				underservedIdxs[i] = info.idx
 			}
 
-			log.Debug("[Sentinel] Proactive subnet search starting",
+			log.Trace("[Sentinel] Proactive subnet search starting",
 				"underservedCount", len(underserved),
 				"threshold", minimumPeersPerSubnet,
 				"subnets", underservedIdxs)
@@ -262,7 +262,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 					stillUnderserved = append(stillUnderserved, i)
 				}
 			}
-			log.Debug("[Sentinel] Subnet coverage after search",
+			log.Trace("[Sentinel] Subnet coverage after search",
 				"subnetsAtMinPeers", atMin,
 				"minPeersPerSubnet", minimumPeersPerSubnet,
 				"stillUnderserved", stillUnderserved)
@@ -525,8 +525,8 @@ func (s *Sentinel) listenForPeers() {
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		// Skip Peer if IP was private.
-		if node.IP().IsPrivate() {
+		// Skip Peer if IP was private, unless local discovery is enabled.
+		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
 			continue
 		}
 
@@ -579,14 +579,23 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
-			log.Trace("[Sentinel] Failed to validate peer", "peer", peerId, "err", err)
+			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
+			// The peer may still work for gossip even if status exchange failed.
+			log.Debug("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
 		}
 
-		if !valid {
-			log.Trace("[Sentinel] Handshake failed, disconnecting peer", "peer", peerId)
+		if !valid && err == nil {
+			// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+			// Must disconnect to avoid receiving incompatible blocks.
+			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
+			return
+		}
+
+		if !valid {
+			// Handshake had a transport error AND returned invalid — keep anyway.
 			s.peers.RecordHandshakeFailure(peerId)
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
