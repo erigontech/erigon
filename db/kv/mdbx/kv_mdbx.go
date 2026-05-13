@@ -514,14 +514,16 @@ func (db *MdbxKV) CHandle() unsafe.Pointer {
 // View txn — at that point everything in GC is reclaimable.
 func (db *MdbxKV) leakDetectorExtraInfo() []any {
 	var dbSize, gcPages, retainedPages, freelistEntries uint64
+	var lastTxID, oldestRoTxID uint64
 	err := db.env.View(func(tx *mdbx.Txn) error {
 		info, err := db.env.Info(tx)
 		if err != nil {
 			return err
 		}
 		dbSize = info.Geo.Current
+		lastTxID = uint64(info.LastTxnID)
 
-		oldestRoTxID := uint64(math.MaxUint64)
+		oldestRoTxID = math.MaxUint64
 		db.liveRoTxIDs.Range(func(_, v any) bool {
 			if id, ok := v.(uint64); ok && id < oldestRoTxID {
 				oldestRoTxID = id
@@ -571,11 +573,19 @@ func (db *MdbxKV) leakDetectorExtraInfo() []any {
 	}
 	pageSize := db.opts.pageSize.Bytes()
 	reclaimablePages := gcPages - retainedPages
+	// txid_lag = how many commits behind the latest the oldest in-process RO
+	// tx is. Workload-independent leading indicator: any non-zero value means
+	// the writer's next big batch of retires will become Retained.
+	var txidLag uint64
+	if lastTxID > oldestRoTxID {
+		txidLag = lastTxID - oldestRoTxID
+	}
 	return []any{
 		"db", db.opts.label,
 		"db_size", common.ByteCount(dbSize),
 		"reclaimable", common.ByteCount(reclaimablePages * pageSize),
 		"retained", common.ByteCount(retainedPages * pageSize),
+		"txid_lag", txidLag,
 		"freelist_entries", freelistEntries,
 	}
 }
