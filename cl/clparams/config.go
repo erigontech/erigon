@@ -1560,6 +1560,7 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	return urls
 }
 
+// Check if chain with a specific ID is supported or not
 //
 // note: the following code uses chainID constants because they are usually the same as the network ID,
 // but the context of usage is they are checked against network ID. Shadowforks like bloatnet make
