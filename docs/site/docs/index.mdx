@@ -1,0 +1,92 @@
+---
+title: Introduction
+sidebar_position: 1
+hide_title: true
+description: "Official documentation for Erigon — the efficient, modular Ethereum execution client. Get started, explore the JSON-RPC API, and learn how to run a full or archive node."
+---
+
+import Link from '@docusaurus/Link';
+
+<div className="lp-hero">
+  <h1>Erigon Client Documentation</h1>
+  <p>An efficient, modular Ethereum execution client built for performance, low disk footprint, and flexible deployment.</p>
+</div>
+
+<div className="lp-grid">
+
+<Link className="lp-card" to="/get-started/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="5 3 19 12 5 21 5 3"/>
+  </svg>
+  <div className="lp-card-title">Get Started</div>
+  <div className="lp-card-desc">Hardware requirements, installation options, and first-run guides to get your node online fast.</div>
+</Link>
+
+<Link className="lp-card" to="/get-started/easy-nodes/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </svg>
+  <div className="lp-card-title">Easy Nodes</div>
+  <div className="lp-card-desc">One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.</div>
+</Link>
+
+<Link className="lp-card" to="/fundamentals/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+  </svg>
+  <div className="lp-card-title">Fundamentals</div>
+  <div className="lp-card-desc">Sync modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.</div>
+</Link>
+
+<Link className="lp-card" to="/fundamentals/modules/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7"/>
+    <rect x="14" y="3" width="7" height="7"/>
+    <rect x="14" y="14" width="7" height="7"/>
+    <rect x="3" y="14" width="7" height="7"/>
+  </svg>
+  <div className="lp-card-title">Modules</div>
+  <div className="lp-card-desc">Run RPC daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.</div>
+</Link>
+
+<Link className="lp-card" to="/staking/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="13" width="20" height="9" rx="2"/>
+    <rect x="9" y="12" width="6" height="2" rx="1"/>
+    <circle cx="12" cy="5" r="3"/>
+    <line x1="12" y1="8" x2="12" y2="11.5"/>
+    <polyline points="10 10 12 12 14 10"/>
+  </svg>
+  <div className="lp-card-title">Staking</div>
+  <div className="lp-card-desc">Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.</div>
+</Link>
+
+<Link className="lp-card" to="/interacting-with-erigon/">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6"/>
+    <polyline points="8 6 2 12 8 18"/>
+  </svg>
+  <div className="lp-card-title">Interacting with Erigon</div>
+  <div className="lp-card-desc">JSON-RPC and gRPC API reference — eth, debug, trace, engine, txpool, and other namespaces.</div>
+</Link>
+
+<Link
+  className="lp-card"
+  to="/get-started/why-using-erigon"
+  style={{gridColumn:'1 / -1', flexDirection:'row', alignItems:'center', gap:'1.5rem', padding:'1.5rem 2rem'}}
+>
+  <svg className="lp-icon" style={{width:'2.5rem', height:'2.5rem', flexShrink:0, marginBottom:0}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="8" r="6"/>
+    <path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/>
+  </svg>
+  <div style={{flex:1}}>
+    <div className="lp-card-title" style={{fontSize:'1.05rem'}}>Why Erigon?</div>
+    <div className="lp-card-desc">Architecture advantages, performance benchmarks, and disk savings — understand what sets Erigon apart from other Ethereum execution clients.</div>
+  </div>
+  <svg style={{flexShrink:0, color:'var(--ifm-color-emphasis-400)', width:'1.1rem', height:'1.1rem'}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6"/>
+  </svg>
+</Link>
+
+</div>
