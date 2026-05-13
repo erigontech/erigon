@@ -331,12 +331,12 @@ if convertRestore {
 
 **Files:** none (git only).
 
-- [ ] stage and commit the changes in two commits to match the two independent concerns:
-  - **commit A**: `db/state: per-file key rate + PrettyCounter in commitment convert logs` — Task 1, 2 changes.
-  - **commit B**: `db/state, cmd/integration: add --restore flag to commitment convert` — Task 3, 4, 5 changes.
-- [ ] move this plan to `docs/plans/completed/`: `mkdir -p docs/plans/completed && git mv docs/plans/20260512-commitment-convert-logging-restore.md docs/plans/completed/`
-- [ ] commit the plan move: `docs: archive commitment-convert logging+restore plan`
-- [ ] do NOT push — leave that to the operator
+- [x] stage and commit the changes in two commits to match the two independent concerns:
+  - **commit A**: `db/state: per-file key rate + PrettyCounter in commitment convert logs` — Task 1, 2 changes. (Done across 49cc2a12fe + c10aaa1d17.)
+  - **commit B**: `db/state, cmd/integration: add --restore flag to commitment convert` — Task 3, 4, 5 changes. (Done across fe58ab37ff + 4cd33a70df + d101a3d88f.)
+- [x] move this plan to `docs/plans/completed/`: `mkdir -p docs/plans/completed && git mv docs/plans/20260512-commitment-convert-logging-restore.md docs/plans/completed/`
+- [x] commit the plan move: `docs: archive commitment-convert logging+restore plan`
+- [x] do NOT push — leave that to the operator
 
 ## Post-Completion
 
