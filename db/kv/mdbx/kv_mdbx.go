@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -457,6 +458,13 @@ type MdbxKV struct {
 
 	leakDetector *dbg.LeakDetector
 
+	// liveRoTxIDs tracks the MDBX txid of every currently-live RO transaction
+	// opened by this process. Used by leakDetectorExtraInfo to compute the
+	// "retained" portion of GC pages (pages in the freelist that cannot yet be
+	// reclaimed because the oldest live reader was started before they were
+	// retired). Key: leak-detector traceID. Value: mdbx tx ID.
+	liveRoTxIDs sync.Map
+
 	// MaxBatchSize is the maximum size of a batch. Default value is
 	// copied from DefaultMaxBatchSize in Open.
 	//
@@ -486,21 +494,43 @@ func (db *MdbxKV) CHandle() unsafe.Pointer {
 	return db.env.CHandle()
 }
 
-// leakDetectorExtraInfo returns DB size and reclaimable freelist space so the
-// leak detector can log them next to the list of long-living transactions —
-// large reclaimable space is the usual symptom of an RO tx pinning an old snapshot.
+// leakDetectorExtraInfo returns DB size + GC accounting so the leak detector
+// can log them next to the list of long-living transactions. The interesting
+// number for debugging is `retained` — pages already in the freelist that
+// MDBX cannot yet hand to the next writer because the oldest live RO tx was
+// started before they were retired. Growth in `retained` is the direct cost
+// of an RO tx pinning an old snapshot.
 //
-// Reclaimable pages are computed by walking the GC table (DBI 0). Each value is
-// an MDBX_PNL: a packed array of pgno_t where element [0] is the count of the
-// page numbers that follow. We sum those counts across all GC records.
+// GC pages are computed by walking DBI 0. Each value is an MDBX_PNL: a packed
+// array of pgno_t where element [0] is the count of page numbers that follow.
+// The key of each GC entry is the txid that retired those pages. We split:
+//
+//	gc_total    = sum(count) over all entries
+//	reclaimable = sum(count) where entry_txid < oldestLiveRoTxID  (free for reuse now)
+//	retained    = gc_total - reclaimable                          (held hostage)
+//
+// oldestLiveRoTxID is the minimum mdbx txid across in-process RO txns tracked
+// in db.liveRoTxIDs. If the map is empty we fall back to the txid of our own
+// View txn — at that point everything in GC is reclaimable.
 func (db *MdbxKV) leakDetectorExtraInfo() []any {
-	var dbSize, reclaimablePages, freelistEntries uint64
+	var dbSize, gcPages, retainedPages, freelistEntries uint64
 	err := db.env.View(func(tx *mdbx.Txn) error {
 		info, err := db.env.Info(tx)
 		if err != nil {
 			return err
 		}
 		dbSize = info.Geo.Current
+
+		oldestRoTxID := uint64(math.MaxUint64)
+		db.liveRoTxIDs.Range(func(_, v any) bool {
+			if id, ok := v.(uint64); ok && id < oldestRoTxID {
+				oldestRoTxID = id
+			}
+			return true
+		})
+		if oldestRoTxID == math.MaxUint64 {
+			oldestRoTxID = tx.ID()
+		}
 
 		st, err := tx.StatDBI(mdbx.DBI(0))
 		if err != nil {
@@ -514,15 +544,24 @@ func (db *MdbxKV) leakDetectorExtraInfo() []any {
 		}
 		defer c.Close()
 		for op := uint(mdbx.First); ; op = mdbx.Next {
-			_, val, err := c.Get(nil, nil, op)
+			key, val, err := c.Get(nil, nil, op)
 			if err != nil {
 				break
 			}
 			// MDBX_PNL layout: pgno_t array, [0]=count, [1..count]=pgnos.
 			// pgno_t is uint32 in the standard mdbx build; reading low 32 bits as
 			// little-endian gives the count whether the in-memory width is 32 or 64.
-			if len(val) >= 4 {
-				reclaimablePages += uint64(binary.LittleEndian.Uint32(val[:4]))
+			if len(val) < 4 {
+				continue
+			}
+			count := uint64(binary.LittleEndian.Uint32(val[:4]))
+			gcPages += count
+			// MDBX stores FREE_DBI keys as native-endian uint64 txids.
+			if len(key) >= 8 {
+				entryTxID := binary.LittleEndian.Uint64(key[:8])
+				if entryTxID >= oldestRoTxID {
+					retainedPages += count
+				}
 			}
 		}
 		return nil
@@ -530,11 +569,13 @@ func (db *MdbxKV) leakDetectorExtraInfo() []any {
 	if err != nil {
 		return []any{"db", db.opts.label, "info_err", err}
 	}
-	reclaimable := reclaimablePages * db.opts.pageSize.Bytes()
+	pageSize := db.opts.pageSize.Bytes()
+	reclaimablePages := gcPages - retainedPages
 	return []any{
 		"db", db.opts.label,
 		"db_size", common.ByteCount(dbSize),
-		"reclaimable", common.ByteCount(reclaimable),
+		"reclaimable", common.ByteCount(reclaimablePages * pageSize),
+		"retained", common.ByteCount(retainedPages * pageSize),
 		"freelist_entries", freelistEntries,
 	}
 }
@@ -665,12 +706,14 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
+	traceID := db.leakDetector.Add()
+	db.liveRoTxIDs.Store(traceID, tx.ID())
 	return &MdbxTx{
 		ctx:      ctx,
 		db:       db,
 		tx:       tx,
 		readOnly: true,
-		traceID:  db.leakDetector.Add(),
+		traceID:  traceID,
 	}, nil
 }
 
@@ -1073,6 +1116,7 @@ func (tx *MdbxTx) Commit() error {
 		tx.db.trackTxEnd()
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
+			tx.db.liveRoTxIDs.Delete(tx.traceID)
 		} else {
 			runtime.UnlockOSThread()
 		}
@@ -1116,6 +1160,7 @@ func (tx *MdbxTx) Rollback() {
 	tx.db.trackTxEnd()
 	if tx.readOnly {
 		tx.db.roTxsLimiter.Release(1)
+		tx.db.liveRoTxIDs.Delete(tx.traceID)
 	} else {
 		runtime.UnlockOSThread()
 	}
