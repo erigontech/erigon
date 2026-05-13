@@ -125,10 +125,11 @@ func TestMuxForwardsSystemCallV2(t *testing.T) {
 	require.Equal(t, 1, sysV1Calls, "V1 child OnSystemCallStart call count (mux should fall back from V2 to V1)")
 }
 
-// TestMuxNilChildHooksDoNotPanic verifies that the mux gracefully skips
-// children whose relevant hook fields are nil, without panicking.
-func TestMuxNilChildHooksDoNotPanic(t *testing.T) {
-	// A child with completely empty hooks.
+// TestMuxEmptyChildHookFunctionsDoNotPanic verifies that the mux gracefully
+// skips children whose individual hook function fields are nil (i.e., a tracer
+// that exists but doesn't implement every hook), without panicking.
+func TestMuxEmptyChildHookFunctionsDoNotPanic(t *testing.T) {
+	// A child with a non-nil Hooks struct but no hook functions set.
 	emptyChild := &tracers.Tracer{
 		Hooks: &tracing.Hooks{},
 	}

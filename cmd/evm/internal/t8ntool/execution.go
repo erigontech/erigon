@@ -84,7 +84,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 	statedb := state.New(stateReader) //ibs
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)
-		statedb.SetCode(addr, account.Code, tracing.CodeChangeUnspecified)
+		statedb.SetCode(addr, account.Code, tracing.CodeChangeGenesis)
 		statedb.SetNonce(addr, account.Nonce, tracing.NonceChangeGenesis)
 		var balance uint256.Int
 		_ = balance.SetFromBig(account.Balance)
