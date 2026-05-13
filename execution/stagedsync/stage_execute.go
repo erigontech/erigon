@@ -417,19 +417,13 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	// noop seeder so the pre-trigger doesn't announce files; SnapshotsPrune's
 	// later call uses the real seeder.
 	//
-	// Use BlockHashes.Progress as the ceiling: it's upstream of Bodies and
-	// Senders, and is the stage that actually writes kv.HeaderCanonical
-	// entries, so blocks up to that progress are guaranteed to have canonical
-	// hashes readable by DumpBlocks. Using Execution's own progress
-	// (s.BlockNumber) is safer but starves retire on chains where Execution
-	// lags FrozenBlocks by less than one chunk.
+	// Use Senders.Progress (= prevStageProgress) as the ceiling so retire has
+	// a forward-looking target. The canonical-hash table can be sparse during
+	// PoS catch-up (FCU writes it progressively), but retireBlocks now
+	// defensively skips a chunk whose blockTo isn't yet canonical and tries
+	// again next round, so the forward-looking ceiling is safe.
 	if cfg.blockRetire != nil {
-		retireTo, perr := stageProgress(rwTx, cfg.db, stages.BlockHashes)
-		if perr != nil {
-			logger.Warn("[exec] couldn't read BlockHashes progress for retire pre-trigger; using exec progress", "err", perr)
-			retireTo = s.BlockNumber
-		}
-		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, retireTo, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
+		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, prevStageProgress, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
 	}
 
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {

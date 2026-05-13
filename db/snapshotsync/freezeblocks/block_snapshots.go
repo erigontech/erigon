@@ -300,6 +300,31 @@ func (br *BlockRetire) retireBlocks(
 		} else if !has {
 			return false, nil
 		}
+		// Verify the chunk's upper-bound block has a canonical hash entry in
+		// DB. DumpBlocks reads ReadHeaderByNumber(blockTo) as its sanity check
+		// and errors with "last header not found" otherwise. In PoS the
+		// canonical-hash table is filled progressively by forkchoice updates
+		// walking back from a new head; until that walk has covered every
+		// block in [FrozenBlocks+1, head] the table can be sparse, and a
+		// proposed chunk's blockTo may not yet be canonical. Treat the
+		// missing-hash case as "not yet eligible" (no error) so retire just
+		// skips this round and tries again later instead of spamming ERROR.
+		var blockToCanonical bool
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			h, err := rawdb.ReadCanonicalHash(tx, blockTo)
+			if err != nil {
+				return err
+			}
+			blockToCanonical = h != (common.Hash{})
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		if !blockToCanonical {
+			br.logger.Info("[snapshots:retire] skipping chunk: blockTo's canonical hash not in DB yet",
+				"blockFrom", blockFrom, "blockTo", blockTo, "max", maxBlockNum)
+			return false, nil
+		}
 		br.logger.Info("[snapshots:retire] Retire Blocks: building chunk",
 			"blockFrom", blockFrom, "blockTo", blockTo, "max", maxBlockNum)
 		// in future we will do it in background
