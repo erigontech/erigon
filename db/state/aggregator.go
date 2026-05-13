@@ -890,7 +890,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
+		a.logger.Warn("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
 		return errStepNotReady
 	}
 	var (
@@ -2154,14 +2154,14 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	if !a.produce {
-		a.logger.Debug("[snapshots] buildFiles: produce=false")
+		a.logger.Warn("[snapshots] buildFiles: produce=false")
 		close(fin)
 		return fin
 	}
 
 	visMin := a.visible.Load().minimaxTxNum
 	if (txNum + 1) <= visMin+a.stepSize.Load() {
-		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
+		a.logger.Warn("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
 		close(fin)
 		return fin
 	}
@@ -2173,6 +2173,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
+	a.logger.Warn("[snapshots] buildFiles: goroutine started", "step", step, "txNum", txNum)
 
 	a.wg.Add(1)
 	go func() {
