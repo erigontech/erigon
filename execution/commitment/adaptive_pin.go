@@ -80,6 +80,10 @@ func DefaultAdaptivePinControllerConfig() AdaptivePinControllerConfig {
 //     boundaries with a CommitmentReader factory; the controller
 //     then promotes / extends / demotes based on the per-block
 //     miss snapshot
+//   - Optional: host installs a parallel-mode resolver factory via
+//     SetParallelMode so promote/extend uses the wave-BFS parallel
+//     preload (file-only batch resolver + MDBX-overlay dbBranches)
+//     instead of the serial CommitmentReader BFS.
 type AdaptivePinController struct {
 	cache  *BranchCache
 	cfg    AdaptivePinControllerConfig
@@ -93,13 +97,64 @@ type AdaptivePinController struct {
 	// states holds per-promoted-contract bookkeeping. Protected by mu.
 	mu     sync.Mutex
 	states map[[32]byte]*adaptiveContractState
+
+	// Parallel-mode plumbing. nil = serial-BFS path (CommitmentReader).
+	// Set together via SetParallelMode; both required for parallel mode.
+	parallelResolverFactory ParallelResolverFactory
+	dbBranchesProvider      DbBranchesProvider
 }
+
+// ParallelResolverFactory builds a fresh BatchBranchResolver for one
+// OnBlockComplete call. release() is invoked after the controller is done
+// with the resolver (e.g. to tear down per-call worker txs). The factory
+// may return (nil, nil, err) to indicate the controller should fall back
+// to the serial-BFS path for this block.
+type ParallelResolverFactory func() (resolve BatchBranchResolver, release func(), err error)
+
+// DbBranchesProvider returns the MDBX-resident branch overlay for one
+// contract — values shadow file values in the parallel preload's wave.
+// Empty/nil result is valid (means "no MDBX overlay; resolver is
+// authoritative"); the controller treats it as a non-error.
+type DbBranchesProvider func(contractHash []byte) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
 	promotedAtBlock  uint64
-	preload          *ContractTrunkPreload
+	preload          *ContractTrunkPreload         // serial-BFS path (nil when parallel)
+	parallel         *ContractTrunkPreloadParallel // parallel-wave-BFS path (nil when serial)
 	coldBlocksInARow int
+}
+
+// pinnedTotal returns the cumulative pinned-count regardless of preload mode.
+func (s *adaptiveContractState) pinnedTotal() int {
+	if s.parallel != nil {
+		return s.parallel.PinnedTotal()
+	}
+	return s.preload.PinnedTotal()
+}
+
+// usedBytes returns the cumulative used-bytes regardless of preload mode.
+func (s *adaptiveContractState) usedBytes() int {
+	if s.parallel != nil {
+		return s.parallel.UsedBytes()
+	}
+	return s.preload.UsedBytes()
+}
+
+// queueRemaining returns the un-processed queue size regardless of mode.
+func (s *adaptiveContractState) queueRemaining() int {
+	if s.parallel != nil {
+		return s.parallel.QueueRemaining()
+	}
+	return s.preload.QueueRemaining()
+}
+
+// pinnedPrefixes returns the pin set for cache invalidation on demote.
+func (s *adaptiveContractState) pinnedPrefixes() [][]byte {
+	if s.parallel != nil {
+		return s.parallel.PinnedPrefixes()
+	}
+	return s.preload.PinnedPrefixes()
 }
 
 // NewAdaptivePinController constructs a controller bound to the given
@@ -143,6 +198,28 @@ func (c *AdaptivePinController) Bind() {
 	c.cache.SetMissCallback(c.onCacheMiss)
 }
 
+// SetParallelMode switches the controller to the wave-BFS parallel preload
+// (ContractTrunkPreloadParallel) for both initial-view and per-block
+// extension. The factory builds a tx-scoped resolver per OnBlockComplete
+// (file-only); the provider returns the MDBX-resident branch overlay per
+// contract so the freshest values shadow file values.
+//
+// Either argument may be nil to clear it. When factory==nil the controller
+// uses the serial-BFS CommitmentReader path (existing default behavior).
+// When factory is set but the factory call returns nil resolver/err, the
+// controller falls back to serial-BFS for that block — the saved parallel
+// state survives the block and resumes on the next successful factory call.
+//
+// Must be called before the first OnBlockComplete; calling it later is
+// allowed but changes behavior at the next block boundary only — already-
+// promoted contracts keep their existing serial/parallel state.
+func (c *AdaptivePinController) SetParallelMode(factory ParallelResolverFactory, provider DbBranchesProvider) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.parallelResolverFactory = factory
+	c.dbBranchesProvider = provider
+}
+
 func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 	hash, ok := ContractHashFromPrefix(prefix)
 	if !ok {
@@ -171,6 +248,25 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Build the per-call parallel resolver up-front (one factory call per
+	// OnBlockComplete shared across all contracts this block). nil when
+	// parallel mode isn't installed, or the factory failed (we fall back to
+	// the serial-BFS reader path).
+	var parallelResolve BatchBranchResolver
+	var releaseParallel func()
+	if c.parallelResolverFactory != nil {
+		r, release, err := c.parallelResolverFactory()
+		if err != nil {
+			c.warnf("[adaptive-pin] parallel resolver factory failed, falling back to serial", "err", err, "block", blockNum)
+		} else {
+			parallelResolve = r
+			releaseParallel = release
+		}
+	}
+	if releaseParallel != nil {
+		defer releaseParallel()
+	}
+
 	var promoted, extended, demoted int
 
 	// Already-promoted contracts: extend on hot, demote on cold.
@@ -180,13 +276,13 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 			state.coldBlocksInARow = 0
 			delete(misses, hash)
 			// Extend if budget remains and queue not empty.
-			if state.preload.QueueRemaining() > 0 && state.preload.UsedBytes() < c.cfg.PerContractMaxBudgetBytes {
-				remaining := c.cfg.PerContractMaxBudgetBytes - state.preload.UsedBytes()
+			if state.queueRemaining() > 0 && state.usedBytes() < c.cfg.PerContractMaxBudgetBytes {
+				remaining := c.cfg.PerContractMaxBudgetBytes - state.usedBytes()
 				step := c.cfg.ExtensionBudgetBytes
 				if step > remaining {
 					step = remaining
 				}
-				if _, _, err := state.preload.Run(step, reader, c.cache, c.logger); err != nil {
+				if err := c.runExtensionLocked(ctx, state, step, parallelResolve, reader); err != nil {
 					c.warnf("[adaptive-pin] extend failed", "hash", hex.EncodeToString(hash[:]), "err", err)
 				} else {
 					extended++
@@ -208,24 +304,12 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, blockNum ui
 	if len(misses) > 0 && len(c.states) < c.cfg.MaxPromotedContracts {
 		candidates := pickPromotionCandidates(misses, c.cfg.PromoteThresholdMisses, c.cfg.MaxPromotedContracts-len(c.states))
 		for _, hash := range candidates {
-			p, err := NewContractTrunkPreload(hash[:])
+			state, err := c.promoteLocked(ctx, hash, blockNum, parallelResolve, reader)
 			if err != nil {
-				continue
-			}
-			if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
 				c.warnf("[adaptive-pin] initial-view failed", "hash", hex.EncodeToString(hash[:]), "err", err)
-				// Roll back partial pin so we don't leak entries
-				// for a contract that won't be in c.states.
-				for _, prefix := range p.PinnedPrefixes() {
-					c.cache.Invalidate(prefix)
-				}
 				continue
 			}
-			c.states[hash] = &adaptiveContractState{
-				contractHash:    hash,
-				promotedAtBlock: blockNum,
-				preload:         p,
-			}
+			c.states[hash] = state
 			promoted++
 		}
 	}
@@ -270,16 +354,99 @@ func (c *AdaptivePinController) snapshotMisses() map[[32]byte]uint64 {
 // demoteLocked invalidates every pinned prefix for the contract.
 // Caller must hold c.mu.
 func (c *AdaptivePinController) demoteLocked(hash [32]byte, state *adaptiveContractState) {
-	for _, prefix := range state.preload.PinnedPrefixes() {
+	for _, prefix := range state.pinnedPrefixes() {
 		c.cache.Invalidate(prefix)
 	}
 	if c.logger != nil {
 		c.logger.Info("[adaptive-pin] demoted",
 			"hash", hex.EncodeToString(hash[:]),
-			"pinned_was", state.preload.PinnedTotal(),
-			"used_mb_was", state.preload.UsedBytes()/(1<<20),
+			"pinned_was", state.pinnedTotal(),
+			"used_mb_was", state.usedBytes()/(1<<20),
 			"cold_blocks", state.coldBlocksInARow)
 	}
+}
+
+// promoteLocked runs the initial-view preload for a freshly-promoted
+// contract. Uses the parallel wave-BFS when parallelResolve != nil,
+// otherwise falls back to the serial CommitmentReader BFS. On error the
+// partial pin set is rolled back. Caller must hold c.mu.
+func (c *AdaptivePinController) promoteLocked(
+	ctx context.Context,
+	hash [32]byte,
+	blockNum uint64,
+	parallelResolve BatchBranchResolver,
+	reader CommitmentReader,
+) (*adaptiveContractState, error) {
+	if parallelResolve != nil {
+		p, err := NewContractTrunkPreloadParallel(hash[:])
+		if err != nil {
+			return nil, err
+		}
+		var dbBranches map[string][]byte
+		if c.dbBranchesProvider != nil {
+			dbBranches = c.dbBranchesProvider(hash[:])
+		}
+		if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, parallelResolve, c.cache, c.logger); err != nil {
+			for _, prefix := range p.PinnedPrefixes() {
+				c.cache.Invalidate(prefix)
+			}
+			return nil, err
+		}
+		return &adaptiveContractState{
+			contractHash:    hash,
+			promotedAtBlock: blockNum,
+			parallel:        p,
+		}, nil
+	}
+	// Serial BFS fallback (no parallel resolver this block).
+	p, err := NewContractTrunkPreload(hash[:])
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, reader, c.cache, c.logger); err != nil {
+		for _, prefix := range p.PinnedPrefixes() {
+			c.cache.Invalidate(prefix)
+		}
+		return nil, err
+	}
+	return &adaptiveContractState{
+		contractHash:    hash,
+		promotedAtBlock: blockNum,
+		preload:         p,
+	}, nil
+}
+
+// runExtensionLocked extends a promoted contract's preload by stepBudget
+// bytes. Uses the saved state's mode (parallel vs serial). Caller must
+// hold c.mu.
+//
+// When the saved state is serial (state.preload != nil) but parallelResolve
+// is available this block, we keep using serial — switching mid-contract
+// would lose the queue position. Future work: convert serial-state to
+// parallel-state at extension time.
+func (c *AdaptivePinController) runExtensionLocked(
+	ctx context.Context,
+	state *adaptiveContractState,
+	stepBudget int,
+	parallelResolve BatchBranchResolver,
+	reader CommitmentReader,
+) error {
+	if state.parallel != nil {
+		if parallelResolve == nil {
+			// Parallel state but no resolver this block — skip the
+			// extension; the saved state survives for the next block.
+			return nil
+		}
+		var dbBranches map[string][]byte
+		if c.dbBranchesProvider != nil {
+			dbBranches = c.dbBranchesProvider(state.contractHash[:])
+		}
+		_, _, err := state.parallel.Run(stepBudget, dbBranches, parallelResolve, c.cache, c.logger)
+		return err
+	}
+	// Serial-BFS state.
+	_, _, err := state.preload.Run(stepBudget, reader, c.cache, c.logger)
+	return err
 }
 
 // PromotedContracts returns the hashes of currently-pinned contracts.

@@ -601,7 +601,55 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					}
 					return v, uint64(step), len(v) > 0, nil
 				}
+				// Install per-call parallel-mode plumbing so the
+				// controller's promote/extend uses the wave-BFS file-only
+				// resolver. The factory captures ttx; cleared after the
+				// call so a future OnBlockComplete can't reach a stale tx.
+				factory := func() (commitment.BatchBranchResolver, func(), error) {
+					resolve := func(keys [][]byte) ([][]byte, error) {
+						d := ttx.Debug()
+						vals := make([][]byte, len(keys))
+						for i, k := range keys {
+							v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
+							if err != nil {
+								return nil, err
+							}
+							if found {
+								vc := make([]byte, len(v))
+								copy(vc, v)
+								vals[i] = vc
+							}
+						}
+						return vals, nil
+					}
+					return resolve, nil, nil
+				}
+				provider := func(contractHash []byte) map[string][]byte {
+					m := map[string][]byte{}
+					c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
+					if cerr != nil {
+						return m
+					}
+					defer c.Close()
+					evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
+					scan := func(from, to []byte) {
+						for k, v, err := c.Seek(from); k != nil && err == nil; k, v, err = c.NextNoDup() {
+							if bytes.Compare(k, to) >= 0 {
+								return
+							}
+							if len(v) < 8 {
+								continue
+							}
+							m[string(common.Copy(k))] = common.Copy(v[8:])
+						}
+					}
+					scan(evenFrom, evenTo)
+					scan(oddFrom, oddTo)
+					return m
+				}
+				sd.adaptivePinController.SetParallelMode(factory, provider)
 				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
+				sd.adaptivePinController.SetParallelMode(nil, nil)
 			}
 		}
 		// Refresh pinned-tier gauges once per Flush — once-per-batch
