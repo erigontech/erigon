@@ -268,19 +268,18 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	// unwoundLatest mirrors the helper in GetLatest: when a key was modified
-	// by the unwound block and is not (or no longer) present in sd.domains/
-	// sd.storage, the unwindChangeset entry holds the pre-unwind value so
-	// the read sees post-unwind state rather than falling through to the
-	// chain DB (which after a forkchoice-driven commit may still hold the
-	// post-change value — engine_x tester reuses the same backend across
-	// sequential ValidatePayload calls and commits each one via
-	// MergeExtendingFork). Without this, the commitment calculator's
-	// asOfStateReader (committer.go) reads stale post-commit values for
-	// accounts whose changes were unwound in-memory and computes a wrong
-	// trie root.
+	// unwoundLatest returns the pre-unwound-block value for a key that was
+	// modified by the unwound block. Only fires when ts is at-or-after the
+	// unwind point — for ts < unwindToTxNum the caller falls through to the
+	// underlying tx (chain DB / files) which holds the older committed value
+	// that was never unwound. Without this, after a forkchoice-driven commit
+	// the chain DB may still hold the post-change value (engine_x tester
+	// reuses the same backend across sequential ValidatePayload calls and
+	// commits each one via MergeExtendingFork) — the commitment calculator's
+	// asOfStateReader (committer.go) would then read stale post-commit
+	// values for unwound keys and compute a wrong trie root.
 	unwoundLatest := func(domain kv.Domain, key string) (v []byte, ok bool, err error) {
-		if sd.unwindChangeset == nil {
+		if sd.unwindChangeset == nil || ts < sd.unwindToTxNum {
 			return nil, false, nil
 		}
 		values := sd.unwindChangeset[domain]
