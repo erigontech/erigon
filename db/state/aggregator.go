@@ -1731,6 +1731,7 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 	a.BuildFilesInBackground(toTxNum)
 
 	stepsInDB, err := a.StepsInDB(ctx, db)
+	a.logger.Warn("[agg] CollateAndPruneIfNeeded", "stepsInDB", fmt.Sprintf("%.2f", stepsInDB), "err", err)
 	if err != nil {
 		return err
 	}
