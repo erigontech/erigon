@@ -392,22 +392,38 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	// Diagnostic: print the highest block number whose canonical hash is in
-	// kv.HeaderCanonical right now. This is the actual ceiling for what
-	// DumpBlocks can read, and is the value we want to compare against when
-	// choosing a retire pre-trigger ceiling.
+	// Diagnostic: compare two views of the canonical-hash table:
+	//   - via the passed rwTx (which in the engine-API path IS the
+	//     block overlay; in the pure staged-sync path it's the in-flight
+	//     stage rwTx — either way, sees writes the WRITER has made),
+	//   - via a fresh RO tx on cfg.db, which is what retire's background
+	//     goroutine sees: only data that has been Commit()-ed to MDBX.
+	// Difference = blocks whose canonical hash is in-memory only and
+	// therefore invisible to retire until the next CommitCycle/stage end.
 	{
-		c, cerr := rwTx.Cursor(kv.HeaderCanonical)
-		if cerr == nil {
+		var latestRw, latestCommitted uint64
+		if c, cerr := rwTx.Cursor(kv.HeaderCanonical); cerr == nil {
 			defer c.Close()
 			if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
-				latestCanonical := binary.BigEndian.Uint64(k)
-				logger.Info("[exec] stage entry",
-					"exec.blockNumber", s.BlockNumber,
-					"senders.progress", prevStageProgress,
-					"latest_canonical_in_db", latestCanonical)
+				latestRw = binary.BigEndian.Uint64(k)
 			}
 		}
+		if roTx, terr := cfg.db.BeginRo(ctx); terr == nil {
+			c, cerr := roTx.Cursor(kv.HeaderCanonical)
+			if cerr == nil {
+				if k, _, kerr := c.Last(); kerr == nil && len(k) >= 8 {
+					latestCommitted = binary.BigEndian.Uint64(k)
+				}
+				c.Close()
+			}
+			roTx.Rollback()
+		}
+		logger.Info("[exec] stage entry",
+			"exec.blockNumber", s.BlockNumber,
+			"senders.progress", prevStageProgress,
+			"canonical_in_overlay_rwTx", latestRw,
+			"canonical_in_committed_db", latestCommitted,
+			"overlay_extra_blocks", latestRw-latestCommitted)
 	}
 
 	// Pre-trigger block retire so the background freezer has the Execution
