@@ -55,7 +55,7 @@ func TestCapabilities(t *testing.T) {
 	testFullMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
-		Blocks:      prune.DefaultBlocksPruneMode, // MaxUint64 = keeps all block snapshots
+		Blocks:      prune.DefaultBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
 	}
 	testMinimalMode := prune.Mode{
 		Initialised: true,
