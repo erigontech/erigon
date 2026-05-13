@@ -250,9 +250,7 @@ test-fixtures-cl:
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
-	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
-	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
 
 ## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
 .PHONY: test-fixtures-eest
