@@ -91,6 +91,8 @@ jobs:
     secrets: inherit
 
   eest-spec-tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-eest-spec.yml
     secrets: inherit
 
