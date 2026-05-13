@@ -18,6 +18,7 @@ package dbg
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,18 +78,32 @@ func (d *LeakDetector) slowList() (res []string) {
 	}
 	slowThreshold := *d.slowThreshold.Load()
 
+	type entry struct {
+		key   uint64
+		item  LeakDetectorItem
+		alive time.Duration
+	}
+
 	d.listLock.Lock()
-	defer d.listLock.Unlock()
-	i := 0
+	now := time.Now()
+	slow := make([]entry, 0, len(d.list))
 	for key, value := range d.list {
-		living := time.Since(value.started)
-		if living > slowThreshold {
-			res = append(res, fmt.Sprintf("%d(%s): %s", key, living, value.stack))
+		alive := now.Sub(value.started)
+		if alive > slowThreshold {
+			slow = append(slow, entry{key, value, alive})
 		}
-		i++
-		if i > 10 { // protect logs from too many output
-			break
-		}
+	}
+	d.listLock.Unlock()
+
+	// Sort oldest first so we deterministically surface the longest-living
+	// resource — important on busy DBs where len(d.list) can be in the
+	// hundreds and random map iteration would otherwise hide the actual leak.
+	sort.Slice(slow, func(i, j int) bool { return slow[i].alive > slow[j].alive })
+	if len(slow) > 10 { // protect logs from too many output
+		slow = slow[:10]
+	}
+	for _, e := range slow {
+		res = append(res, fmt.Sprintf("%d(%s): %s", e.key, e.alive, e.item.stack))
 	}
 	return res
 }
