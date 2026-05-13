@@ -95,6 +95,10 @@ var (
 		Name:  "bench",
 		Usage: "benchmark the execution",
 	}
+	TimeFlag = cli.BoolFlag{
+		Name:  "time",
+		Usage: "record per-test wall time and memstats on a single execution (cheaper than --bench)",
+	}
 	CreateFlag = cli.BoolFlag{
 		Name:  "create",
 		Usage: "indicates the action should be create rather than call",
@@ -130,6 +134,20 @@ var (
 	DisableReturnDataFlag = cli.BoolFlag{
 		Name:  "noreturndata",
 		Usage: "disable return data output",
+	}
+	RunFlag = cli.StringFlag{
+		Name:  "run",
+		Value: ".*",
+		Usage: "Run only those tests matching the regular expression.",
+	}
+	WorkersFlag = cli.Uint64Flag{
+		Name:  "workers",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
+	}
+	JSONOutputFlag = cli.BoolFlag{
+		Name:  "jsonout",
+		Usage: "Output results as JSON array instead of human-readable format",
 	}
 )
 
@@ -187,6 +205,7 @@ func init() {
 		&disasmCommand,
 		&runCommand,
 		&blockTestCommand,
+		&engineXTestCommand,
 		&stateTestCommand,
 		&stateTransitionCommand,
 	}

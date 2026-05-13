@@ -1029,9 +1029,9 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
-	versionOfRs := uint8(0)
-	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
-		versionOfRs = 1
+	versionOfRs := version.DataStructureVersion(0)
+	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
+		versionOfRs = recsplit.ExistenceFilterVersion
 	}
 	cfg := recsplit.RecSplitArgs{
 		Version:            versionOfRs,
@@ -1333,9 +1333,10 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 	}
 
+	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
+	// last write in an older .kv is still found (walkback bounded by maxTxNum).
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		if maxTxNum != math.MaxUint64 && (dt.files[i].startTxNum > maxTxNum || maxTxNum > dt.files[i].endTxNum) { // (maxTxNum > dt.files[i].endTxNum || dt.files[i].startTxNum > maxTxNum) { // skip partially matched files
-			//fmt.Printf("getLatestFromFiles: skipping file %d %s, maxTxNum=%d, startTxNum=%d, endTxNum=%d\n", i, dt.files[i].src.decompressor.FileName(), maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum)
+		if maxTxNum != math.MaxUint64 && dt.files[i].startTxNum > maxTxNum {
 			continue
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
