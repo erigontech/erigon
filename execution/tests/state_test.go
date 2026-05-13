@@ -51,11 +51,11 @@ func TestStateCornerCases(t *testing.T) {
 // (state-test format, non-EEST) at the Cancun-era snapshot, under
 // legacy-tests/LegacyTests/Cancun/GeneralStateTests. The fixtures cover all
 // pre-merge fork variants (Frontier through London, plus Paris/Shanghai/Cancun)
-// — TestState only walks EEST static_tests, which don't carry every variant
-// (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches the
-// ripemd-touch state-clearing path that the Hive `legacy-cancun` simulator
-// flagged). Run them locally so that class of regression is caught on CI
-// rather than only by the weekly out-of-tree Hive run.
+// — the EEST static_tests exercised by `evm statetest` don't carry every
+// variant (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches
+// the ripemd-touch state-clearing path that the Hive `legacy-cancun`
+// simulator flagged). Run them locally so that class of regression is
+// caught on CI rather than only by the weekly out-of-tree Hive run.
 func TestLegacyCancunState(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -87,23 +87,6 @@ func TestLegacyCancunState(t *testing.T) {
 	st.SkipLoad(`^stPreCompiledContracts2/ecrecoverShortBuff\.json`)
 
 	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
-}
-
-func TestState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	stateTestSetup(t)
-
-	st := new(testutil.TestMatcher)
-	// Slow tests
-	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-	// Very slow tests
-	st.SkipLoad(`^stTimeConsuming/`)
-
-	// Corresponds to GeneralStateTests from ethereum/tests:
-	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	runStateTests(t, st, filepath.Join(eestDir, "state_tests", "static", "state_tests"))
 }
 
 // stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by

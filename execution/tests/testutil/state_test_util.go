@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -254,7 +253,7 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, empty.RootHash, checkedErr
+		return st, root, checkedErr
 	}
 	if err != nil {
 		// Error was expected — check post-state root if specified
@@ -309,40 +308,35 @@ func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
-	msg, err := toMessage(t.Json.Tx, post, baseFee)
-	if err != nil {
-		return nil, common.Hash{}, 0, common.Hash{}, err
-	}
-
-	// Prepare the EVM.
-	txContext := protocol.NewEVMTxContext(msg)
 	header := block.HeaderNoCopy()
-	//blockNum, txNum := header.Number.Uint64(), 1
 
-	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
-	context.GetHash = vmTestBlockHash
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
+	blockContext.GetHash = vmTestBlockHash
 	if baseFee != nil {
-		context.BaseFee.Set(baseFee)
+		blockContext.BaseFee.Set(baseFee)
 	}
 	if vmconfig.UseGevm && t.Json.Env.BaseFee != nil {
-		context.BaseFee.Set(t.Json.Env.BaseFee)
+		blockContext.BaseFee.Set(t.Json.Env.BaseFee)
 	}
 	if t.Json.Env.Difficulty != nil {
-		context.Difficulty.Set(t.Json.Env.Difficulty)
+		blockContext.Difficulty.Set(t.Json.Env.Difficulty)
 	}
 	if config.IsLondon(0) && t.Json.Env.Random != nil {
 		rnd := common.Hash(t.Json.Env.Random.Bytes32())
-		context.PrevRanDao = &rnd
-		context.Difficulty.Clear()
+		blockContext.PrevRanDao = &rnd
+		blockContext.Difficulty.Clear()
 	}
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
-		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
+		blockContext.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
 		if err != nil {
 			return nil, common.Hash{}, 0, common.Hash{}, err
 		}
 	}
+
+	var domains *execctx.SharedDomains
+	var statedb *state.IntraBlockState
 	if vmconfig.UseGevm {
-		domains, err := execctx.NewSharedDomains(context2.Background(), tx, log.New())
+		domains, err = execctx.NewSharedDomains(context2.Background(), tx, log.New())
 		if err != nil {
 			return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 		}
@@ -350,23 +344,70 @@ func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		if err := MakePreStateGevm(tx, domains, t.Json.Pre, readBlockNr); err != nil {
 			return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
 		}
-		root, gasUsed, logsHash, err := t.runNoVerifyGevm(tx, domains, config, header, context, msg, blockNum, txNum)
-		return nil, root, gasUsed, logsHash, err
+		statedb = state.New(rpchelper.NewLatestStateReader(tx))
+	} else {
+		_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+		if err != nil {
+			return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
+		}
+		domains, err = execctx.NewSharedDomains(context2.Background(), tx, log.New())
+		if err != nil {
+			return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
+		}
+		defer domains.Close()
+		statedb = state.New(rpchelper.NewLatestStateReader(tx))
 	}
 
-	_, err = MakePreState(&chain.Rules{}, tx, t.Json.Pre, readBlockNr)
+	// Pre-state root, computed once over the just-flushed pre-allocation.
+	// We return it for any early-return path so the test framework's
+	// `post.Root` check still has a real root to compare against when the tx
+	// was rejected before / during apply (the fixture's post.Root for those
+	// cases equals the pre-state root).
+	preRootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
+		return nil, common.Hash{}, 0, common.Hash{}, fmt.Errorf("pre-state ComputeCommitment: %w", err)
 	}
-	domains, err := execctx.NewSharedDomains(context2.Background(), tx, log.New())
-	if err != nil {
-		return nil, common.Hash{}, 0, common.Hash{}, testforks.UnsupportedForkError{Name: subtest.Fork}
+	preRoot := common.BytesToHash(preRootBytes)
+
+	chainRules := blockContext.Rules(config)
+
+	// EEST fixtures carry the signed RLP-encoded tx in `post.txbytes`; running
+	// it through the production AsMessage path means we test real validation
+	// (tx-type-vs-fork from each AsMessage, plus EIP-4844 blob structural rules
+	// in BlobTx.AsMessage). Decode/AsMessage failures and ApplyMessage failures
+	// all bubble up as the function's err so the test framework can match them
+	// against the fixture's ExpectException.
+	//
+	// Older in-tree corner-case fixtures only carry the JSON `transaction`
+	// block; for those we build the Message via toMessage (no validation).
+	var msg protocol.Message
+	if len(post.Tx) > 0 {
+		signer := types.LatestSignerForChainID(config.ChainID)
+		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
+		decodedTx, err := types.DecodeTransaction(post.Tx)
+		if err != nil {
+			return statedb, preRoot, 0, common.Hash{}, err
+		}
+		msg, err = decodedTx.AsMessage(*signer, baseFee, chainRules)
+		if err != nil {
+			return statedb, preRoot, 0, common.Hash{}, err
+		}
+	} else {
+		msg, err = toMessage(t.Json.Tx, post, baseFee)
+		if err != nil {
+			return statedb, preRoot, 0, common.Hash{}, err
+		}
 	}
-	defer domains.Close()
-	r := rpchelper.NewLatestStateReader(tx)
+
+	// Prepare the EVM.
+	txContext := protocol.NewEVMTxContext(msg)
+	if vmconfig.UseGevm {
+		root, gasUsed, logsHash, err := t.runNoVerifyGevm(tx, domains, config, header, blockContext, msg, blockNum, txNum)
+		return statedb, root, gasUsed, logsHash, err
+	}
+
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
-	statedb := state.New(r)
-	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
+	evm := vm.NewEVM(blockContext, txContext, statedb, config, vmconfig)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxStart != nil {
 		vmconfig.Tracer.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
 	}
@@ -375,20 +416,26 @@ func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	snapshot := statedb.PushSnapshot()
 	gaspool := new(protocol.GasPool)
 	gaspool.AddGas(block.GasLimit()).AddBlobGas(config.GetMaxBlobGasPerBlock(header.Time))
-	res, applyErr := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
+	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
 		gasUsed = res.ReceiptGasUsed
 	}
-	if applyErr != nil {
-		statedb.RevertToSnapshot(snapshot, applyErr)
+	if err != nil {
+		statedb.RevertToSnapshot(snapshot, err)
 	}
 	statedb.PopSnapshot(snapshot)
 	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
 		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
 	}
+	if err != nil {
+		return statedb, preRoot, gasUsed, common.Hash{}, err
+	}
 
-	// Coinbase touch (even for failed txs)
+	// Add 0-value mining reward. This only makes a difference in the cases
+	// where the coinbase self-destructed or the tx didn't pay any fees; in
+	// those cases the coinbase isn't otherwise created and needs to be
+	// touched. Matches go-ethereum's state-test runner.
 	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
@@ -398,13 +445,11 @@ func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, gasUsed, common.Hash{}, err
 	}
 
-	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, gasUsed, common.Hash{}, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, common.Hash{}, gasUsed, common.Hash{}, fmt.Errorf("ComputeCommitment: %w", err)
 	}
-	// Propagate transaction execution error (e.g. intrinsic gas too low)
-	return statedb, common.BytesToHash(rootBytes), gasUsed, rlpHash(statedb.Logs()), applyErr
+	return statedb, common.BytesToHash(rootBytes), gasUsed, rlpHash(statedb.Logs()), nil
 }
 
 func (t *StateTest) runNoVerifyGevm(tx kv.TemporalRwTx, domains *execctx.SharedDomains, config *chain.Config, header *types.Header, blockCtx evmtypes.BlockContext, msg protocol.Message, blockNum, txNum uint64) (common.Hash, uint64, common.Hash, error) {
@@ -676,6 +721,12 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
+// toMessage builds a protocol.Message directly from the JSON fixture's
+// `transaction` block. It is only used for the in-tree corner-case fixtures
+// that don't carry signed `txbytes` — EEST fixtures go through
+// types.DecodeTransaction + AsMessage instead, which exercises the production
+// validation path. toMessage itself does no fork-vs-tx-type validation;
+// fixtures that depend on this fallback aren't testing that.
 func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
 	var from accounts.Address
@@ -747,10 +798,8 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 		if tx.MaxPriorityFeePerGas == nil {
 			tx.MaxPriorityFeePerGas = tx.MaxFeePerGas
 		}
-
 		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
 		feeCap = big.Int(*tx.MaxFeePerGas)
-
 		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee.ToBig()), &feeCap)
 		gasPriceInt = uint256.MustFromBig(gp)
 	}
