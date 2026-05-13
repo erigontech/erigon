@@ -33,6 +33,7 @@ var (
 	bigT    = reflect.TypeFor[*Big]()
 	uintT   = reflect.TypeFor[Uint]()
 	uint16T = reflect.TypeFor[Uint16]()
+	uint32T = reflect.TypeFor[Uint32]()
 	uint64T = reflect.TypeFor[Uint64]()
 )
 
@@ -221,6 +222,70 @@ func (b *Uint16) UnmarshalText(input []byte) error {
 
 // String returns the hex encoding of b.
 func (b Uint16) String() string {
+	text, _ := b.MarshalText()
+	return string(text)
+}
+
+// Uint32 marshals/unmarshals as a JSON string with 0x prefix.
+// Unlike Uint64, it accepts leading zeros (e.g. "0x00", "0x00000001") because
+// some test formats encode small integers as zero-padded hex bytes.
+// The zero value marshals as "0x00".
+type Uint32 uint32
+
+// MarshalText implements encoding.TextMarshaler.
+func (b Uint32) MarshalText() ([]byte, error) {
+	buf := make([]byte, 2, 10)
+	copy(buf, `0x`)
+	buf = strconv.AppendUint(buf, uint64(b), 16)
+	if len(buf)%2 != 0 {
+		// Ensure even hex length: insert a '0' after "0x"
+		buf = append(buf, 0)
+		copy(buf[3:], buf[2:len(buf)-1])
+		buf[2] = '0'
+	}
+	return buf, nil
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *Uint32) UnmarshalJSON(input []byte) error {
+	if !isString(input) {
+		return errNonString(uint32T)
+	}
+	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), uint32T)
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+// Unlike Uint64, leading zeros are accepted (e.g. "0x00", "0x00000001").
+func (b *Uint32) UnmarshalText(input []byte) error {
+	if len(input) == 0 {
+		*b = 0
+		return nil
+	}
+	if !bytesHave0xPrefix(input) {
+		return ErrMissingPrefix
+	}
+	raw := input[2:]
+	if len(raw) == 0 {
+		return ErrEmptyNumber
+	}
+	if len(raw) > 8 {
+		return ErrUint32Range
+	}
+	var dec uint64
+	for _, byte := range raw {
+		nib := decodeNibble(byte)
+		if nib == badNibble {
+			return ErrSyntax
+		}
+		dec *= 16
+		dec += nib
+	}
+	*b = Uint32(dec)
+	return nil
+}
+
+// String returns the hex encoding of b.
+func (b Uint32) String() string {
 	text, _ := b.MarshalText()
 	return string(text)
 }

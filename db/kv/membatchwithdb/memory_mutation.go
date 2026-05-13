@@ -869,8 +869,10 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
-	panic("not supported")
-	// return m.db.HistorySeek(name, k, ts)
+	if m.db == nil {
+		return nil, false, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
+	}
+	return m.db.HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
@@ -881,8 +883,10 @@ func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs 
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
-	panic("not supported")
-	// return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
+	if m.db == nil {
+		return nil, fmt.Errorf("MemoryMutation: history read requires backing tx (detached overlay)")
+	}
+	return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
@@ -1072,6 +1076,54 @@ func (v *OverlayTemporalReadView) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 }
 func (v *OverlayTemporalReadView) FreezeInfo() kv.FreezeInfo {
 	return v.temporalTx.FreezeInfo()
+}
+
+func (v *OverlayTemporalReadView) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := v.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	k, val, err := c.Seek(fromPrefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil; k, val, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *OverlayTemporalReadView) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, val []byte) error) error {
+	if amount == 0 {
+		return nil
+	}
+	c, err := v.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	k, val, err := c.Seek(prefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil && amount > 0; k, val, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, val); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
 }
 
 type temporaldb struct {

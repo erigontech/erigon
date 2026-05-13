@@ -716,7 +716,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular = params.SelfdestructGasEIP150
-		var address = accounts.InternAddress(callContext.Stack.Back(0).Bytes20())
+		var address = callContext.peekAddress()
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

@@ -368,16 +368,19 @@ type BlockReader struct {
 	txNumsReader rawdbv3.TxNumsReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
-	headerByNumCache *lru.Cache[uint64, *types.Header]
+	headerByNumCache   *lru.Cache[uint64, *types.Header]
+	canonicalHashCache *lru.Cache[uint64, common.Hash]
 }
 
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
+var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
+	br.canonicalHashCache, _ = lru.New[uint64, common.Hash](canonicalHashCacheSize)
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
@@ -632,6 +635,10 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, true, nil
 	}
 
+	if cached, ok := r.canonicalHashCache.Get(blockHeight); ok {
+		return cached, true, nil
+	}
+
 	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
 	if !ok {
 		return h, false, nil
@@ -646,6 +653,7 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 		return h, false, nil
 	}
 	h = header.Hash()
+	r.canonicalHashCache.Add(blockHeight, h)
 	return h, true, nil
 }
 
@@ -1320,13 +1328,18 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
 
 	var expectedFirstTxnID uint64
-	for _, snb := range view.Bodies() {
+	for i, snb := range view.Bodies() {
+		if i%1000 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		if snb.Src() == nil {
 			continue
 		}

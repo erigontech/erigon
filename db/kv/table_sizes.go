@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -95,6 +97,9 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 
 			var sb strings.Builder
 			for _, t := range tableSizes {
+				if t.Size < (1 * datasize.MB).Bytes() {
+					continue
+				}
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
 				if t.Size == 0 || !debugLogging {
 					continue

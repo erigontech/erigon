@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -32,6 +31,7 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	logger := log.New()
 
@@ -42,7 +42,7 @@ func TestArchiveWriter(t *testing.T) {
 		file := filepath.Join(tmp, name)
 		compressCfg := seg.DefaultCfg
 		compressCfg.MinPatternScore = 8
-		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
+		comp, err := seg.NewCompressor(t.Context(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)
 		w := seg.NewWriter(comp, compFlags)
 		tb.Cleanup(w.Close)
@@ -145,6 +145,7 @@ func TestArchiveWriter(t *testing.T) {
 }
 
 func TestPrunableProgress(t *testing.T) {
+	t.Parallel()
 	_, tx := memdb.NewTestTx(t)
 	SaveExecV3PrunableProgress(tx, []byte("test"), 100)
 	s, err := GetExecV3PrunableProgress(tx, []byte("test"))

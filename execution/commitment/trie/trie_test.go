@@ -72,6 +72,40 @@ func TestNull(t *testing.T) {
 	}
 }
 
+func TestUpdateEmptyValueDeletes(t *testing.T) {
+	trie := newEmpty()
+	key := []byte("test-key")
+	value := []byte("test-value")
+
+	// 1. Insert a value
+	trie.Update(key, value)
+	v, ok := trie.Get(key)
+	require.True(t, ok)
+	require.Equal(t, value, v)
+
+	// 2. Update with empty value (should delete)
+	trie.Update(key, []byte{})
+
+	// 3. Verify deletion
+	v, ok = trie.Get(key)
+	require.True(t, ok) // true because we resolved it fully without hitting a hash node
+	require.Nil(t, v, "key should be deleted when updated with empty value")
+
+	// 4. Insert again
+	trie.Update(key, value)
+	v, ok = trie.Get(key)
+	require.True(t, ok)
+	require.Equal(t, value, v)
+
+	// 5. Update with nil (should delete)
+	trie.Update(key, nil)
+
+	// 6. Verify deletion
+	v, ok = trie.Get(key)
+	require.True(t, ok)
+	require.Nil(t, v, "key should be deleted when updated with nil value")
+}
+
 func TestLargeValue(t *testing.T) {
 	trie := newEmpty()
 	trie.Update([]byte("key1"), []byte{99, 99, 99, 99})
