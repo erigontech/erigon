@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Download disk usage artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           run-id: ${{ env.SOURCE_RUN_ID }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +152,7 @@ jobs:
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
           TODAY=$(date +%Y-%m-%d)
-          EXISTING=$(gh pr list --head "$BRANCH" --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number' 2>/dev/null)
+          EXISTING=$(gh pr list --head "$BRANCH" --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number // empty' 2>/dev/null)
 
           if [ -z "$EXISTING" ]; then
             gh pr create \
