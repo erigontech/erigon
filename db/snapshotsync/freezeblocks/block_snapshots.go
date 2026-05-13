@@ -427,7 +427,9 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	}
 
 	go func() {
-		defer onDone()
+		if onDone != nil {
+			defer onDone()
+		}
 		defer br.working.Store(false)
 
 		if br.snBuildAllowed != nil {
