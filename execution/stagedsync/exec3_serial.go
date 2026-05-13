@@ -58,6 +58,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
+	checkIsBatchFullEvery := time.NewTicker(5 * time.Second)
+	defer checkIsBatchFullEvery.Stop()
+
 	havePartialBlock := false
 	blockNum := startBlockNum
 
@@ -220,10 +223,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
+			if se.isApplyingBlocks {
+				se.LogExecution()
+			}
+		case <-checkIsBatchFullEvery.C:
 			if !se.isApplyingBlocks {
 				break
 			}
-			se.LogExecution()
 			isBatchFull := se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
 			needCalcRoot := isBatchFull || havePartialBlock
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
