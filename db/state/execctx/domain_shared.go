@@ -761,6 +761,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	sd.logger.Info("compute commitment", "blockNum", blockNum)
 	// Flush any pending deferred commitment updates from the previous block
 	// into the CORRECT block's changeset (via FlushPendingUpdates which uses
 	// GetChangesetByBlockNum). This ensures the branch writes are recorded in
