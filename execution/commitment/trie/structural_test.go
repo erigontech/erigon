@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -170,7 +171,7 @@ func TestV2Resolution(t *testing.T) {
 	}
 	// Check the availability of the resolved keys
 	for _, hex := range rl.hexes {
-		key := hexToKeybytes(hex)
+		key := nibbles.HexToKeybytes(hex)
 		_, found := tr1.Get(key)
 		if !found {
 			t.Errorf("Key %x was not resolved", hex)

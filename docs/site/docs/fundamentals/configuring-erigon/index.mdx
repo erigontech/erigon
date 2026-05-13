@@ -238,11 +238,11 @@ Flags for configuring various RPC servers and their behavior.
 * `--rpc.overlay.replayblocktimeout value`: The maximum time to wait to replay a single block.
   * Default: `10s`
 * `--rpc.subscription.filters.maxlogs value`: Maximum logs to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxheaders value`: Maximum block headers to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
   * Default: `0`
 * `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
@@ -426,6 +426,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `128`
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
+* `--caplin.nat value`: NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p multiaddrs while the socket binds to `--caplin.discovery.addr`. Required when running inside Docker or behind NAT. Accepted values: `""` (none), `"extip:1.2.3.4"`, `"stun"`, `"stun:<host>"`, `"upnp"`, `"pmp"`, `"pmp:192.168.0.1"`.
+  * Default: `""` (no NAT mapping)
 * `--caplin.max-inbound-traffic-per-peer value`: The maximum inbound traffic per second per peer.
   * Default: `1MB`
 * `--caplin.max-outbound-traffic-per-peer value`: The maximum outbound traffic per second per peer.
@@ -442,6 +444,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `false`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
+* `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
+  * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.snapgen`: Enables snapshot generation.
