@@ -55,10 +55,10 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	ids               map[string]int     // ids aggregates the 4byte ids found
-	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
-	reason            error              // Textual reason for the interruption
-	activePrecompiles []accounts.Address // Updated on tx start based on given rules
+	ids               map[string]int        // ids aggregates the 4byte ids found
+	interrupt         atomic.Bool           // Atomic flag to signal execution interruption
+	reason            atomic.Pointer[error] // Reason for the interruption, populated by Stop
+	activePrecompiles []accounts.Address    // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -125,12 +125,15 @@ func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return res, t.reason
+	if p := t.reason.Load(); p != nil {
+		return res, *p
+	}
+	return res, nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *fourByteTracer) Stop(err error) {
-	t.reason = err
+	t.reason.Store(&err)
 	t.interrupt.Store(true)
 }
 

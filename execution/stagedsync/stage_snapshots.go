@@ -323,6 +323,26 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
+	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
+	// snapshot domain state may be ahead of the Execution stage progress (which is 0
+	// on a fresh node until ExecV3 runs and self-corrects via SeekCommitment). During
+	// that startup window the RPC layer can resolve `latest` to genesis (exec=0) while
+	// the cached state reader serves snapshot-tip state — a state-vs-rules mismatch
+	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
+	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
+	// consistent view immediately, matching what ExecV3 would set on its first run.
+	if commitBlock := readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return fmt.Errorf("get Execution stage progress: %w", err)
+		}
+		if execProgress < commitBlock {
+			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+			}
+		}
+	}
+
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
 		txNumsReader := cfg.blockReader.TxnumReader()
