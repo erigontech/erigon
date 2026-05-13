@@ -33,6 +33,11 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	if err != nil {
 		return err
 	}
+	// Preserve the previousStateRoot so that transitionSlot can fill
+	// latestBlockHeader.Root with the correct (block-attested) state root
+	// instead of recomputing HashSSZ(), which may diverge when the
+	// incremental hashing cache has been dirtied by fork-choice operations.
+	bs.previousStateRoot = b.previousStateRoot
 	return nil
 }
 
