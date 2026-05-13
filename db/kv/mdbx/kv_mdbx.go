@@ -573,9 +573,11 @@ func (db *MdbxKV) leakDetectorExtraInfo() []any {
 	}
 	pageSize := db.opts.pageSize.Bytes()
 	reclaimablePages := gcPages - retainedPages
-	// txid_lag = how many commits behind the latest the oldest in-process RO
-	// tx is. Workload-independent leading indicator: any non-zero value means
-	// the writer's next big batch of retires will become Retained.
+	// txid_lag = how many writer commits have happened since the oldest
+	// in-process RO tx took its snapshot. Pair with `retained`: a large lag
+	// with small Retained means the reader has been alive across a quiet
+	// window — vulnerable to retire spikes; a large lag with large Retained
+	// means we are actively bleeding pages into the held-hostage pile.
 	var txidLag uint64
 	if lastTxID > oldestRoTxID {
 		txidLag = lastTxID - oldestRoTxID
