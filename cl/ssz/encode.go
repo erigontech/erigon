@@ -28,14 +28,14 @@ type Sized interface {
 	Static() bool
 }
 
-type ObjectSSZ interface {
+type SizedObjectSSZ interface {
 	ssz.EncodableSSZ
-	ssz.Marshaler
+	Sized
 }
 
-type SizedObjectSSZ interface {
-	ObjectSSZ
-	Sized
+type HashableSizedObjectSSZ interface {
+	SizedObjectSSZ
+	ssz.HashableSSZ
 }
 
 /*
@@ -96,6 +96,13 @@ func MarshalSSZ(buf []byte, schema ...any) (dst []byte, err error) {
 			// If the element is a byte slice, append it to the dst
 			dst = append(dst, obj...)
 			currentOffset += len(obj)
+		case bool:
+			b := byte(0)
+			if obj {
+				b = 1
+			}
+			dst = append(dst, b)
+			currentOffset += 1
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			startSize := len(dst)

@@ -140,10 +140,10 @@ var (
 		Value: ".*",
 		Usage: "Run only those tests matching the regular expression.",
 	}
-	WorkersFlag = cli.IntFlag{
+	WorkersFlag = cli.Uint64Flag{
 		Name:  "workers",
-		Value: 0,
-		Usage: "Number of workers to execute tests in parallel (0 means use the command's defaul)",
+		Value: 1,
+		Usage: "Number of workers to execute tests in parallel (must be >= 1)",
 	}
 	JSONOutputFlag = cli.BoolFlag{
 		Name:  "jsonout",
