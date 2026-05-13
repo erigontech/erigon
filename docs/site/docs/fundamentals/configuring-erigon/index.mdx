@@ -97,6 +97,8 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
+* `--prune.commitment-history.distance.blocks value`: Bounds commitment-history snapshot retention to the latest `N` blocks. Requires `--prune.include-commitment-history` and must be `≤ --prune.distance`. May be tightened at runtime (extra files are expired on the next prune cycle); widening requires resync. `0` keeps everything (default).
+  * Default: `0`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
   * Default: `false`
 * `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
