@@ -125,6 +125,28 @@ func TestMuxForwardsSystemCallV2(t *testing.T) {
 	require.Equal(t, 1, sysV1Calls, "V1 child OnSystemCallStart call count (mux should fall back from V2 to V1)")
 }
 
+// TestMuxForwardsSystemCallEnd verifies that the mux tracer fans out
+// OnSystemCallEnd to all children that register it.
+func TestMuxForwardsSystemCallEnd(t *testing.T) {
+	var endCalls int
+
+	child := &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnSystemCallEnd: func() {
+				endCalls++
+			},
+		},
+	}
+
+	mux := newTestMuxTracer([]string{"child"}, []*tracers.Tracer{child})
+
+	require.NotNil(t, mux.OnSystemCallEnd, "mux does not expose OnSystemCallEnd")
+
+	mux.OnSystemCallEnd()
+
+	require.Equal(t, 1, endCalls, "child OnSystemCallEnd call count")
+}
+
 // TestMuxEmptyChildHookFunctionsDoNotPanic verifies that the mux gracefully
 // skips children whose individual hook function fields are nil (i.e., a tracer
 // that exists but doesn't implement every hook), without panicking.
@@ -148,4 +170,34 @@ func TestMuxEmptyChildHookFunctionsDoNotPanic(t *testing.T) {
 	require.NotPanics(t, func() {
 		mux.OnSystemCallStartV2(nil)
 	}, "OnSystemCallStartV2 with nil child hook must not panic")
+
+	require.NotPanics(t, func() {
+		mux.OnSystemCallEnd()
+	}, "OnSystemCallEnd with nil child hook must not panic")
 }
+
+// TestMuxNilHooksPointerDoesNotPanic verifies that a child tracer with a
+// nil *tracing.Hooks pointer (e.g., &tracers.Tracer{}) does not cause a
+// panic from promoted-field access in the mux fanout loops.
+func TestMuxNilHooksPointerDoesNotPanic(t *testing.T) {
+	nilHooksChild := &tracers.Tracer{} // Hooks is nil
+
+	mux := newTestMuxTracer([]string{"nil"}, []*tracers.Tracer{nilHooksChild})
+
+	require.NotPanics(t, func() {
+		mux.OnSystemCallStartV2(nil)
+	}, "OnSystemCallStartV2 with nil Hooks pointer must not panic")
+
+	require.NotPanics(t, func() {
+		mux.OnSystemCallEnd()
+	}, "OnSystemCallEnd with nil Hooks pointer must not panic")
+
+	require.NotPanics(t, func() {
+		mux.OnCodeChangeV2(accounts.Address{}, accounts.CodeHash{}, nil, accounts.CodeHash{}, nil, tracing.CodeChangeContractCreation)
+	}, "OnCodeChangeV2 with nil Hooks pointer must not panic")
+
+	require.NotPanics(t, func() {
+		mux.OnNonceChangeV2(accounts.Address{}, 0, 1, tracing.NonceChangeEoACall)
+	}, "OnNonceChangeV2 with nil Hooks pointer must not panic")
+}
+
