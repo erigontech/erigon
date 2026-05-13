@@ -300,30 +300,63 @@ func (br *BlockRetire) retireBlocks(
 		} else if !has {
 			return false, nil
 		}
-		// Verify the chunk's upper-bound block has a canonical hash entry in
-		// DB. DumpBlocks reads ReadHeaderByNumber(blockTo) as its sanity check
-		// and errors with "last header not found" otherwise. In PoS the
+		// Walk kv.HeaderCanonical from blockFrom upward to find the highest
+		// CONTIGUOUS canonical block in [blockFrom, blockTo]. In PoS the
 		// canonical-hash table is filled progressively by forkchoice updates
-		// walking back from a new head; until that walk has covered every
-		// block in [FrozenBlocks+1, head] the table can be sparse, and a
-		// proposed chunk's blockTo may not yet be canonical. Treat the
-		// missing-hash case as "not yet eligible" (no error) so retire just
-		// skips this round and tries again later instead of spamming ERROR.
-		var blockToCanonical bool
+		// walking back from a new head, so it can be sparse during catch-up.
+		// DumpBlocks needs every block in the chunk to be readable, so we
+		// shrink blockTo down to the highest contiguous canonical block,
+		// rounded down to a 1000-block (Erigon2MinSegmentSize) boundary.
+		// If the result is below blockFrom+1000 the chunk isn't eligible
+		// this round; return ok=false with no error and retry next time.
+		const minChunk = snaptype.Erigon2MinSegmentSize
+		var actualBlockTo uint64
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			h, err := rawdb.ReadCanonicalHash(tx, blockTo)
-			if err != nil {
-				return err
+			c, cerr := tx.Cursor(kv.HeaderCanonical)
+			if cerr != nil {
+				return cerr
 			}
-			blockToCanonical = h != (common.Hash{})
+			defer c.Close()
+			k, _, kerr := c.Seek(hexutil.EncodeTs(blockFrom))
+			if kerr != nil {
+				return kerr
+			}
+			expected := blockFrom
+			var maxContiguous uint64
+			haveAny := false
+			for k != nil {
+				num := binary.BigEndian.Uint64(k)
+				if num > blockTo {
+					break
+				}
+				if num != expected {
+					break // gap
+				}
+				maxContiguous = num
+				haveAny = true
+				expected++
+				k, _, kerr = c.Next()
+				if kerr != nil {
+					return kerr
+				}
+			}
+			if haveAny {
+				actualBlockTo = ((maxContiguous + 1) / minChunk) * minChunk
+			}
 			return nil
 		}); err != nil {
 			return false, err
 		}
-		if !blockToCanonical {
-			br.logger.Info("[snapshots:retire] skipping chunk: blockTo's canonical hash not in DB yet",
-				"blockFrom", blockFrom, "blockTo", blockTo, "max", maxBlockNum)
+		if actualBlockTo < blockFrom+minChunk {
+			br.logger.Info("[snapshots:retire] skipping: canonical-hash coverage insufficient for a chunk",
+				"blockFrom", blockFrom, "proposed_blockTo", blockTo,
+				"max_contiguous_canonical_chunk_end", actualBlockTo, "max", maxBlockNum)
 			return false, nil
+		}
+		if actualBlockTo != blockTo {
+			br.logger.Info("[snapshots:retire] shrinking blockTo to highest contiguous canonical chunk",
+				"blockFrom", blockFrom, "proposed_blockTo", blockTo, "actual_blockTo", actualBlockTo)
+			blockTo = actualBlockTo
 		}
 		br.logger.Info("[snapshots:retire] Retire Blocks: building chunk",
 			"blockFrom", blockFrom, "blockTo", blockTo, "max", maxBlockNum)
