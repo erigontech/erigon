@@ -83,7 +83,7 @@
   {
     "shard": "enginextests-benchmark-60m-parallel",
     "workers": 1,
-    "max-allowed-failures": 7,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
@@ -94,7 +94,7 @@
   {
     "shard": "enginextests-benchmark-100m-parallel",
     "workers": 1,
-    "max-allowed-failures": 7,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
@@ -105,7 +105,7 @@
   {
     "shard": "enginextests-benchmark-150m-parallel",
     "workers": 1,
-    "max-allowed-failures": 59,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
