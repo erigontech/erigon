@@ -1622,16 +1622,26 @@ func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) 
 	if a.frozenBlocks != nil {
 		frozenBlocks = a.frozenBlocks.FrozenBlocks()
 	}
+	endTxNum := a.EndTxNumMinimax()
+	stepSize := a.StepSize()
+	nextStep := kv.Step(endTxNum / stepSize)
+	flushedTxNum := a.lastFlushedCommitmentTxNum.Load()
 	logger.Warn("[agg] stepsInDB>2: potential reasons",
 		"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
 		"produce", a.produce,
 		"buildingFiles", a.buildingFiles.Load(),
 		"mergingFiles", a.mergingFiles.Load(),
 		"maxCollationTxNum", a.maxCollationTxNum.Load(),
-		"endTxNumMinimax", a.EndTxNumMinimax(),
-		"stepSize", a.StepSize(),
+		"endTxNumMinimax", endTxNum,
+		"stepSize", stepSize,
+		"nextStep", nextStep,
+		"stepFullyCommitted", stepFullyCommitted(flushedTxNum, nextStep, stepSize),
+		"lastFlushedCommitmentTxNum", flushedTxNum,
 		"reorgBlockDepth", a.reorgBlockDepth,
 		"frozenBlocks", frozenBlocks,
+		"collateWorkers", a.collateAndBuildWorkers,
+		"mergeWorkers", a.mergeWorkers,
+		"backgroundProgress", a.ps.Has(),
 	)
 }
 
