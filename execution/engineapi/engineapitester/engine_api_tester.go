@@ -256,6 +256,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("load/generate node key: %w", err)
 	}
+	mdbxDBSizeLimit := args.MdbxDBSizeLimit
+	if mdbxDBSizeLimit == 0 {
+		mdbxDBSizeLimit = 1 * datasize.GB
+	}
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -269,7 +273,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
-		MdbxDBSizeLimit: 1 * datasize.GB,
+		MdbxDBSizeLimit: mdbxDBSizeLimit,
 		DisableSentry:   args.DisableSentry,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
@@ -287,7 +291,11 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
+		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+	}
+	if args.BatchSize > 0 {
+		ethConfig.BatchSize = args.BatchSize
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -401,11 +409,13 @@ type EngineApiTesterInitArgs struct {
 	Genesis                *types.Genesis
 	CoinbaseKey            *ecdsa.PrivateKey
 	EthConfigTweaker       func(*ethconfig.Config)
+	BatchSize              datasize.ByteSize
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
 	DisableTxPool          bool
 	DisableSentry          bool
+	MdbxDBSizeLimit        datasize.ByteSize
 }
 
 type EngineApiTester struct {
