@@ -228,19 +228,9 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 				if value, ok := values[key]; ok {
 					keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
 
-					if len(value.Value) == 0 {
-						// Pre-unwind state had no value at this key — either the
-						// diff was a "delete-only at different step" (Value==nil)
-						// or "new key with no prior value" (Value==[]byte{}).
-						// Return ok=true so sd.GetLatest does NOT fall through to
-						// the underlying tx (which after a forkchoice-driven
-						// commit may still hold the post-change value: engine_x
-						// tester reuses the same backend across sequential
-						// ValidatePayload calls, MergeExtendingFork commits each
-						// one's state to chain DB). Falling through would let
-						// the worker read a stale value and misclassify a
-						// freshly-written same-value SSTORE as a no-op.
-						return nil, keyStep, true
+					if value.Value == nil {
+						// Different step: the entry at this step was deleted, key doesn't exist here
+						return nil, keyStep, false
 					}
 					// Same step: restore this value
 					return value.Value, keyStep, true
