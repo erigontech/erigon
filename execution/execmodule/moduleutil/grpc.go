@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -182,38 +183,6 @@ func HeadersRpcToHeaders(headers []*executionproto.Header) ([]*types.Header, err
 	return out, nil
 }
 
-func ConvertWithdrawalsFromRpc(in []*typesproto.Withdrawal) []*types.Withdrawal {
-	if in == nil {
-		return nil
-	}
-	out := make([]*types.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &types.Withdrawal{
-			Index:     w.Index,
-			Validator: w.ValidatorIndex,
-			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    w.Amount,
-		})
-	}
-	return out
-}
-
-func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*typesproto.Withdrawal {
-	if in == nil {
-		return nil
-	}
-	out := make([]*typesproto.Withdrawal, 0, len(in))
-	for _, w := range in {
-		out = append(out, &typesproto.Withdrawal{
-			Index:          w.Index,
-			ValidatorIndex: w.Validator,
-			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         w.Amount,
-		})
-	}
-	return out
-}
-
 func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash common.Hash) *executionproto.BlockBody {
 	if in == nil {
 		return nil
@@ -224,7 +193,7 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash c
 		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
 		Transactions: in.Transactions,
 		Uncles:       HeadersToHeadersRPC(in.Uncles),
-		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		Withdrawals:  engine_types.ConvertWithdrawalsToRpc(in.Withdrawals),
 	}
 }
 
@@ -248,7 +217,7 @@ func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, e
 	return &types.RawBody{
 		Transactions: in.Transactions,
 		Uncles:       uncles,
-		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		Withdrawals:  engine_types.ConvertWithdrawalsFromRpc(in.Withdrawals),
 	}, nil
 }
 

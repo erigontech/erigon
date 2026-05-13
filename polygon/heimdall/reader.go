@@ -2,10 +2,6 @@ package heimdall
 
 import (
 	"context"
-	"fmt"
-
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -116,19 +112,7 @@ func (r *RemoteReader) Close() {
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {
-	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
-	if err != nil {
-		r.logger.Error("getting Version", "err", err)
-		return false
-	}
-	if !gointerfaces.EnsureVersion(r.version, versionReply) {
-		r.logger.Error("incompatible interface versions", "client", r.version.String(),
-			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-		return false
-	}
-	r.logger.Info("interfaces compatible", "client", r.version.String(),
-		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-	return true
+	return gointerfaces.EnsureVersionCompatibility(r.client, r.version, r.logger)
 }
 
 func decodeValidator(v *remoteproto.Validator) *Validator {

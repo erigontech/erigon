@@ -387,7 +387,7 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {
 	callOpts := &bind.CallOpts{
-		BlockNumber: uint256.NewInt(event.Raw.BlockNumber),
+		BlockNumber: uint256.NewInt(uint64(event.Raw.BlockNumber)),
 	}
 
 	eonIndex := event.Eon

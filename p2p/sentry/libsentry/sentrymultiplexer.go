@@ -453,6 +453,7 @@ type SentryStreamS[T protoreflect.ProtoMessage] struct {
 
 func (s *SentryStreamS[T]) Send(m T) error {
 	s.Ch <- StreamReply[T]{R: m}
+	EvictOldestIfHalfFull(s.Ch)
 	return nil
 }
 
@@ -503,7 +504,7 @@ func (c *SentryStreamC[T]) RecvMsg(anyMessage any) error {
 func (m *sentryMultiplexer) Messages(ctx context.Context, in *sentryproto.MessagesRequest, opts ...grpc.CallOption) (sentryproto.Sentry_MessagesClient, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	ch := make(chan StreamReply[*sentryproto.InboundMessage], 16384)
+	ch := make(chan StreamReply[*sentryproto.InboundMessage], MessagesQueueSize)
 	streamServer := &SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
 
 	go func() {
@@ -682,7 +683,7 @@ func (m *sentryMultiplexer) PeerById(ctx context.Context, in *sentryproto.PeerBy
 func (m *sentryMultiplexer) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
 	g, gctx := errgroup.WithContext(ctx)
 
-	ch := make(chan StreamReply[*sentryproto.PeerEvent], 16384)
+	ch := make(chan StreamReply[*sentryproto.PeerEvent], MessagesQueueSize)
 	streamServer := &SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
 
 	go func() {

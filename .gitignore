@@ -25,6 +25,9 @@ docs/readthedocs/build
 .project
 .settings
 
+# Lazy-downloaded test fixture tarballs (see Makefile target test-fixtures)
+/test-fixtures-cache/
+
 # Used by mdbx Makefile
 /ethdb/mdbx/dist/CMakeFiles/*
 /ethdb/mdbx/dist/CMakeCache*
@@ -118,8 +121,8 @@ mdbx.lck
 
 *.prof
 
-.claude/settings.local.json
 .claude/projects/
+*/**/*.local.json
 
 # Prevent accidental commit of locally-built binaries
 /erigon
@@ -130,3 +133,7 @@ agentspecs/
 
 # ralphex progress logs
 .ralphex/progress/
+
+.gomodcache
+_artifacts
+gocache

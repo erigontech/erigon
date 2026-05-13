@@ -26,6 +26,13 @@ concurrency:
     }}
   cancel-in-progress: true
 
+# actions: write lets merge-queue runs call `gh run cancel` on a leaf
+# failure so the gate doesn't stall waiting for still-running siblings.
+# Reusable leaves inherit these from the caller.
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   lint:
     if: github.event_name == 'pull_request'
@@ -38,6 +45,10 @@ jobs:
 
   race-tests:
     uses: ./.github/workflows/test-all-erigon-race.yml
+    secrets: inherit
+
+  eest-spec-tests:
+    uses: ./.github/workflows/test-eest-spec.yml
     secrets: inherit
 
   hive:
@@ -72,9 +83,13 @@ jobs:
     secrets: inherit
 
   sonar:
-    # SONAR_TOKEN is a repo secret unavailable to fork PRs, so skip the scan
-    # for external contributions to avoid a guaranteed failure in ci-gate.
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    # SONAR_TOKEN is a repo secret unavailable to fork PRs and Dependabot PRs
+    # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
+    # so skip the scan for those to avoid a guaranteed failure in ci-gate.
+    if: |
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor != 'dependabot[bot]') ||
+      github.event_name != 'pull_request'
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
@@ -84,6 +99,7 @@ jobs:
       - lint
       - tests
       - race-tests
+      - eest-spec-tests
       - hive
       - hive-eest
       - caplin

@@ -30,12 +30,12 @@ func TestOpenFolder(t *testing.T) {
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
-	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg := NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
@@ -78,7 +78,7 @@ func TestOpenFolder(t *testing.T) {
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
 
-	rwtx, err = db.BeginRw(context.Background())
+	rwtx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwtx.Rollback)
 	checkGet(headerTx, bodyTx, rwtx)
@@ -105,7 +105,7 @@ func TestOpenFolder(t *testing.T) {
 		require.Equal(t, uint64(10*(i+1)), bodyItems[i].endTxNum)
 	}
 
-	rwtx, err = db.BeginRw(context.Background())
+	rwtx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwtx.Rollback)
 
@@ -121,7 +121,7 @@ func TestOpenFolder(t *testing.T) {
 	require.NoError(t, rwtx.Commit())
 
 	agg.Close()
-	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	agg = NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
@@ -149,12 +149,12 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
-	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg := NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwtx.Rollback)
 
@@ -190,7 +190,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 
 	// now open folder and check visiblefiles
 	agg.Close()
-	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	agg = NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
@@ -210,12 +210,12 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
 
-	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg := NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwtx.Rollback)
 
@@ -252,7 +252,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 
 	// now open folder and check visiblefiles
 	agg.Close()
-	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	agg = NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
@@ -270,7 +270,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	bodies.freezer = bfreezer
 
 	agg.Close()
-	agg = NewForkableAgg(context.Background(), dirs, db, log)
+	agg = NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
@@ -297,12 +297,12 @@ func TestClose(t *testing.T) {
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 	bodies.unaligned = true
 
-	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg := NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(rwtx.Rollback)
 
@@ -358,12 +358,12 @@ func TestMergedFileGet(t *testing.T) {
 	headerId, header := setupHeader(t, db, log, dirs)
 	bodyId, bodies := setupBodies(t, db, log, dirs)
 
-	agg := NewForkableAgg(context.Background(), dirs, db, log)
+	agg := NewForkableAgg(t.Context(), dirs, db, log)
 	defer agg.Close()
 	agg.RegisterMarkedForkable(header)
 	agg.RegisterMarkedForkable(bodies)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
@@ -407,7 +407,7 @@ func TestMergedFileGet(t *testing.T) {
 	aggTx.Close()
 	require.NoError(t, rwtx.Commit())
 
-	rwtx, err = db.BeginRw(context.Background())
+	rwtx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 	checkGet(headerTx, bodyTx, rwtx)
@@ -433,7 +433,7 @@ func TestMergedFileGet(t *testing.T) {
 
 	aggTx = agg.BeginTemporalTx()
 	defer aggTx.Close()
-	rwtx, err = db.BeginRw(context.Background())
+	rwtx, err = db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
@@ -630,7 +630,7 @@ func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
 	require.NoError(t, err)
 	defer unmarked.Close()
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwtx.Rollback()
 
@@ -643,7 +643,7 @@ func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
 	}
 
 	from := RootNum(5)
-	fs, err := unmarkedTx.Unwind(context.Background(), from, rwtx)
+	fs, err := unmarkedTx.Unwind(t.Context(), from, rwtx)
 	require.NoError(t, err)
 	require.Greater(t, fs.PruneCount, uint64(0))
 

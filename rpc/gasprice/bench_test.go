@@ -94,12 +94,8 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(b, err)
-	defer tx.Rollback() //nolint:gocritic
 
 	cases := []struct {
 		name        string
@@ -118,6 +114,9 @@ func BenchmarkSuggestTipCap(b *testing.B) {
 
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(b, err)
+			defer tx.Rollback() //nolint:gocritic
 			cfg := gaspricecfg.Config{
 				Blocks:     tc.checkBlocks,
 				Percentile: 60,
@@ -159,15 +158,8 @@ func BenchmarkFeeHistory(b *testing.B) {
 	m := newTestBackendN(b, numBlocks)
 	defer m.Close()
 
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false,
 		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
-
-	// Single read-only tx used only by the main goroutine (GetLatestBlockNumber,
-	// ChainConfig, PendingBlockAndReceipts). Worker goroutines open their own
-	// transactions via Fork.
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
 
 	gasCache := jsonrpc.NewGasPriceCache()
 
@@ -189,6 +181,9 @@ func BenchmarkFeeHistory(b *testing.B) {
 
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(b, err)
+			defer tx.Rollback()
 			for i := 0; i < b.N; i++ {
 				// Create a fresh oracle per iteration so the LRU history cache
 				// starts cold every time (nil historyCache).  This ensures we

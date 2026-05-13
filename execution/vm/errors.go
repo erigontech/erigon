@@ -80,10 +80,16 @@ func (e *ErrStackOverflow) Error() string {
 
 // ErrInvalidOpCode wraps an evm error when an invalid opcode is encountered.
 type ErrInvalidOpCode struct {
-	opcode OpCode
+	opcode  OpCode
+	operand *byte
 }
 
-func (e *ErrInvalidOpCode) Error() string { return fmt.Sprintf("invalid opcode: %s", e.opcode) }
+func (e *ErrInvalidOpCode) Error() string {
+	if e.operand != nil {
+		return fmt.Sprintf("invalid opcode: %s (operand: 0x%02x)", e.opcode, *e.operand)
+	}
+	return fmt.Sprintf("invalid opcode: %s", e.opcode)
+}
 
 func (m *ErrInvalidOpCode) Is(target error) bool {
 	_, is := target.(*ErrInvalidOpCode)

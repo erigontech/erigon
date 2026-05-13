@@ -33,10 +33,6 @@ var (
 	hashT = reflect.TypeFor[Hash]()
 )
 
-const (
-	hexPrefix = `0x`
-)
-
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
 type Hash [length.Hash]byte
 

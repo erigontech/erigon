@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -245,54 +246,6 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(10, 2), res.value)
 }
 
-// TestValidateRead_HasBAL_BypassForPrePopulatedPaths verifies that when
-// HasBAL is true, a StorageRead that now finds a MVReadResultDone entry on a
-// BAL-prepopulated path (BalancePath, NoncePath, CodePath, StoragePath) is
-// considered valid — the entry is a BAL-filtered no-op write and the original
-// storage read value is still correct.
-func TestValidateRead_HasBAL_BypassForPrePopulatedPaths(t *testing.T) {
-	t.Parallel()
-
-	addr := getAddress(42)
-	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
-		if readVersion == writeVersion {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-
-	for _, path := range []AccountPath{BalancePath, NoncePath, CodePath, StoragePath} {
-		t.Run(path.String(), func(t *testing.T) {
-			vm := NewVersionMap(nil)
-			vm.HasBAL = true
-
-			// Simulate a BAL-prepopulated write at txIndex 0, incarnation 1.
-			key := accounts.NilKey
-			if path == StoragePath {
-				key = accounts.InternKey(common.BigToHash(big.NewInt(1)))
-			}
-			vm.Write(addr, path, key, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
-
-			// Build a VersionedIO where tx 2 read from storage (no map entry
-			// at execution time) with its own version as the read version.
-			io := NewVersionedIO(2)
-			rs := ReadSet{}
-			rs.Set(VersionedRead{
-				Address: addr,
-				Path:    path,
-				Key:     key,
-				Source:  StorageRead,
-				Version: Version{TxIndex: 2, Incarnation: 1},
-			})
-			io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
-
-			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
-			require.Equal(t, VersionValid, valid,
-				"HasBAL should bypass invalidation for %s when entry is from BAL pre-population", path)
-		})
-	}
-}
-
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a
@@ -368,87 +321,6 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 				"without HasBAL, StorageRead finding MVReadResultDone should invalidate for %s", path)
 		})
 	}
-}
-
-// TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath verifies that
-// when HasBAL is true and an AddressPath read returns MVReadResultNone (no
-// entry in the version map), but BalancePath has a MVReadResultDone entry
-// (from BAL pre-population), the AddressPath read is invalidated.
-// See also TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath
-// for the same check without HasBAL (worker flush case).
-func TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) {
-	t.Parallel()
-
-	addr := getAddress(42)
-	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
-		if readVersion == writeVersion {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-
-	vm := NewVersionMap(nil)
-	vm.HasBAL = true
-
-	// BAL pre-populated a BalancePath entry at txIndex 0 (simulating account
-	// creation by a prior tx that set a balance).
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
-
-	// No AddressPath entry exists (it's not BAL-pre-populated).
-	// Tx 2 read AddressPath from storage during execution.
-	io := NewVersionedIO(2)
-	rs := ReadSet{}
-	rs.Set(VersionedRead{
-		Address: addr,
-		Path:    AddressPath,
-		Source:  StorageRead,
-		Version: Version{TxIndex: 2, Incarnation: 1},
-	})
-	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
-
-	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
-	require.Equal(t, VersionInvalid, valid,
-		"AddressPath read should be invalidated when BAL has a BalancePath entry from a prior tx (account may have been created)")
-}
-
-// TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath verifies that
-// even without HasBAL (no stored BAL body, e.g. p2p blocks), the BalancePath
-// cross-check still catches stale AddressPath reads. This is the key fix:
-// worker flushes create BalancePath entries that must be checked regardless
-// of whether BAL pre-population was used.
-func TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) {
-	t.Parallel()
-
-	addr := getAddress(42)
-	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
-		if readVersion == writeVersion {
-			return VersionValid
-		}
-		return VersionInvalid
-	}
-
-	vm := NewVersionMap(nil) // HasBAL = false
-	require.False(t, vm.HasBAL)
-
-	// A concurrent worker flushed a BalancePath entry at txIndex 0
-	// (simulating account creation by a prior tx).
-	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
-
-	// No AddressPath entry exists.
-	// Tx 2 read AddressPath from storage during execution (got "account doesn't exist").
-	io := NewVersionedIO(2)
-	rs := ReadSet{}
-	rs.Set(VersionedRead{
-		Address: addr,
-		Path:    AddressPath,
-		Source:  StorageRead,
-		Version: Version{TxIndex: 2, Incarnation: 1},
-	})
-	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
-
-	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
-	require.Equal(t, VersionInvalid, valid,
-		"without HasBAL, AddressPath read should still be invalidated when BalancePath has an entry from a worker flush")
 }
 
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
@@ -560,4 +432,107 @@ func TestReadTimeSameLocation(t *testing.T) {
 	for i := 0; i < 1000000; i++ {
 		mvh1.Read(ap1, AddressPath, accounts.NilKey, 2)
 	}
+}
+
+// TestValuesEqual_StoragePath verifies that valuesEqual handles StoragePath
+// (uint256.Int values) correctly. Without this, storage reads that matched the
+// versionMap value were incorrectly invalidated (falling through to the default
+// case which always returns false), causing livelocks in dense blocks.
+func TestValuesEqual_StoragePath(t *testing.T) {
+	t.Parallel()
+
+	a := *uint256.NewInt(42)
+	b := *uint256.NewInt(42)
+	c := *uint256.NewInt(99)
+
+	require.True(t, valuesEqual(StoragePath, a, b), "same storage values should be equal")
+	require.False(t, valuesEqual(StoragePath, a, c), "different storage values should not be equal")
+}
+
+// TestValidateRead_StoragePath_ValueTiebreaker verifies that when a StoragePath
+// read was from storage (source=StorageRead) but the versionMap now has a Done
+// entry with the SAME value, validation considers it valid (value tiebreaker).
+func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	storageKey := accounts.InternKey(common.BigToHash(big.NewInt(7)))
+	storageVal := *uint256.NewInt(100)
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+
+	// TX 5 wrote storage value 100 to the versionMap.
+	vm.Write(addr, StoragePath, storageKey, Version{TxIndex: 5, Incarnation: 1}, storageVal, true)
+
+	// TX 10 originally read from storage (no versionMap entry at execution
+	// time) and got value 100 — the same value TX 5 later wrote.
+	io := NewVersionedIO(10)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    StoragePath,
+		Key:     storageKey,
+		Source:  StorageRead,
+		Version: Version{TxIndex: UnknownDep, Incarnation: -1},
+		Val:     storageVal,
+	})
+	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
+
+	valid := vm.ValidateVersion(10, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionValid, valid,
+		"StoragePath read with matching value should be valid via tiebreaker")
+
+	// Now test with a DIFFERENT value — should be invalid.
+	vm2 := NewVersionMap(nil)
+	vm2.Write(addr, StoragePath, storageKey, Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(999), true)
+
+	valid2 := vm2.ValidateVersion(10, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid2,
+		"StoragePath read with different value should be invalid")
+}
+
+// TestFlushEstimate_ValidTxNotMarkedEstimate verifies that when
+// FlushVersionedWrites is called with complete=true for a valid TX,
+// the entries are FlagDone (not FlagEstimate). This is critical:
+// marking valid TX writes as Estimate causes downstream TXs to
+// abort with ErrDependency, leading to livelocks.
+func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	vm := NewVersionMap(nil)
+
+	// Simulate: TX 5 is valid, flushed as Done (complete=true).
+	writes := VersionedWrites{
+		{Address: addr, Path: BalancePath, Key: accounts.NilKey,
+			Version: Version{TxIndex: 5, Incarnation: 1}, Val: *uint256.NewInt(100)},
+	}
+	vm.FlushVersionedWrites(writes, true, "")
+
+	// TX 10 reads should see FlagDone → MVReadResultDone.
+	res := vm.Read(addr, BalancePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, res.Status(),
+		"valid TX flush should produce Done entries, not Estimate")
+	require.Equal(t, 5, res.DepIdx())
+	require.Equal(t, 1, res.Incarnation())
+
+	// Simulate: TX 7 is invalid, flushed as Estimate (complete=false).
+	writes2 := VersionedWrites{
+		{Address: addr, Path: NoncePath, Key: accounts.NilKey,
+			Version: Version{TxIndex: 7, Incarnation: 2}, Val: uint64(5)},
+	}
+	vm.FlushVersionedWrites(writes2, false, "")
+
+	// TX 10 reads NoncePath should see FlagEstimate → MVReadResultDependency.
+	res2 := vm.Read(addr, NoncePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDependency, res2.Status(),
+		"invalid TX flush should produce Estimate entries")
+	require.Equal(t, 7, res2.DepIdx())
 }

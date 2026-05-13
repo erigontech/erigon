@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -125,7 +126,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			continue
 		}
 
-		peerInfo, _, err := convertToAddrInfo(node)
+		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
 			continue
 		}
@@ -236,7 +237,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				underservedIdxs[i] = info.idx
 			}
 
-			log.Debug("[Sentinel] Proactive subnet search starting",
+			log.Trace("[Sentinel] Proactive subnet search starting",
 				"underservedCount", len(underserved),
 				"threshold", minimumPeersPerSubnet,
 				"subnets", underservedIdxs)
@@ -261,7 +262,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 					stillUnderserved = append(stillUnderserved, i)
 				}
 			}
-			log.Debug("[Sentinel] Subnet coverage after search",
+			log.Trace("[Sentinel] Subnet coverage after search",
 				"subnetsAtMinPeers", atMin,
 				"minPeersPerSubnet", minimumPeersPerSubnet,
 				"stillUnderserved", stillUnderserved)
@@ -494,7 +495,7 @@ func (s *Sentinel) listenForPeers() {
 	if s.cfg.NoDiscovery {
 		return
 	}
-	multiAddresses := convertToMultiAddr(enodes)
+	multiAddresses := p2p.ConvertToMultiAddr(enodes)
 	s.stickToPeers(multiAddresses)
 
 	iterator := s.listener.RandomNodes()
@@ -517,7 +518,7 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		peerInfo, _, err := convertToAddrInfo(node)
+		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
 			continue
