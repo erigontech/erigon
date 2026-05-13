@@ -140,9 +140,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, block.BlockAccessList); err != nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
-			}
+			// BAL bytes go to the in-memory cache instead of MDBX. The
+			// chaindata write was tens of seconds per block on churned DBs;
+			// see db/rawdb/balcache.go. Older blocks needed by eth/71 peers
+			// or RPC are regenerated on demand via the BALRegenerator.
+			rawdb.CacheBlockAccessList(header.Hash(), block.BlockAccessList)
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}

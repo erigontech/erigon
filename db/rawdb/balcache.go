@@ -23,7 +23,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // balCacheSize is how many recent blocks' EIP-7928 BlockAccessLists are kept in
@@ -56,10 +55,11 @@ func init() {
 // the lookup path here installs one via SetBALRegenerator and consults it as a
 // fallback when neither the in-memory cache nor the chaindata DB has the BAL.
 //
-// The returned bytes are the canonical RLP encoding (as written by
-// rawdb.WriteBlockAccessListBytes) so callers can hand them to peers
-// unchanged. The hash of the decoded BAL MUST match header.BlockAccessListHash
-// — peers verify this on receipt; a mismatch fails the eth/71 BAL response.
+// The returned bytes are the canonical RLP encoding (matching what
+// types.EncodeBlockAccessListBytes produces) so callers can hand them to
+// peers unchanged. The hash of the decoded BAL MUST match
+// header.BlockAccessListHash — peers verify this on receipt; a mismatch
+// fails the eth/71 BAL response.
 type BALRegenerator interface {
 	RegenerateBlockAccessList(ctx context.Context, hash common.Hash, number uint64) ([]byte, error)
 }
@@ -104,33 +104,28 @@ func CachedBlockAccessList(hash common.Hash) ([]byte, bool) {
 	return balCache.Get(hash)
 }
 
-// BlockAccessListBytes returns the BAL bytes for (hash, number). Lookup order:
-//  1. In-memory LRU cache (recent blocks, freshly produced).
-//  2. Chaindata DB (BALs the eth/71 bal-downloader fetched from peers, or
-//     legacy persisted BALs).
-//  3. If a BALRegenerator is installed, re-execute the block to derive the BAL.
-//     The result is added to the cache before returning.
+// BlockAccessListBytes returns the BAL bytes for (hash, number). Two-tier
+// lookup:
+//  1. In-memory LRU cache (recent blocks, freshly produced or recently
+//     regenerated).
+//  2. If a BALRegenerator is installed, re-execute the block to derive the
+//     BAL. The result is added to the cache before returning.
+//
+// The BAL is intentionally NOT persisted to MDBX. Writing the BAL on the
+// NewPayload critical path was a multi-hundred-KB Put per block that, on a
+// churned DB, took tens of seconds. The cache + regenerate-on-miss model
+// removes the write entirely; older blocks needed by peers (or RPC) are
+// reconstructed on demand.
 //
 // Returns (nil, nil) if no source has it (no regenerator installed, or
-// regenerator returned nil). Returns a non-nil error only on actual lookup
-// failure (DB error, regenerator error).
+// regenerator returned nil). Returns a non-nil error only on actual
+// regenerator failure.
 //
 // Callers passing the context (ctx) get cancellation of the regeneration leg
 // — peer-driven serving paths should respect the peer's read deadline.
-func BlockAccessListBytes(ctx context.Context, db kv.Getter, hash common.Hash, number uint64) ([]byte, error) {
+func BlockAccessListBytes(ctx context.Context, hash common.Hash, number uint64) ([]byte, error) {
 	if v, ok := balCache.Get(hash); ok {
 		return v, nil
-	}
-	stored, err := ReadBlockAccessListBytes(db, hash, number)
-	if err != nil {
-		return nil, err
-	}
-	if stored != nil {
-		// Promote DB hits into the cache so the next lookup is a single
-		// LRU probe — important for serving the same hash repeatedly
-		// (peers re-asking, RPC retries).
-		CacheBlockAccessList(hash, stored)
-		return stored, nil
 	}
 	regen := getBALRegenerator()
 	if regen == nil {

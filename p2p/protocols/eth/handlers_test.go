@@ -591,9 +591,7 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 
 	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP payload (non-empty)
-	if err := rawdb.WriteBlockAccessListBytes(tx, hashKnownWithBAL, 100, bal); err != nil {
-		t.Fatalf("WriteBlockAccessListBytes: %v", err)
-	}
+	rawdb.CacheBlockAccessList(hashKnownWithBAL, bal)
 
 	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
 	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
@@ -644,9 +642,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		h := common.Hash{byte(i + 1)}
 		num := uint64(1000 + i)
 		reader[h] = num
-		if err := rawdb.WriteBlockAccessListBytes(tx, h, num, bal); err != nil {
-			t.Fatalf("WriteBlockAccessListBytes: %v", err)
-		}
+		rawdb.CacheBlockAccessList(h, bal)
 		query = append(query, h)
 	}
 

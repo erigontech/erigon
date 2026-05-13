@@ -66,7 +66,7 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 		}
 	}
 
-	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	data, err := rawdb.BlockAccessListBytes(ctx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
