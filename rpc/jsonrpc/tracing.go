@@ -199,6 +199,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		} else {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
+				// Fail closed here because tracing needs a valid Message-derived sender/fee context.
 				stream.WriteNil()
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			} else {

@@ -98,7 +98,7 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader,
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
-		return nil, evmtypes.TxContext{}, fmt.Errorf("convert transaction to message: %w", err)
+		return nil, evmtypes.TxContext{}, fmt.Errorf("convert transaction at index %d (%s) to message: %w", txIndex, txn.Hash(), err)
 	}
 	txContext := protocol.NewEVMTxContext(msg)
 	return msg, txContext, nil
