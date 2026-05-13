@@ -101,10 +101,8 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 
 	// Diffset is stored under hOld — this is the block we actually executed.
 	addr := common.Address{0xde, 0xad}
-	stepBytes := [8]byte{} // step 0 in inverted big-endian
-	diffKey := string(append(addr.Bytes(), stepBytes[:]...))
 	cs := &changeset.StateChangeSet{}
-	cs.Diffs[kv.AccountsDomain].DomainUpdate([]byte(diffKey)[:len(addr.Bytes())], kv.Step(0), nil /* prev=nil → []byte{} tombstone on unwind */)
+	cs.Diffs[kv.AccountsDomain].DomainUpdate(addr.Bytes(), kv.Step(0), nil /* prev=nil → []byte{} tombstone on unwind */)
 	require.NoError(t, changeset.WriteDiffSet(tx, height, hOld.Hash(), cs))
 
 	// Phase 1: hOld is canonical → direct hit under the current canonical hash.

@@ -245,9 +245,9 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 
 	t := time.Now()
 	var changeSet *[kv.DomainLen][]kv.DomainEntryDiff
-	// lastExecHash tracks the hash of the actually-executed block at u.CurrentBlockNumber
-	// (which may differ from the current canonical hash at that height — see comment in
-	// findExecutedDiffsetAtHeight). RevertWithDiffset needs this hash to surgically
+	// lastExecHash tracks the hash of the topmost actually-executed block in the
+	// unwound range (may differ from the current canonical hash at that height —
+	// see findExecutedDiffsetAtHeight). RevertWithDiffset needs it to surgically
 	// invalidate the state cache instead of falling back to a full clear.
 	var lastExecHash common.Hash
 	for currentBlock := u.CurrentBlockNumber; currentBlock > u.UnwindPoint; currentBlock-- {
@@ -267,10 +267,14 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 			return fmt.Errorf("domains.GetDiffset(%d): not found under any known header hash", currentBlock)
 		}
-		if currentBlock == u.CurrentBlockNumber {
-			lastExecHash = executedHash
-		}
 		if changeSet == nil {
+			// First diffset found = topmost executed block in the unwound range.
+			// Capture lastExecHash here, not on the very first loop iteration:
+			// when u.CurrentBlockNumber itself has no diffset (the
+			// "has not been processed yet" edge case above), we skipped it, so
+			// taking the hash from that iteration would leave lastExecHash
+			// zero and RevertWithDiffset would degrade to a full cache clear.
+			lastExecHash = executedHash
 			changeSet = &currentKeys
 		} else {
 			for i := range currentKeys {
