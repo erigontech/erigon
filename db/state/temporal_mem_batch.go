@@ -577,7 +577,7 @@ func (sd *TemporalMemBatch) Close() {
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()
 	}
-	for _, iiWriter := range sd.iiWriters {
+	for _, iiWriter := range sd.pastIIWriters {
 		iiWriter.close()
 	}
 	for _, fWriter := range sd.forkableWriters {
