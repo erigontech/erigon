@@ -207,9 +207,9 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, db kv.Tx, query GetBloc
 			bytes += len(notAvailableSentinel)
 			continue
 		}
-		// Cache-aware lookup: in-memory cache → chaindata DB → installed
-		// BALRegenerator (re-executes the block when nothing is stored).
-		bal, _ := rawdb.BlockAccessListBytes(ctx, db, hash, *number)
+		// 2-tier lookup: in-memory cache → installed BALRegenerator
+		// (re-executes the block when nothing is cached). No MDBX read.
+		bal, _ := rawdb.BlockAccessListBytes(ctx, hash, *number)
 		if len(bal) == 0 {
 			// We have the block header but no source produced a BAL
 			// (pre-Amsterdam, pruned, or regenerator absent/declined).

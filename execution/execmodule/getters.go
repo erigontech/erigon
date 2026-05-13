@@ -263,9 +263,9 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
+		balBytes, err := rawdb.BlockAccessListBytes(ctx, h, *number)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: BlockAccessListBytes error %w", err)
 		}
 		var bal []byte
 		if len(balBytes) > 0 {
@@ -309,9 +309,9 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
+		balBytes, err := rawdb.BlockAccessListBytes(ctx, hash, blockNum)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: BlockAccessListBytes error %w", err)
 		}
 		var bal []byte
 		if len(balBytes) > 0 {

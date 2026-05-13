@@ -603,13 +603,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 
 			var dbBAL types.BlockAccessList
-			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
-			// a separate db.View() as it can deadlock with the stageloop's
-			// RW transaction when BlockOverlay is active.
-			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
-			if err != nil {
-				return err
-			}
+			// BALs are cache-only (see db/rawdb/balcache.go). If the engine_newPayload
+			// path cached one for this block (via execmodule.InsertBlocks), pick it up
+			// here for the parallel exec's BAL validation.
+			data, _ := rawdb.CachedBlockAccessList(b.Hash())
 			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {

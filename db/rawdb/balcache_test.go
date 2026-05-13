@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
@@ -33,7 +32,7 @@ import (
 type fakeRegenerator struct {
 	calls atomic.Int32
 	// resultFor maps the (hash) → bytes the regenerator will return. Unset
-	// hashes get the default canned bytes if set, else (nil, errNoBALForHash).
+	// hashes get the default canned bytes if set, else (nil, nil).
 	resultFor    map[common.Hash][]byte
 	defaultBytes []byte
 	errAlways    error
@@ -66,8 +65,6 @@ func hashFromByte(b byte) common.Hash {
 func TestBlockAccessListBytes_CacheHitShortCircuits(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x01)
 	data := []byte{0xc1, 0x00}
@@ -76,50 +73,27 @@ func TestBlockAccessListBytes_CacheHitShortCircuits(t *testing.T) {
 	// Install a regenerator that, if called, fails the test.
 	rawdb.SetBALRegenerator(&fakeRegenerator{errAlways: errFakeRegen})
 
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 7)
+	got, err := rawdb.BlockAccessListBytes(context.Background(), hash, 7)
 	require.NoError(t, err)
 	require.Equal(t, data, got)
-}
-
-func TestBlockAccessListBytes_DBHitPromotesToCache(t *testing.T) {
-	t.Cleanup(rawdb.ResetBALCacheForTest)
-	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
-
-	hash := hashFromByte(0x02)
-	data := []byte{0xc2, 0xff, 0xee}
-	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, hash, 11, data))
-
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 11)
-	require.NoError(t, err)
-	require.Equal(t, data, got)
-
-	// Subsequent lookup must be a cache hit (no DB read necessary).
-	rawdb.SetBALRegenerator(nil)
-	got2, ok := rawdb.CachedBlockAccessList(hash)
-	require.True(t, ok, "DB-source BAL must be promoted to cache")
-	require.Equal(t, data, got2)
 }
 
 func TestBlockAccessListBytes_RegeneratorFallback(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x03)
 	regenerated := []byte{0xc3, 0x42}
 	regen := &fakeRegenerator{defaultBytes: regenerated}
 	rawdb.SetBALRegenerator(regen)
 
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 22)
+	got, err := rawdb.BlockAccessListBytes(context.Background(), hash, 22)
 	require.NoError(t, err)
 	require.Equal(t, regenerated, got)
 	require.Equal(t, int32(1), regen.calls.Load(), "regenerator should be called once on miss")
 
 	// Repeated lookup hits the cache, regenerator NOT called again.
-	got2, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 22)
+	got2, err := rawdb.BlockAccessListBytes(context.Background(), hash, 22)
 	require.NoError(t, err)
 	require.Equal(t, regenerated, got2)
 	require.Equal(t, int32(1), regen.calls.Load(), "cached regenerated BAL must short-circuit subsequent lookups")
@@ -128,27 +102,23 @@ func TestBlockAccessListBytes_RegeneratorFallback(t *testing.T) {
 func TestBlockAccessListBytes_NoRegeneratorOnMiss(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x04)
 	rawdb.SetBALRegenerator(nil)
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 33)
+	got, err := rawdb.BlockAccessListBytes(context.Background(), hash, 33)
 	require.NoError(t, err)
-	require.Nil(t, got, "no cache, no DB, no regenerator → nil bytes (peer sees 'not available')")
+	require.Nil(t, got, "no cache, no regenerator → nil bytes (peer sees 'not available')")
 }
 
 func TestBlockAccessListBytes_RegeneratorReturnsNil(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x05)
 	regen := &fakeRegenerator{} // defaultBytes nil
 	rawdb.SetBALRegenerator(regen)
 
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 44)
+	got, err := rawdb.BlockAccessListBytes(context.Background(), hash, 44)
 	require.NoError(t, err)
 	require.Nil(t, got)
 	require.Equal(t, int32(1), regen.calls.Load())
@@ -162,14 +132,12 @@ func TestBlockAccessListBytes_RegeneratorReturnsNil(t *testing.T) {
 func TestBlockAccessListBytes_RegeneratorError(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x06)
 	regen := &fakeRegenerator{errAlways: errFakeRegen}
 	rawdb.SetBALRegenerator(regen)
 
-	_, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 55)
+	_, err := rawdb.BlockAccessListBytes(context.Background(), hash, 55)
 	require.ErrorIs(t, err, errFakeRegen)
 	_, ok := rawdb.CachedBlockAccessList(hash)
 	require.False(t, ok, "regenerator error must not pollute the cache")
@@ -201,8 +169,6 @@ func TestCacheBlockAccessList_CopiesBytes(t *testing.T) {
 func TestSetBALRegenerator_ReplaceAndClear(t *testing.T) {
 	t.Cleanup(rawdb.ResetBALCacheForTest)
 	rawdb.ResetBALCacheForTest()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
 
 	hash := hashFromByte(0x09)
 	r1 := &fakeRegenerator{defaultBytes: []byte{0xa1}}
@@ -210,7 +176,7 @@ func TestSetBALRegenerator_ReplaceAndClear(t *testing.T) {
 	rawdb.SetBALRegenerator(r1)
 	rawdb.SetBALRegenerator(r2) // replace
 
-	got, err := rawdb.BlockAccessListBytes(context.Background(), tx, hash, 99)
+	got, err := rawdb.BlockAccessListBytes(context.Background(), hash, 99)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0xa2}, got)
 	require.Zero(t, r1.calls.Load(), "old regenerator must not be called after replacement")
@@ -218,7 +184,7 @@ func TestSetBALRegenerator_ReplaceAndClear(t *testing.T) {
 
 	rawdb.ResetBALCacheForTest() // clear cache so the next lookup hits the regenerator again
 	rawdb.SetBALRegenerator(nil) // explicit clear
-	got, err = rawdb.BlockAccessListBytes(context.Background(), tx, hash, 99)
+	got, err = rawdb.BlockAccessListBytes(context.Background(), hash, 99)
 	require.NoError(t, err)
 	require.Nil(t, got, "cleared regenerator → miss returns nil")
 }

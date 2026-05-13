@@ -198,17 +198,10 @@ func (d *BALDownloader) collectMissingBALs(ctx context.Context) ([]missingBAL, e
 				break
 			}
 			hash := hdr.Hash()
-			existing, err := rawdb.ReadBlockAccessListBytes(tx, hash, n)
-			if err != nil {
-				// A real DB error here used to silently fall through, treating
-				// this slot as "missing" — leading to refetch+rewrite+refetch
-				// loops on every scan pass against a transient or persistent
-				// DB issue. Log and skip; next scan will retry.
-				d.logger.Debug("[bal-downloader] ReadBlockAccessListBytes failed, skipping slot",
-					"n", n, "hash", hash, "err", err)
-				continue
-			}
-			if len(existing) > 0 {
+			// Cache-only — BALs are not persisted to MDBX. If the cache has
+			// already absorbed this hash (recently produced locally or fetched
+			// from another peer this run), skip the fetch.
+			if _, ok := rawdb.CachedBlockAccessList(hash); ok {
 				continue
 			}
 			missing = append(missing, missingBAL{
@@ -286,27 +279,19 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, sentryI i
 		return
 	}
 
-	// Write accepted entries. The fetcher already decoded EIP-8159 (post
+	// Cache accepted entries. The fetcher already decoded EIP-8159 (post
 	// ethereum/EIPs#11553) sentinels: nil = "peer doesn't have it" (was 0x80
 	// on the wire) — skip and retry next pass from another peer; {0xc0} =
-	// "genuinely empty BAL, hash-verified" — write the canonical RLP so
-	// callers that distinguish "have" vs "don't have" via rawdb see the
-	// record; anything else = hash-validated BAL bytes.
+	// "genuinely empty BAL, hash-verified"; anything else = hash-validated
+	// BAL bytes. We cache rather than write to MDBX — see
+	// db/rawdb/balcache.go for the rationale.
 	var stored int
-	if err := d.rwDB.Update(ctx, func(tx kv.RwTx) error {
-		for i, payload := range got {
-			if len(payload) == 0 {
-				continue
-			}
-			if err := rawdb.WriteBlockAccessListBytes(tx, batch[i].hash, batch[i].number, payload); err != nil {
-				return err
-			}
-			stored++
+	for i, payload := range got {
+		if len(payload) == 0 {
+			continue
 		}
-		return nil
-	}); err != nil {
-		d.logger.Debug("[bal-downloader] db write failed", "err", err, "batch_size", len(batch))
-		return
+		rawdb.CacheBlockAccessList(batch[i].hash, payload)
+		stored++
 	}
 
 	if stored > 0 {
