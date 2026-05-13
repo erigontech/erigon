@@ -1,10 +1,10 @@
-*                      @AskAlexSharov @Giulio2002
-/.github/workflows     @mriccobene @AskAlexSharov
+*                      @AskAlexSharov @yperbasis
+/.github/workflows     @mriccobene @lystopad
 /cl/                   @domiwei @Giulio2002
 /db/                   @AskAlexSharov @sudeepdino008
 /docs/                 @bloxster @AskAlexSharov @yperbasis
 /execution/            @yperbasis @mh0lt
-/execution/commitment/ @taratorio @antonis19 @awskii
+/execution/commitment/ @taratorio @mh0lt @awskii
 /p2p/                  @anacrolix @taratorio
-/rpc/                  @canepat @lupin012
+/rpc/                  @lupin012 @yperbasis
 /txnprovider/          @taratorio @yperbasis
