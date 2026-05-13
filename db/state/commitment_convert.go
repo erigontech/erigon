@@ -910,6 +910,14 @@ func loadRestoreManifest(path string) ([]string, bool, error) {
 		}
 		out = append(out, line)
 	}
+	// An existing manifest with no usable entries (empty file, whitespace-only,
+	// truncated mid-write outside the atomic-rename path) must surface as an
+	// error: otherwise restore would happily report "0 files restored" while the
+	// backup dir still holds the real files. Force the operator to delete the
+	// manifest and let the next run rebuild it from backup contents.
+	if len(out) == 0 {
+		return nil, true, fmt.Errorf("[commitment_convert] restore: manifest %s is empty; remove it to rebuild from backup contents", path)
+	}
 	return out, true, nil
 }
 

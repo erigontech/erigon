@@ -993,3 +993,36 @@ func TestRestoreCommitmentFiles_RejectsPathTraversalInManifest(t *testing.T) {
 	require.Contains(t, err.Error(), "plain filename",
 		"error must call out the basename requirement")
 }
+
+// TestRestoreCommitmentFiles_RejectsEmptyManifest verifies that an existing
+// .restore_manifest file with no usable entries surfaces as an error rather
+// than silently reporting "0 files restored". Without this guard, an operator
+// who manually empties or truncates the manifest mid-debug would see a
+// success log while their backup files remain orphaned in backup/domains/.
+func TestRestoreCommitmentFiles_RejectsEmptyManifest(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	_, agg := testDbAndAggregatorv3(t, 10)
+	dirs := agg.Dirs()
+	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
+	require.NoError(t, os.MkdirAll(backupDir, 0o755))
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+
+	origKV := []byte("ORIG_KV")
+	backupPath := filepath.Join(backupDir, "v2.0-commitment.0-32.kv")
+	require.NoError(t, os.WriteFile(backupPath, origKV, 0o644))
+	// Zero-byte manifest — simulates hand-truncation or a partial editor write.
+	require.NoError(t, os.WriteFile(filepath.Join(backupDir, ".restore_manifest"), nil, 0o644))
+
+	err := state.RestoreCommitmentFiles(t.Context(), agg.Dirs(), log.New())
+	require.Error(t, err, "must refuse to proceed on an empty manifest")
+	require.Contains(t, err.Error(), "manifest")
+	require.Contains(t, err.Error(), "empty")
+
+	// The real backup file must remain untouched so the operator can recover
+	// after deleting the empty manifest.
+	require.Equal(t, origKV, readFileBytes(t, backupPath),
+		"backup file must not be moved when manifest validation fails")
+	require.NoFileExists(t, filepath.Join(dirs.SnapDomain, "v2.0-commitment.0-32.kv"))
+}
