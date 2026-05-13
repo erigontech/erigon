@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -122,7 +123,13 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err != nil {
 			return false
 		}
+		// If the block is not in the database, check the fork choice store.
+		// Recently received blocks (e.g. via gossip) may not have been persisted yet.
+		if block == nil && c.forkChoiceReader != nil {
+			block, _ = c.forkChoiceReader.GetBlock(blockRoot)
+		}
 		if block == nil {
+			log.Debug("[Sentinel] beaconBlocksByRoot: block not found", "root", blockRoot)
 			return true
 		}
 
