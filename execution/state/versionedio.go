@@ -750,13 +750,47 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
-		if path != CodePath {
+		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
+		// at a strictly higher TxIndex re-creates the account, so the SD
+		// must NOT short-circuit the read. Mirrors versionedStateReader
+		// .ReadAccountData's revival check at lines 273-293 of this file.
+		//
+		// Without this the worker reads zero for any post-revival access:
+		// e.g. EIP-161 fires for the coinbase when tx N's finalize emits
+		// SelfDestructPath=true (empty-removal: balance 0, no fee tip),
+		// then tx N+1's finalize emits BalancePath=FeeTipped (revives it
+		// with a non-zero balance). A subsequent tx's BALANCE coinbase
+		// must surface the revived balance — the serial equivalent is
+		// AddBalance(amount>0) on a previously-deleted stateObject, where
+		// GetOrNewStateObject implicitly recreates a fresh object with
+		// the new balance. Without this check the parallel worker reads
+		// zero, SSTOREs zero into the contract's slot (was non-zero),
+		// triggering a spurious SSTORE_CLEAR_REFUND that doesn't fire
+		// under serial — observed as TestLegacyBlockchain bcEIP3675/
+		// tipInsideBlock failing with gas exactly 4800 short under
+		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
+		destructTxIndex := res.DepIdx()
+		revived := false
+		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+			revived = true
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived && path != CodePath {
 			// A prior tx self-destructed this account — all state reads must
 			// return the zero value of the type, not the caller-supplied default.
 			// refreshVersionedAccount passes the account's pre-destruction field
 			// values as defaultV, so using defaultV here would return stale data.
 			var zero T
-			sdVersion := Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
 			if commited {
 				return zero, MapRead, sdVersion, nil
 			}
@@ -781,7 +815,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return zero, MapRead, sdVersion, nil
 			}
 			destrcutedVersion = Version{
-				TxIndex: res.DepIdx(),
+				TxIndex: destructTxIndex,
 			}
 		}
 	}
