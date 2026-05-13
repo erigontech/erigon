@@ -251,26 +251,26 @@ if convertRestore {
 **Files:**
 - Modify: `db/state/commitment_convert.go`
 
-- [ ] capture `fileStart := time.Now()` near the top of `convertCommitmentFile` (after error returns but before the read loop).
-- [ ] add a small helper `formatRate(ki uint64, elapsed time.Duration) string` near the other top-level helpers: returns `"--"` if `elapsed < time.Second`, else `common.PrettyCounter(uint64(float64(ki) / elapsed.Seconds()))`. Tiny files finish in <1s and would otherwise print absurd-looking key/s values.
-- [ ] rewrite the 30s tick log (currently `progress %d/%d file=%s (%.1f%% in file) %s`) to:
+- [x] capture `fileStart := time.Now()` near the top of `convertCommitmentFile` (after error returns but before the read loop).
+- [x] add a small helper `formatRate(ki uint64, elapsed time.Duration) string` near the other top-level helpers: returns `"--"` if `elapsed < time.Second`, else `common.PrettyCounter(uint64(float64(ki) / elapsed.Seconds()))`. Tiny files finish in <1s and would otherwise print absurd-looking key/s values.
+- [x] rewrite the 30s tick log (currently `progress %d/%d file=%s (%.1f%% in file) %s`) to:
   ```
   [commitment_convert] phase 1 file=%s processing %s key/s at %s/%s %s
   ```
   with `baseName`, `formatRate(ki, time.Since(fileStart))`, `common.PrettyCounter(processedKeys+ki)`, `common.PrettyCounter(grandTotalKeys)`, `buildPhase1Prefix(...)`.
-- [ ] rewrite the per-file-done log (currently `phase 1 file done %s sizeDelta=%.1f%% ki=%d %s`) to:
+- [x] rewrite the per-file-done log (currently `phase 1 file done %s sizeDelta=%.1f%% ki=%d %s`) to:
   ```
   [commitment_convert] phase 1 file done %s ki=%s sizeDelta=%.1f%% in %s (%s key/s) at %s/%s %s
   ```
   with elapsed = `time.Since(fileStart).Round(time.Second)` and rate via `formatRate(ki, time.Since(fileStart))` (raw elapsed, not rounded, so the rate calc isn't quantised).
-- [ ] rewrite the phase 1 summary log (currently `phase 1 complete: converted %d, skipped %d, total %d, sizeDelta=%s`) to:
+- [x] rewrite the phase 1 summary log (currently `phase 1 complete: converted %d, skipped %d, total %d, sizeDelta=%s`) to:
   ```
   phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s
   ```
-  with `common.PrettyCounter(processedKeys)` and `time.Since(phaseStart).Round(time.Second)`. Confirm `phaseStart` reaches `convertPhase1`'s return path.
-- [ ] build: `make integration`
-- [ ] no new tests (cosmetic change)
-- [ ] manual eyeball: grep the source for the four new log strings to confirm they compile and reference defined identifiers
+  with `common.PrettyCounter(processedKeys)` and `time.Since(phaseStart).Round(time.Second)`. Confirm `phaseStart` reaches `convertPhase1`'s return path. (processedKeys threaded out of convertPhase1 as a 5th return value)
+- [x] build: `make integration`
+- [x] no new tests (cosmetic change)
+- [x] manual eyeball: grep the source for the four new log strings to confirm they compile and reference defined identifiers
 
 ### Task 3: Rename `cleanupRebuildParent` → `cleanupParentIfEmpty`
 

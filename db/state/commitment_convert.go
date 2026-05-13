@@ -29,6 +29,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -345,6 +346,16 @@ func buildPhase1Prefix(fileIdx, fileTotal int, processedKeys, grandTotalKeys uin
 	return fmt.Sprintf("(%d/%d files, %.1f%% overall by keys)", fileIdx, fileTotal, pct)
 }
 
+// formatRate returns the key/s rate for `ki` keys read in `elapsed`, formatted
+// via PrettyCounter. Tiny files finish in under a second and produce absurdly
+// large rates; suppress those by returning "--" instead.
+func formatRate(ki uint64, elapsed time.Duration) string {
+	if elapsed < time.Second {
+		return "--"
+	}
+	return common.PrettyCounter(uint64(float64(ki) / elapsed.Seconds()))
+}
+
 // convertCommitmentFile produces a re-encoded copy of `file` in `dstDir`.
 //
 // It detects the source file's current state, builds the per-pair key and value
@@ -459,7 +470,6 @@ func convertCommitmentFile(
 	reader := seg.NewReader(src.decompressor.MakeGetter(), srcCompression)
 	reader.Reset(0)
 
-	totalForFile := at.KeyCountInFiles(kv.CommitmentDomain, startTxNum, endTxNum)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -468,6 +478,7 @@ func convertCommitmentFile(
 	// inside [stepFrom, stepTo).
 	txNumForPut := endTxNum - 1
 	baseName := filepath.Base(file.Fullpath())
+	fileStart := time.Now()
 
 	// Value transform is applied here (not in collateETL) so we can (a) carve out
 	// KeyCommitmentState — its value is opaque metadata, not BranchData — and (b)
@@ -516,13 +527,12 @@ func convertCommitmentFile(
 		case <-ctx.Done():
 			return 0, 0, ki, ctx.Err()
 		case <-logEvery.C:
-			filePct := float32(0)
-			if totalForFile > 0 {
-				filePct = 100.0 * float32(ki) / float32(totalForFile)
-			}
 			logger.Info(fmt.Sprintf(
-				"[commitment_convert] progress %d/%d file=%s (%.1f%% in file) %s",
-				ki, totalForFile, baseName, filePct,
+				"[commitment_convert] phase 1 file=%s processing %s key/s at %s/%s %s",
+				baseName,
+				formatRate(ki, time.Since(fileStart)),
+				common.PrettyCounter(processedKeys+ki),
+				common.PrettyCounter(grandTotalKeys),
 				buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 		default:
 		}
@@ -539,9 +549,16 @@ func convertCommitmentFile(
 		return 0, 0, ki, fmt.Errorf("convertCommitmentFile %q: size delta: %w", file.Fullpath(), err)
 	}
 
+	elapsed := time.Since(fileStart)
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] phase 1 file done %s sizeDelta=%.1f%% ki=%d %s",
-		baseName, pct, ki,
+		"[commitment_convert] phase 1 file done %s ki=%s sizeDelta=%.1f%% in %s (%s key/s) at %s/%s %s",
+		baseName,
+		common.PrettyCounter(ki),
+		pct,
+		elapsed.Round(time.Second),
+		formatRate(ki, elapsed),
+		common.PrettyCounter(processedKeys+ki),
+		common.PrettyCounter(grandTotalKeys),
 		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 
 	return delta, pct, ki, nil
@@ -647,13 +664,14 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	// Phase 1: convert all.
 	phaseStart := time.Now()
-	processedFiles, skippedFiles, totalSizeDelta, err := convertPhase1(ctx, at, files, rebuildDir, opts, grandTotalKeys, logger)
+	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, files, rebuildDir, opts, grandTotalKeys, logger)
 	if err != nil {
 		return err
 	}
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, in %s, sizeDelta=%s",
+		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s",
 		processedFiles, skippedFiles, len(files),
+		common.PrettyCounter(processedKeys),
 		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta)))
 
 	if processedFiles == 0 {
@@ -767,12 +785,11 @@ func convertPhase1(
 	opts ConvertOpts,
 	grandTotalKeys uint64,
 	logger log.Logger,
-) (processedFiles, skippedFiles int, totalSizeDelta int64, err error) {
+) (processedFiles, skippedFiles int, totalSizeDelta int64, processedKeys uint64, err error) {
 	N := len(files)
-	var processedKeys uint64
 	for i, f := range files {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return processedFiles, skippedFiles, totalSizeDelta, ctxErr
+			return processedFiles, skippedFiles, totalSizeDelta, processedKeys, ctxErr
 		}
 		delta, _, ki, convErr := convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
 		if errors.Is(convErr, errSkip) {
@@ -784,7 +801,7 @@ func convertPhase1(
 			continue
 		}
 		if convErr != nil {
-			return processedFiles, skippedFiles, totalSizeDelta, fmt.Errorf(
+			return processedFiles, skippedFiles, totalSizeDelta, processedKeys, fmt.Errorf(
 				"[commitment_convert] phase 1 file %s: %w (cleanup: rm -rf %s)",
 				f.Fullpath(), convErr, rebuildDir)
 		}
@@ -792,7 +809,7 @@ func convertPhase1(
 		processedFiles++
 		totalSizeDelta += delta
 	}
-	return processedFiles, skippedFiles, totalSizeDelta, nil
+	return processedFiles, skippedFiles, totalSizeDelta, processedKeys, nil
 }
 
 // convertPhase2 walks the visible commitment files and returns the subset that
