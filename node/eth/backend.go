@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -734,7 +735,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// Expose the on-demand FetchBALs entry point to sync hooks
 		// (engine_block_downloader after a batch, engine_newPayload when
 		// the CL payload doesn't carry a BAL).
-		rawdb.SetBALSyncFetcher(balDownloader)
+		balcache.SetBALSyncFetcher(balDownloader)
 		go balDownloader.Run(backend.sentryCtx)
 	}
 
@@ -1040,7 +1041,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// fall back to re-executing the block when nothing is cached. BAL bytes
 	// are no longer persisted to MDBX (see db/rawdb/balcache.go), so older
 	// blocks needed by peers or RPC must be reconstructed on demand.
-	rawdb.SetBALRegenerator(execmodule.NewBALRegenerator(execmodule.BALRegeneratorDeps{
+	balcache.SetBALRegenerator(execmodule.NewBALRegenerator(execmodule.BALRegeneratorDeps{
 		DB:           backend.chainDB,
 		ChainConfig:  chainConfig,
 		Engine:       backend.engine,

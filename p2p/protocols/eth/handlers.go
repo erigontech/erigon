@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -209,7 +210,7 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, db kv.Tx, query GetBloc
 		}
 		// 2-tier lookup: in-memory cache → installed BALRegenerator
 		// (re-executes the block when nothing is cached). No MDBX read.
-		bal, _ := rawdb.BlockAccessListBytes(ctx, hash, *number)
+		bal, _ := balcache.BlockAccessListBytes(ctx, hash, *number)
 		if len(bal) == 0 {
 			// We have the block header but no source produced a BAL
 			// (pre-Amsterdam, pruned, or regenerator absent/declined).

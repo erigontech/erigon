@@ -14,7 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -291,9 +291,9 @@ func TestGetBlockAccessLists71_AnswersAndSends(t *testing.T) {
 	hashUnknown := common.Hash{0x02}
 	const knownBlockNum uint64 = 100
 	bal := []byte{0xc3, 0x01, 0x02, 0x03} // short valid RLP non-empty payload
-	rawdb.ResetBALCacheForTest()
-	t.Cleanup(rawdb.ResetBALCacheForTest)
-	rawdb.CacheBlockAccessList(hashKnown, bal)
+	balcache.ResetBALCacheForTest()
+	t.Cleanup(balcache.ResetBALCacheForTest)
+	balcache.CacheBlockAccessList(hashKnown, bal)
 	if err := rwTx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

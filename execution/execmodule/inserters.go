@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -144,7 +145,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			// chaindata write was tens of seconds per block on churned DBs;
 			// see db/rawdb/balcache.go. Older blocks needed by eth/71 peers
 			// or RPC are regenerated on demand via the BALRegenerator.
-			rawdb.CacheBlockAccessList(header.Hash(), block.BlockAccessList)
+			balcache.CacheBlockAccessList(header.Hash(), block.BlockAccessList)
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}

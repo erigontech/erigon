@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -201,7 +201,7 @@ func (d *BALDownloader) collectMissingBALs(ctx context.Context) ([]missingBAL, e
 			// Cache-only — BALs are not persisted to MDBX. If the cache has
 			// already absorbed this hash (recently produced locally or fetched
 			// from another peer this run), skip the fetch.
-			if _, ok := rawdb.CachedBlockAccessList(hash); ok {
+			if _, ok := balcache.CachedBlockAccessList(hash); ok {
 				continue
 			}
 			missing = append(missing, missingBAL{
@@ -290,7 +290,7 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, sentryI i
 		if len(payload) == 0 {
 			continue
 		}
-		rawdb.CacheBlockAccessList(batch[i].hash, payload)
+		balcache.CacheBlockAccessList(batch[i].hash, payload)
 		stored++
 	}
 
@@ -304,7 +304,7 @@ func (d *BALDownloader) fetchBatch(ctx context.Context, peer [64]byte, sentryI i
 	}
 }
 
-// FetchBALs implements rawdb.BALSyncFetcher: picks an eth/71 peer and
+// FetchBALs implements balcache.BALSyncFetcher: picks an eth/71 peer and
 // requests BALs for the given (hash, number, expected) tuples in a single
 // batched call, caching every hash-verified response. Non-blocking by intent
 // — failures (no peer, peer declined, timeout) are silently dropped because

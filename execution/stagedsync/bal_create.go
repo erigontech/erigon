@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -79,7 +79,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 	// cached BAL here for the validator cross-check. Cache misses are OK —
 	// not every code path has a sidecar (backward block downloader doesn't
 	// carry one).
-	dbBALBytes, _ := rawdb.CachedBlockAccessList(blockHash)
+	dbBALBytes, _ := balcache.CachedBlockAccessList(blockHash)
 	if dbBALBytes != nil {
 		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 		if err != nil {
