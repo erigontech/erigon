@@ -55,12 +55,13 @@ func (r *testStateReader) Read(d kv.Domain, key []byte, stepSize uint64) ([]byte
 
 func (r *testStateReader) Clone(kv.TemporalTx) StateReader { return r }
 
-func TestTrieContextBranchCopiesData(t *testing.T) {
+func Test_TrieContext_BranchCopiesData(t *testing.T) {
 	t.Parallel()
 
 	prefix := []byte{0xaa}
+	expectedBranchData := []byte{1, 2, 3}
 	reader := &testStateReader{
-		branchData: []byte{1, 2, 3},
+		branchData: append([]byte(nil), expectedBranchData...),
 		step:       42,
 	}
 	ctx := NewTrieContextRo(reader, 1)
@@ -68,13 +69,13 @@ func TestTrieContextBranchCopiesData(t *testing.T) {
 	branch, step, err := ctx.Branch(prefix)
 	require.NoError(t, err)
 	require.Equal(t, reader.step, step)
-	require.Equal(t, []byte{1, 2, 3}, branch)
+	require.Equal(t, expectedBranchData, branch)
 	require.Equal(t, kv.CommitmentDomain, reader.readDomain)
 	require.Equal(t, prefix, reader.readKey)
 	require.Equal(t, uint64(1), reader.readStepSize)
 
 	reader.branchData[0] = 9
-	require.Equal(t, []byte{1, 2, 3}, branch)
+	require.Equal(t, expectedBranchData, branch)
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
