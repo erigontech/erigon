@@ -32,15 +32,18 @@ import (
 
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
-	event.OpAttestation:       {},
-	event.OpSingleAttestation: {},
-	event.OpAttesterSlashing:  {},
-	event.OpBlobSidecar:       {},
-	event.OpDataColumnSidecar: {},
-	event.OpBlsToExecution:    {},
-	event.OpContributionProof: {},
-	event.OpProposerSlashing:  {},
-	event.OpVoluntaryExit:     {},
+	event.OpAttestation:               {},
+	event.OpSingleAttestation:         {},
+	event.OpAttesterSlashing:          {},
+	event.OpBlobSidecar:               {},
+	event.OpDataColumnSidecar:         {},
+	event.OpBlsToExecution:            {},
+	event.OpContributionProof:         {},
+	event.OpProposerSlashing:          {},
+	event.OpVoluntaryExit:             {},
+	event.OpPayloadAttestationMessage: {},
+	event.OpExecutionPayloadBid:       {},
+	event.OpExecutionPayloadAvailable: {},
 	// state events
 	event.StateBlock:                       {},
 	event.StateBlockGossip:                 {},
