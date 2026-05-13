@@ -857,11 +857,18 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	var lcp, sa, inv, saisBuf []int32
-	for superstring := range superstringCh {
+	for {
+		var (
+			superstring []byte
+			ok          bool
+		)
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case superstring, ok = <-superstringCh:
+			if !ok {
+				return
+			}
 		}
 
 		if cap(sa) < len(superstring) {

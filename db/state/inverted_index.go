@@ -1159,9 +1159,9 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
-	versionOfRs := uint8(0)
-	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
-		versionOfRs = 1
+	versionOfRs := version.DataStructureVersion(0)
+	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
+		versionOfRs = recsplit.ExistenceFilterVersion
 	}
 	cfg := recsplit.RecSplitArgs{
 		BucketSize: recsplit.DefaultBucketSize,

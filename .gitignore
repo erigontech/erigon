@@ -121,8 +121,8 @@ mdbx.lck
 
 *.prof
 
-.claude/settings.local.json
 .claude/projects/
+*/**/*.local.json
 
 # Prevent accidental commit of locally-built binaries
 /erigon
@@ -133,3 +133,7 @@ agentspecs/
 
 # ralphex progress logs
 .ralphex/progress/
+
+.gomodcache
+_artifacts
+gocache

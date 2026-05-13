@@ -2020,11 +2020,18 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			valBuf := make([]byte, 0, 128)
 
-			for item := range workCh {
+			for {
+				var (
+					item hashWorkItem
+					ok   bool
+				)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				default:
+				case item, ok = <-workCh:
+					if !ok {
+						return nil
+					}
 				}
 				if err := verifyHashItem(item, failFast, fileName, isReferencing,
 					preloadedAccValues, preloadedStoValues,
@@ -2035,7 +2042,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 					return err
 				}
 			}
-			return nil
 		})
 	}
 
