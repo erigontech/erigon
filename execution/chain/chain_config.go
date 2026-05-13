@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -119,8 +120,18 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// DisabledEIPs lists EIPs that are disabled for this chain, even when
+	// their parent fork is active. Used for devnets where the reference
+	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
+	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
+
 	// Account Abstraction
 	AllowAA bool
+}
+
+// IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.
+func (c *Config) IsEIPDisabled(eip int) bool {
+	return slices.Contains(c.DisabledEIPs, eip)
 }
 
 var (
@@ -785,7 +796,13 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	DisabledEIPs                                      []int
 	IsAura                                            bool
+}
+
+// IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
+func (r *Rules) IsEIPDisabled(eip int) bool {
+	return slices.Contains(r.DisabledEIPs, eip)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
