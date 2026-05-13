@@ -1053,10 +1053,15 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, false, err
 	}
 	if a.frozenBlocks != nil && a.frozenBlocks.FrozenBlocks() > 0 {
+		// Cap the lookup at lastBlockInDB: frozenBlocks may exceed what has
+		// been executed so far (e.g. block snapshot files cover the full
+		// chain but we are still syncing). TxNums.Max on a block not yet in
+		// MDBX returns 0, which would block all collation.
+		capBlock := min(a.frozenBlocks.FrozenBlocks(), lastBlockInDB)
 		var capTxNum uint64
 		if err = a.db.View(ctx, func(tx kv.Tx) error {
 			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, capBlock)
 			return err
 		}); err != nil {
 			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
@@ -1065,7 +1070,10 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
 			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
 				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDb", lastStepInDb-1)
+				"lastCollatableStepInDb", lastStepInDb-1,
+				"frozenBlocks", a.frozenBlocks.FrozenBlocks(),
+				"capBlock", capBlock,
+				"capTxNum", capTxNum)
 			return 0, 0, 0, false, nil
 		}
 	}
