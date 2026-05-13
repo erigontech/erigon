@@ -427,8 +427,11 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 }
 
 // commitmentHistoryEnabled returns whether --prune.include-commitment-history was set at node
-// startup. The flag is written once and never changed, so the result is cached after first read.
-// If the DB key is absent (node not yet initialised) the value is not cached and false is returned.
+// startup. The flag is written once by checkAndSetCommitmentHistoryFlag and never changed, so
+// the result is cached after the first successful read.
+// Unlike pruneMode, false is not cached when the DB key is absent: during the brief boot window
+// before checkAndSetCommitmentHistoryFlag runs the key may not exist yet, and caching false
+// would shadow a subsequent true write. Each request during that window pays one DB lookup.
 func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
 	if p := api._commitmentHistoryEnabled.Load(); p != nil {
 		return *p, nil
