@@ -2245,6 +2245,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
+			a.logger.Warn("[snapshots] buildFiles: step not yet in DB", "step", step, "lastInDB", lastInDB)
 			close(fin)
 			return
 		}
@@ -2292,6 +2293,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if cap := a.maxCollationTxNum.Load(); cap > 0 {
 			maxStep := kv.Step(cap / a.StepSize())
 			if lastInDB > maxStep {
+				a.logger.Warn("[snapshots] buildFiles: lastInDB capped by maxCollationTxNum", "lastInDB", lastInDB, "maxStep", maxStep, "cap", cap)
 				lastInDB = maxStep
 			}
 		}
@@ -2306,6 +2308,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// The highest step S where (S+1)*stepSize <= flushedTxNum
 			safeStep := kv.Step(flushedTxNum/stepSize) - 1
 			if flushedTxNum >= stepSize && lastInDB > safeStep {
+				a.logger.Warn("[snapshots] buildFiles: lastInDB capped by flushed commitment", "lastInDB", lastInDB, "safeStep", safeStep, "flushedTxNum", flushedTxNum)
 				lastInDB = safeStep
 			}
 		}
@@ -2340,7 +2343,8 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
-				break // step not fully committed yet — wait for execution to catch up
+				a.logger.Warn("[snapshots] buildFiles: step not fully committed", "step", step, "committedTxNum", committedTxNum, "need", (uint64(step)+1)*a.StepSize())
+				break
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
