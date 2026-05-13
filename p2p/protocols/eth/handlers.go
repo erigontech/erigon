@@ -372,9 +372,14 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		pendingIndex = cached.PendingIndex
 	}
 
-	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
-	if err != nil {
-		return nil, false, err
+	// Only read the flag when there is work to do; full cache hits skip this DB lookup.
+	var commitmentHistoryEnabled bool
+	if pendingIndex < len(query) {
+		var err error
+		commitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(db)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 
 	for lookups := pendingIndex; lookups < len(query); lookups++ {
