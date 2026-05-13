@@ -392,14 +392,21 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	// Pre-trigger block retire so the background freezer has the entire
-	// Execution run as head-start before the next cycle's aggregator collation
-	// gates on FrozenBlocks. No-op if a retire round is already in flight
-	// (the CompareAndSwap inside RetireBlocksInBackground also bumps
+	// Pre-trigger block retire so the background freezer has the Execution
+	// run as head-start before the next cycle's aggregator collation gates
+	// on FrozenBlocks. No-op if a retire round is already in flight (the
+	// CompareAndSwap inside RetireBlocksInBackground also bumps
 	// maxScheduledBlock). Pass a noop seeder so this pre-trigger doesn't
 	// announce files; SnapshotsPrune's later call uses the real seeder.
+	//
+	// Use s.BlockNumber (Execution's own last-committed block) as the ceiling
+	// rather than Senders.Progress: Senders' stored progress can be ahead of
+	// the canonical-hash table writes during early-sync warm-up, causing
+	// DumpBlocks to error with "last header not found" for blocks Senders
+	// committed but whose canonical hash isn't yet in DB. Blocks up to
+	// s.BlockNumber are guaranteed canonical because Execution read them.
 	if cfg.blockRetire != nil {
-		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, to, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
+		cfg.blockRetire.RetireBlocksInBackground(ctx, 0, s.BlockNumber, log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
 	}
 
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {

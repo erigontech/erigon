@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -248,6 +249,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			resetCommitmentGauges(ctx)
 			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
 			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
+			// Re-trigger background retire with the latest committed block as the
+			// ceiling. Inside the CompareAndSwap gate this is cheap: if retire is
+			// already running it just bumps maxScheduledBlock; otherwise it spawns
+			// a fresh round. b.NumberU64() is guaranteed canonical (Execution just
+			// read it), avoiding the canonical-hash-not-found error from Senders-
+			// based ceilings.
+			if se.cfg.blockRetire != nil {
+				se.cfg.blockRetire.RetireBlocksInBackground(ctx, 0, b.NumberU64(), log.LvlDebug, downloader.NoopSeederClient{}, nil, nil)
+			}
 			se.logger.Info(
 				"periodic commit check",
 				"block", b.NumberU64(),

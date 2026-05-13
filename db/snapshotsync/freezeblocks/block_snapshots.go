@@ -289,14 +289,19 @@ func (br *BlockRetire) retireBlocks(
 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.snCfg)
 
+	if !ok {
+		br.logger.Info("[snapshots:retire] CanRetire=false (nothing to do this round)",
+			"max", maxBlockNum, "min_blocks_in_snapshots", minBlockNum)
+	}
+
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
 			return false, err
 		} else if !has {
 			return false, nil
 		}
-		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
-			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
+		br.logger.Info("[snapshots:retire] Retire Blocks: building chunk",
+			"blockFrom", blockFrom, "blockTo", blockTo, "max", maxBlockNum)
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
@@ -305,6 +310,8 @@ func (br *BlockRetire) retireBlocks(
 		if err := snapshots.OpenFolder(); err != nil {
 			return ok, fmt.Errorf("open: %w", err)
 		}
+		br.logger.Info("[snapshots:retire] Retire Blocks: chunk built",
+			"blockFrom", blockFrom, "blockTo", blockTo, "frozen_now", br.blockReader.FrozenBlocks())
 		snapshots.LogStat("blocks:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -418,13 +425,19 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
-	if maxBlockNum > br.maxScheduledBlock.Load() {
+	prevScheduled := br.maxScheduledBlock.Load()
+	if maxBlockNum > prevScheduled {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
 	if !br.working.CompareAndSwap(false, true) {
+		br.logger.Info("[snapshots:retire] re-pinged (already running)",
+			"requested_max", maxBlockNum, "prev_scheduled_max", prevScheduled, "frozen", br.blockReader.FrozenBlocks())
 		return false
 	}
+
+	br.logger.Info("[snapshots:retire] scheduled",
+		"requested_min", minBlockNum, "requested_max", maxBlockNum, "frozen", br.blockReader.FrozenBlocks())
 
 	go func() {
 		if onDone != nil {
