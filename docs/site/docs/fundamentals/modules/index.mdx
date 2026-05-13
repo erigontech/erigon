@@ -1,0 +1,59 @@
+---
+title: Modules
+sidebar_position: 15
+hide_title: true
+description: "Erigon's modular architecture — independent components including the RPC daemon, downloader, sentry, and txpool."
+---
+
+import Link from '@docusaurus/Link';
+
+<div className="lp-hero">
+  <h1>Modules</h1>
+  <p>Erigon's internal components can run as separate processes for scalability, security, or custom deployments. Only split them when you have a clear reason to.</p>
+</div>
+
+<div className="lp-grid">
+
+<Link className="lp-card" to="/fundamentals/modules/rpc-daemon">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="3" width="20" height="14" rx="2"/>
+    <line x1="8" y1="21" x2="16" y2="21"/>
+    <line x1="12" y1="17" x2="12" y2="21"/>
+  </svg>
+  <div className="lp-card-title">RPC Daemon</div>
+  <div className="lp-card-desc">Serve JSON-RPC requests as a separate, remoteable process — the most battle-tested external component.</div>
+</Link>
+
+<Link className="lp-card" to="/fundamentals/modules/txpool">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="8" y1="6" x2="21" y2="6"/>
+    <line x1="8" y1="12" x2="21" y2="12"/>
+    <line x1="8" y1="18" x2="21" y2="18"/>
+    <line x1="3" y1="6" x2="3.01" y2="6"/>
+    <line x1="3" y1="12" x2="3.01" y2="12"/>
+    <line x1="3" y1="18" x2="3.01" y2="18"/>
+  </svg>
+  <div className="lp-card-title">TxPool</div>
+  <div className="lp-card-desc">Manage the pending transaction pool as a standalone service, decoupled from the main node process.</div>
+</Link>
+
+<Link className="lp-card" to="/fundamentals/modules/sentry">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="2"/>
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
+  </svg>
+  <div className="lp-card-title">Sentry</div>
+  <div className="lp-card-desc">Erigon's network-facing peer-to-peer communication layer, isolatable for security or multi-node setups.</div>
+</Link>
+
+<Link className="lp-card" to="/fundamentals/modules/downloader">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="8 17 12 21 16 17"/>
+    <line x1="12" y1="12" x2="12" y2="21"/>
+    <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
+  </svg>
+  <div className="lp-card-title">Downloader</div>
+  <div className="lp-card-desc">Fetch and verify Erigon snapshots from the BitTorrent network — handles historical data retrieval.</div>
+</Link>
+
+</div>
