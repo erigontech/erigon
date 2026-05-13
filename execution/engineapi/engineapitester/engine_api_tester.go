@@ -291,7 +291,11 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
+		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+	}
+	if args.BatchSize > 0 {
+		ethConfig.BatchSize = args.BatchSize
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -405,6 +409,7 @@ type EngineApiTesterInitArgs struct {
 	Genesis                *types.Genesis
 	CoinbaseKey            *ecdsa.PrivateKey
 	EthConfigTweaker       func(*ethconfig.Config)
+	BatchSize              datasize.ByteSize
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
