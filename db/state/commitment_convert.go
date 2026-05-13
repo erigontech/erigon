@@ -49,7 +49,7 @@ var commitmentStepRangeRe = regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.`)
 // ConvertOpts is the target encoding state requested from ConvertCommitmentFiles.
 // Both axes are independent: TargetSqueeze controls the value codec
 // (squeezed = plain keys replaced with file offsets), TargetNibblesV2 controls
-// the key codec (V1 = HexNibblesToCompactBytes, V2 = nibbles.EncodeKeyV2).
+// the key codec (V1 = nibbles.HexToCompact, V2 = nibbles.EncodeKeyV2).
 type ConvertOpts struct {
 	TargetSqueeze   bool
 	TargetNibblesV2 bool
@@ -245,12 +245,12 @@ func sampleViaBT(reader *seg.Reader, fi *FilesItem, samples int) ([]sampledPair,
 // (detected, target) (V1/V2) combination. The four cases are:
 //
 //	V1 → V1  pass-through
-//	V1 → V2  nibbles.EncodeKeyV2(commitment.UncompactNibbles(k))
-//	V2 → V1  commitment.HexNibblesToCompactBytes(nibbles.DecodeKeyV2(k))
+//	V1 → V2  nibbles.EncodeKeyV2(nibbles.CompactToHex(k))
+//	V2 → V1  nibbles.HexToCompact(nibbles.DecodeKeyV2(k))
 //	V2 → V2  pass-through
 //
 // V2 encoding panics on malformed input (path length > 128 or nibble > 0x0F).
-// The V1→V2 path is preceded by UncompactNibbles whose output is bounded by
+// The V1→V2 path is preceded by CompactToHex whose output is bounded by
 // the source bytes; V2→V1 is preceded by DecodeKeyV2 which itself rejects
 // non-canonical input. If a path-length > 128 still slips through, EncodeKeyV2
 // panics — this is intentional: a corrupt source file should fail loudly
@@ -261,7 +261,7 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 		return func(k []byte) ([]byte, error) { return k, nil }
 	case !detectedV2 && targetV2:
 		return func(k []byte) ([]byte, error) {
-			return nibbles.EncodeKeyV2(commitment.UncompactNibbles(k)), nil
+			return nibbles.EncodeKeyV2(nibbles.CompactToHex(k)), nil
 		}
 	default: // detectedV2 && !targetV2
 		return func(k []byte) ([]byte, error) {
@@ -269,7 +269,7 @@ func keyXform(detectedV2, targetV2 bool) func([]byte) ([]byte, error) {
 			if err != nil {
 				return nil, fmt.Errorf("keyXform V2→V1: DecodeKeyV2(%x): %w", k, err)
 			}
-			return commitment.HexNibblesToCompactBytes(decoded), nil
+			return nibbles.HexToCompact(decoded), nil
 		}
 	}
 }

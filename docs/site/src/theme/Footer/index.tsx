@@ -44,7 +44,7 @@ export default function Footer(): React.ReactElement {
         <div style={{display: 'flex', flexDirection: 'column', gap: '1rem'}}>
           <div style={{display: 'flex', alignItems: 'center', gap: '0.6rem'}}>
             <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
-            <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
+            <span style={{fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
           </div>
           <p style={{
             fontSize: '0.875rem',

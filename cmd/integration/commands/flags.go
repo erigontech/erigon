@@ -48,11 +48,12 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode    bool
-	clearCommitment bool
-	resume          bool
-	noHistory       bool
-	syncCfg         = ethconfig.Defaults.Sync
+	chainTipMode                    bool
+	clearCommitment                 bool
+	resume                          bool
+	noHistory                       bool
+	erigondbDomainStepsInFrozenFile string
+	syncCfg                         = ethconfig.Defaults.Sync
 
 	convertSqueeze   bool
 	convertNibblesV2 bool
@@ -121,7 +122,7 @@ func withYes(cmd *cobra.Command) {
 }
 
 func withSqueeze(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+	cmd.Flags().BoolVar(&squeeze, "squeeze", false, "use offset-pointers from commitment.kv to account.kv")
 }
 
 func withConvertFlags(cmd *cobra.Command) {
@@ -211,6 +212,12 @@ func withOutputCsvFile(cmd *cobra.Command) {
 
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+
+func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&erigondbDomainStepsInFrozenFile,
+		utils.ErigondbDomainStepsInFrozenFileFlag.Name, "",
+		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
 // withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.

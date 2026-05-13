@@ -23,16 +23,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // hexCompact emits a V1-encoded key with no terminator for the supplied nibbles.
-// It just delegates to commitment.HexNibblesToCompactBytes — the test wrapper
+// It just delegates to nibbles.HexToCompact — the test wrapper
 // exists so calls read like keys not transforms.
 func hexCompact(nibs ...byte) []byte {
-	return commitment.HexNibblesToCompactBytes(nibs)
+	return nibbles.HexToCompact(nibs)
 }
 
 // v2Key emits a V2 canonical key for the supplied nibbles.
@@ -132,7 +131,7 @@ func TestDetectKeyEncoding_StateKeysOnly(t *testing.T) {
 
 func TestDetectKeyEncoding_KnownAmbiguous(t *testing.T) {
 	// Hand-crafted V1 keys whose V1-encoded bytes ALSO satisfy V2 canonicality.
-	// HexNibblesToCompactBytes on even-length nibble path with no terminator
+	// HexToCompact on even-length nibble path with no terminator
 	// emits [0x00, packedBytes...]. If the final packed byte is 0x00, the V1
 	// output ends with 0x00 — exactly the V2 parity=0 marker. This documents
 	// the ambiguity: the detector cannot distinguish such V1 files from V2
@@ -236,7 +235,7 @@ func nibblePaths() [][]byte {
 func TestXform_KeyXform_V1ToV1_Passthrough(t *testing.T) {
 	xf := keyXform(false, false)
 	for _, p := range nibblePaths() {
-		k := commitment.HexNibblesToCompactBytes(p)
+		k := nibbles.HexToCompact(p)
 		got, err := xf(k)
 		require.NoError(t, err)
 		require.True(t, bytes.Equal(k, got), "V1→V1 pass-through must return identity bytes")
@@ -256,7 +255,7 @@ func TestXform_KeyXform_V2ToV2_Passthrough(t *testing.T) {
 func TestXform_KeyXform_V1ToV2(t *testing.T) {
 	xf := keyXform(false, true)
 	for _, p := range nibblePaths() {
-		v1 := commitment.HexNibblesToCompactBytes(p)
+		v1 := nibbles.HexToCompact(p)
 		got, err := xf(v1)
 		require.NoError(t, err)
 		// Asserting on the round-trip rather than the encoded bytes keeps the
@@ -276,11 +275,11 @@ func TestXform_KeyXform_V2ToV1(t *testing.T) {
 		got, err := xf(v2)
 		require.NoError(t, err)
 		// Same round-trip strategy: V2 → V1 → re-encode V1 → byte-equal V1.
-		// HexNibblesToCompactBytes is deterministic and canonical for the
+		// HexToCompact is deterministic and canonical for the
 		// no-terminator paths we use, so re-encoding closes the loop.
-		want := commitment.HexNibblesToCompactBytes(p)
+		want := nibbles.HexToCompact(p)
 		require.True(t, bytes.Equal(want, got),
-			"V2→V1 must reproduce HexNibblesToCompactBytes(%x): got %x, want %x", p, got, want)
+			"V2→V1 must reproduce HexToCompact(%x): got %x, want %x", p, got, want)
 	}
 }
 
@@ -289,7 +288,7 @@ func TestXform_KeyXform_V1V2_RoundTrip(t *testing.T) {
 	v1ToV2 := keyXform(false, true)
 	v2ToV1 := keyXform(true, false)
 	for _, p := range nibblePaths() {
-		start := commitment.HexNibblesToCompactBytes(p)
+		start := nibbles.HexToCompact(p)
 		mid, err := v1ToV2(start)
 		require.NoError(t, err)
 		end, err := v2ToV1(mid)

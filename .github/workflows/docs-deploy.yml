@@ -25,6 +25,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify llms.txt artifacts are up to date
+        run: |
+          python3 docs/site/scripts/generate-llms.py --check
+          python3 -m unittest discover docs/site/scripts -v
+
       - uses: actions/setup-node@v6
         with:
           node-version: '20'

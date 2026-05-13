@@ -116,7 +116,7 @@ Logo height overridden in CSS: **28px**
 ```
 "Erigon Client"
 ```
-Font: **Quantify**, weight 700, letter-spacing 0.04em (applied via CSS)
+Font: **Montserrat**, weight 800, letter-spacing 0.04em (applied via CSS)
 
 ### Left Nav Items
 | Label | Type |
@@ -156,7 +156,7 @@ Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus 
 
 ### Logo + Tagline (left column)
 - Logo image height: **32px**
-- Brand text: **Quantify** font, weight 700, letter-spacing 0.04em
+- Brand text: **Montserrat** font, weight 800, letter-spacing 0.04em
 - Tagline: *"Building the future on the efficient software frontier."*
 - Company address: Erigon Technologies AG, Dammstrasse 16, 6300 Zug, Switzerland
 
@@ -266,10 +266,13 @@ Each entry is an `<a>` with `display:flex`, `alignItems:center`, `gap:0.6rem`. I
 
 ## 7. Typography
 
-### Font Imports (`src/css/custom.css`)
+### Font Loading (`src/css/custom.css`)
+All fonts are self-hosted via `@font-face` (no CDN). Woff2 files live in `static/fonts/`.
 ```css
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800&family=Nunito+Sans:wght@400;700;800&display=swap');
-@import url('https://fonts.cdnfonts.com/css/quantify');
+@font-face { font-family: 'Montserrat';   src: url('/fonts/Montserrat-ExtraBold.woff2')  format('woff2'); font-weight: 800; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Regular.woff2')    format('woff2'); font-weight: 400; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Bold.woff2')        format('woff2'); font-weight: 700; }
+@font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-ExtraBold.woff2')  format('woff2'); font-weight: 800; }
 ```
 
 ### Font Roles
@@ -277,7 +280,7 @@ Each entry is an `<a>` with `display:flex`, `alignItems:center`, `gap:0.6rem`. I
 |---|---|---|
 | Body text | Nunito Sans, sans-serif | 400 |
 | Headings (h1–h6) | Montserrat, sans-serif | 800 |
-| Navbar title, footer brand | Quantify | 700 |
+| Navbar title, footer brand | Montserrat | 800 |
 | Navbar left items | Montserrat | 800 |
 | Code | system monospace | — |
 
