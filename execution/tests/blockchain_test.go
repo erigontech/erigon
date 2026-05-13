@@ -88,7 +88,7 @@ func newCanonical(t *testing.T, n int) *execmoduletester.ExecModuleTester {
 }
 
 // Test fork of length N starting from block i
-func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *big.Int)) {
+func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *uint256.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	var err error
@@ -123,7 +123,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	}
 	// Extend the newly created chain
 	var blockChainB *blockgen.ChainPack
-	var tdPre, tdPost *big.Int
+	var tdPre, tdPost *uint256.Int
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -139,12 +139,9 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 		if err != nil {
 			return err
 		}
-		td, err := rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
+		tdPre, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
-		}
-		if td != nil {
-			tdPre = td.ToBig()
 		}
 		return nil
 	})
@@ -160,12 +157,9 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 			return err
 		}
 		currentBlock, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
-		td, err := rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
-		}
-		if td != nil {
-			tdPost = td.ToBig()
 		}
 		return nil
 	})
@@ -215,7 +209,7 @@ func TestExtendCanonicalBlocks(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
@@ -243,7 +237,7 @@ func testShorterFork(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	worse := func(td1, td2 *big.Int) {
+	worse := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) >= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected less than %v", td2, td1)
 		}
@@ -273,7 +267,7 @@ func testLongerFork(t *testing.T, full bool) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
