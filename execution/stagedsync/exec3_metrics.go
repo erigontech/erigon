@@ -909,6 +909,9 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		}...)
 		fmt.Println("[dbg] stepsInDb check", stepsInDb)
 		log.Warn("[dbg] stepsInDb check", "stepsInDb", fmt.Sprintf("%.2f", stepsInDb))
+		if stepsInDb > 2 {
+			te.agg.WarnStepsInDBReasons(p.logger, stepsInDb)
+		}
 	}
 
 	if uncommitedGas > 0 {

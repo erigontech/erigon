@@ -1617,6 +1617,19 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 	return steps, nil
 }
 
+func (a *Aggregator) WarnStepsInDBReasons(logger log.Logger, stepsInDB float64) {
+	logger.Warn("[agg] stepsInDB>2: potential reasons",
+		"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
+		"produce", a.produce,
+		"buildingFiles", a.buildingFiles.Load(),
+		"mergingFiles", a.mergingFiles.Load(),
+		"maxCollationTxNum", a.maxCollationTxNum.Load(),
+		"endTxNumMinimax", a.EndTxNumMinimax(),
+		"stepSize", a.StepSize(),
+		"reorgBlockDepth", a.reorgBlockDepth,
+	)
+}
+
 // CollateAndPruneIfNeeded runs synchronous collate when stepsInDB exceeds
 // 1.5 steps, looping until it drops to 1 or below. Then runs prune in a
 // separate transaction so MDBX GC can reclaim freed pages.
@@ -1737,16 +1750,7 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 		return err
 	}
 	if stepsInDB > 2 {
-		a.logger.Warn("[agg] stepsInDB>2: potential reasons",
-			"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
-			"produce", a.produce,
-			"buildingFiles", a.buildingFiles.Load(),
-			"mergingFiles", a.mergingFiles.Load(),
-			"maxCollationTxNum", a.maxCollationTxNum.Load(),
-			"endTxNumMinimax", a.EndTxNumMinimax(),
-			"stepSize", a.StepSize(),
-			"reorgBlockDepth", a.reorgBlockDepth,
-		)
+		a.WarnStepsInDBReasons(a.logger, stepsInDB)
 	}
 	if stepsInDB <= 1.5 {
 		// Still run one prune pass for any already-collated data.
