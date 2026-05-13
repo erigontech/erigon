@@ -32,7 +32,6 @@ import (
 	"sync"
 
 	snapshothashes "github.com/erigontech/erigon-snapshot"
-	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
@@ -498,42 +497,30 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 	return cfg
 }
 
-// EmbeddedWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
-var EmbeddedWebseedsRaw = map[string][]byte{
-	networkname.Mainnet:  webseed.Mainnet,
-	networkname.Sepolia:  webseed.Sepolia,
-	networkname.Gnosis:   webseed.Gnosis,
-	networkname.Chiado:   webseed.Chiado,
-	networkname.Hoodi:    webseed.Hoodi,
-	networkname.Bloatnet: webseed.Bloatnet,
+// EmbeddedWebseeds holds the public HTTP webseed URLs for each chain. Vendored
+// from erigon-snapshot/webseed, which used to ship one one-key TOML file per
+// chain; the only consumers want the URL list, so the TOML wrapper was dropped.
+var EmbeddedWebseeds = map[string][]string{
+	networkname.Mainnet:  {"v1:https://erigon34-v1-snapshots-mainnet.erigon.network"},
+	networkname.Sepolia:  {"v1:https://erigon34-v1-snapshots-sepolia.erigon.network"},
+	networkname.Gnosis:   {"v1:https://erigon34-v1-snapshots-gnosis.erigon.network"},
+	networkname.Chiado:   {"v1:https://erigon34-v1-snapshots-chiado.erigon.network"},
+	networkname.Hoodi:    {"v1:https://erigon34-v1-snapshots-hoodi.erigon.network"},
+	networkname.Bloatnet: {"v1:https://erigon34-v1-snapshots-bloatnet.erigon.network"},
 }
 
-// GetEmbeddedWebseeds parses and returns the webseed URLs for a single chain.
+// GetEmbeddedWebseeds returns the webseed URLs for a single chain.
 func GetEmbeddedWebseeds(chain string) ([]string, bool) {
-	raw, ok := EmbeddedWebseedsRaw[chain]
-	if !ok {
-		return nil, false
-	}
-	a := map[string]string{}
-	if err := toml.Unmarshal(raw, &a); err != nil {
-		panic(err)
-	}
-	res := make([]string, 0, len(a))
-	for _, l := range a {
-		res = append(res, l)
-	}
-	slices.Sort(res)
-	return res, true
+	s, ok := EmbeddedWebseeds[chain]
+	return s, ok
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
-// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
-// Remove the copies in erigon-snapshot once this is the canonical location.
-func FetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+func FetchChainToml(ctx context.Context, source SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
-	if source == snapshothashes.R2 {
+	if source == R2 {
 		url = ChainTomlR2URL(branch, chain)
 	} else {
 		url = ChainTomlGitHubURL(branch, chain)
@@ -542,7 +529,7 @@ func FetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 	if err != nil {
 		return nil, err
 	}
-	if source == snapshothashes.R2 {
+	if source == R2 {
 		InsertCloudflareHeaders(req)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -578,11 +565,11 @@ func LoadRemotePreverified(ctx context.Context, chainName string) error {
 	} else {
 		log.Info("Loading remote snapshot hashes", "chain", chainName)
 
-		hashes, err := FetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		hashes, err := FetchChainToml(ctx, R2, snapshotGitBranch, chainName)
 		if err != nil {
 			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
 
-			hashes, err = FetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			hashes, err = FetchChainToml(ctx, Github, snapshotGitBranch, chainName)
 			if err != nil {
 				return err
 			}

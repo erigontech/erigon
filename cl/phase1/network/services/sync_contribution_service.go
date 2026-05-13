@@ -144,9 +144,18 @@ func (s *syncContributionService) isLocalValidatorProposer(headState *state.Cach
 }
 
 func (s *syncContributionService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedContributionAndProofForGossip, error) {
+	// Pre-allocate with config-aware aggregation bits size so DecodeSSZ uses the
+	// correct byte length for the current preset (minimal: 1 byte, mainnet: 16 bytes).
+	aggBitsSize := int(s.beaconCfg.SyncCommitteeSize / s.beaconCfg.SyncCommitteeSubnetCount / 8)
+	contrib := &cltypes.Contribution{}
+	contrib.SetAggregationBitsSize(aggBitsSize)
 	obj := &SignedContributionAndProofForGossip{
-		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
-		SignedContributionAndProof: &cltypes.SignedContributionAndProof{},
+		Receiver: &sentinelproto.Peer{Pid: pid.String()},
+		SignedContributionAndProof: &cltypes.SignedContributionAndProof{
+			Message: &cltypes.ContributionAndProof{
+				Contribution: contrib,
+			},
+		},
 	}
 	if err := obj.SignedContributionAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
@@ -176,7 +185,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 		}
 
 		// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
-		if contributionAndProof.Contribution.SubcommitteeIndex >= clparams.MainnetBeaconConfig.SyncCommitteeSubnetCount {
+		if contributionAndProof.Contribution.SubcommitteeIndex >= s.beaconCfg.SyncCommitteeSubnetCount {
 			return errors.New("subcommittee index is out of range")
 		}
 

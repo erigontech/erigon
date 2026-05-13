@@ -60,12 +60,13 @@ func blockTestCmd(ctx *cli.Context) error {
 		log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	}
 
+	workers := ctx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
+
 	if len(path) != 0 {
 		collected := collectFiles(path)
-		workers := ctx.Int(WorkersFlag.Name)
-		if workers <= 0 {
-			workers = 1
-		}
 		results, err := runBlockTestsParallel(ctx, collected, workers)
 		if err != nil {
 			return err
@@ -96,7 +97,7 @@ type fileResult struct {
 	err     error
 }
 
-func runBlockTestsParallel(ctx *cli.Context, files []string, workers int) ([]testResult, error) {
+func runBlockTestsParallel(ctx *cli.Context, files []string, workers uint64) ([]testResult, error) {
 	if workers == 1 {
 		results := make([]testResult, 0, len(files)*4) // pre-allocate: most files have a few tests
 		for _, fname := range files {
@@ -124,7 +125,7 @@ func runBlockTestsParallel(ctx *cli.Context, files []string, workers int) ([]tes
 	}
 	close(fileCh)
 
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
