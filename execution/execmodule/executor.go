@@ -212,6 +212,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return tx.Commit()
 	}
 
+	log.Warn("[dbg] ProcessFrozenBlocks start2")
 	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
 	if err != nil {
 		return err
@@ -229,6 +230,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			return err
 		}
 	}
+	log.Warn("[dbg] ProcessFrozenBlocks start3")
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
