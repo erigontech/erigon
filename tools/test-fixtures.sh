@@ -12,13 +12,15 @@
 # 2x local disk usage vs. extracted-only; CI caches only *.tar.gz to stay
 # under cache budget and re-extracts on each run.
 #
-# Usage: tools/test-fixtures.sh [MANIFEST [CACHE_DIR]]
+# Usage: tools/test-fixtures.sh [MANIFEST [CACHE_DIR [KEY...]]]
 #   MANIFEST defaults to test-fixtures.json
 #   CACHE_DIR defaults to test-fixtures-cache
+#   KEY...    optional manifest keys; default = all keys
 set -euo pipefail
 
 manifest="${1:-test-fixtures.json}"
 cache="${2:-test-fixtures-cache}"
+keys=("${@:3}")
 
 for tool in jq curl tar; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "test-fixtures: $tool not found in PATH" >&2; exit 1; }
@@ -40,8 +42,23 @@ mkdir -p "$cache"
 
 # Read & parse the manifest up-front so jq errors abort the script (process
 # substitution would mask them under `set -e`).
-if ! manifest_entries=$(jq -r 'to_entries | sort_by(.key) | .[] | "\(.key)\t\(.value.url)\t\(.value.sha256)"' "$manifest" | tr -d '\r'); then
+if (( ${#keys[@]} == 0 )); then
+	keys_json='[]'
+else
+	keys_json=$(printf '%s\n' "${keys[@]}" | jq -R . | jq -s .)
+fi
+if ! manifest_entries=$(jq -r --argjson keys "$keys_json" '
+	to_entries
+	| sort_by(.key)
+	| map(select(($keys | length) == 0 or (.key as $k | $keys | index($k))))
+	| .[]
+	| "\(.key)\t\(.value.url)\t\(.value.sha256)"
+' "$manifest" | tr -d '\r'); then
 	echo "test-fixtures: failed to parse manifest $manifest" >&2
+	exit 1
+fi
+if [[ -z "$manifest_entries" ]] && (( ${#keys[@]} > 0 )); then
+	echo "test-fixtures: no manifest entries matched keys: ${keys[*]}" >&2
 	exit 1
 fi
 
