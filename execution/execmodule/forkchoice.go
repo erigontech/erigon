@@ -488,6 +488,28 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// this is the true user-intended batch (bounded by --batchSize),
 			// not the residual MDBX dirty queue we see after spilling.
 			sdSizeBeforeFlush := sd.Size()
+			// Helper to snapshot GC + PageOps. Defined here so it's in scope
+			// for both the pre-flush and post-commit reads.
+			getGCStats := func() *mdbx.GCStats {
+				internal, ok := e.db.(interface{ InternalDB() kv.RwDB })
+				if !ok {
+					return nil
+				}
+				mdbxDB, ok := internal.InternalDB().(interface {
+					GCStats() (*mdbx.GCStats, error)
+				})
+				if !ok {
+					return nil
+				}
+				s, gerr := mdbxDB.GCStats()
+				if gerr != nil {
+					return nil
+				}
+				return s
+			}
+			// Snapshot PageOps + GC state BEFORE Flush so the delta captures
+			// the full sd.Flush + commit work, not just commit's fsync.
+			before := getGCStats()
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
@@ -516,27 +538,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 					spaceDirty = d
 				}
 			}
-			// Helper: returns a fresh GCStats snapshot of MDBX's freelist
-			// (db_size, reclaimable, retained, gc_total). Reads via the env,
-			// not the RW tx, so values reflect what's currently committed on
-			// disk plus this tx's own retires when called after Commit.
-			getGCStats := func() *mdbx.GCStats {
-				internal, ok := e.db.(interface{ InternalDB() kv.RwDB })
-				if !ok {
-					return nil
-				}
-				mdbxDB, ok := internal.InternalDB().(interface {
-					GCStats() (*mdbx.GCStats, error)
-				})
-				if !ok {
-					return nil
-				}
-				s, gerr := mdbxDB.GCStats()
-				if gerr != nil {
-					return nil
-				}
-				return s
-			}
 			// Tables we want a per-commit breakdown for. These are the state
 			// domains (values + history) most likely to dominate growth.
 			trackedTables := []string{
@@ -558,7 +559,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}
 
-			before := getGCStats()
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
