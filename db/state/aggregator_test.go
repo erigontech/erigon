@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -579,6 +580,91 @@ func TestAggregator_BuildFiles_EmptyStepOK(t *testing.T) {
 	// this through.
 	require.NoError(t, agg.BuildFiles(2*stepSize))
 }
+
+// TestReadyForCollation_FrozenBlocksZero checks that when no block snapshot
+// files exist (FrozenBlocks()==0), readyForCollation does not block collation.
+//
+// Before the fix, the code passed FrozenBlocks()==0 to TxNums.Max which looked
+// up block 0 (genesis) and returned its maxTxNum (~0). Every step then failed
+// (step+1)*stepSize > 0, permanently blocking all state file creation.
+//
+// All existing tests used ReorgBlockDepth(0), so readyForCollation returned
+// true immediately without ever reaching the frozenBlocks check.
+func TestReadyForCollation_FrozenBlocksZero(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	const reorgDepth = uint64(5)
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+	agg := NewTest(dirs).ReorgBlockDepth(reorgDepth).StepSize(stepSize).Logger(logger).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder())
+
+	// Write enough blocks so the reorgBlockDepth check passes for step 0.
+	// step 0 covers txNums [0,10); lastBlockInStep = block whose maxTxNum = 9 = block 9.
+	// We need lastBlockInDB > lastBlockInStep(9) + reorgDepth(5) = 14, so write 20 blocks.
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for blockNum := uint64(0); blockNum <= 20; blockNum++ {
+			if err := rawdbv3.TxNums.Append(tx, blockNum, blockNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	// FrozenBlocks() == 0: no block snapshot files, no boundary to enforce.
+	agg.frozenBlocks = &mockFrozenBlocks{n: 0}
+
+	_, _, _, ok, err := agg.readyForCollation(t.Context(), 0)
+	require.NoError(t, err)
+	assert.True(t, ok, "FrozenBlocks==0 must not block collation")
+}
+
+// TestReadyForCollation_FrozenBlocksExceedsLastBlock checks that when
+// FrozenBlocks() is larger than the last executed block (snapshot files cover
+// more chain than has been executed so far), collation is not blocked.
+//
+// Before the fix the code called TxNums.Max(tx, frozenBlocks) for a block not
+// yet in MDBX. TxNums.Max silently falls back to the last DB entry and happens
+// to return the right answer, but the intent was unclear. The fix caps the
+// lookup at lastBlockInDB explicitly. Either way collation must proceed.
+func TestReadyForCollation_FrozenBlocksExceedsLastBlock(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	const reorgDepth = uint64(5)
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+	agg := NewTest(dirs).ReorgBlockDepth(reorgDepth).StepSize(stepSize).Logger(logger).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder())
+
+	// Write 20 blocks into MDBX (lastBlockInDB = 20).
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for blockNum := uint64(0); blockNum <= 20; blockNum++ {
+			if err := rawdbv3.TxNums.Append(tx, blockNum, blockNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	// FrozenBlocks() = 5000 >> lastBlockInDB = 20. Block 5000 is not in MDBX.
+	agg.frozenBlocks = &mockFrozenBlocks{n: 5000}
+
+	_, _, _, ok, err := agg.readyForCollation(t.Context(), 0)
+	require.NoError(t, err)
+	assert.True(t, ok, "FrozenBlocks > lastBlockInDB must not block collation")
+}
+
+type mockFrozenBlocks struct{ n uint64 }
+
+func (m *mockFrozenBlocks) FrozenBlocks() uint64 { return m.n }
 
 // putHistoryKey inserts a single (txNumBE, key) pair into the domain's
 // History.KeysTable. The table is a DupSort table, but DupSort Put semantics

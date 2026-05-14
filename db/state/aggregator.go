@@ -1006,20 +1006,36 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, false, err
 	}
 	if a.frozenBlocks != nil {
-		var capTxNum uint64
-		if err = a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			return err
-		}); err != nil {
-			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDb", lastStepInDb-1)
-			return 0, 0, 0, false, nil
+		fb := a.frozenBlocks.FrozenBlocks()
+
+		// Case 1: no block snapshot files at all — there is no file boundary
+		// to enforce, so collation may proceed freely.
+		if fb == 0 {
+			// nothing to cap against
+		} else {
+			// Case 2: block snapshots exist but may extend further than what
+			// has been executed so far (e.g. downloading a 20M-block chain
+			// while execution is only at block 4M). Looking up a block that
+			// is not yet in MDBX is undefined; TxNums.Max silently falls
+			// back to the last DB entry, which gives the right answer, but
+			// capping at lastBlockInDB makes the intent explicit.
+			capBlock := min(fb, lastBlockInDB)
+			var capTxNum uint64
+			if err = a.db.View(ctx, func(tx kv.Tx) error {
+				var err error
+				capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, capBlock)
+				return err
+			}); err != nil {
+				return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
+			}
+			if uint64(step+1)*a.StepSize() > capTxNum {
+				lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
+				a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
+					"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
+					"lastCollatableStepInDb", lastStepInDb-1,
+					"frozenBlocks", fb, "capBlock", capBlock, "capTxNum", capTxNum)
+				return 0, 0, 0, false, nil
+			}
 		}
 	}
 	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
