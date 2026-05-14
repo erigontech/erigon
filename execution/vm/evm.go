@@ -95,7 +95,6 @@ type EVM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 
 	stateGasConsumed        uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
-	regularGasConsumed      uint64 // total regular gas charged during tx execution (for block-level accounting)
 	childPendingStateRefund uint64 // EIP-8037 state-gas refund pending from most recent successful child frame
 }
 
@@ -162,13 +161,9 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 // (so block gas accounting includes reverted state gas).
 func (evm *EVM) StateGasConsumed() uint64 { return evm.stateGasConsumed }
 
-// RegularGasConsumed returns the total regular gas charged during tx execution (for block-level accounting)
-func (evm *EVM) RegularGasConsumed() uint64 { return evm.regularGasConsumed }
-
 // ResetGasConsumed resets the gas consumed counters for a new transaction
 func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
-	evm.regularGasConsumed = 0
 	evm.childPendingStateRefund = 0
 }
 
@@ -188,9 +183,6 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapsh
 
 	// 2. On exceptional halt (not REVERT), burn remaining regular gas.
 	if err != ErrExecutionReverted {
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed += gas.Regular
-		}
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.config.Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
@@ -205,9 +197,9 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapsh
 
 	if depth > 0 {
 		// Restore stateGasConsumed so the parent frame sees the correct
-		// value, and restore the child's state gas (reservoir-sourced + spill)
-		// to the parent's reservoir. Regular gas: REVERT preserves it
-		// (step 2 didn't apply); exceptional halt burnt it in step 2.
+		// value, and restore the child's state gas (reservoir-sourced +
+		// spill) to the parent's reservoir. Regular gas: REVERT preserves
+		// it (step 2 didn't apply); exceptional halt burnt it in step 2.
 		evm.stateGasConsumed = savedStateGasConsumed
 		gas.State += childStateConsumed
 	}
@@ -362,11 +354,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		preGas := gas.Regular
 		ret, gas.Regular, err = RunPrecompiledContract(p, input, gas.Regular, evm.Config().Tracer)
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed += preGas - gas.Regular
-		}
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -569,13 +557,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 	if nonce != 0 || !contractHash.IsEmpty() || hasStorage {
 		err = ErrContractAddressCollision
-		// EIP-8037: track collision-burned regular gas in regularGasConsumed
-		// so 2D block accounting reflects regular_gas_used += message.gas at
-		// both depth>0 (inner CREATE collision) and depth=0 (top-level CREATE
-		// tx collision).
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed += gasRemaining.Regular
-		}
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}

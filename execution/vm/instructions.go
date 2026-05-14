@@ -1120,12 +1120,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			return pc, nil, ErrWriteProtection
 		}
 		gas.Regular += params.CallStipend
-		// EIP-8037: The stipend is added to child gas but wasn't charged.
-		// In the Python spec, escrow_subcall_regular_gas includes the stipend,
-		// so we must deduct it from regularGasConsumed for correct block accounting.
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed -= params.CallStipend
-		}
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
@@ -1176,10 +1170,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	if !value.IsZero() {
 		gas.Regular += params.CallStipend
-		// EIP-8037: See comment in opCall — stipend is part of escrow.
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed -= params.CallStipend
-		}
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it

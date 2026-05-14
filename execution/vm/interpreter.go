@@ -227,9 +227,6 @@ func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, trac
 		return initial, ok
 	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
-			evm.regularGasConsumed += gas
-		}
 		return initial, ok
 	default:
 		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
@@ -477,7 +474,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	isAmsterdam := evm.chainRules.IsAmsterdam
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	for {
@@ -503,10 +499,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			return nil, callContext.Gas(), ErrOutOfGas
 		} else {
 			callContext.gas -= cost
-		}
-		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
-		if isAmsterdam && cost > 0 {
-			evm.regularGasConsumed += cost
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -554,12 +546,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				return nil, callContext.Gas(), ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Regular
-			if isAmsterdam {
-				// EIP-8037: Track dynamic regular gas immediately after deduction.
-				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
-				// so we subtract it to get parent's actual cost.
-				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
-			}
 			if dynamicCost.State > 0 {
 				// Note: do NOT add dynamicCost.State to `cost` here.
 				// `cost` is only used for tracing and is compared against `gasCopy`

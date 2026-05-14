@@ -626,7 +626,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundCounters := st.state.GetRefund()
 			st.gasRemaining.State += refundCounters.State
 			blockState := imdGas.State + st.evm.StateGasConsumed() - refundCounters.State
-			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+			// EIP-8037 block-regular: total gas charged across both dimensions
+			// is initialGas.Total − gasRemaining.Total; subtract the state
+			// dimension to get the regular contribution.
+			blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
 			// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
@@ -649,7 +652,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		blockState := imdGas.State + st.evm.StateGasConsumed()
-		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+		blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
