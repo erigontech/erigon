@@ -397,6 +397,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
 	f.finalizedCheckpoints.Store(common.Hash(blockRoot), newState.FinalizedCheckpoint())
 
+	if err := f.DumpBeaconStateOnDisk(common.Hash(blockRoot), newState, false); err != nil {
+		return nil, LogisticError, err
+	}
+
 	return newState, Success, nil
 }
 
