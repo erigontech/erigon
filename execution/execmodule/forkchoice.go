@@ -562,6 +562,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
+			// Aggregated steps still live in chaindata domain tables because
+			// the in-loop PruneExecutionStage runs on the overlay (RO-backed
+			// MemoryMutation) and silently no-ops. Drain here on a real RW
+			// tx so chaindata doesn't accumulate prunable rows across the
+			// (potentially hours-long) hasMore catch-up.
+			pruneStart := time.Now()
+			var pruneHaveMore bool
+			pruneErr := e.db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+				var perr error
+				pruneHaveMore, perr = tx.PruneSmallBatches(ctx, 2*time.Second)
+				return perr
+			})
+			pruneDur := time.Since(pruneStart)
+			if pruneErr != nil {
+				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
+			}
 			// Re-open RO tx + block overlay on the fresh committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
@@ -573,6 +589,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				"newRoTxId", roTx.ViewID(),
 				"sd_inmem_before_flush", common.ByteCount(sdSizeBeforeFlush),
 				"spaceDirty_residual", common.ByteCount(spaceDirty),
+				"prune_dur", common.Round(pruneDur, 0),
+				"prune_have_more", pruneHaveMore,
 			}
 			if before != nil && after != nil {
 				// Delta in MDBX page-op counters tells us the REAL per-commit
