@@ -27,17 +27,16 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -52,6 +51,68 @@ import (
 // list of filesItem must be represented as Tree - because they may overlap
 
 // visibleFile - class is used for good/visible files
+
+type DirtyFiles struct {
+	btree2.BTreeG[*FilesItem]
+}
+
+func newDirtyFiles() *DirtyFiles {
+	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
+}
+
+func (df *DirtyFiles) copy() *DirtyFiles {
+	return &DirtyFiles{*df.BTreeG.Copy()}
+}
+
+func (df *DirtyFiles) CloseItems(items []*FilesItem) {
+	for _, item := range items {
+		df.Delete(item)
+		item.closeFiles()
+	}
+}
+
+func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
+	toClose := make([]*FilesItem, 0, df.Len())
+	df.Scan(func(item *FilesItem) bool { // can't call .Delete() inside .Scan()
+		if predicate(item) {
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		df.Delete(item)
+		item.closeFiles()
+	}
+}
+
+func (df *DirtyFiles) MadvNormal() {
+	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
+}
+func (df *DirtyFiles) DisableReadAhead() {
+	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
+}
+func (df *DirtyFiles) EnableReadAhead() {
+	df.Scan(func(f *FilesItem) bool { f.EnableReadAhead(); return true })
+}
+
+func (df *DirtyFiles) EndTxNumMax() uint64 {
+	if max, ok := df.Max(); ok {
+		return max.endTxNum
+	}
+	return 0
+}
+
+// updateMinimax: callers use 0 as "not set yet".
+func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+	if max, ok := df.Max(); ok {
+		if current == 0 {
+			return max.endTxNum
+		}
+		return min(current, max.endTxNum)
+	}
+	return current
+}
+
 type FilesItem struct {
 	decompressor         *seg.Decompressor
 	index                *recsplit.Index
@@ -69,16 +130,6 @@ type FilesItem struct {
 	// other processes (which also reading files, may have same logic)
 	canDelete atomic.Bool
 }
-
-// type FilesItem interface {
-// 	Segment() *seg.Decompressor
-// 	AccessorIndex() *recsplit.Index
-// 	BtIndex() *BtIndex
-// 	ExistenceFilter() *existence.Filter
-// 	Range() (startTxNum, endTxNum uint64)
-// }
-
-//var _ FilesItem = (*filesItem)(nil)
 
 func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
 	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
@@ -301,7 +352,7 @@ func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, fi
 	return res
 }
 
-func deleteMergeFile(dirtyFiles *btree2.BTreeG[*FilesItem], outs []*FilesItem, filenameBase string, logger log.Logger) {
+func deleteMergeFile(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
 	for _, out := range outs {
 		if out == nil {
 			panic("must not happen: " + filenameBase)
@@ -413,10 +464,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles() // just close, not remove from disk
-		d.dirtyFiles.Delete(item)
-	}
+	d.dirtyFiles.CloseItems(invalidFileItems) // just close, not remove from disk
 
 	return nil
 }
@@ -490,10 +538,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		h.dirtyFiles.Delete(item)
-	}
+	h.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }
@@ -556,10 +601,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		ii.dirtyFiles.Delete(item)
-	}
+	ii.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }
@@ -588,7 +630,7 @@ func (i visibleFile) EndRootNum() uint64 {
 	return i.endTxNum
 }
 
-func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
 	newVisibleFiles := make(visibleFiles, 0, files.Len())
 	// trace = true
 	if trace {
@@ -688,12 +730,45 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 // visibleFiles have no garbage (overlaps, unindexed, etc...)
 type visibleFiles []visibleFile
 
+func (files visibleFiles) MadvNormal() {
+	for _, f := range files {
+		f.src.MadvNormal()
+	}
+}
+func (files visibleFiles) EnableReadAhead() {
+	for _, f := range files {
+		f.src.EnableReadAhead()
+	}
+}
+func (files visibleFiles) DisableReadAhead() {
+	for _, f := range files {
+		f.src.DisableReadAhead()
+	}
+}
+
 // refcntIncrement pins every non-frozen file by incrementing its refcount.
 // Callers must pair this with a matching decrement in RoTx.Close.
 func (files visibleFiles) refcntIncrement() {
 	for i := range files {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
+		if files[i].src.frozen {
+			continue
+		}
+		files[i].src.refcount.Add(1)
+	}
+}
+
+func (files visibleFiles) refcntDecrement(filenameBase string, logger log.Logger) {
+	traceActive := traceFileLife != "" && filenameBase == traceFileLife
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
+			continue
+		}
+		if src.refcount.Add(-1) == 0 && src.canDelete.Load() {
+			if traceActive {
+				logger.Warn("[agg.dbg] real remove at RoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
 		}
 	}
 }
@@ -783,25 +858,16 @@ func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint6
 
 // closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
 // is not in the provided fNames list.
-func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) {
+func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
 	protectFiles := make(map[string]struct{}, len(fNames))
 	for _, f := range fNames {
 		protectFiles[f] = struct{}{}
 	}
-	var toClose []*FilesItem
-	iter := dirtyFiles.Iter()
-	for ok := iter.First(); ok; ok = iter.Next() {
-		item := iter.Item()
-		if item.decompressor != nil {
-			if _, ok := protectFiles[item.decompressor.FileName()]; ok {
-				continue
-			}
+	dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.decompressor == nil {
+			return true
 		}
-		toClose = append(toClose, item)
-	}
-	iter.Release()
-	for _, item := range toClose {
-		item.closeFiles()
-		dirtyFiles.Delete(item)
-	}
+		_, protected := protectFiles[item.decompressor.FileName()]
+		return !protected
+	})
 }

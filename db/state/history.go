@@ -27,7 +27,6 @@ import (
 	"strings"
 	"time"
 
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -63,7 +62,7 @@ type History struct {
 	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
 	// snapshot and published atomically via Aggregator.visible. BeginFilesRo opens
 	// readers against that snapshot in zero-copy way.
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *DirtyFiles
 
 	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
 	_testBuildVIHook func(rs *recsplit.RecSplit)
@@ -77,7 +76,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 
 	h := History{
 		HistCfg:    cfg,
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: newDirtyFiles(),
 	}
 
 	var err error
@@ -269,8 +268,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		h._testBuildVIHook(rs)
 	}
 
-	seq := &multiencseq.SequenceReader{}
-	it := &multiencseq.SequenceIterator{}
+	var seq multiencseq.SequenceReader
+	var it multiencseq.SequenceIterator
 
 	for {
 		histReader.Reset(0)
@@ -287,7 +286,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			it.Reset(seq, 0)
+			it.Reset(&seq, 0)
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
@@ -1126,20 +1125,7 @@ func (ht *HistoryRoTx) Close() {
 	}
 	files := ht.files
 	ht.files = nil
-	for i := 0; i < len(files); i++ {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && ht.h.FilenameBase == traceFileLife {
-				ht.h.logger.Warn("[agg.dbg] real remove at HistoryRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
+	files.refcntDecrement(ht.h.FilenameBase, ht.h.logger)
 	for _, r := range ht.readers {
 		r.Close()
 	}
