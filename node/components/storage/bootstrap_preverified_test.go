@@ -215,19 +215,23 @@ func TestBuildBootstrapManifest_RespectsPruneMode(t *testing.T) {
 		m := buildBootstrapManifest(items, cc, prune.MinimalMode, nil)
 		got := gather(m)
 
-		// Bug-N regression sentinel: history/idx/accessor must NOT
-		// appear under minimal mode.
+		// Bug-N regression sentinel: history/idx/accessor + caplin
+		// archive must NOT appear under minimal mode. State history
+		// is ~1.3 TB on mainnet; caplin archive is ~150 GB. Both
+		// inflated the filled disk that the original bug-N report
+		// hit (1.9 TB total).
 		require.NotContains(t, got, "history/v1.0-accountsHistory.0-1024.v",
 			"minimal must drop state history (.v in history/) — this is the file kind that filled the 1.3 TB disk in bug N")
 		require.NotContains(t, got, "idx/v1.0-accountsIdx.0-1024.ef",
 			"minimal must drop state-history indexes (.ef in idx/)")
 		require.NotContains(t, got, "accessor/v1.0-history.0-1024.vi",
 			"minimal must drop state-history accessors (.vi in accessor/)")
+		require.NotContains(t, got, "caplin/v1.1-000000-000010-beaconblocks.seg",
+			"minimal must drop caplin/ archive — operator opts into it via --caplin.archive, not by being a publisher")
 
-		// State primaries + blocks + caplin + config still present.
+		// State primaries + blocks + config still present.
 		require.Contains(t, got, "domain/v1.0-accounts.0-1024.kv")
 		require.Contains(t, got, "v1.0-000000-000500-headers.seg")
-		require.Contains(t, got, "caplin/v1.1-000000-000010-beaconblocks.seg")
 		require.Contains(t, got, "salt-state.txt")
 		require.Contains(t, got, "erigondb.toml")
 	})

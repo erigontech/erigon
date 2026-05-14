@@ -86,7 +86,7 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		}
 	})
 
-	t.Run("minimal drops state history; keeps state primary + blocks + config + caplin", func(t *testing.T) {
+	t.Run("minimal drops state history AND caplin archive; keeps state primary + blocks + config", func(t *testing.T) {
 		got := FilterPreverifiedByPruneMode(items, cc, prune.MinimalMode)
 		gotNames := namesOf(got)
 
@@ -99,27 +99,28 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 			"v1.0-000000-000500-bodies.seg",
 			"v1.0-000000-000500-transactions.seg", // Minimal keeps tx — only Full filters pre-merge tx
 			"v1.0-020000-020500-transactions.seg",
-			"caplin/v1.1-000000-000010-beaconblocks.seg",
 			"salt-state.txt",
 			"erigondb.toml",
 		}
 		for _, name := range mustKeep {
 			require.Contains(t, gotNames, name,
-				"minimal must keep %s — it's state primary / blocks / config / caplin", name)
+				"minimal must keep %s — it's state primary / blocks / config", name)
 		}
 
 		// Dropped under minimal (bug-N regression sentinel — these are
-		// the ~1.3 TB of mainnet state history that filled the disk):
+		// the ~1.3 TB of mainnet state history + ~150 GB of caplin
+		// archive that filled the disk):
 		mustDrop := []string{
 			"history/v1.0-accountsHistory.0-1024.v",
 			"history/v1.0-storageHistory.0-1024.v",
 			"idx/v1.0-accountsIdx.0-1024.ef",
 			"idx/v1.0-logAddrIdx.0-1024.ef",
 			"accessor/v1.0-history.0-1024.vi",
+			"caplin/v1.1-000000-000010-beaconblocks.seg",
 		}
 		for _, name := range mustDrop {
 			require.NotContains(t, gotNames, name,
-				"minimal must drop %s — it's state history (idx/, history/, accessor/) and History pruning is enabled", name)
+				"minimal must drop %s — state history (idx/, history/, accessor/) and caplin archive are not part of the minimal-mode publish set", name)
 		}
 	})
 
@@ -140,10 +141,12 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		require.Contains(t, gotNames, "v1.0-020000-020500-transactions.seg")
 	})
 
-	t.Run("blocks mode drops state history; keeps all transactions", func(t *testing.T) {
+	t.Run("blocks mode drops state history + caplin; keeps all transactions", func(t *testing.T) {
 		got := FilterPreverifiedByPruneMode(items, cc, prune.BlocksMode)
 		gotNames := namesOf(got)
 		require.NotContains(t, gotNames, "history/v1.0-accountsHistory.0-1024.v")
+		require.NotContains(t, gotNames, "caplin/v1.1-000000-000010-beaconblocks.seg",
+			"every non-archive mode drops caplin/ — coupled to prune.History.Enabled()")
 		// Blocks mode has Blocks=KeepAllBlocksPruneMode, which is NOT
 		// DefaultBlocksPruneMode, so pre-merge tx filter is a no-op.
 		require.Contains(t, gotNames, "v1.0-000000-000500-transactions.seg")

@@ -92,6 +92,28 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		if pruneMode.History.Enabled() && isStateHistory(p.Name) {
 			continue
 		}
+		// Caplin archive (caplin/*.seg — beacon state snapshots,
+		// validator-balances dumps, historical beacon blocks, etc.)
+		// is dropped under the same prune-history gate. Rationale:
+		// minimal-mode publishers explicitly do not want to host a
+		// CL archive — that's an operator opt-in (--caplin.archive),
+		// and the inline SyncSnapshots filter at line 411 of
+		// snapshotsync.go uses the same `!caplinState && caplin/`
+		// pattern. Without this drop, a 7.0 TB partition running a
+		// --prune.mode=minimal publisher pulls ~150 GB of caplin/
+		// archive on top of the state/blocks set the operator
+		// actually wanted.
+		//
+		// Coupling caplin/ to prune.History.Enabled() (rather than
+		// to a dedicated caplinArchive flag) is the bootstrap-side
+		// shorthand: every non-archive prune mode is consistent
+		// with "don't host the CL archive." If a future operator
+		// wants archive-CL + minimal-EL, the inline SyncSnapshots
+		// path's caplinState flag remains the explicit knob; the
+		// bootstrap filter would need a parallel parameter then.
+		if pruneMode.History.Enabled() && strings.HasPrefix(p.Name, "caplin/") {
+			continue
+		}
 		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, pruneMode, p) {
 			continue
 		}
