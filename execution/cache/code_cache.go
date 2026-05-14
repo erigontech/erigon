@@ -37,6 +37,10 @@ const (
 	DefaultCodeCacheBytes = 512 * datasize.MB
 	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
 	DefaultAddrCacheBytes = 16 * datasize.MB
+	// DefaultCodeSizeCacheEntries is the max entry count for the size-only
+	// cache (geth-style: code size answers without loading bytes for
+	// EXTCODESIZE / EXTCODEHASH callers).
+	DefaultCodeSizeCacheEntries int64 = 1_000_000
 )
 
 // CodeCache is a multi-level concurrent cache for contract code.
@@ -77,16 +81,27 @@ type CodeCache struct {
 	ethHashToCode    *maphash.Map[[]byte] // keccak(code) → code, concurrent
 	ethHashCodeSize  atomic.Int64         // current size in bytes (ethHash layer)
 
+	// Size-only layer: ethCodeHash → int (length in bytes). Answers
+	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Geth has the
+	// equivalent at core/state/database_code.go (1 M-entry LRU). Tiny
+	// per-entry footprint (32B key + 8B value) so the same memory budget
+	// gives ~1000x the hit surface vs the bytes cache.
+	codeSizeByEthHash    *maphash.Map[int]
+	codeSizeEntries      atomic.Int64
+	codeSizeCapEntries   int64
+
 	blockHash common.Hash // hash of the last block processed
 	mu        sync.RWMutex
 
 	// Stats counters (atomic for concurrent access)
-	addrHits      atomic.Uint64
-	addrMisses    atomic.Uint64
-	codeHits      atomic.Uint64
-	codeMisses    atomic.Uint64
-	ethHashHits   atomic.Uint64
-	ethHashMisses atomic.Uint64
+	addrHits        atomic.Uint64
+	addrMisses      atomic.Uint64
+	codeHits        atomic.Uint64
+	codeMisses      atomic.Uint64
+	ethHashHits     atomic.Uint64
+	ethHashMisses   atomic.Uint64
+	codeSizeHits    atomic.Uint64
+	codeSizeMisses  atomic.Uint64
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
@@ -95,11 +110,13 @@ type CodeCache struct {
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
 func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
 	return &CodeCache{
-		addrToHash:     maphash.NewMap[versionedAddressID](),
-		hashToCode:     maphash.NewMap[[]byte](),
-		ethHashToCode:  maphash.NewMap[[]byte](),
-		addrCapacityB:  addrCapacityBytes,
-		codeCapacityB:  codeCapacityBytes,
+		addrToHash:         maphash.NewMap[versionedAddressID](),
+		hashToCode:         maphash.NewMap[[]byte](),
+		ethHashToCode:      maphash.NewMap[[]byte](),
+		codeSizeByEthHash:  maphash.NewMap[int](),
+		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
+		addrCapacityB:      addrCapacityBytes,
+		codeCapacityB:      codeCapacityBytes,
 	}
 }
 
@@ -196,6 +213,10 @@ func (c *CodeCache) PutWithEthHash(addr []byte, code []byte, ethHash []byte) {
 		c.Put(addr, code)
 	}
 
+	// Populate the size-only layer alongside the bytes layer — every time
+	// we touch the bytes we can answer a future EXTCODESIZE for free.
+	c.PutCodeSizeByEthHash(ethHash, len(code))
+
 	if _, exists := c.ethHashToCode.Get(ethHash); exists {
 		return
 	}
@@ -205,6 +226,40 @@ func (c *CodeCache) PutWithEthHash(addr []byte, code []byte, ethHash []byte) {
 	}
 	c.ethHashToCode.Set(ethHash, code)
 	c.ethHashCodeSize.Add(entrySize)
+}
+
+// GetCodeSizeByEthHash retrieves the size (in bytes) of a contract by its
+// Ethereum codeHash, without loading the bytes. Returns (0, false) on miss.
+//
+// Designed for EXTCODESIZE / EXTCODEHASH which only need the length; on a
+// cache hit the caller answers a 4-instruction map probe instead of paying
+// the file-accessor + decompression stack for the full bytes. Geth has the
+// equivalent at core/state/database_code.go.
+func (c *CodeCache) GetCodeSizeByEthHash(ethHash []byte) (int, bool) {
+	size, ok := c.codeSizeByEthHash.Get(ethHash)
+	if !ok {
+		c.codeSizeMisses.Add(1)
+		return 0, false
+	}
+	c.codeSizeHits.Add(1)
+	return size, true
+}
+
+// PutCodeSizeByEthHash stores the size of code keyed by its Ethereum
+// codeHash. No-op when full (limitation; addrToHash-style LRU is queued as
+// a separate surgical change).
+func (c *CodeCache) PutCodeSizeByEthHash(ethHash []byte, size int) {
+	if len(ethHash) == 0 || size < 0 {
+		return
+	}
+	if _, exists := c.codeSizeByEthHash.Get(ethHash); exists {
+		return
+	}
+	if c.codeSizeEntries.Load() >= c.codeSizeCapEntries {
+		return
+	}
+	c.codeSizeByEthHash.Set(ethHash, size)
+	c.codeSizeEntries.Add(1)
 }
 
 // Delete removes the address → codeHash mapping.

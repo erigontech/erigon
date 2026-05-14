@@ -1542,10 +1542,27 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	return enc, nil
 }
 
+// codeSizeGetter is the type-asserted fast-path interface for callers
+// that only need the length of the code (EXTCODESIZE / EXTCODEHASH).
+// Implemented by execctx.temporalGetter; fallback to GetLatest otherwise.
+type codeSizeGetter interface {
+	GetCodeSize(addr []byte) (int, bool, error)
+}
+
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var addressValue common.Address
 	if !address.IsNil() {
 		addressValue = address.Value()
+	}
+	if sg, ok := r.getter.(codeSizeGetter); ok {
+		size, _, err := sg.GetCodeSize(addressValue[:])
+		if err != nil {
+			return 0, err
+		}
+		if r.trace {
+			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
+		}
+		return size, nil
 	}
 	enc, _, err := r.getter.GetLatest(kv.CodeDomain, addressValue[:])
 	if err != nil {
