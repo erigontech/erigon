@@ -43,6 +43,7 @@ package scenarios_test
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -154,8 +155,9 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 		blockReqs       []requestRecord
 		reqMu           sync.Mutex
 
-		stateBeforeReady atomic.Int32
-		blockBeforeReady atomic.Int32
+		stateBeforeReady          atomic.Int32
+		headerBeforeReady         atomic.Int32 // *-headers.seg before ready — phase 1 under piece A
+		nonHeaderBlockBeforeReady atomic.Int32 // bodies/transactions before ready — phase 2 violation if > 0
 	)
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.InitialStateReady) {
 		stateReadyCount.Add(1)
@@ -179,7 +181,15 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 		} else {
 			blockReqs = append(blockReqs, rec)
 			if stateReadyCount.Load() == 0 {
-				blockBeforeReady.Add(1)
+				// Header files are phase 1 under piece A (they carry
+				// header.stateRoot, the consensus anchor every state
+				// validator cross-references). Bodies / transactions
+				// stay phase 2 and a count > 0 here is a regression.
+				if strings.HasSuffix(e.FileName, "-headers.seg") {
+					headerBeforeReady.Add(1)
+				} else {
+					nonHeaderBlockBeforeReady.Add(1)
+				}
 			}
 		}
 		reqMu.Unlock()
@@ -199,11 +209,22 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 	require.Equal(t, int32(1), stateReadyCount.Load(),
 		"InitialStateReady must fire exactly once across the run")
 
-	// 2. Phase ordering: blocks NEVER request before InitialStateReady.
-	require.Zero(t, blockBeforeReady.Load(),
-		"no block DownloadRequested may fire before InitialStateReady — phase gate runs one way")
+	// 2. Phase ordering.
+	//    - Non-header block files (bodies / transactions) MUST NOT
+	//      request before InitialStateReady — phase 2.
+	//    - Header files MAY request before InitialStateReady — phase 1
+	//      under piece A (they carry header.stateRoot, the consensus
+	//      anchor every cryptographic state validator cross-references).
+	//      Not asserted positive here because the archive may not include
+	//      any header files; the negative assertion above is the
+	//      regression sentinel either way.
+	//    - At least one state DownloadRequested must precede
+	//      InitialStateReady (else the gate never has anything to wait on).
+	require.Zero(t, nonHeaderBlockBeforeReady.Load(),
+		"no non-header block (bodies/transactions) may fire DownloadRequested before InitialStateReady — phase 2 violation")
 	require.Greater(t, stateBeforeReady.Load(), int32(0),
 		"at least one state DownloadRequested must precede InitialStateReady")
+	_ = headerBeforeReady.Load() // informational; not asserted (archive may have no headers)
 
 	// 3. Latest-first ordering PER DOMAIN. The orchestrator's
 	//    requestGapsFor sorts each domain's batch by ToStep descending,

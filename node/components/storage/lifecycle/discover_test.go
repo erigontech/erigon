@@ -99,3 +99,75 @@ func TestDiscoverNewFiles_MissingDirNoOp(t *testing.T) {
 	d.Sweep(context.Background(), nil)
 	// Read error → silent skip; next sweep retries.
 }
+
+// TestDiscoverNewFiles_PicksUpConfigAndSubdirs pins the bug-M contract.
+// Before the fix, discoverNewFiles filtered top-level entries by
+// snapshotPrimaryExts (.seg/.kv/.v/.ef only) AND only scanned the
+// top-level dir. As a consequence:
+//   - salt-*.txt and erigondb.toml at top-level were silently skipped
+//     because their extensions don't match the primary-ext whitelist —
+//     so the publisher's inventory had no salt or meta entries
+//     → GenerateV2 emitted empty Salt/Meta sections in chain.toml
+//     → consumers couldn't fetch them → ReloadSalt failed on exec start.
+//   - State primaries in domain/, history/, idx/, accessor/ were never
+//     enumerated.
+//   - caplin/*.seg in the caplin/ subdir was never enumerated.
+//
+// This test exercises the full production-layout fan-out to lock in
+// the fix.
+func TestDiscoverNewFiles_PicksUpConfigAndSubdirs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Mirror Erigon's canonical on-disk snapshot layout. Each file is
+	// empty bytes — discover only checks names + presence. Accessor
+	// files (.kvi/.kvei/.bt in domain/, .vi in accessor/) are NOT
+	// distributed snapshots — they're built locally — so the discover
+	// path intentionally skips them. They're omitted here.
+	for _, rel := range []string{
+		// Top-level non-extension-matching config files (bug M direct):
+		"salt-blocks.txt",
+		"salt-state.txt",
+		"erigondb.toml",
+		// Top-level block files (already worked pre-bug-M, included
+		// to confirm the rewrite didn't regress them):
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000000-000500-bodies.seg",
+		// State-domain subdirs (bug M direct: pre-fix, these were
+		// never discovered because discover only scanned top-level):
+		"domain/v1.0-accounts.0-256.kv",
+		"history/v1.0-accountsHistory.0-256.v",
+		"idx/v1.0-accountsIdx.0-256.ef",
+		// Caplin subdir (bug M direct):
+		"caplin/v1.1-000000-000010-beaconblocks.seg",
+	} {
+		path := filepath.Join(dir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+		require.NoError(t, os.WriteFile(path, []byte{}, 0644))
+	}
+
+	inv := snapshot.NewInventory()
+	d := &Driver{Inv: inv, SnapDir: dir}
+	d.Sweep(context.Background(), nil)
+
+	// Inventory keys subdir entries with the subdir-prefixed path
+	// (e.g. "domain/v1.0-accounts.0-256.kv"); top-level entries get
+	// the bare basename. The disk-scan and the aggregator's
+	// onFilesChange callback both use this convention so the keyspace
+	// stays consistent.
+	for _, key := range []string{
+		"salt-blocks.txt",
+		"salt-state.txt",
+		"erigondb.toml",
+		"v1.0-000000-000500-headers.seg",
+		"v1.0-000000-000500-bodies.seg",
+		"domain/v1.0-accounts.0-256.kv",
+		"history/v1.0-accountsHistory.0-256.v",
+		"idx/v1.0-accountsIdx.0-256.ef",
+		"caplin/v1.1-000000-000010-beaconblocks.seg",
+	} {
+		state, ok := inv.LifecycleState(key)
+		require.Truef(t, ok, "must be discovered: %s", key)
+		require.Equalf(t, snapshot.LifecycleDownloaded, state,
+			"must land at Downloaded: %s (got %s)", key, state)
+	}
+}

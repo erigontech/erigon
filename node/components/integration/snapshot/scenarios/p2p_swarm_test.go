@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -169,24 +170,41 @@ func TestP2P_Swarm_CompleteArchive(t *testing.T) {
 	}
 
 	// Observers for the phased-ordering check.
+	//
+	// Phase 1 (must dispatch BEFORE InitialStateReady):
+	//   - state-domain files (e.Domain != "")
+	//   - block-header files (*-headers.seg) — they carry header.stateRoot,
+	//     the consensus anchor every cryptographic state validator
+	//     cross-references; InitialStateReady's contract is "state is
+	//     validated against consensus", so headers are part of it.
+	//   - meta + salt (not exercised in this archive)
+	//
+	// Phase 2 (must NOT dispatch until InitialStateReady):
+	//   - non-header block files (bodies, transactions)
+	//   - caplin
 	var (
-		manifestCount       atomic.Int32
-		promotedCount       atomic.Int32
-		stateReadyCount     atomic.Int32
-		stateReqBeforeReady atomic.Int32
-		blockReqBeforeReady atomic.Int32
-		stateReqAfterReady  atomic.Int32
-		blockReqAfterReady  atomic.Int32
+		manifestCount             atomic.Int32
+		promotedCount             atomic.Int32
+		stateReadyCount           atomic.Int32
+		stateReqBeforeReady       atomic.Int32
+		headerReqBeforeReady      atomic.Int32 // *-headers.seg before ready — expected > 0 under piece A
+		nonHeaderBlockBeforeReady atomic.Int32 // bodies / transactions before ready — REGRESSION if > 0
+		stateReqAfterReady        atomic.Int32
+		blockReqAfterReady        atomic.Int32
 	)
+	isHeaderFile := func(name string) bool { return strings.HasSuffix(name, "-headers.seg") }
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.PeerManifestReceived) { manifestCount.Add(1) }))
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.TrustPromoted) { promotedCount.Add(1) }))
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.InitialStateReady) { stateReadyCount.Add(1) }))
 	require.NoError(t, leecher.Bus.Subscribe(func(e flow.DownloadRequested) {
 		if stateReadyCount.Load() == 0 {
-			if e.Domain != "" {
+			switch {
+			case e.Domain != "":
 				stateReqBeforeReady.Add(1)
-			} else {
-				blockReqBeforeReady.Add(1)
+			case isHeaderFile(e.FileName):
+				headerReqBeforeReady.Add(1)
+			default:
+				nonHeaderBlockBeforeReady.Add(1)
 			}
 		} else {
 			if e.Domain != "" {
@@ -217,16 +235,24 @@ func TestP2P_Swarm_CompleteArchive(t *testing.T) {
 	require.Equal(t, int32(1), stateReadyCount.Load(),
 		"InitialStateReady must fire exactly once")
 
-	// Phased-ordering check: every block DownloadRequested must happen
-	// AFTER InitialStateReady. The phase gate runs one way — no blocks
-	// before state-ready. State requests may still fire after
-	// state-ready if a peer with new state joins late; that's normal
-	// and doesn't violate phasing. The gate keeps blocks out of phase
-	// 1, not state out of phase 2.
-	require.Zero(t, blockReqBeforeReady.Load(),
-		"no block DownloadRequested may fire before InitialStateReady")
+	// Phased-ordering check.
+	//   - Non-header block files (bodies / transactions / caplin) must
+	//     NOT dispatch before InitialStateReady — they're phase 2.
+	//   - At least one state DownloadRequested must fire in phase 1
+	//     (else the gate never has anything to wait for).
+	//   - At least one block DownloadRequested must fire after
+	//     InitialStateReady (the phase-2 drain happened).
+	//   - Header files (phase 1 under piece A) MAY dispatch before
+	//     state-ready; expected count = one per range in the archive
+	//     (3 here). Asserted positive to lock in the piece-A contract:
+	//     if this drops to zero a regression has reverted headers to
+	//     phase 2.
+	require.Zero(t, nonHeaderBlockBeforeReady.Load(),
+		"no non-header block (bodies/transactions/caplin) may fire DownloadRequested before InitialStateReady — phase 2 violation")
 	require.Greater(t, stateReqBeforeReady.Load(), int32(0),
 		"at least one state DownloadRequested before InitialStateReady")
+	require.Greater(t, headerReqBeforeReady.Load(), int32(0),
+		"at least one header DownloadRequested must fire before InitialStateReady — pins the piece-A contract (headers are phase 1, carry header.stateRoot)")
 	require.Greater(t, blockReqAfterReady.Load(), int32(0),
 		"at least one block DownloadRequested after InitialStateReady")
 

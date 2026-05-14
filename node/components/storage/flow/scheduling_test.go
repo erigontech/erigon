@@ -254,3 +254,117 @@ func TestOrchestratorHeaderFilesDispatchInPhase1(t *testing.T) {
 		"body must dispatch from the phase-2 queue once state-ready fires")
 	mu.Unlock()
 }
+
+// TestOrchestratorSaltMetaDispatchInPhase1 pins the bug-L contract that
+// salt and meta entries are phase-1 prerequisites alongside state-domain
+// files. The reason: ReloadSalt (called by the OtterSync post-download
+// bookkeeping after InitialStateReady) needs salt on disk; if salt
+// landed via phase-2 (queued behind InitialStateReady), exec start
+// errors with "salt not found on ReloadSalt".
+//
+// Concrete shape verified here:
+//   - State entry + meta entry + salt entry all dispatch immediately
+//     in parallel.
+//   - Caplin entry does NOT dispatch until InitialStateReady.
+//   - InitialStateReady does NOT fire until ALL three of
+//     state/meta/salt have completed.
+//   - Caplin drains from the phase-2 queue after InitialStateReady.
+func TestOrchestratorSaltMetaDispatchInPhase1(t *testing.T) {
+	bus := newBusForTest()
+	storage := &recordingStorage{inv: snapshot.NewInventory()}
+	o := NewWithStorage(bus, storage, logger())
+
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	var (
+		mu              sync.Mutex
+		downloads       []string
+		stateReadyFired bool
+	)
+	require.NoError(t, bus.Subscribe(func(e DownloadRequested) {
+		mu.Lock()
+		downloads = append(downloads, e.FileName)
+		mu.Unlock()
+	}))
+	require.NoError(t, bus.Subscribe(func(InitialStateReady) {
+		mu.Lock()
+		stateReadyFired = true
+		mu.Unlock()
+	}))
+
+	stateEntry := &snapshot.FileEntry{
+		Domain: testDomain, FromStep: 0, ToStep: 2048,
+		Name: "v1.0-accounts.0-2048.kv",
+	}
+	metaEntry := &snapshot.FileEntry{
+		Kind: snapshot.KindMeta,
+		Name: "erigondb.toml",
+	}
+	saltEntry := &snapshot.FileEntry{
+		Kind: snapshot.KindSalt,
+		Name: "salt-state.txt",
+	}
+	caplinEntry := &snapshot.FileEntry{
+		Kind: snapshot.KindCaplin,
+		Name: "caplin/v1.1-000000-000010-beaconblocks.seg",
+	}
+
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-salt",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateEntry}},
+		Meta:    []*snapshot.FileEntry{metaEntry},
+		Salt:    []*snapshot.FileEntry{saltEntry},
+		Caplin:  []*snapshot.FileEntry{caplinEntry},
+	})
+
+	// State, meta, salt all dispatch immediately. Caplin is phase 2 and waits.
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(downloads) == 3
+	}, 2*time.Second, "state + meta + salt dispatched in phase 1")
+
+	mu.Lock()
+	require.ElementsMatch(t,
+		[]string{stateEntry.Name, metaEntry.Name, saltEntry.Name},
+		downloads,
+		"phase 1 must include state + meta + salt, exclude caplin",
+	)
+	require.False(t, stateReadyFired,
+		"InitialStateReady must wait while meta/salt are still pending")
+	mu.Unlock()
+
+	// Complete state and meta — salt still pending; ready must not fire.
+	bus.Publish(DownloadComplete{FileName: stateEntry.Name, InfoHash: [20]byte{0xaa}, Size: 1024})
+	bus.Publish(DownloadComplete{FileName: metaEntry.Name, InfoHash: [20]byte{0xbb}, Size: 100})
+
+	for i := 0; i < 5; i++ {
+		mu.Lock()
+		fired := stateReadyFired
+		mu.Unlock()
+		require.False(t, fired,
+			"InitialStateReady fired prematurely — salt still pending. This is the bug-L regression guard.")
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Complete salt — phase 1 is done; ready fires and caplin drains.
+	bus.Publish(DownloadComplete{FileName: saltEntry.Name, InfoHash: [20]byte{0xcc}, Size: 50})
+
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return stateReadyFired
+	}, 2*time.Second, "InitialStateReady fires after state + meta + salt complete")
+
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(downloads) == 4
+	}, 2*time.Second, "caplin drains from phase-2 queue after InitialStateReady")
+
+	mu.Lock()
+	require.Contains(t, downloads, caplinEntry.Name,
+		"caplin must dispatch from the phase-2 queue once state-ready fires")
+	mu.Unlock()
+}

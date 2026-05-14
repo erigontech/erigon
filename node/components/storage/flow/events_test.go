@@ -103,3 +103,45 @@ func TestBlockHeadersReadyChannel(t *testing.T) {
 		t.Fatal("channel reopened (impossible) — close-once semantics broken")
 	}
 }
+
+// TestBlockHeadersReady_WiringChain pins the full piece-B wiring chain:
+// the stage-side hook (whatever production calls `cfg.blockHeadersOpened`)
+// → backend.go's installer (publishes flow.BlockHeadersReady on the bus)
+// → a consumer's BlockHeadersReadyChannel.
+//
+// Each link in this chain has its own unit test, but if backend.go's
+// installer closure ever diverges from what the channel helper expects
+// (different event type, missing TipBlock, swapped field, etc.), those
+// link-level tests still pass while production silently fails. This
+// integration test catches divergence in the chain itself.
+//
+// The stage-side hook is just a func(uint64). We model it as the same
+// closure shape backend.go installs: `func(tip) { bus.Publish(...) }`.
+// Then we invoke the hook (as stage_snapshots.go would) and assert the
+// channel closes and the tip getter returns the right value.
+func TestBlockHeadersReady_WiringChain(t *testing.T) {
+	t.Parallel()
+	bus := newBusForTest()
+	ch, tipFn := BlockHeadersReadyChannel(bus)
+
+	// Mirror backend.go's hook installer. Keep this shape in sync with
+	// node/eth/backend.go's `config.Snapshot.BlockHeadersOpenedHook =
+	// func(tipBlock uint64) { bus.Publish(flow.BlockHeadersReady{TipBlock: tipBlock}) }`.
+	stageHook := func(tipBlock uint64) {
+		bus.Publish(BlockHeadersReady{TipBlock: tipBlock})
+	}
+
+	// stage_snapshots.go calls the hook once, after a successful
+	// OpenSegments(Headers, Bodies), passing cfg.blockReader.FrozenBlocks().
+	const stageFrozenTip uint64 = 25_049_601
+	stageHook(stageFrozenTip)
+
+	select {
+	case <-ch:
+		// ok
+	case <-time.After(time.Second):
+		t.Fatal("BlockHeadersReadyChannel did not close after stage-side hook fired — wiring chain broken")
+	}
+	require.Equal(t, stageFrozenTip, tipFn(),
+		"tip getter must reflect the value the stage passed to the hook — wiring chain dropped/mutated TipBlock")
+}
