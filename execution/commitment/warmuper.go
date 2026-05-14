@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 // TrieContextFactory creates new PatriciaContext instances for parallel warmup.
@@ -194,7 +195,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
+		prefix := nibbles.HexToCompact(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
 		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
@@ -271,10 +272,14 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	// Blocking By-Design!
+	// Speed of system is equal to speed of facing all page-faults during
+	// Or warmapers face them or main thread
+	// It means doesn't make much sense to unblock main thread if all Warmupers are loaded
+	// Anyway main thread can't run ahead of Warmupers (there are page-faults which will stop him)
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
-	default: // non-blocking
 	}
 }
 

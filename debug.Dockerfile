@@ -51,7 +51,6 @@ COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
 COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
 COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
 COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
-COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
 COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
 COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
 COPY --from=builder /app/build/bin/pics /usr/local/bin/pics

@@ -5,8 +5,37 @@
  * Fonts: Montserrat ExtraBold (headings), Nunito Sans (body)
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@800&family=Nunito+Sans:wght@400;700;800&display=swap');
-@import url('https://fonts.cdnfonts.com/css/quantify');
+@font-face {
+  font-family: 'Montserrat';
+  src: url('/fonts/Montserrat-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Nunito Sans';
+  src: url('/fonts/NunitoSans-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   /* Brand fonts */
@@ -83,6 +112,39 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 800;
 }
 
+h1 { letter-spacing: -0.015em; }
+h2 { letter-spacing: -0.01em; }
+
+h6 {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+/* ─── Typography rhythm ─────────────────────────────────────────────────── */
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+:root {
+  --ifm-heading-line-height: 1.2;
+}
+
+.markdown h2 {
+  margin-top: 2.5rem;
+}
+.markdown h3 {
+  margin-top: 1.75rem;
+}
+
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  scroll-margin-top: calc(var(--ifm-navbar-height) + 1rem);
+}
+
 /* ─── Shared landing-page card grid ─────────────────────────────────────── */
 
 .lp-hero {
@@ -152,8 +214,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 .navbar__title {
   color: var(--ifm-navbar-link-color);
-  font-family: 'Quantify', sans-serif;
-  font-weight: 700;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 800;
   letter-spacing: 0.04em;
 }
 .navbar .clean-btn {
@@ -407,6 +469,29 @@ details.alert.alert--info summary {
   border-color: #EF7716 !important;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(239,119,22,0.15);
+}
+
+/* ─── Footer responsive (mobile) ────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .footer-top-grid {
+    grid-template-columns: 1fr !important;
+    padding: 2.5rem 1.5rem 2rem !important;
+    gap: 2.5rem !important;
+  }
+
+  .footer-bottom-bar {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    padding: 1.25rem 1.5rem !important;
+    gap: 1rem !important;
+  }
+
+  .footer-bottom-bar > div {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 0.6rem !important;
+  }
 }
 
 /* ─── Version dropdown ───────────────────────────────────────────────────── */

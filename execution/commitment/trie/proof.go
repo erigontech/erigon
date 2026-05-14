@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -41,7 +42,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 	hasher := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(hasher)
 	// Collect all nodes on the path to key.
-	key = keybytesToHex(key)
+	key = nibbles.KeybytesToHex(key)
 	key = key[:len(key)-1] // Remove terminator
 	tn := t.RootNode
 	for len(key) > 0 && tn != nil {
@@ -239,7 +240,7 @@ func proofMap(proof []hexutil.Bytes) (map[common.Hash]Node, map[common.Hash]rawP
 
 func verifyProof(root common.Hash, key []byte, proofs map[common.Hash]Node, used map[common.Hash]rawProofElement) ([]byte, error) {
 	nextIndex := 0
-	key = keybytesToHex(key)
+	key = nibbles.KeybytesToHex(key)
 	var node Node = HashNode{hash: root[:]}
 	for {
 		switch nt := node.(type) {

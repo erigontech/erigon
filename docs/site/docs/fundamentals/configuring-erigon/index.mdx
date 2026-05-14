@@ -1,6 +1,7 @@
 ---
 title: "CLI Reference"
 sidebar_position: 3
+description: "Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings."
 ---
 
 
@@ -96,13 +97,13 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables fast `eth_getProof` for executed blocks by storing commitment history. Requires +32 GB RAM. See [`eth_getProof`](/interacting-with-erigon/eth#eth_getproof).
   * Default: `false`
-* `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
-  * Default: `false`
-* `--snap.stop`: Stops generating new snapshots.
-  * Default: `false`
-* `--snap.state.stop`: Stops generating new state files.
-  * Default: `false`
 * `--snap.skip-state-snapshot-download`: Skips state download and starts from genesis.
+  * Default: `false`
+* `--snap.keepblocks`: Workaround/debug — keeps ancient blocks in the DB instead of moving them into snapshots (useful for debugging).
+  * Default: `false`
+* `--snap.stop`: Workaround for snapshot-related bugs — stops producing new snapshot files (DB will grow as a result).
+  * Default: `false`
+* `--snap.state.stop`: Workaround for state-related bugs — stops producing new state files (DB will grow as a result).
   * Default: `false`
 
 ### Transaction Pool (TxPool)
@@ -237,11 +238,11 @@ Flags for configuring various RPC servers and their behavior.
 * `--rpc.overlay.replayblocktimeout value`: The maximum time to wait to replay a single block.
   * Default: `10s`
 * `--rpc.subscription.filters.maxlogs value`: Maximum logs to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxheaders value`: Maximum block headers to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
-  * Default: `0`
+  * Default: `10000`
 * `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
   * Default: `0`
 * `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
@@ -392,8 +393,7 @@ These flags control the block synchronization and data downloading process, incl
   * Default: `false`
 * `--torrent.upload.rate value`: The upload rate in bytes per second.
   * Default: `16mb`
-* `--torrent.download.rate value`: The download rate in bytes per second.
-  * Default: `512mb`
+* `--torrent.download.rate value`: Sets the torrent download rate cap. Default: `512mb`. Use a lower value on shared machines to avoid saturating the connection; use `Inf` to remove the limit.
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
@@ -426,6 +426,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `128`
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
+* `--caplin.nat value`: NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p multiaddrs while the socket binds to `--caplin.discovery.addr`. Required when running inside Docker or behind NAT. Accepted values: `""` (none), `"extip:1.2.3.4"`, `"stun"`, `"stun:<host>"`, `"upnp"`, `"pmp"`, `"pmp:192.168.0.1"`.
+  * Default: `""` (no NAT mapping)
 * `--caplin.max-inbound-traffic-per-peer value`: The maximum inbound traffic per second per peer.
   * Default: `1MB`
 * `--caplin.max-outbound-traffic-per-peer value`: The maximum outbound traffic per second per peer.
@@ -442,6 +444,8 @@ Flags for configuring the Caplin consensus layer.
   * Default: `false`
 * `--caplin.blobs-no-pruning`: Disables blob pruning.
   * Default: `false`
+* `--caplin.columns-keep-slots value`: Number of slots to retain PeerDAS data column sidecars. Increase for DA oracle or rollup nodes that need longer column history.
+  * Default: `131072` (~18 days)
 * `--caplin.checkpoint-sync.disable`: Disables checkpoint sync.
   * Default: `false`
 * `--caplin.snapgen`: Enables snapshot generation.
