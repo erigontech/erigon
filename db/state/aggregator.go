@@ -1245,6 +1245,7 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
 	if dbg.NoPrune() {
+		at.a.logger.Info("[prune] skipped: NoPrune flag set")
 		return false, nil
 	}
 	// On tip-of-chain timeout is about `3sec`
@@ -1258,6 +1259,9 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}
+	at.a.logger.Info("[prune] PruneSmallBatches called",
+		"timeout", timeout, "furious", furiousPrune, "aggressive", aggressivePrune,
+		"initial_pruneLimit", pruneLimit, "endTxNumMinimax", at.a.EndTxNumMinimax())
 
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
@@ -1444,8 +1448,12 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	}
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
+		at.a.logger.Info("[prune] at.prune: nothing to do",
+			"txFrom", txFrom, "txTo", txTo, "step", step,
+			"reason", map[bool]string{true: "txFrom==txTo (no aggregated data)", false: "CanPrune=false (no domain/ii eligible)"}[txFrom == txTo])
 		return nil, nil
 	}
+	at.a.logger.Info("[prune] at.prune: proceeding", "txFrom", txFrom, "txTo", txTo, "step", step, "limit", limit)
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)

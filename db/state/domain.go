@@ -1885,9 +1885,27 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		return stat, err
 	}
 	if prg != nil && prg.TxTo >= txTo && prg.ValueProgress == prune.Done {
+		dt.d.logger.Info("[prune] domain skipped: marker says Done",
+			"domain", dt.d.FilenameBase, "step", step, "txTo", txTo,
+			"prg.TxTo", prg.TxTo, "prg.ValueProgress", prg.ValueProgress)
 		stat.Progress = prune.Done
 		return stat, nil
 	}
+	dt.d.logger.Info("[prune] domain pruning",
+		"domain", dt.d.FilenameBase, "step", step, "txFrom", txFrom, "txTo", txTo,
+		"prg.TxTo", func() uint64 {
+			if prg == nil {
+				return 0
+			}
+			return prg.TxTo
+		}(),
+		"prg.ValueProgress", func() prune.Progress {
+			if prg == nil {
+				return prune.First
+			}
+			return prg.ValueProgress
+		}(),
+		"largeValues", dt.d.LargeValues)
 	if prg == nil {
 		prg = &prune.Stat{}
 	}
