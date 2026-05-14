@@ -1670,9 +1670,9 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		if err != nil {
 			return err
 		}
-
 		stepsInDB, err := a.StepsInDB(ctx, db)
 		if err != nil || stepsInDB <= targetSteps {
+			log.Warn("[dbg] exit1", "stepsInDB", stepsInDB, "targetSteps", targetSteps)
 			return nil
 		}
 
@@ -1680,6 +1680,7 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		// yet retired, or cap prevents collation). Exit to let execution
 		// continue and retry next cycle.
 		if stepsInDB >= prevSteps && prevSteps > 0 {
+			log.Warn("[dbg] exit2", "stepsInDB", stepsInDB, "prevSteps", prevSteps)
 			return nil
 		}
 		prevSteps = stepsInDB
@@ -2116,6 +2117,8 @@ func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
 	a.frozenBlocks = p
 }
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+	log.Warn("[dbg] BuildFilesInBackground", "stack", dbg.Stack())
+
 	return a.buildFilesInBackground(txNum, true)
 }
 
