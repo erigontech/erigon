@@ -190,6 +190,7 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
 func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
+	log.Warn("[dbg] ProcessFrozenBlocks start")
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {

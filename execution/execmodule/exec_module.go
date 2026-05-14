@@ -597,10 +597,12 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
+	log.Warn("[dbg] Start start")
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
+		log.Warn("[dbg] Start exit1")
 		return
 	}
 	defer e.semaphore.Release(1)
