@@ -369,6 +369,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	hasMore := true
 	for hasMore {
 		// Execution + flush in one transaction.
+		log.Warn("[dbg] StageLoopIteration1")
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
@@ -386,6 +387,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 			return err
 		}
 		// Collate (if steps accumulated) + prune in separate transaction.
+		log.Warn("[dbg] StageLoopIteration2")
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
 			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
