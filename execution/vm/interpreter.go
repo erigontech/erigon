@@ -59,8 +59,14 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 type CallContext struct {
 	gas      uint64
 	stateGas uint64
-	input    []byte
-	Memory   Memory
+	// EIP-8037 per-frame state-gas accounting. stateGasUsed accumulates state
+	// gas charged in this frame; stateGasRefundPending holds the unapplied
+	// portion of an inline credit_state_gas_refund, which propagates to the
+	// caller on successful frame return.
+	stateGasUsed          uint64
+	stateGasRefundPending uint64
+	input                 []byte
+	Memory                Memory
 
 	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
 	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
@@ -119,6 +125,8 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
+	ctx.stateGasUsed = 0
+	ctx.stateGasRefundPending = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -128,6 +136,8 @@ func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
 	c.cacheGen = 0
+	c.stateGasUsed = 0
+	c.stateGasRefundPending = 0
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)
@@ -154,9 +164,33 @@ func (c *CallContext) useMdGas(evm *EVM, gas uint64, t mdgas.MdGasType, tracer *
 	if ok {
 		c.gas = remaining.Regular
 		c.stateGas = remaining.State
+		if t == mdgas.StateGas {
+			c.stateGasUsed += gas
+		}
 		return true
 	}
 	return false
+}
+
+// creditStateGasRefund applies an inline state-gas refund to this frame's
+// reservoir, clamped to the frame's own state-gas charges. The unapplied
+// remainder is staged in stateGasRefundPending and propagates to the caller
+// on successful frame return.
+func (c *CallContext) creditStateGasRefund(evm *EVM, amount uint64) {
+	applied := amount
+	if applied > c.stateGasUsed {
+		applied = c.stateGasUsed
+	}
+	c.stateGas += applied
+	c.stateGasUsed -= applied
+	if evm != nil {
+		if evm.stateGasConsumed >= applied {
+			evm.stateGasConsumed -= applied
+		} else {
+			evm.stateGasConsumed = 0
+		}
+	}
+	c.stateGasRefundPending += amount - applied
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
@@ -273,6 +307,18 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.Hooks) {
 	ctx.stateGas = returnGas.State
 	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
+}
+
+// absorbChildPendingStateRefund applies the pending state-gas refund credit
+// from the most recent successful child frame to this frame via
+// creditStateGasRefund (EIP-8037).
+func (ctx *CallContext) absorbChildPendingStateRefund(evm *EVM) {
+	if evm.childPendingStateRefund == 0 {
+		return
+	}
+	pending := evm.childPendingStateRefund
+	evm.childPendingStateRefund = 0
+	ctx.creditStateGasRefund(evm, pending)
 }
 
 // callGas builds the MdGas to pass to a child CALL frame from the
@@ -399,6 +445,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if logged && tracer.OnFault != nil {
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
+		}
+		// EIP-8037: propagate unapplied state-gas refund credit to the
+		// caller on successful return. Revert and exceptional halt discard
+		// the pending value along with the frame's other state.
+		if err == nil {
+			evm.childPendingStateRefund = callContext.stateGasRefundPending
+		} else {
+			evm.childPendingStateRefund = 0
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()

@@ -1065,15 +1065,15 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
-	// EIP-8037: child CREATE failure creates no account — refund the
-	// NEW_ACCOUNT state gas charged at entry back to the parent's reservoir.
-	if suberr != nil && evm.chainRules.IsAmsterdam {
-		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
-		scope.stateGas += stateGas
-		if evm.stateGasConsumed >= stateGas {
-			evm.stateGasConsumed -= stateGas
+	if evm.chainRules.IsAmsterdam {
+		// EIP-8037: child CREATE failure refunds the NEW_ACCOUNT state gas
+		// the parent charged at entry; child success may carry pending
+		// refund credit (from an SSTORE 0→x→0 inside the child) that the
+		// parent absorbs here.
+		if suberr != nil {
+			scope.creditStateGasRefund(evm, uint64(params.StateBytesNewAccount)*evm.Context.CostPerStateByte)
 		} else {
-			evm.stateGasConsumed = 0
+			scope.absorbChildPendingStateRefund(evm)
 		}
 	}
 
@@ -1144,6 +1144,9 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if err == nil && evm.chainRules.IsAmsterdam {
+		scope.absorbChildPendingStateRefund(evm)
+	}
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1194,6 +1197,9 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if err == nil && evm.chainRules.IsAmsterdam {
+		scope.absorbChildPendingStateRefund(evm)
+	}
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1236,6 +1242,9 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if err == nil && evm.chainRules.IsAmsterdam {
+		scope.absorbChildPendingStateRefund(evm)
+	}
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1277,6 +1286,9 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if err == nil && evm.chainRules.IsAmsterdam {
+		scope.absorbChildPendingStateRefund(evm)
+	}
 
 	evm.returnData = ret
 	return pc, ret, nil

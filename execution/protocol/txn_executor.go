@@ -79,6 +79,7 @@ type TxnExecutor struct {
 	gasRemaining        mdgas.MdGas
 	blockRegularGasUsed uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
 	blockStateGasUsed   uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	poolGasReserved     uint64 // amount SubGas'd from the block pool by buyGas
 	txnGasUsed          uint64
 	txnGasUsedB4Refunds uint64 // txnGasUsed before refunds
 	gasPrice            *uint256.Int
@@ -184,7 +185,32 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-func (st *TxnExecutor) buyGas(gasBailout bool) error {
+// regularPoolContribution returns the maximum regular-dimension gas this
+// transaction can consume from the block pool. Pre-Amsterdam this is the full
+// tx.gas; under EIP-8037 the regular pool only sees tx.gas minus the
+// intrinsic state portion, capped at TX_MAX_GAS_LIMIT — but never less than
+// the EIP-7623/7976 floor, since block_regular_gas_used uses max(regular,
+// floor) at finalisation.
+func (st *TxnExecutor) regularPoolContribution(intrinsic mdgas.IntrinsicGasCalcResult) uint64 {
+	gas := st.msg.Gas()
+	if !st.evm.ChainRules().IsAmsterdam {
+		return gas
+	}
+	if gas > intrinsic.StateGas {
+		gas -= intrinsic.StateGas
+	} else {
+		gas = 0
+	}
+	if gas > params.MaxTxnGasLimit {
+		gas = params.MaxTxnGasLimit
+	}
+	if gas < intrinsic.FloorGasCost {
+		gas = intrinsic.FloorGasCost
+	}
+	return gas
+}
+
+func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
@@ -236,12 +262,15 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 
-	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+	poolGas := st.regularPoolContribution(intrinsicGasResult)
+	if err := st.gp.SubGas(poolGas); err != nil {
 		return err
 	}
-	// Correct blockRegularGasUsed will be set later in Execute; set it for the moment to the txn's gas limit
-	// so that st.gp.AddGas(st.blockRegularGasUsed) in the recover block works correctly even if a panic occurs beforehand.
-	st.blockRegularGasUsed = st.msg.Gas()
+	st.poolGasReserved = poolGas
+	// Correct blockRegularGasUsed will be set later in Execute; set it for the moment to the
+	// pool reservation so st.gp.AddGas(st.blockRegularGasUsed) in the recover block works
+	// correctly even if a panic occurs beforehand.
+	st.blockRegularGasUsed = poolGas
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
@@ -311,7 +340,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if st.gp != nil && st.msg.Gas() > st.gp.Gas() {
+	if st.gp != nil && st.regularPoolContribution(intrinsicGasResult) > st.gp.Gas() {
 		return ErrGasLimitReached
 	}
 
@@ -352,7 +381,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	return st.buyGas(gasBailout)
+	return st.buyGas(gasBailout, intrinsicGasResult)
 }
 
 // ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
@@ -654,14 +683,13 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
-	// Also return remaining gas to the block gas counter so it is
-	// available for the next transaction.
-	// EIP-8037: The net per-tx pool deduction must be blockRegularGasUsed,
-	// not max(regular, state). Using max per-tx would give Σ max(r_i, s_i) ≥
-	// max(Σ r_i, Σ s_i), rejecting valid blocks. State gas (including any
-	// spill from reservoir into gas_left) is tracked in stateGasConsumed and
-	// validated at block end via GasUsed.BlockGasUsed() = max(Σ regular, Σ state).
-	st.gp.AddGas(st.initialGas.Total() - st.blockRegularGasUsed)
+	// Return any reserved-but-unused pool gas. Net deduction is
+	// blockRegularGasUsed (the regular-dimension cost), matching the
+	// block-level invariant max(Σ regular, Σ state) <= gas_limit checked
+	// at block-end. EIP-8037: buyGas reserves only the regular-pool
+	// contribution (tx.gas − intrinsic_state, capped at TX_MAX), so the
+	// add-back unwinds against that reservation.
+	st.gp.AddGas(st.poolGasReserved - st.blockRegularGasUsed)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
@@ -728,9 +756,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
 	var stateIgasRefund uint64
-	var stateIgasRefundInc uint64
+	var newAccountRefund, authBaseRefund uint64
 	if st.evm.ChainRules().IsAmsterdam {
-		stateIgasRefundInc = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
+		newAccountRefund = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
+		authBaseRefund = params.StateBytesAuthBase * st.evm.Context.CostPerStateByte
 	}
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if auths != nil {
@@ -774,8 +803,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
+			hasDelegation := false
 			if !codeHash.IsEmpty() {
-				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {
 					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -784,7 +813,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
 					continue
 				}
-				// noop: has delegated designation
+				hasDelegation = true
 			}
 
 			// 5. nonce check
@@ -797,17 +826,23 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				continue
 			}
 
-			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
+			// 6. Refund intrinsic state gas the auth wasn't going to spend:
+			//    NEW_ACCOUNT for existing account leaves, AUTH_BASE for slots
+			//    that already hold a delegation indicator. Pre-Amsterdam keeps
+			//    the legacy regular-gas refund (EIP-7702).
 			exists, err := st.state.Exist(authority)
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
-			if exists {
-				if st.evm.ChainRules().IsAmsterdam {
-					stateIgasRefund += stateIgasRefundInc
-				} else {
-					st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+			if st.evm.ChainRules().IsAmsterdam {
+				if exists {
+					stateIgasRefund += newAccountRefund
 				}
+				if hasDelegation {
+					stateIgasRefund += authBaseRefund
+				}
+			} else if exists {
+				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
 			}
 
 			// 7. set authority code

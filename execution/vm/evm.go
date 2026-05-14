@@ -94,9 +94,10 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	stateGasConsumed   uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
-	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
-	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert
+	stateGasConsumed        uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
+	regularGasConsumed      uint64 // total regular gas charged during tx execution (for block-level accounting)
+	revertedSpillGas        uint64 // state gas that spilled to regular and was restored on depth-0 revert
+	childPendingStateRefund uint64 // EIP-8037 state-gas refund pending from most recent successful child frame
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -173,6 +174,7 @@ func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
 	evm.regularGasConsumed = 0
 	evm.revertedSpillGas = 0
+	evm.childPendingStateRefund = 0
 }
 
 // handleFrameRevert handles the full error path for a call or create frame:
@@ -267,12 +269,17 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	depth := evm.depth
 
-	// EIP-8037: on top-level error (revert or exceptional halt), refund the
-	// full execution state_gas_used to the reservoir via state_refund.
+	// EIP-8037: on top-level error refund the full execution state_gas_used
+	// to the reservoir via state_refund; on success, route any pending
+	// state-gas refund credit from the child frame through state_refund as
+	// well (the tx-level "frame" has no caller to absorb it).
 	if depth == 0 && evm.chainRules.IsAmsterdam {
 		defer func() {
 			if err != nil {
 				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
+			} else if evm.childPendingStateRefund > 0 {
+				evm.intraBlockState.AddStateRefund(evm.childPendingStateRefund)
+				evm.childPendingStateRefund = 0
 			}
 		}()
 	}
@@ -516,12 +523,16 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 	// EIP-8037: on top-level CREATE error (revert, halt, address collision,
 	// insufficient balance, …), refund the full execution state_gas_used plus
-	// the intrinsic NEW_ACCOUNT state gas via state_refund.
+	// the intrinsic NEW_ACCOUNT state gas via state_refund. On success route
+	// any pending child state-gas refund credit through state_refund.
 	if depth == 0 && evm.chainRules.IsAmsterdam {
 		defer func() {
 			if err != nil {
 				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
 				evm.intraBlockState.AddStateRefund(uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte)
+			} else if evm.childPendingStateRefund > 0 {
+				evm.intraBlockState.AddStateRefund(evm.childPendingStateRefund)
+				evm.childPendingStateRefund = 0
 			}
 		}()
 	}
@@ -587,11 +598,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 	if nonce != 0 || !contractHash.IsEmpty() || hasStorage {
 		err = ErrContractAddressCollision
-		// EIP-8037: At depth > 0, track collision-burned gas in regularGasConsumed
-		// so 2D block gas accounting reflects the gas consumed on EIP-684 collision.
-		// At depth 0 (CREATE transaction), the burned gas is accounted for through
-		// the zero-gas return in txn_executor.go (regular_gas_used=0 per spec).
-		if evm.chainRules.IsAmsterdam && depth > 0 {
+		// EIP-8037: track collision-burned regular gas in regularGasConsumed
+		// so 2D block accounting reflects regular_gas_used += message.gas at
+		// both depth>0 (inner CREATE collision) and depth=0 (top-level CREATE
+		// tx collision).
+		if evm.chainRules.IsAmsterdam {
 			evm.regularGasConsumed += gasRemaining.Regular
 		}
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {

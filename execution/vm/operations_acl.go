@@ -99,7 +99,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 				if rules.IsAmsterdam {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
-					evm.IntraBlockState().AddStateRefund(params.StateBytesPerStorageSet * evm.Context.CostPerStateByte)
+					// EIP-8037: credit the state-gas refund inline so the
+					// frame's reservoir refills and subsequent state-creation
+					// charges can consume the credit instead of spilling to
+					// gas_left. The unapplied remainder propagates to the
+					// caller on successful return.
+					callContext.creditStateGasRefund(evm, params.StateBytesPerStorageSet*evm.Context.CostPerStateByte)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
