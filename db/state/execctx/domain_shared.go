@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -899,6 +900,23 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// CodeDomain L2b transparent bypass: many addresses share one codeHash
+	// (proxies, factory-deployed clones, ERC-20 holder set, OpenZeppelin
+	// templates). Today's addr-keyed cache misses on every fresh address
+	// even when the bytecode is already in the L2b layer. Resolve the
+	// codeHash from the account record (warm in AccountsDomain cache for
+	// any account the EVM has already loaded) and probe L2b before paying
+	// the code-file accessor stack cost.
+	var codeEthHash []byte
+	if domain == kv.CodeDomain && sd.stateCache != nil {
+		if h := sd.codeHashForAddr(tx, k); len(h) > 0 {
+			codeEthHash = h
+			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
+				return cv, 0, nil
+			}
+		}
+	}
+
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
 	} else {
@@ -910,13 +928,76 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
+		if domain == kv.CodeDomain && len(codeEthHash) > 0 && len(v) > 0 {
+			sd.stateCache.PutCodeWithHash(k, v, codeEthHash)
+		} else {
+			sd.stateCache.Put(domain, k, v)
+		}
 	}
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
 		sd.branchCache.Put(k, v, uint64(step), "sd.GetLatest")
 	}
 
 	return v, step, nil
+}
+
+// codeHashForAddr returns the Ethereum codeHash for an account, or nil if the
+// account cannot be resolved or has no code. Reads the account through this
+// SD's normal layered lookup chain so the AccountsDomain cache absorbs the
+// cost (the typical case for any address the EVM has already loaded).
+//
+// Returns nil quietly on any error or missing account — the caller falls
+// through to the addr-keyed file read so correctness is unaffected.
+func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
+	if len(addr) == 0 {
+		return nil
+	}
+	// Direct sd.mem / sd.stateCache / aggTx chain via tx.GetLatest avoids
+	// recursing back into sd.GetLatest's CodeDomain branch. tx here is
+	// the temporal tx the SD was given; tx.GetLatest hits the aggTx
+	// directly. The account is overwhelmingly cache-warm on this path
+	// because the EVM has just loaded it for the op that triggered the
+	// code read; if not, this read fills the AccountsDomain cache as a
+	// side-effect.
+	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
+		return decodeAccountCodeHash(v)
+	}
+	if sd.parent != nil {
+		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
+			return decodeAccountCodeHash(v)
+		}
+	}
+	if sd.stateCache != nil {
+		if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
+			return decodeAccountCodeHash(v)
+		}
+	}
+	// Fall back to the aggTx directly to avoid a second recursion through
+	// SD.GetLatest. Skip on error; the caller's addr-keyed file read still
+	// runs and produces the correct result.
+	v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
+	if err != nil || len(v) == 0 {
+		return nil
+	}
+	return decodeAccountCodeHash(v)
+}
+
+// decodeAccountCodeHash extracts the codeHash from an account's encoded
+// (DecodeForStorage) bytes. Returns nil on decode error or when the account
+// has no code (empty codeHash).
+func decodeAccountCodeHash(enc []byte) []byte {
+	if len(enc) == 0 {
+		return nil
+	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(enc); err != nil {
+		return nil
+	}
+	if acc.CodeHash.IsEmpty() {
+		return nil
+	}
+	h := acc.CodeHash.Value()
+	return h[:]
 }
 
 func (sd *SharedDomains) Metrics() *changeset.DomainMetrics {

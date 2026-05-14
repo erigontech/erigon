@@ -78,6 +78,33 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	return cache.Get(key)
 }
 
+// GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
+// bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss or
+// when the code domain cache is not a CodeCache (defensive fallback).
+//
+// Use when the caller has the codeHash in hand (post-account-load) — typical
+// for EXTCODESIZE / EXTCODEHASH / CALL targets. Lets many-addrs-one-code
+// patterns (proxies, factory clones, ERC-20 holders) share a single L2b
+// entry.
+func (c *StateCache) GetCodeByHash(ethHash []byte) ([]byte, bool) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return nil, false
+	}
+	return cc.GetByEthHash(ethHash)
+}
+
+// PutCodeWithHash stores code populating both the addr-keyed path and the
+// ethHash-keyed L2b layer. Callers should prefer this over Put when they
+// have the codeHash from the account record — avoids a redundant keccak.
+func (c *StateCache) PutCodeWithHash(addr, code, ethHash []byte) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	cc.PutWithEthHash(addr, common.Copy(code), ethHash)
+}
+
 // Put stores data for the given domain and key.
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]
