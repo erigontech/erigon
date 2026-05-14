@@ -918,7 +918,11 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			}, e.logger); err != nil {
 				return nil, err
 			}
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
