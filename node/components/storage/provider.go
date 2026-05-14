@@ -29,6 +29,7 @@ package storage
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"runtime"
@@ -40,8 +41,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -658,9 +661,129 @@ func (p *Provider) Initialize(deps Deps) error {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)
 		}
+
+		// Bootstrap-from-preverified: seed the orchestrator with a
+		// synthetic peer-manifest derived from preverified.toml so a
+		// fresh publisher can drive its initial download even when no
+		// V2-advertising peer is reachable on the swarm. Without this,
+		// the orchestrator only fires DownloadRequested on
+		// PeerManifestReceived events — and a bootstrap publisher
+		// (first publisher on a chain, or a publisher restarting in
+		// a network where every existing V2 peer has churned) has no
+		// such event to react to → OtterSync's storage-owned-download
+		// gate sits forever waiting on InitialStateReady. The previous
+		// (pre-V2) publisher path triggered downloads via OtterSync's
+		// direct SyncSnapshots call; under
+		// --snap.lifecycle-driven-by-storage that path is no-op'd, so
+		// the synthetic-manifest path here is the new bootstrap.
+		//
+		// Idempotent: re-firing the manifest is safe — requestGapsFor
+		// dedups against existing pending/local entries via
+		// haveLocally + coverageForRoleLocked.
+		if config.Snapshot.BootstrapFromPreverified {
+			if err := p.bootstrapFromPreverified(config.Snapshot.ChainName); err != nil {
+				logger.Warn("[storage] bootstrap from preverified failed", "err", err)
+			}
+		}
 	}
 
 	return nil
+}
+
+// bootstrapFromPreverified builds a synthetic flow.PeerManifestReceived
+// from preverified.toml entries and publishes it on the storage event
+// bus. The orchestrator processes it as a peer-claim manifest, dedups
+// against the local inventory, and fires DownloadRequested for the
+// gaps — exactly the same flow a real V2 peer would trigger, with no
+// V2 peer required.
+//
+// Translation rules per entry:
+//   - Hash parsed from hex; entries with malformed hashes are skipped
+//     (preverified-toml-format invariant).
+//   - Name + Kind + Domain + step/block range are populated via
+//     snapshot.PopulateFromName so the orchestrator's role-coverage
+//     check sees the same shape it would from a peer's V2 manifest.
+//   - Trust is set to TrustNone — the orchestrator promotes to
+//     TrustVerified on DownloadComplete, same path as for peer-fed
+//     entries.
+//   - Bucket routing mirrors manifest_exchange/convert.go's V2→peer
+//     conversion: Domain != "" → Domains[domain], KindCaplin → Caplin,
+//     KindMeta → Meta, KindSalt → Salt, else → Blocks.
+//
+// PeerID is the fixed sentinel "bootstrap-preverified" so peer-attribution
+// (orchestrator.peerFiles) records the bootstrap source explicitly. A
+// PeerDeparted for this ID is never fired — the bootstrap manifest is a
+// once-per-lifetime seed.
+func (p *Provider) bootstrapFromPreverified(chainName string) error {
+	cfg, known := snapcfg.KnownCfg(chainName)
+	if !known {
+		return fmt.Errorf("no preverified config for chain %q", chainName)
+	}
+
+	manifest := flow.PeerManifestReceived{
+		PeerID:  "bootstrap-preverified",
+		Domains: make(map[snapshot.Domain][]*snapshot.FileEntry),
+	}
+
+	for _, item := range cfg.Preverified.Items {
+		entry := entryFromPreverifiedItem(item)
+		if entry == nil {
+			continue
+		}
+		switch {
+		case entry.Kind == snapshot.KindMeta:
+			manifest.Meta = append(manifest.Meta, entry)
+		case entry.Kind == snapshot.KindSalt:
+			manifest.Salt = append(manifest.Salt, entry)
+		case entry.Kind == snapshot.KindCaplin:
+			manifest.Caplin = append(manifest.Caplin, entry)
+		case entry.Domain != "":
+			manifest.Domains[entry.Domain] = append(manifest.Domains[entry.Domain], entry)
+		default:
+			manifest.Blocks = append(manifest.Blocks, entry)
+		}
+	}
+
+	totalEntries := len(manifest.Blocks) + len(manifest.Meta) + len(manifest.Salt) + len(manifest.Caplin)
+	for _, d := range manifest.Domains {
+		totalEntries += len(d)
+	}
+	p.logger.Info("[storage] bootstrap-from-preverified: seeding synthetic manifest",
+		"chain", chainName,
+		"total", totalEntries,
+		"domains", len(manifest.Domains),
+		"blocks", len(manifest.Blocks),
+		"caplin", len(manifest.Caplin),
+		"meta", len(manifest.Meta),
+		"salt", len(manifest.Salt),
+	)
+	p.eventBus.Publish(manifest)
+	return nil
+}
+
+// entryFromPreverifiedItem translates a preverified.Item (name + hex
+// hash) into a snapshot.FileEntry suitable for inclusion in a
+// flow.PeerManifestReceived. Returns nil for entries whose hash is
+// malformed.
+func entryFromPreverifiedItem(item preverified.Item) *snapshot.FileEntry {
+	hashBytes, err := hex.DecodeString(item.Hash)
+	if err != nil || len(hashBytes) != 20 {
+		return nil
+	}
+	var hash [20]byte
+	copy(hash[:], hashBytes)
+
+	entry := &snapshot.FileEntry{
+		Name:        item.Name,
+		TorrentHash: hash,
+		Trust:       snapshot.TrustNone,
+	}
+	// Populate Kind, Domain, FromStep/ToStep (state) or
+	// FromBlock/ToBlock (block) from the filename. Returns silently for
+	// unrecognised patterns; the entry still gets through with whatever
+	// fields we set above.
+	snapshot.PopulateFromName(entry)
+	return entry
 }
 
 // execPoolAdapter wraps a *workerpool.WorkerPool so it satisfies
