@@ -152,23 +152,14 @@ func (d *DefaultTxBlockIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum u
 		}
 
 		if !ok {
-			// Block sblk is absent from MaxTxNum — a gap created by
-			// FillDBFromSnapshots, which only writes recent frozen blocks.
-			// Seek to the next known entry and use its txNum as a proxy:
-			// since MaxTxNum is monotonically non-decreasing by block, if
-			// the next entry's txNum >= txNum the target lies at or before
-			// sblk (search left); otherwise search right.
-			var seekKey [8]byte
-			binary.BigEndian.PutUint64(seekKey[:], uint64(sblk))
-			nextK, nextV, seekErr := c.Seek(seekKey[:])
-			if seekErr != nil {
-				err = seekErr
-				return true
-			}
-			if nextK == nil {
-				return false // sblk is past the last known entry
-			}
-			return binary.BigEndian.Uint64(nextV) >= txNum
+			_fb, _ft, _ := c.First()
+			_lb, _lt, _ := c.Last()
+			fb := binary.BigEndian.Uint64(_fb)
+			lt := binary.BigEndian.Uint64(_lt)
+			ft := binary.BigEndian.Uint64(_ft)
+			lb := binary.BigEndian.Uint64(_lb)
+			err = fmt.Errorf("BlockNum(%d): seems broken TxNum value: %d -> %d; db has: (%d-%d, %d-%d)", sblk, txNum, maxTxNum, fb, ft, lb, lt)
+			return true
 		}
 		return maxTxNum >= txNum
 	}))
