@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -62,4 +64,56 @@ func TestBlackListForPruning(t *testing.T) {
 		}
 	}
 
+}
+
+func TestCommitmentHistoryMinStep(t *testing.T) {
+	cases := []struct {
+		name          string
+		maxStateStep  uint64
+		distanceSteps uint64
+		want          uint64
+	}{
+		{"unlimited-distance-disables-filter", 100, 0, 0},
+		{"distance-larger-than-maxstep-disables-filter", 5, 10, 0},
+		{"distance-equal-to-maxstep-disables-filter", 10, 10, 0},
+		{"normal-case", 100, 8, 92},
+		{"recent", 100, 1, 99},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, commitmentHistoryMinStep(tc.maxStateStep, tc.distanceSteps))
+		})
+	}
+}
+
+func TestShouldSkipCommitmentHistorySegment(t *testing.T) {
+	cases := []struct {
+		name    string
+		file    string
+		minStep uint64
+		skip    bool
+	}{
+		// Filtering disabled.
+		{"min-step-zero-keeps-everything", "history/v1.0-commitment.0-16.v", 0, false},
+
+		// Non-commitment files are never filtered.
+		{"non-commitment-history-kept", "history/v1.0-accounts.0-16.v", 50, false},
+		{"transactions-segment-kept", "v1.0-000000-000100-transactions.seg", 50, false},
+		{"unparseable-name-kept", "salt-blocks.txt", 50, false},
+
+		// Commitment domain files are never filtered (only history/idx/accessor).
+		{"commitment-domain-kept", "domain/v1.0-commitment.0-16.kv", 50, false},
+
+		// Commitment-history files: filter by .To <= minStep.
+		{"history-fully-below-window-skipped", "history/v1.0-commitment.0-16.v", 16, true},
+		{"history-straddling-window-kept", "history/v1.0-commitment.0-16.v", 15, false},
+		{"history-above-window-kept", "history/v1.0-commitment.16-32.v", 8, false},
+		{"idx-fully-below-window-skipped", "idx/v1.0-commitment.0-16.ef", 32, true},
+		{"accessor-fully-below-window-skipped", "accessor/v1.0-commitment.0-16.vi", 32, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.skip, shouldSkipCommitmentHistorySegment(tc.file, tc.minStep))
+		})
+	}
 }

@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -1117,6 +1118,20 @@ var (
 		Usage:   "Enables blazing fast eth_getProof for executed block",
 		Aliases: []string{"experimental.commitment-history", "prune.experimental.include-commitment-history"},
 	}
+	CommitmentHistoryModeFlag = cli.StringFlag{
+		Name: "prune.commitment-history.mode",
+		Usage: `Commitment-history snapshot download mode. Available values: "archive", "recent", "medium", "custom".
+				archive: download every commitment-history segment (default),
+				recent:  keep the last ` + strconv.Itoa(int(prune.CommitmentHistoryRecentSteps)) + ` snapshot step,
+				medium:  keep the last ` + strconv.Itoa(int(prune.CommitmentHistoryMediumSteps)) + ` snapshot steps,
+				custom:  use --prune.commitment-history.steps as the step distance.
+				Any non-archive value requires --prune.include-commitment-history.`,
+		Value: prune.CommitmentHistoryArchiveMode,
+	}
+	CommitmentHistoryStepsFlag = cli.Uint64Flag{
+		Name:  "prune.commitment-history.steps",
+		Usage: "Number of most-recent commitment-history snapshot steps to keep when --prune.commitment-history.mode=custom. 0 means unlimited.",
+	}
 	AlwaysGenerateChangesetsFlag = cli.BoolFlag{
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",
@@ -1917,6 +1932,20 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
+	}
+	if ctx.IsSet(CommitmentHistoryModeFlag.Name) || ctx.IsSet(CommitmentHistoryStepsFlag.Name) {
+		steps, err := prune.ResolveCommitmentHistorySteps(
+			ctx.String(CommitmentHistoryModeFlag.Name),
+			ctx.Uint64(CommitmentHistoryStepsFlag.Name),
+		)
+		if err != nil {
+			Fatalf("%v", err)
+		}
+		if steps > 0 && !cfg.KeepExecutionProofs {
+			Fatalf("--%s and --%s require --%s",
+				CommitmentHistoryModeFlag.Name, CommitmentHistoryStepsFlag.Name, KeepExecutionProofsFlag.Name)
+		}
+		cfg.CommitmentHistoryDistanceSteps = steps
 	}
 
 	if ctx.IsSet(AlwaysGenerateChangesetsFlag.Name) {

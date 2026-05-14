@@ -295,4 +295,8 @@ type Sync struct {
 	ExperimentalConcurrentCommitment bool
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+	// CommitmentHistoryDistanceSteps bounds how many of the most recent snapshot
+	// "steps" we keep commitment-history snapshots for. 0 means unlimited (keep all).
+	// Only meaningful when KeepExecutionProofs is true.
+	CommitmentHistoryDistanceSteps uint64
 }
