@@ -46,31 +46,13 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 		if err != nil {
 			return nil, err
 		}
-		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
-		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
-			break
-		}
-		for i := 0; i < kzgCommitments; i++ {
-			ids.Append(&cltypes.BlobIdentifier{
-				BlockRoot: blockRoot,
-				Index:     uint64(i),
-			})
-		}
-	}
-	return ids, nil
-}
-
-func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *clparams.BeaconChainConfig) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
-	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
-	for _, block := range blocks {
-		if block.Version() < clparams.DenebVersion {
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			// [New in Gloas:EIP7732] EMPTY block: no ExecutionPayloadBid so no commitments.
+			log.Debug("[BlobsIdentifiers] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
 			continue
 		}
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil {
-			return nil, err
-		}
-		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		kzgCommitments := commitments.Len()
 		if ids.Len()+kzgCommitments > cfg.MaxRequestBlobSidecarsByVersion(block.Version()) {
 			break
 		}

@@ -119,6 +119,17 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PendingConsolidationsDump:     getKvGetterForStateTable(db, kv.PendingConsolidationsDump),
 			kv.PendingPartialWithdrawalsDump: getKvGetterForStateTable(db, kv.PendingPartialWithdrawalsDump),
 			kv.PendingDepositsDump:           getKvGetterForStateTable(db, kv.PendingDepositsDump),
+			// GLOAS (EIP-7732)
+			kv.Builders:                          getKvGetterForStateTable(db, kv.Builders),
+			kv.BuildersDump:                      getKvGetterForStateTable(db, kv.BuildersDump),
+			kv.BuilderPendingWithdrawals:         getKvGetterForStateTable(db, kv.BuilderPendingWithdrawals),
+			kv.BuilderPendingWithdrawalsDump:     getKvGetterForStateTable(db, kv.BuilderPendingWithdrawalsDump),
+			kv.PayloadExpectedWithdrawals:        getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawals),
+			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
+			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
+			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
+			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
+			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
 		},
 		Compression: map[string]bool{},
 	}
