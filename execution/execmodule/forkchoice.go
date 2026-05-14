@@ -899,6 +899,8 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		return nil, nil
 	}
 
+	log.Warn("[dbg] ufc1")
+
 	// Kick collation (build files) + prune via the same path that
 	// stageloop.StageLoopIteration uses. Without this call from the FCU
 	// path, files would never advance once the node is at tip — execution
@@ -917,6 +919,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			if pruneTimeout > maxTimeout {
 				pruneTimeout = maxTimeout
 			}
+			log.Warn("[dbg] ufc2")
 			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger); err != nil {
@@ -928,6 +931,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	} else {
 		panic("assert")
 	}
+	log.Warn("[dbg] ufc3")
 
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))
 	if len(timings) > 0 {

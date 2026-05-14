@@ -159,6 +159,8 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			return tx, err
 		}
 
+		log.Warn("[dbg] RunPrune done3")
+
 		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
 			return tx, err
 		}
@@ -205,6 +207,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	// If domains are ahead of block files, nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
+		log.Warn("[dbg] ProcessFrozenBlocks done3")
 		return tx.Commit()
 	}
 

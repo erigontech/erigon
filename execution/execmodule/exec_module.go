@@ -620,9 +620,11 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
 				}
 			}()
+			log.Warn("[dbg] ProcessFrozenBlocks done1")
 			return
 		}
 	}
+	log.Warn("[dbg] ProcessFrozenBlocks done2")
 	// Notify the fork validator of the current execution height after startup sync.
 	if err := e.db.View(ctx, func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
