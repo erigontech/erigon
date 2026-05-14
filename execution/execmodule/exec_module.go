@@ -597,12 +597,10 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
-	log.Warn("[dbg] Start start")
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
-		log.Warn("[dbg] Start exit1")
 		return
 	}
 	defer e.semaphore.Release(1)
@@ -622,11 +620,9 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
 				}
 			}()
-			log.Warn("[dbg] ProcessFrozenBlocks done1")
 			return
 		}
 	}
-	log.Warn("[dbg] ProcessFrozenBlocks done2")
 	// Notify the fork validator of the current execution height after startup sync.
 	if err := e.db.View(ctx, func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
