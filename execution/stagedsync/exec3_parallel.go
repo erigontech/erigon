@@ -113,6 +113,43 @@ type parallelExecutor struct {
 	// block-end system calls) on SharedDomains.mem.
 	shouldGenerateChangesets bool
 	currentChangeSet         *changeset.StateChangeSet
+	// currentChangeSetBlock is the block number currentChangeSet belongs to
+	// (0 == none). Tracked so ensureChangesetAccumulator can be a no-op when the
+	// accumulator is already installed for the block whose writes are about to
+	// be applied — making changeset capture robust against blocks scheduled out
+	// of band (e.g. processRequest scheduling the first block of a new request
+	// after the blockExecutors map went empty mid-batch, with no preceding
+	// blockResult to trigger the install at the rotation site below).
+	currentChangeSetBlock uint64
+}
+
+// ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
+// block-specific StateChangeSet before any of blockNum's sd.mem writes are
+// applied. Idempotent. Exec-loop only — it mutates SharedDomains.mem via
+// SetChangesetAccumulator, which must be single-writer (see the comment on
+// currentChangeSet).
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
+	if !pe.shouldGenerateChangesets || blockNum == 0 || blockNum > pe.maxBlockNum {
+		return
+	}
+	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
+		return
+	}
+	// A previous block's accumulator is normally saved+cleared at its
+	// blockResult; if one is still installed here for a different block the
+	// rotation was missed — overwrite (the previous block's changeset was
+	// already saved at its blockResult, so nothing is lost).
+	pe.currentChangeSet = &changeset.StateChangeSet{}
+	pe.currentChangeSetBlock = blockNum
+	pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
+}
+
+// clearChangesetAccumulator detaches the current changeset accumulator after
+// its block's changeset has been saved. Exec-loop only.
+func (pe *parallelExecutor) clearChangesetAccumulator() {
+	pe.domains().SetChangesetAccumulator(nil)
+	pe.currentChangeSet = nil
+	pe.currentChangeSetBlock = 0
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -191,13 +228,17 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// (per-block save/clear/install) so apply-loop and exec-loop sd.mem
 	// writes never race on SharedDomains.mem.
 	pe.shouldGenerateChangesets = shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum)
-	if pe.shouldGenerateChangesets && startBlockNum > 0 {
-		pe.currentChangeSet = &changeset.StateChangeSet{}
-		pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
-	}
+	pe.ensureChangesetAccumulator(startBlockNum)
 
-	// Start the commitment calculator.
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, commitResults, rootResults)
+	// Start the commitment calculator. forcePerBlockCompute mirrors serial's
+	// per-block gate (exec3_serial.go: `if !dbg.BatchCommitments ||
+	// shouldGenerateChangesets || KeepExecutionProofs`). When changesets
+	// must be generated (for unwind/reorg) the calculator must compute
+	// per-block — otherwise batch-mode dedupes branch updates across the
+	// batch and flushes them all into the last block's changeset, which
+	// fails on subsequent reorgs.
+	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -363,6 +404,20 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
 					}
 					if pe.reachedMaxBlock.Load() {
+						return nil
+					}
+					// Clean exit even without the reachedMaxBlock flag: the exec loop
+					// can exit through `rws.ResultCh closed` / `rws.Drain returned closed`
+					// (execLoopExitCheck) for a single-block fork-validation batch where
+					// the result heap empties before the main loop reaches the
+					// execLoopShouldExit precedence check. In that path nobody flips
+					// reachedMaxBlock, even though every block in [startBlockNum, maxBlockNum]
+					// has been applied. Returning ErrLoopExhausted here makes the stage
+					// loop report "has more work" and the engine API surfaces "unexpected
+					// state step has more work" (TestEngineApiEmptyBlockProduction and the
+					// engine-API cluster). When the applied range is complete, treat it as
+					// a clean batch end.
+					if lastBlockResult.BlockNum >= pe.maxBlockNum && len(applyLoopMissingBlocks(txResultBlocks, appliedBlocks)) == 0 {
 						return nil
 					}
 					return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
@@ -831,20 +886,35 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
+				// Snapshot the just-completed block's changeset BEFORE sending the
+				// blockResult, so that the commitment calculator (which consumes
+				// blockResults on a separate goroutine) can find this block's
+				// saved changeset via GetChangesetByBlockNum at compute time.
+				// In per-block compute mode (shouldGenerateChangesets), the
+				// calculator switches the accumulator to this saved CS for the
+				// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
+				// so branch writes land in block N's CS rather than whatever the
+				// exec loop has installed as current. If we saved AFTER sendResult,
+				// the calculator could race ahead and look up an unsaved CS,
+				// causing branch deltas to leak into the next block's CS and
+				// produce wrong-trie-root chains on subsequent reorg-driven
+				// re-execution (see TestRecreateAndRewind reproducer). Clearing
+				// the live accumulator and the local pointer must still happen
+				// here (in the exec loop) so the rotation-to-next-block install
+				// at line 893-895 is serialized with the exec loop's other
+				// sd.mem writes (system calls, finalize, ApplyStateWrites for
+				// the next block).
+				// Belt-and-braces: an empty block (no tx-results reaching
+				// processResults) may not have triggered the install — create
+				// its (empty) accumulator so it gets saved like every other block.
+				pe.ensureChangesetAccumulator(blockResult.BlockNum)
+				if pe.currentChangeSet != nil {
+					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
+				}
 				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
 					return err
 				}
-
-				// Snapshot the just-completed block's changeset and clear sd.mem's
-				// accumulator before any further sd.mem writes occur. This must
-				// happen here (in the exec loop) — not in the apply loop — so that
-				// it is serialized with the exec loop's other sd.mem writes
-				// (system calls, finalize, ApplyStateWrites for the next block).
-				if pe.shouldGenerateChangesets && pe.currentChangeSet != nil {
-					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
-				}
-				pe.domains().SetChangesetAccumulator(nil)
-				pe.currentChangeSet = nil
+				pe.clearChangesetAccumulator()
 
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
@@ -883,13 +953,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pe.RUnlock()
 
 			if ok {
-				// Install a fresh changeset accumulator for the next block before
-				// any of its sd.mem writes start. Doing this here (still in the
-				// exec loop) keeps SharedDomains.mem mutations single-writer.
-				if pe.shouldGenerateChangesets && blockExecutor.blockNum > 0 && blockExecutor.blockNum <= pe.maxBlockNum {
-					pe.currentChangeSet = &changeset.StateChangeSet{}
-					pe.domains().SetChangesetAccumulator(pe.currentChangeSet)
-				}
+				// Fast-path install of the next block's changeset accumulator,
+				// still in the exec loop (single-writer). If the next block's
+				// executor isn't in the map yet this is a no-op; processResults
+				// then installs it lazily on the block's first apply.
+				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1206,6 +1274,11 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		if !ok {
 			return nil, fmt.Errorf("unknown block: %d", txResult.Version().BlockNum)
 		}
+
+		// Ensure this block's changeset accumulator is installed before its
+		// writes are applied — covers blocks scheduled out of band (with no
+		// preceding blockResult to trigger the fast-path install above).
+		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 
@@ -2002,7 +2075,38 @@ func (result *execResult) finalizeTxSimple(
 			if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 				return nil, nil, nil, err
 			}
+			// Mirror serial-exec's txn_executor.go post-message fee distribution
+			// (AddBalance(coinbase, tip) / AddBalance(burnt, burn)) AFTER applying
+			// TxOut. The parallel worker ran with shouldDelayFeeCalc=true, so the
+			// fees aren't in TxOut; the finalize accumulates them onto the
+			// version-map base separately. But the post-apply IBS handed to
+			// postApplyMessageFunc only sees TxOut — without crediting the fees
+			// here it underrepresents the coinbase's balance to LogSelfDestructedAccounts.
+			//
+			// The EIP-7708 case 2 path is the load-bearing one: when the coinbase
+			// is itself a contract that SELFDESTRUCTs during the tx, ApplyVersionedWrites
+			// has marked it selfdestructed with balance=0; AddBalance leaves the
+			// selfdestruct flag intact (Selfdestruct only fires on the addr→clear
+			// transition, not on subsequent balance writes) and restores the priority
+			// fee as residual balance. LogSelfDestructedAccounts' GetRemovedAccountsWithBalance
+			// then reports {coinbase, FeeTipped} and emits the Burn log — matching
+			// serial-exec exactly. https://github.com/erigontech/erigon/issues/21136
+			if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, nil, nil, err
+			}
+			if hasBurnt && txTask.Config.IsLondon(blockNum) {
+				if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
+
+			// Capture PostApplyMessage side effects (logs) — e.g. EIP-7708 Burn
+			// logs from LogSelfDestructedAccounts. Without this they're stranded
+			// on the post-apply ibs and never make it into the receipt, so the
+			// validating consumer recomputes a different receipts root and the
+			// block is rejected as a BadBlock.
+			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 		}
 	}
 
@@ -2518,14 +2622,41 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 
-					// Update CollectorWrites with fee-adjusted coinbase balance
-					// so the BlockStateCache sees the correct accumulated fees.
-					if txResult.CollectorWrites != nil {
-						for _, w := range addWrites {
+					// Update CollectorWrites with fee-adjusted balances (coinbase /
+					// burnt) so the BlockStateCache sees the correct accumulated
+					// fees. CollectorWrites is a flat slice, so replacing a
+					// BalancePath entry by address is a linear scan; doing that per
+					// addWrites entry is O(len(addWrites)·len(CollectorWrites)) — when
+					// finalize is a full block-end IBS reconstruction both can be ~one
+					// entry per account the block touched (a tx that pays ~100k
+					// accounts — TestInvalidReceiptHashHighMgas), i.e. ~10^10
+					// comparisons. Index CollectorWrites' BalancePath entries by
+					// address once instead.
+					if len(txResult.CollectorWrites) > 0 {
+						balIdx := make(map[accounts.Address]int, len(txResult.CollectorWrites))
+						for i, w := range txResult.CollectorWrites {
 							if w.Path == state.BalancePath {
-								if bal, ok := w.Val.(uint256.Int); ok {
-									txResult.CollectorWrites = txResult.CollectorWrites.SetBalance(w.Address, bal, w.Reason)
+								// First match wins — mirrors the old per-entry
+								// CollectorWrites.SetBalance(addr) linear scan.
+								if _, seen := balIdx[w.Address]; !seen {
+									balIdx[w.Address] = i
 								}
+							}
+						}
+						for _, w := range addWrites {
+							if w.Path != state.BalancePath {
+								continue
+							}
+							bal, ok := w.Val.(uint256.Int)
+							if !ok {
+								continue
+							}
+							if i, found := balIdx[w.Address]; found {
+								txResult.CollectorWrites[i].Val = bal
+								txResult.CollectorWrites[i].Reason = w.Reason
+							} else {
+								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, Reason: w.Reason})
+								balIdx[w.Address] = len(txResult.CollectorWrites) - 1
 							}
 						}
 					}
@@ -2538,7 +2669,27 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// and resolves account values from the versionMap.
 					resultIncarnation := txResult.Version().Incarnation
 					rawWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader)
+					// domainStorageKeys: enumerate every storage slot currently
+					// committed for addr (sd.mem + domain files), so a self-destruct
+					// emits the full StoragePath=0 cascade — covers genesis-allocated
+					// and prior-block storage that vm.StorageKeys doesn't see.
+					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
+						av := addr.Value()
+						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
+						var keys []accounts.StorageKey
+						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
+							if len(k) >= addrLen+hashLen {
+								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+							}
+							return true, nil
+						}); iterErr != nil {
+							// Non-fatal: fall back to vm.StorageKeys-only. A missed slot
+							// surfaces as a wrong-trie-root, not a silent corruption.
+							pe.logger.Warn("[parallel] domainStorageKeys iterate failed", "addr", av, "err", iterErr)
+						}
+						return keys
+					}
+					txResult.writes = normalizeWriteSet(rawWrites, be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, pe.cfg.chainConfig.IsSpuriousDragon(be.blockNum))
 				}
 
 				// Snapshot the finalized result before pushing — prevents
@@ -2953,8 +3104,80 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 //
 // The input is blockIO.WriteSet(txIndex) — the raw versionWritten output.
 // The output is ready for applyVersionedWrites and TouchUpdates.
-func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader) state.VersionedWrites {
+//
+// domainStorageKeys, when non-nil, must return every storage slot currently
+// committed for an address (from sd.mem + domain files) — used to emit the
+// full StoragePath=0 cascade when the address self-destructs. vm.StorageKeys
+// alone only covers slots written in the current batch; genesis-allocated or
+// prior-block storage isn't there, so the calc would never delete those slots
+// from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
+// / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
+// the block). Pass nil in unit tests that don't exercise pre-block storage.
+func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txIndex int, incarnation int, stateReader state.StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool) state.VersionedWrites {
 	filtered := make(state.VersionedWrites, 0, len(writes))
+
+	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
+	// domainStorageKeys (committed before this batch), deduped — the complete
+	// set of storage slots that must be DELETE'd when addr self-destructs.
+	sdStorageSlots := func(addr accounts.Address) []accounts.StorageKey {
+		seen := make(map[accounts.StorageKey]struct{})
+		var out []accounts.StorageKey
+		for _, k := range vm.StorageKeys(addr) {
+			if _, ok := seen[k]; !ok {
+				seen[k] = struct{}{}
+				out = append(out, k)
+			}
+		}
+		if domainStorageKeys != nil {
+			for _, k := range domainStorageKeys(addr) {
+				if _, ok := seen[k]; !ok {
+					seen[k] = struct{}{}
+					out = append(out, k)
+				}
+			}
+		}
+		return out
+	}
+
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
+	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
+	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
+	// d.incarnation != nil and routes into the "cleanup-before-recreate"
+	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
+	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
+	// account stays in sd.mem with non-zero incarnation, and a subsequent
+	// block's CREATE2 at the same address sees a phantom existing account,
+	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
+	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
+	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	//
+	// Two filters applied here:
+	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`
+	//      skip the SelfDestructPath case uses below — a stale SelfDestructPath=true
+	//      from a non-validated incarnation must not mark the address as SD'd.
+	//   2. Final-state: pre-Cancun a single tx can SELFDESTRUCT an address and then
+	//      CREATE2-recreate at the same address; IBS emits SelfDestructPath=true
+	//      (from Selfdestruct) followed later by SelfDestructPath=false (from
+	//      CreateAccount, since the recreated object's selfdestructed flag is
+	//      cleared). The address ends ALIVE, so its recreate-time account-field
+	//      writes must survive — only mark sdSet when the LAST SelfDestructPath
+	//      entry for the address (in emission order) is true. applyVersionedWrites
+	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
+	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
+	//      eliminate it; mainnet-rare, but cheap to get right.)
+	sdSet := make(map[accounts.Address]bool)
+	for _, w := range writes {
+		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
+			if v, ok := w.Val.(bool); ok {
+				sdSet[w.Address] = v
+			}
+		}
+	}
+	for addr, sd := range sdSet {
+		if !sd {
+			delete(sdSet, addr)
+		}
+	}
 
 	// Track which addresses have account-level writes vs storage-only writes.
 	// Serial's MakeWriteSet calls UpdateAccountData for every dirty object,
@@ -2964,32 +3187,69 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	hasStorageWrite := make(map[accounts.Address]bool)
 
 	for _, w := range writes {
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
+		// takes the pure-delete branch instead of cleanup-before-recreate.
+		// Also drop StoragePath writes: serial's selfdestruct does
+		// DomainDelPrefix(StorageDomain, addr) which wipes ALL slots, so an
+		// SSTORE made after a SELFDESTRUCT in the same TX (pre-Cancun the
+		// account stays live until end-of-TX, so re-entered code can still
+		// SSTORE) is a no-op once the account is removed. The SelfDestructPath
+		// case below re-emits an explicit StoragePath=0 delete for every slot
+		// (sdStorageSlots), so the trie still sees the wipe. Keeping the raw
+		// SSTORE here would race the cascade delete in ApplyWrites' slice order
+		// and sometimes leave a phantom slot (TestCVE2020_26265).
+		if sdSet[w.Address] {
+			switch w.Path {
+			case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath, state.CodePath, state.StoragePath:
+				continue
+			}
+		}
 		switch w.Path {
 		case state.StoragePath:
 			// Only include writes from the current (validated) incarnation.
 			if w.Version.Incarnation != incarnation {
 				continue
 			}
+			writeVal, _ := w.Val.(uint256.Int)
+			// If addr was self-destructed by an earlier TX in this block, its
+			// storage was wiped — the effective baseline for any slot not
+			// re-written since is 0, regardless of what the versionMap (prior
+			// TX) or the domain (pre-block) still holds. The SD's per-slot
+			// zeroing is only re-emitted into the calc's writeset below, never
+			// flushed back to the versionMap, so without this a resurrect TX
+			// that re-writes a slot to its pre-SD value is wrongly dropped as a
+			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
+			sdTxIdx, sdOk := -1, false
+			if sd := vm.Read(w.Address, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
+				if v, ok := sd.Value().(bool); ok && v {
+					sdTxIdx, sdOk = sd.Version().TxIndex, true
+				}
+			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			origin := vm.Read(w.Address, state.StoragePath, w.Key, txIndex)
-			if origin.Status() == state.MVReadResultDone && origin.Value() != nil {
+			originValid := origin.Status() == state.MVReadResultDone && origin.Value() != nil &&
+				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+			if originValid {
 				originVal := origin.Value().(uint256.Int)
-				if writeVal, ok := w.Val.(uint256.Int); ok && writeVal.Eq(&originVal) {
+				if writeVal.Eq(&originVal) {
 					continue // write-back same as prior TX's value — no-op
+				}
+			} else if sdOk {
+				// SD'd earlier with no re-write since — baseline is 0.
+				if writeVal.IsZero() {
+					continue
 				}
 			} else if stateReader != nil {
 				// No prior TX wrote this key — compare against pre-block value.
 				preVal, found, err := stateReader.ReadAccountStorage(w.Address, w.Key)
 				if err == nil {
-					if writeVal, ok := w.Val.(uint256.Int); ok {
-						if !found && writeVal.IsZero() {
-							continue // both zero — no-op
-						}
-						if found && writeVal.Eq(&preVal) {
-							continue // same as pre-block — no-op
-						}
+					if !found && writeVal.IsZero() {
+						continue // both zero — no-op
+					}
+					if found && writeVal.Eq(&preVal) {
+						continue // same as pre-block — no-op
 					}
 				}
 			}
@@ -3023,7 +3283,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			destructed, _ := w.Val.(bool)
 			if destructed {
 				filtered = append(filtered, w)
-				for _, slot := range vm.StorageKeys(w.Address) {
+				for _, slot := range sdStorageSlots(w.Address) {
 					filtered = append(filtered, &state.VersionedWrite{
 						Address: w.Address,
 						Path:    state.StoragePath,
@@ -3070,13 +3330,55 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	}
 
 	for addr := range allAddresses {
+		if sdSet[addr] {
+			// Don't fill account fields for SD'd addresses — same rationale as
+			// the sdSet drop in the filter loop above. Without this, the
+			// stateReader fallback below would round-trip pre-SD account state
+			// (Nonce, CodeHash, Incarnation) back into the writeset and undo
+			// the SD when applyVersionedWrites picks the cleanup-then-recreate
+			// branch.
+			continue
+		}
 		ver := state.Version{TxIndex: txIndex, Incarnation: incarnation}
 		fields := addrFields[addr]
+
+		// If addr was self-destructed by an earlier TX in this block and this
+		// TX re-creates it (it isn't in sdSet — this TX didn't re-destruct it),
+		// missing account fields are the post-destruction defaults, NOT the
+		// pre-SD values still sitting in the versionMap. IBS.Selfdestruct only
+		// records SelfDestructPath/BalancePath/IncarnationPath, so a re-creation
+		// via a plain value transfer (no CREATE) leaves the stale pre-SD nonce
+		// and codeHash in the map — reading them back here resurrects a phantom
+		// contract (wrong trie root: TestSelfDestructReceive, TestCVE2020_26265).
+		// If a later TX between the SD and this one re-created addr via CREATE2,
+		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
+		// fall through to the normal versionMap lookup.
+		sdEarlier := false
+		if sd := vm.Read(addr, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
+			if v, ok := sd.Value().(bool); ok && v {
+				sdEarlier = true
+			}
+		}
 
 		// For each missing field, try versionMap then stateReader.
 		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath} {
 			if fields != nil && fields[path] {
 				continue // already in output
+			}
+			if sdEarlier {
+				var val any
+				switch path {
+				case state.BalancePath:
+					val = uint256.Int{}
+				case state.NoncePath:
+					val = uint64(0)
+				case state.IncarnationPath:
+					val = uint64(0)
+				case state.CodeHashPath:
+					val = accounts.EmptyCodeHash
+				}
+				filtered = append(filtered, &state.VersionedWrite{Address: addr, Path: path, Val: val, Version: ver})
+				continue
 			}
 			rr := vm.Read(addr, path, accounts.NilKey, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
@@ -3181,12 +3483,18 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		}
 	}
 
-	// Check for empty accounts and replace with Delete.
+	// Check for empty accounts and replace with Delete. Only when EIP-161
+	// (SpuriousDragon) is active — before that fork an empty account that's
+	// merely touched (e.g. a 0-value transfer) is created and persists, so
+	// converting it to a delete here would diverge from serial's trie root
+	// (TestEIP161AccountRemoval block 1, pre-SpuriousDragon).
 	emptyAddrs := make(map[accounts.Address]bool)
-	for addr, s := range acctStates {
-		if s.hasBal && s.hasNonce && s.hasCode &&
-			s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
-			emptyAddrs[addr] = true
+	if emptyRemoval {
+		for addr, s := range acctStates {
+			if s.hasBal && s.hasNonce && s.hasCode &&
+				s.balance.IsZero() && s.nonce == 0 && s.codeHash.IsEmpty() {
+				emptyAddrs[addr] = true
+			}
 		}
 	}
 
