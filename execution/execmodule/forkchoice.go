@@ -847,7 +847,11 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 			} else {
 				e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
 			}
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	// Update head and announce block range (notifications already dispatched).
