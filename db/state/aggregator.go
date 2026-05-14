@@ -2129,20 +2129,20 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	if !a.produce {
-		a.logger.Debug("[snapshots] buildFiles: produce=false")
+		a.logger.Warn("[snapshots] buildFiles: produce=false")
 		close(fin)
 		return fin
 	}
 
 	visMin := a.visible.Load().minimaxTxNum
 	if (txNum + 1) <= visMin+a.stepSize.Load() {
-		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
+		a.logger.Warn("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
 		close(fin)
 		return fin
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		a.logger.Debug("[snapshots] buildFiles: already building")
+		a.logger.Warn("[snapshots] buildFiles: already building")
 		close(fin)
 		return fin
 	}
@@ -2207,6 +2207,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
+			a.logger.Warn("[dbg] hasData exit!", "step", step, "lastInDB", lastInDB)
 			close(fin)
 			return
 		}
@@ -2302,6 +2303,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
+				a.logger.Warn("[dbg] stepFullyCommitted exit!", "step", step, "committedTxNum", committedTxNum)
 				break // step not fully committed yet — wait for execution to catch up
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
