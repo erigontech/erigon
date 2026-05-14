@@ -412,6 +412,17 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 	return gt.sd.GetLatest(name, gt.tx, k)
 }
 
+// GetCodeSize returns the length of the code at addr without loading the
+// bytes. Returns (size, true, nil) on size-cache hit, (size, true, nil)
+// after a full-bytes load+populate, or (0, false, nil) when the account
+// has no code. Errors propagate normally.
+//
+// Callers (ReaderV3.ReadAccountCodeSize, etc.) type-assert on this method
+// so the existing kv.TemporalGetter interface is unchanged.
+func (gt *temporalGetter) GetCodeSize(addr []byte) (int, bool, error) {
+	return gt.sd.GetCodeSize(gt.tx, addr)
+}
+
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
 	return gt.sd.HasPrefix(name, prefix, gt.tx)
 }
@@ -939,6 +950,54 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	return v, step, nil
+}
+
+// GetCodeSize returns the length of the contract code at addr, probing a
+// size-only cache (geth-style codeSizeCache) before falling through to the
+// full bytes path. For workloads dominated by EXTCODESIZE / EXTCODEHASH
+// this avoids the file-accessor + decompression cost of the full bytes on
+// the second-and-later access to any codeHash seen anywhere in the process.
+//
+// Correctness invariant: the fast path is purely additive. When it cannot
+// answer, the function delegates to GetLatest(CodeDomain, addr) — the
+// authoritative path that hits L1/parent/stateCache/L2b/file in order.
+// Never short-circuits to (0, false, nil) based on account-record
+// resolution alone; that broke EIP-7002 / EIP-7251 system-contract
+// syscalls (the predeploy has CodeDomain entries but the AccountsDomain
+// record may be empty at block boundary).
+//
+// Returns (size, true, nil) on success and (0, false, nil) only when
+// CodeDomain itself confirms no code.
+func (sd *SharedDomains) GetCodeSize(tx kv.TemporalTx, addr []byte) (int, bool, error) {
+	if tx == nil {
+		return 0, false, errors.New("sd.GetCodeSize: unexpected nil tx")
+	}
+
+	// Fast path: when we can resolve codeHash from the account cache AND
+	// the size is in the size cache, return without loading bytes.
+	if sd.stateCache != nil {
+		if codeEthHash := sd.codeHashForAddr(tx, addr); len(codeEthHash) > 0 {
+			if size, ok := sd.stateCache.GetCodeSizeByHash(codeEthHash); ok {
+				return size, true, nil
+			}
+			if cv, ok := sd.stateCache.GetCodeByHash(codeEthHash); ok {
+				sd.stateCache.PutCodeSizeByHash(codeEthHash, len(cv))
+				return len(cv), true, nil
+			}
+		}
+	}
+
+	// Cold path: authoritative read via the normal SD.GetLatest chain.
+	// Populates L1, L2b, and (via PutWithEthHash) the size layer for
+	// future callers.
+	v, _, err := sd.GetLatest(kv.CodeDomain, tx, addr)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(v) == 0 {
+		return 0, false, nil
+	}
+	return len(v), true, nil
 }
 
 // codeHashForAddr returns the Ethereum codeHash for an account, or nil if the
