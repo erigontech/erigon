@@ -274,6 +274,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	log.Warn("[dbg] ProcessFrozenBlocks4")
 
 	if hook != nil {
 		if err := pe.db.View(ctx, func(tx kv.Tx) error {
