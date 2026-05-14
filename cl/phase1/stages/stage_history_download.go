@@ -94,6 +94,30 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		cfg.caplinConfig.ArchiveBlocks = false // disable backfilling if not on a supported network
 	}
 
+	// Skip the stage entirely when no archive flag is set. The EL gets
+	// its historical blocks from snapshots (downloaded via the storage
+	// component's bootstrap manifest) and its live blocks from
+	// Engine-API FCU + newPayload driven by Beacon gossip. The
+	// historical-blocks backfill via DevP2P that this stage performs
+	// is only useful for archive operators who want CL data going back
+	// to genesis.
+	//
+	// Without this gate, a fresh minimal-mode publisher (no
+	// --caplin.archive flags) starts this stage before the EL's
+	// OpenSegments has fired — Caplin reads FrozenBlocks()=0, sets
+	// destinationSlotForEL to Bellatrix-fork epoch, and walks ~25M
+	// blocks via DevP2P at ~25 blk/sec for 250+ hours. By the time
+	// Caplin's onNewBlock callback gets the first block and could
+	// adjust destinationSlotForEL to the actual frozen tip, the work
+	// is already in-flight.
+	if !cfg.caplinConfig.ArchiveBlocks && !cfg.caplinConfig.ArchiveStates && !cfg.caplinConfig.ArchiveBlobs {
+		logger.Info("Skipping DownloadHistoricalBlocks: no archive flag set (live blocks via gossip + FCU)",
+			"archive_blocks", cfg.caplinConfig.ArchiveBlocks,
+			"archive_states", cfg.caplinConfig.ArchiveStates,
+			"archive_blobs", cfg.caplinConfig.ArchiveBlobs)
+		return nil
+	}
+
 	var hasFinishedDownloadingElBlocks atomic.Bool
 
 	// Start the procedure
