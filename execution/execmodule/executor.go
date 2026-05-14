@@ -162,17 +162,6 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 
 		log.Warn("[dbg] RunPrune done3")
 
-		if a, ok := pe.db.(state.HasAgg); ok {
-			agg := a.Agg().(*state.Aggregator)
-			if err := agg.CollateAndPruneIfNeeded(ctx, pe.db, func(tx kv.TemporalRwTx) error {
-				return pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout)
-			}, pe.logger); err != nil {
-				return tx, err
-			}
-		} else {
-			panic("assert")
-		}
-
 		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
 			return tx, err
 		}
@@ -255,6 +244,17 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			sd.ClearRam(true)
 			if err := tx.Commit(); err != nil {
 				return nil, err
+			}
+
+			if a, ok := pe.db.(state.HasAgg); ok {
+				agg := a.Agg().(*state.Aggregator)
+				if err := agg.CollateAndPruneIfNeeded(ctx, pe.db, func(tx kv.TemporalRwTx) error {
+					return pe.sync.RunPrune(ctx, tx, true, 0)
+				}, pe.logger); err != nil {
+					return tx, err
+				}
+			} else {
+				panic("assert")
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
