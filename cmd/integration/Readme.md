@@ -170,14 +170,6 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 src=<datadir>/chaindata && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.tmp" && mv "${src}/mdbx.dat.tmp" "${src}/mdbx.dat" || rm -f "${src}/mdbx.dat.tmp"
 ```
 
-Example output:
-```
-mdbx_copy v0.14.1-0-ga13147d1 (2025-05-06T14:15:36+03:00, T-1c8f0e50d4b62e8e5a881a86b049d6a3e17a3edd)
-Running for copy /erigon/chaindata to /erigon/chaindata/mdbx.dat.tmp...
-   open-MADV_DONTNEED 16..1024
-   readahead ON 0..16
-```
-
 ## See tables size
 
 ```sh
