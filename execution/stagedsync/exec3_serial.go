@@ -58,9 +58,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
-	checkIsBatchFullEvery := time.NewTicker(5 * time.Second)
-	defer checkIsBatchFullEvery.Stop()
-
 	havePartialBlock := false
 	blockNum := startBlockNum
 
@@ -226,45 +223,48 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if se.isApplyingBlocks {
 				se.LogExecution()
 			}
-		case <-checkIsBatchFullEvery.C:
-			if !se.isApplyingBlocks {
-				break
-			}
+		default:
+		}
+
+		// Check batch fullness after EVERY block (previously this was gated
+		// behind a 5s ticker, which let exec overshoot the configured
+		// batchSize when blocks were processed quickly). Smaller batches mean
+		// smaller commitment-trie deltas per CommitCycle and less per-cycle
+		// hashing work, which is the dominant cost on heavy-state chains.
+		if se.isApplyingBlocks {
 			isBatchFull := se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
 			needCalcRoot := isBatchFull || havePartialBlock
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 			// this will only happen for the first executed block
 			havePartialBlock = false
-			if !needCalcRoot {
-				break
+			if needCalcRoot {
+				resetExecGauges(ctx)
+				ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
+				if err != nil {
+					return nil, rwTx, err
+				} else if !ok {
+					return b.HeaderNoCopy(), rwTx, nil
+				}
+				resetCommitmentGauges(ctx)
+				se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
+				se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
+				// Note: retire is not triggered here either. lastCommittedBlockNum
+				// is an in-memory counter advanced after SharedDomains.Process; the
+				// data is not flushed to MDBX until the surrounding CommitCycle. A
+				// trigger here would fire before the data is visible to retire's
+				// RO tx. The real wakeup is in execmodule/forkchoice.go's
+				// CommitCycle, after commitRwTx.Commit().
+				se.logger.Info(
+					"periodic commit check",
+					"block", b.NumberU64(),
+					"txNum", inputTxNum,
+					"commitment", times.ComputeCommitment,
+				)
+				stateCache.PrintStatsAndReset()
+				if isBatchFull {
+					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+				}
 			}
-			resetExecGauges(ctx)
-			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
-			if err != nil {
-				return nil, rwTx, err
-			} else if !ok {
-				return b.HeaderNoCopy(), rwTx, nil
-			}
-			resetCommitmentGauges(ctx)
-			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
-			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
-			// Note: retire is not triggered here either. lastCommittedBlockNum
-			// is an in-memory counter advanced after SharedDomains.Process; the
-			// data is not flushed to MDBX until the surrounding CommitCycle. A
-			// trigger here would fire before the data is visible to retire's
-			// RO tx. The real wakeup is in execmodule/forkchoice.go's
-			// CommitCycle, after commitRwTx.Commit().
-			se.logger.Info(
-				"periodic commit check",
-				"block", b.NumberU64(),
-				"txNum", inputTxNum,
-				"commitment", times.ComputeCommitment,
-			)
-			stateCache.PrintStatsAndReset()
-			if isBatchFull {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
-			}
-		default:
 		}
 
 		select {
