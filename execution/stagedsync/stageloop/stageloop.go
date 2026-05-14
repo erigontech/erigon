@@ -223,6 +223,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			}, logger); err != nil {
 				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
 			}
+		} else {
+			panic("assert")
 		}
 
 		// Lock commitGate so background collation RO txs are closed
