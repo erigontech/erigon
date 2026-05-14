@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -492,6 +493,23 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
 			}
 			sd.ClearRam(true)
+			// Snapshot the RW tx accounting just before commit: txid, dirty
+			// bytes, used bytes. These tell us how big this CommitCycle's
+			// flush is, which directly drives the per-cycle trie-hash cost.
+			commitRwTxID := commitRwTx.ViewID()
+			var spaceDirty, spaceUsed uint64
+			if hd, ok := commitRwTx.(kv.HasSpaceDirty); ok {
+				if d, _, sderr := hd.SpaceDirty(); sderr == nil {
+					spaceDirty = d
+				}
+			}
+			if mdbxTx, ok := commitRwTx.(interface {
+				SpaceUsed() (uint64, error)
+			}); ok {
+				if u, sderr := mdbxTx.SpaceUsed(); sderr == nil {
+					spaceUsed = u
+				}
+			}
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
@@ -500,6 +518,32 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
+			// Diagnostic: log per-CommitCycle accounting. Pulls reclaimable/
+			// retained from the same GCStats path the leak detector uses so
+			// we have a point-in-time view at this exact moment.
+			roTxID := roTx.ViewID()
+			var gcLogFields []any
+			if internal, ok := e.db.(interface{ InternalDB() kv.RwDB }); ok {
+				if mdbxDB, ok := internal.InternalDB().(interface {
+					GCStats() (*mdbx.GCStats, error)
+				}); ok {
+					if s, gerr := mdbxDB.GCStats(); gerr == nil {
+						gcLogFields = []any{
+							"reclaimable", common.ByteCount(s.ReclaimablePages * s.PageSize),
+							"retained", common.ByteCount(s.RetainedPages * s.PageSize),
+							"db_size", common.ByteCount(s.DBSize),
+						}
+					}
+				}
+			}
+			args := []any{
+				"rwTxId", commitRwTxID,
+				"newRoTxId", roTxID,
+				"spaceDirty", common.ByteCount(spaceDirty),
+				"spaceUsed", common.ByteCount(spaceUsed),
+			}
+			args = append(args, gcLogFields...)
+			e.logger.Info("[commit-cycle] committed", args...)
 			// The MDBX commit above just made the overlay's canonical-hash
 			// writes visible to all other RO txs. This is the ONLY moment
 			// retire's background goroutine (which opens its own RO tx) can
