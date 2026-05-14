@@ -707,6 +707,90 @@ func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int,
 	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
 }
 
+// BalanceUpdate is one (addr, val, reason) triple consumed by SetBalances.
+type BalanceUpdate struct {
+	Addr   accounts.Address
+	Val    uint256.Int
+	Reason tracing.BalanceChangeReason
+}
+
+// SetBalances applies multiple BalancePath updates in a single pass over
+// writes. Equivalent in result to calling SetBalance once per update, but
+// the linear scan is amortised across the batch. For very large write sets
+// (point_evaluation 150M-gas runs show CollectorWrites >> 1k entries) this
+// turns an O(N · M) hot loop in nextResult into O(N + M).
+func (writes VersionedWrites) SetBalances(updates []BalanceUpdate) VersionedWrites {
+	if len(updates) == 0 {
+		return writes
+	}
+	if len(updates) == 1 {
+		return writes.SetBalance(updates[0].Addr, updates[0].Val, updates[0].Reason)
+	}
+	var found uint
+	const inlineMax = 8
+	if len(updates) <= inlineMax {
+		for _, w := range writes {
+			if w.Path != BalancePath {
+				continue
+			}
+			for i := range updates {
+				bit := uint(1) << i
+				if found&bit != 0 {
+					continue
+				}
+				if w.Address == updates[i].Addr {
+					w.Val = updates[i].Val
+					w.Reason = updates[i].Reason
+					found |= bit
+				}
+			}
+			if found == (uint(1)<<len(updates))-1 {
+				break
+			}
+		}
+		for i := range updates {
+			bit := uint(1) << i
+			if found&bit == 0 {
+				writes = append(writes, &VersionedWrite{
+					Address: updates[i].Addr,
+					Path:    BalancePath,
+					Val:     updates[i].Val,
+					Reason:  updates[i].Reason,
+				})
+			}
+		}
+		return writes
+	}
+	updateIdx := make(map[accounts.Address]int, len(updates))
+	for i := range updates {
+		updateIdx[updates[i].Addr] = i
+	}
+	foundMap := make(map[accounts.Address]struct{}, len(updates))
+	for _, w := range writes {
+		if w.Path != BalancePath {
+			continue
+		}
+		if i, ok := updateIdx[w.Address]; ok {
+			if _, already := foundMap[w.Address]; !already {
+				w.Val = updates[i].Val
+				w.Reason = updates[i].Reason
+				foundMap[w.Address] = struct{}{}
+			}
+		}
+	}
+	for i := range updates {
+		if _, ok := foundMap[updates[i].Addr]; !ok {
+			writes = append(writes, &VersionedWrite{
+				Address: updates[i].Addr,
+				Path:    BalancePath,
+				Val:     updates[i].Val,
+				Reason:  updates[i].Reason,
+			})
+		}
+	}
+	return writes
+}
+
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
 // address has no existing writes in the set, all four account fields (balance,
 // nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can

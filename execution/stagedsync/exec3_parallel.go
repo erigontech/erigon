@@ -2536,13 +2536,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 					// Update CollectorWrites with fee-adjusted coinbase balance
 					// so the BlockStateCache sees the correct accumulated fees.
+					// Batched via SetBalances so the linear scan over
+					// CollectorWrites runs once per fee adjustment, not once
+					// per (write × addr) pair.
 					if txResult.CollectorWrites != nil {
+						balanceUpdates := make([]state.BalanceUpdate, 0, len(addWrites))
 						for _, w := range addWrites {
 							if w.Path == state.BalancePath {
 								if bal, ok := w.Val.(uint256.Int); ok {
-									txResult.CollectorWrites = txResult.CollectorWrites.SetBalance(w.Address, bal, w.Reason)
+									balanceUpdates = append(balanceUpdates, state.BalanceUpdate{Addr: w.Address, Val: bal, Reason: w.Reason})
 								}
 							}
+						}
+						if len(balanceUpdates) > 0 {
+							txResult.CollectorWrites = txResult.CollectorWrites.SetBalances(balanceUpdates)
 						}
 					}
 				}
