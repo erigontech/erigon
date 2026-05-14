@@ -28,7 +28,6 @@ import (
 	"sync"
 	"time"
 
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -85,7 +84,7 @@ type Domain struct {
 	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
 	// domainVisible snapshot and published atomically via Aggregator.visible.
 	// BeginFilesRo opens readers against that snapshot in zero-copy way.
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *DirtyFiles
 
 	checker *DependencyIntegrityChecker
 
@@ -109,7 +108,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 
 	d := &Domain{
 		DomainCfg:  cfg,
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: newDirtyFiles(),
 	}
 
 	var err error
@@ -239,56 +238,18 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
-	var toClose []*FilesItem
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
+	pred := func(item *FilesItem) bool {
+		if item.StartStep(d.stepSize) < lowerBound {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
 		}
 		return true
-	})
-	for _, item := range toClose {
-		d.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
 	}
-
-	toClose = toClose[:0]
-	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		d.History.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
-	}
-
-	toClose = toClose[:0]
-	d.History.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) >= lowerBound {
-			toClose = append(toClose, item)
-		}
-		return true
-	})
-	for _, item := range toClose {
-		d.History.InvertedIndex.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, because step %d was not complete", fName, lowerBound))
-		item.closeFiles()
-	}
+	d.dirtyFiles.CloseIf(pred)
+	d.History.dirtyFiles.CloseIf(pred)
+	d.History.InvertedIndex.dirtyFiles.CloseIf(pred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
@@ -1452,20 +1413,7 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
-	for i := range files {
-		src := files[i].src
-		if src == nil || src.frozen {
-			continue
-		}
-		refCnt := src.refcount.Add(-1)
-		//GC: last reader responsible to remove useles files: close it and delete
-		if refCnt == 0 && src.canDelete.Load() {
-			if traceFileLife != "" && dt.d.FilenameBase == traceFileLife {
-				dt.d.logger.Warn("[agg.dbg] real remove at DomainRoTx.Close", "file", src.decompressor.FileName())
-			}
-			src.closeFilesAndRemove()
-		}
-	}
+	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
 	for _, r := range dt.mapReaders {
 		r.Close()
 	}

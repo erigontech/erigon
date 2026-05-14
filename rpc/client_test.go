@@ -237,10 +237,34 @@ func TestClientBatchRequest_len(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
 		defer cancelFn()
-		if err := client.BatchCallContext(ctx, nil); err != nil {
-			t.Errorf("expected nil error for empty batch but got: %v", err)
+		err := client.BatchCallContext(ctx, nil)
+		if err == nil {
+			t.Fatal("expected error for empty batch but got nil")
+		}
+		var rpcErr Error
+		if !errors.As(err, &rpcErr) || rpcErr.ErrorCode() != -32600 {
+			t.Fatalf("expected invalid request error (-32600), got: %v", err)
 		}
 	})
+}
+
+func TestClientBatchRequest_emptyInproc(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+	defer cancelFn()
+	err := client.BatchCallContext(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for empty batch but got nil")
+	}
+	var rpcErr Error
+	if !errors.As(err, &rpcErr) || rpcErr.ErrorCode() != -32600 {
+		t.Fatalf("expected invalid request error (-32600), got: %v", err)
+	}
 }
 
 func TestClientNotify(t *testing.T) {
