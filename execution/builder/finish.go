@@ -71,7 +71,7 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
 	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 	// and validated but NOT included in the block header.
-	if current.BlockAccessList != nil && cfg.chainConfig.IsAmsterdam(current.Header.Time) {
+	if current.BlockAccessList != nil && cfg.chainConfig.IsAmsterdam(current.Header.Time) && !cfg.chainConfig.IsEIPDisabled(7928) {
 		hash := current.BlockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}
