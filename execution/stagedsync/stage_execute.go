@@ -375,7 +375,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
-	log.Warn("[dbg] SpawnExecuteBlocksStage")
+	log.Warn("[dbg] SpawnExecuteBlocksStage", "stack", dbg.Stack())
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
