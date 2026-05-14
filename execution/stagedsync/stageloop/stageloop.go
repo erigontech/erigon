@@ -200,6 +200,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	initialCycle, firstCycle := true, false
 	for more := true; more; {
 		overlay := doms.BlockOverlay()
+		log.Warn("[dbg] i'm here0")
+
 		more, err = sync.Run(doms, overlay, initialCycle, firstCycle)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
@@ -207,6 +209,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 		// Close RO tx so no reader holds back MDBX GC during prune.
 		roTx.Rollback()
+		log.Warn("[dbg] i'm here1")
 
 		// Collate+prune OLD data (its own RwTx).
 		if a, ok := db.(state.HasAgg); ok {
@@ -218,6 +221,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				}
 				capRoTx.Rollback()
 			}
+			log.Warn("[dbg] i'm here2")
 			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
 				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
 			}, logger); err != nil {
@@ -247,6 +251,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 
 		// Flush execution state + overlay via brief RwTx, then commit.
+		log.Warn("[dbg] i'm here3")
+
 		commitTx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: begin rw: %w", err)
