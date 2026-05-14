@@ -79,7 +79,6 @@ type TxnExecutor struct {
 	gasRemaining        mdgas.MdGas
 	blockRegularGasUsed uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
 	blockStateGasUsed   uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
-	poolGasReserved     uint64 // amount SubGas'd from the block pool by buyGas
 	txnGasUsed          uint64
 	txnGasUsedB4Refunds uint64 // txnGasUsed before refunds
 	gasPrice            *uint256.Int
@@ -185,32 +184,7 @@ func (st *TxnExecutor) to() accounts.Address {
 	return st.msg.To()
 }
 
-// regularPoolContribution returns the maximum regular-dimension gas this
-// transaction can consume from the block pool. Pre-Amsterdam this is the full
-// tx.gas; under EIP-8037 the regular pool only sees tx.gas minus the
-// intrinsic state portion, capped at TX_MAX_GAS_LIMIT — but never less than
-// the EIP-7623/7976 floor, since block_regular_gas_used uses max(regular,
-// floor) at finalisation.
-func (st *TxnExecutor) regularPoolContribution(intrinsic mdgas.IntrinsicGasCalcResult) uint64 {
-	gas := st.msg.Gas()
-	if !st.evm.ChainRules().IsAmsterdam {
-		return gas
-	}
-	if gas > intrinsic.StateGas {
-		gas -= intrinsic.StateGas
-	} else {
-		gas = 0
-	}
-	if gas > params.MaxTxnGasLimit {
-		gas = params.MaxTxnGasLimit
-	}
-	if gas < intrinsic.FloorGasCost {
-		gas = intrinsic.FloorGasCost
-	}
-	return gas
-}
-
-func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
+func (st *TxnExecutor) buyGas(gasBailout bool) error {
 	gasVal, overflow := u256.MulOverflow(u256.U64(st.msg.Gas()), *st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
@@ -261,16 +235,6 @@ func (st *TxnExecutor) buyGas(gasBailout bool, intrinsicGasResult mdgas.Intrinsi
 		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
-
-	poolGas := st.regularPoolContribution(intrinsicGasResult)
-	if err := st.gp.SubGas(poolGas); err != nil {
-		return err
-	}
-	st.poolGasReserved = poolGas
-	// Correct blockRegularGasUsed will be set later in Execute; set it for the moment to the
-	// pool reservation so st.gp.AddGas(st.blockRegularGasUsed) in the recover block works
-	// correctly even if a panic occurs beforehand.
-	st.blockRegularGasUsed = poolGas
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
@@ -340,8 +304,20 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	if st.gp != nil && st.regularPoolContribution(intrinsicGasResult) > st.gp.Gas() {
-		return ErrGasLimitReached
+	// EIP-8037 inclusion check, per-dimension:
+	//   min(TX_MAX_GAS_LIMIT, tx.gas) <= regular_gas_available
+	//   tx.gas                         <= state_gas_available  (Amsterdam+)
+	if st.gp != nil {
+		regularContribution := st.msg.Gas()
+		if rules.IsAmsterdam {
+			regularContribution = min(regularContribution, params.MaxTxnGasLimit)
+		}
+		if regularContribution > st.gp.RegularGasAvailable() {
+			return ErrGasLimitReached
+		}
+		if rules.IsAmsterdam && st.msg.Gas() > st.gp.StateGasAvailable() {
+			return ErrGasLimitReached
+		}
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.
@@ -381,7 +357,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	return st.buyGas(gasBailout, intrinsicGasResult)
+	return st.buyGas(gasBailout)
 }
 
 // ApplyFrame is similar to Execute but without gas accounting, for use in RIP-7560 transactions
@@ -491,10 +467,12 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer func() {
 			if r := recover(); r != nil {
 				// Recover from dependency panic and retry the execution.
+				// No gas pool restore needed — buyGas no longer reserves;
+				// the pool is only consumed (ConsumeRegular/ConsumeState) after
+				// the tx completes successfully.
 				if r != state.ErrDependency {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
-				st.gp.AddGas(st.blockRegularGasUsed)
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
 				if depTxIndex < 0 {
 					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
@@ -683,13 +661,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
-	// Return any reserved-but-unused pool gas. Net deduction is
-	// blockRegularGasUsed (the regular-dimension cost), matching the
-	// block-level invariant max(Σ regular, Σ state) <= gas_limit checked
-	// at block-end. EIP-8037: buyGas reserves only the regular-pool
-	// contribution (tx.gas − intrinsic_state, capped at TX_MAX), so the
-	// add-back unwinds against that reservation.
-	st.gp.AddGas(st.poolGasReserved - st.blockRegularGasUsed)
+	// EIP-8037: deduct the actual per-dimension usage from the block pool.
+	// Pre-Amsterdam only the regular dimension exists.
+	if err := st.gp.ConsumeRegular(st.blockRegularGasUsed); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+	}
+	if rules.IsAmsterdam {
+		if err := st.gp.ConsumeState(st.blockStateGasUsed); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
+		}
+	}
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
