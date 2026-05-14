@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/bits"
 	"math/rand"
 	"sort"
 	"testing"
@@ -36,11 +37,12 @@ import (
 type noopPatriciaContext struct{}
 
 func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
-func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte, prevStep kv.Step) error {
+func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
 	return nil
 }
 func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
 func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
+func (n *noopPatriciaContext) TxNum() uint64                            { return 0 }
 
 func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
@@ -79,14 +81,28 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	return row, bm
 }
 
+// generateCellEncodeDataRow converts a cell row (from generateCellRow) into a [16]cellEncodeData array.
+func generateCellEncodeDataRow(tb testing.TB, row []*cell, bm uint16) [16]cellEncodeData {
+	tb.Helper()
+	var data [16]cellEncodeData
+	for bitset := bm; bitset != 0; {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		if nibble < len(row) && row[nibble] != nil {
+			data[nibble] = cellEncodeDataFromCell(row[nibble])
+		}
+		bitset ^= bit
+	}
+	return data
+}
+
 func TestBranchData_MergeHexBranches2(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 
 	require.NoError(t, err)
 	require.NotEmpty(t, enc)
@@ -168,9 +184,8 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
-		return row[i], nil
-	})
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	fmt.Printf("%s\n", enc.String())
@@ -224,12 +239,9 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	_ = cells
 	_ = am
 
-	cg := func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
-	}
-
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
@@ -273,12 +285,9 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	row, bm := generateCellRow(t, 16)
 
-	cg := func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
-	}
-
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
@@ -315,6 +324,54 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, orig, merged)
 	})
+}
+
+// TestBranchData_ReplacePlainKeys_PartialChange exercises the span-copy logic
+// when only some keys change (account keys shortened, storage keys kept).
+func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
+	t.Parallel()
+
+	row, bm := generateCellRow(t, 16)
+	be := NewBranchEncoder(1024)
+	cellData := generateCellEncodeDataRow(t, row, bm)
+	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
+	require.NoError(t, err)
+
+	original := common.Copy(enc)
+
+	// Collect original keys and shorten only account keys.
+	type keyRecord struct {
+		key       []byte
+		isStorage bool
+	}
+	var origKeys []keyRecord
+	replaced, err := BranchData(common.Copy(enc)).ReplacePlainKeys(
+		make([]byte, 0, len(enc)),
+		func(key []byte, isStorage bool) ([]byte, error) {
+			origKeys = append(origKeys, keyRecord{common.Copy(key), isStorage})
+			if isStorage {
+				return nil, nil // keep original
+			}
+			return key[:4], nil // shorten account keys
+		},
+	)
+	require.NoError(t, err)
+
+	// Expand back: restore account keys, keep storage keys.
+	keyI := 0
+	expandedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		rec := origKeys[keyI]
+		keyI++
+		if isStorage {
+			require.True(t, rec.isStorage)
+			return nil, nil
+		}
+		require.False(t, rec.isStorage)
+		return rec.key, nil
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, original, expandedBack,
+		"round-trip with partial key replacement should reproduce original")
 }
 
 func TestNewUpdates(t *testing.T) {
@@ -440,4 +497,29 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 
 	err = warmuper2.Wait()
 	require.NoError(t, err)
+}
+
+func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
+	t.Parallel()
+
+	updates := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	key := "storage-key"
+
+	updates.TouchPlainKey(key, nil, updates.TouchStorage)
+	updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
+
+	var got *Update
+	pivot := &KeyUpdate{plainKey: key}
+	updates.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			got = item.update
+		}
+		return false
+	})
+
+	require.NotNil(t, got)
+	require.Equal(t, StorageUpdate, got.Flags)
+	require.False(t, got.Deleted())
+	require.Equal(t, int8(len("value")), got.StorageLen)
+	require.Equal(t, []byte("value"), got.Storage[:got.StorageLen])
 }

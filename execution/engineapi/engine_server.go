@@ -29,6 +29,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -40,7 +42,9 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -54,9 +58,9 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -74,35 +78,36 @@ type EngineServer struct {
 	consuming        atomic.Bool
 	test             bool
 	caplin           bool // we need to send errors for caplin.
-	executionService executionproto.ExecutionClient
+	internalCL       bool // true when any embedded CL is active (suppresses "no CL" warning)
+	executionService execmodule.ExecutionModule
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
 	chainRW chainreader.ChainReaderWriterEth1
+	filters *rpchelper.Filters
+	events  *shards.Events
 	lock    sync.Mutex
 	logger  log.Logger
 
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
 	printPectraBanner bool
+	maxReorgDepth     uint64
 }
-
-const DefaultFcuTimeout = 1 * time.Second
 
 func NewEngineServer(
 	logger log.Logger,
 	config *chain.Config,
-	executionService executionproto.ExecutionClient,
+	executionService execmodule.ExecutionModule,
 	blockDownloader *engine_block_downloader.EngineBlockDownloader,
 	caplin bool,
+	internalCL bool,
 	proposing bool,
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
 	fcuTimeout time.Duration,
+	maxReorgDepth uint64,
 ) *EngineServer {
-	if fcuTimeout == 0 {
-		fcuTimeout = DefaultFcuTimeout
-	}
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -111,9 +116,11 @@ func NewEngineServer(
 		chainRW:           chainRW,
 		proposing:         proposing,
 		caplin:            caplin,
+		internalCL:        internalCL,
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
 		txpool:            txPool,
+		maxReorgDepth:     maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -131,17 +138,21 @@ func (e *EngineServer) Start(
 	engineReader rules.EngineReader,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
+	events *shards.Events,
 ) error {
+	e.filters = filters
+	e.events = events
+
 	var eg errgroup.Group
-	if !e.caplin {
+	if !e.internalCL {
 		eg.Go(func() error {
 			defer e.logger.Debug("[EngineServer] engine log spammer goroutine terminated")
 			e.engineLogSpamer.Start(ctx)
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil)
-	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, httpConfig.Gascap, httpConfig.Feecap, httpConfig.ReturnDataLimit, httpConfig.AllowUnprotectedTxs, httpConfig.MaxGetProofRewindBlockCount, httpConfig.WebsocketSubscribeLogsChannelSize, e.logger)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
+	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
 		{
@@ -168,11 +179,42 @@ func (e *EngineServer) Start(
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
+	if s.isWithdrawalsPresenceValid(time, withdrawals) {
+		return nil
+	}
+	if !s.config.IsShanghai(time) {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
-		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+}
+
+func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
+	if !s.config.IsShanghai(time) {
+		return withdrawals == nil
+	}
+	return withdrawals != nil
+}
+
+func (s *EngineServer) validatePayloadAttributes(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+	}
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+	}
+
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+		return &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
 	return nil
 }
@@ -220,15 +262,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     (*big.Int)(req.BaseFeePerGas),
+		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
 		Extra:       req.ExtraData,
-		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
+		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),
 		MixDigest:   req.PrevRandao,
 		UncleHash:   empty.UncleHash,
-		Difficulty:  merge.ProofOfStakeDifficulty,
+		Difficulty:  *merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
@@ -283,29 +325,42 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList types.BlockAccessList
+	var blockAccessListBytes []byte
 	var err error
 	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(*req.BlockAccessList) == 0 {
+		if len(req.BlockAccessList) == 0 {
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+				}, nil
 			}
 			if err := blockAccessList.Validate(); err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
+				}, nil
 			}
-			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			hash := crypto.HashData(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
+			blockAccessListBytes = req.BlockAccessList
 		}
-	} else if req.BlockAccessList != nil {
-		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
+		if req.SlotNumber != nil {
+			slotNumber := uint64(*req.SlotNumber)
+			header.SlotNumber = &slotNumber
+		} else {
+			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		}
 	}
+
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -388,9 +443,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
-
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -499,6 +553,9 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+			if parent == nil {
+				parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
+			}
 			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
@@ -512,10 +569,10 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
-		// We add the extra restriction blockHash != headHash for the FCU case of canonicalHash == blockHash
-		// because otherwise (when FCU points to the head) we want go to stage headers
-		// so that it calls writeForkChoiceHashes.
-		if currentHeader != nil && blockHash != currentHeader.Hash() && header != nil && isCanonical {
+		// For NewPayload: if the block is already canonical and known, return VALID immediately.
+		// For FCU: we must always go through HandleForkChoice so the EL head actually moves,
+		// even if the requested head is a canonical ancestor (e.g. fork choice head regression).
+		if newPayload && currentHeader != nil && header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
@@ -553,17 +610,15 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-	var resp *executionproto.GetAssembledBlockResponse
+	var assembled execmodule.AssembledBlockResult
 	var err error
 
 	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		resp, err = s.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
-			Id: payloadId,
-		})
+		assembled, err = s.executionService.GetAssembledBlock(ctx, payloadId)
 		if err != nil {
 			return false, err
 		}
-		return resp.Busy, nil
+		return assembled.Busy, nil
 	})
 
 	if err != nil {
@@ -573,23 +628,21 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
-	// If the service is busy or there is no data for the given id then respond accordingly.
-	if resp.Data == nil {
+	if assembled.Block == nil {
 		s.logger.Warn("Payload not stored", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
-
 	}
 
-	data := resp.Data
-	var executionRequests []hexutil.Bytes
-	if version >= clparams.ElectraVersion {
-		executionRequests = make([]hexutil.Bytes, 0)
-		for _, r := range data.Requests.Requests {
-			executionRequests = append(executionRequests, r)
-		}
+	br := assembled.Block
+	block := br.Block
+	header := block.Header()
+
+	if header == nil {
+		s.logger.Warn("Payload build failed (nil header)", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
 	}
 
-	ts := data.ExecutionPayload.Timestamp
+	ts := header.Time
 	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
@@ -601,11 +654,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
-	payload := &engine_types.GetPayloadResponse{
-		ExecutionPayload:  engine_types.ConvertPayloadFromRpc(data.ExecutionPayload),
-		BlockValue:        (*hexutil.Big)(gointerfaces.ConvertH256ToUint256Int(data.BlockValue).ToBig()),
-		BlobsBundle:       engine_types.ConvertBlobsFromRpc(data.BlobsBundle),
-		ExecutionRequests: executionRequests,
+	payload, err := assembledBlockToPayloadResponse(br, assembled.BlockValue, version)
+	if err != nil {
+		return nil, err
 	}
 
 	if version == clparams.FuluVersion {
@@ -650,9 +701,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	defer s.lock.Unlock()
 
 	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
-
+		fcuStart := time.Now()
+		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
 		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
+		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "elapsed", time.Since(fcuStart))
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
@@ -664,13 +716,24 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			}
 			return nil, err
 		}
-		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
+		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "status", status.Status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
 	} else {
-		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "payloadStatus", status)
+		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
+	}
+
+	// Per the engine API spec, payloadAttributes must be validated against the
+	// fork schedule regardless of the fork-choice sync state. Doing this before
+	// the SYNCING short-circuit below lets the CL detect misconfigured attributes
+	// (e.g. fcuV2 with nil withdrawals at a Shanghai timestamp) even when the
+	// head is still syncing.
+	if payloadAttributes != nil {
+		if err := s.validatePayloadAttributes(version, payloadAttributes); err != nil {
+			return nil, err
+		}
 	}
 
 	// No need for payload building
@@ -678,62 +741,60 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-	}
-	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-	}
-
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-	}
 
 	if !s.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
+	if headHeader == nil && s.filters != nil {
+		if sd := s.filters.LatestSD(); sd != nil {
+			if overlay := sd.BlockOverlay(); overlay != nil {
+				headHeader, _ = rawdb.ReadHeaderByHash(overlay, forkchoiceState.HeadHash)
+			}
+		}
+	}
+	if headHeader == nil {
+		return nil, fmt.Errorf("head header not found for hash %x", forkchoiceState.HeadHash)
+	}
 
 	if headHeader.Time >= timestamp {
 		s.logger.Debug("[ForkChoiceUpdated] payload time lte head time", "head", headHeader.Time, "payload", timestamp)
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
-	req := &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+	assembleParams := &builder.Parameters{
+		ParentHash:            forkchoiceState.HeadHash,
 		Timestamp:             timestamp,
-		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		PrevRandao:            payloadAttributes.PrevRandao,
+		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
+		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 
 	if version >= clparams.CapellaVersion {
-		req.Withdrawals = engine_types.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
+		assembleParams.Withdrawals = payloadAttributes.Withdrawals
 	}
 
 	if version >= clparams.DenebVersion {
-		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
+		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
 	}
 
-	var resp *executionproto.AssembleBlockResponse
+	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
 	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		resp, err = s.executionService.AssembleBlock(ctx, req)
+		assembled, err = s.executionService.AssembleBlock(ctx, assembleParams)
 		if err != nil {
 			return false, err
 		}
-		return resp.Busy, nil
+		return assembled.Busy, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	if execBusy {
-		s.logger.Warn("[ForkChoiceUpdated] Execution Service busy, could not fulfil Assemble Block request", "req.parentHash", req.ParentHash)
+		s.logger.Warn("[ForkChoiceUpdated] Execution Service busy, could not fulfil Assemble Block request", "parentHash", forkchoiceState.HeadHash)
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, PayloadId: nil}, nil
 	}
 	return &engine_types.ForkChoiceUpdatedResponse{
@@ -741,7 +802,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			Status:          engine_types.ValidStatus,
 			LatestValidHash: &forkchoiceState.HeadHash,
 		},
-		PayloadId: engine_types.ConvertPayloadId(resp.Id),
+		PayloadId: engine_types.ConvertPayloadId(assembled.PayloadID),
 	}, nil
 }
 
@@ -812,6 +873,7 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
+	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -872,7 +934,7 @@ func (e *EngineServer) HandleNewPayload(
 				return nil, err
 			}
 
-			if status == executionproto.ExecutionStatus_Busy || status == executionproto.ExecutionStatus_TooFarAway {
+			if status == execmodule.ExecutionStatusBusy || status == execmodule.ExecutionStatusTooFarAway {
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 			} else {
@@ -883,7 +945,11 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
+	var accessLists map[common.Hash][]byte
+	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
+		accessLists = map[common.Hash][]byte{block.Hash(): blockAccessListBytes}
+	}
+	if err := e.chainRW.InsertBlocksAndWaitWithAccessLists(ctx, []*types.Block{block}, accessLists); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
@@ -893,7 +959,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
@@ -915,7 +981,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
 	}
 
@@ -930,20 +996,97 @@ func (e *EngineServer) HandleNewPayload(
 	return resp, nil
 }
 
-func convertGrpcStatusToEngineStatus(status executionproto.ExecutionStatus) engine_types.EngineStatus {
+func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
 	switch status {
-	case executionproto.ExecutionStatus_Success:
+	case execmodule.ExecutionStatusSuccess:
 		return engine_types.ValidStatus
-	case executionproto.ExecutionStatus_MissingSegment:
+	case execmodule.ExecutionStatusMissingSegment:
 		return engine_types.AcceptedStatus
-	case executionproto.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusTooFarAway:
 		return engine_types.AcceptedStatus
-	case executionproto.ExecutionStatus_BadBlock:
+	case execmodule.ExecutionStatusBadBlock:
 		return engine_types.InvalidStatus
-	case executionproto.ExecutionStatus_Busy:
+	case execmodule.ExecutionStatusBusy:
 		return engine_types.SyncingStatus
 	}
-	panic("giulio u stupid.")
+	panic(fmt.Sprintf("unhandled execution status: %d", status))
+}
+
+// assembledBlockToPayloadResponse converts a native assembled block to an engine-API payload response.
+func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *uint256.Int, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
+	block := br.Block
+	header := block.Header()
+
+	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	if err != nil {
+		return nil, err
+	}
+	txs := make([]hexutil.Bytes, len(encodedTxs))
+	for i, tx := range encodedTxs {
+		txs[i] = tx
+	}
+
+	bloom := header.Bloom
+	ep := &engine_types.ExecutionPayload{
+		ParentHash:    header.ParentHash,
+		FeeRecipient:  header.Coinbase,
+		StateRoot:     header.Root,
+		ReceiptsRoot:  header.ReceiptHash,
+		LogsBloom:     bloom[:],
+		PrevRandao:    header.MixDigest,
+		BlockNumber:   hexutil.Uint64(header.Number.Uint64()),
+		GasLimit:      hexutil.Uint64(header.GasLimit),
+		GasUsed:       hexutil.Uint64(header.GasUsed),
+		Timestamp:     hexutil.Uint64(header.Time),
+		ExtraData:     header.Extra,
+		BaseFeePerGas: (*hexutil.Big)(header.BaseFee.ToBig()),
+		BlockHash:     block.Hash(),
+		Transactions:  txs,
+	}
+	if block.Withdrawals() != nil {
+		ep.Withdrawals = block.Withdrawals()
+	}
+	if header.BlobGasUsed != nil {
+		bgu := hexutil.Uint64(*header.BlobGasUsed)
+		ep.BlobGasUsed = &bgu
+	}
+	if header.ExcessBlobGas != nil {
+		ebg := hexutil.Uint64(*header.ExcessBlobGas)
+		ep.ExcessBlobGas = &ebg
+	}
+	if header.SlotNumber != nil {
+		sn := hexutil.Uint64(*header.SlotNumber)
+		ep.SlotNumber = &sn
+	}
+	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
+		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
+		if encErr == nil {
+			ep.BlockAccessList = encoded
+		}
+	}
+
+	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
+	if err != nil {
+		return nil, err
+	}
+
+	var executionRequests []hexutil.Bytes
+	if version >= clparams.ElectraVersion {
+		if br.Requests == nil {
+			return nil, errors.New("missing execution requests for Electra+ payload")
+		}
+		executionRequests = make([]hexutil.Bytes, 0, len(br.Requests))
+		for _, r := range br.Requests {
+			executionRequests = append(executionRequests, r.Encode())
+		}
+	}
+
+	return &engine_types.GetPayloadResponse{
+		ExecutionPayload:  ep,
+		BlockValue:        (*hexutil.Big)(blockValue.ToBig()),
+		BlobsBundle:       blobsBundle,
+		ExecutionRequests: executionRequests,
+	}, nil
 }
 
 func (e *EngineServer) HandleForkChoice(
@@ -986,13 +1129,13 @@ func (e *EngineServer) HandleForkChoice(
 	if err != nil {
 		return nil, err
 	}
-	if status == executionproto.ExecutionStatus_InvalidForkchoice {
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, &engine_helpers.InvalidForkchoiceStateErr
 	}
-	if status == executionproto.ExecutionStatus_Busy {
+	if status == execmodule.ExecutionStatusBusy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, ValidationError: engine_types.NewStringifiedErrorFromString("Invalid chain after execution")}, nil
 	}
 	payloadStatus := &engine_types.PayloadStatus{

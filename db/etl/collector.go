@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -70,8 +71,10 @@ type Collector struct {
 	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
-	sortAndFlushInBackground bool
-	allocator                *Allocator
+	sortAndFlushInBackground       bool
+	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
+
+	allocator *Allocator
 }
 
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
@@ -118,38 +121,39 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		return nil
 	}
 
-	var provider dataProvider
 	if canStoreInRam && len(c.dataProviders) == 0 {
 		c.buf.Sort()
-		provider = KeepInRAM(c.buf)
+		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
-	} else {
-		var err error
-
-		if c.sortAndFlushInBackground {
-			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
-			if c.allocator != nil {
-				c.buf = c.allocator.Get()
-			} else {
-				prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-				c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
-				c.buf.Prealloc(prevLen/8, prevSize/8)
-			}
-			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator)
-			if err != nil {
-				return err
-			}
-		} else {
-			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
-			if err != nil {
-				return err
-			}
-			c.buf.Reset()
-		}
-	}
-	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
+		return nil
 	}
+
+	// go bg - but without server overloading
+	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
+	if !doInBackground {
+		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
+		if err != nil {
+			return err
+		}
+		c.dataProviders = append(c.dataProviders, provider)
+		c.buf.Reset()
+		return nil
+	}
+
+	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
+	if c.allocator != nil {
+		c.buf = c.allocator.Get()
+	} else {
+		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
+		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
+		c.buf.Prealloc(prevLen/8, prevSize/8)
+	}
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
+	if err != nil {
+		return err
+	}
+	c.dataProviders = append(c.dataProviders, provider)
 	return nil
 }
 
@@ -169,7 +173,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
 	}
-	defer c.Close()
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
@@ -198,7 +201,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	var canUseAppend bool
-	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
+	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0
 
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
@@ -292,7 +295,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 	h := &Heap{}
 	heapInit(h)
 	for i, provider := range providers {
-		if key, value, err := provider.Next(nil, nil); err == nil {
+		if key, value, err := provider.Next(); err == nil {
 			heapPush(h, &HeapElem{key, value, i})
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
@@ -324,8 +327,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				if err = loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
+				prevK = element.Key
 			}
 		} else if args.BufferType == SortableAppendBuffer {
 			if !bytes.Equal(prevK, element.Key) {
@@ -334,9 +336,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 						return err
 					}
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = element.Key
+				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
@@ -346,7 +347,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 			}
 		}
 
-		if element.Key, element.Value, err = provider.Next(element.Key[:0], element.Value[:0]); err == nil {
+		if element.Key, element.Value, err = provider.Next(); err == nil {
 			heapPush(h, element)
 		} else if !errors.Is(err, io.EOF) {
 			return fmt.Errorf("%s: error while reading next element from disk: %w", logPrefix, err)

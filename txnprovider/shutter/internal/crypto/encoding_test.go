@@ -68,7 +68,7 @@ func TestUnmarshalBroken(t *testing.T) {
 	err = m.Unmarshal(d[:len(d)-1])
 	assert.True(t, err != nil)
 
-	v := d[:]
+	v := d
 	v[0]++
 	err = m.Unmarshal(v)
 	assert.True(t, err != nil)

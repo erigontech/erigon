@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -77,18 +78,19 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	values := make([]byte, valueSize)
 
 	dataPath := filepath.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(tb.Context(), "cmp", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
 	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
 		bufSize = 1 * datasize.MB
 	}
-	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	collector := etl.NewCollector(btindex.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	defer collector.Close()
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
-		n, err := rnd.Read(key[:])
+		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
@@ -101,6 +103,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	}
 
 	writer := seg.NewWriter(comp, compressFlags)
+	defer writer.Close()
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		_, err = writer.Write(k)
@@ -112,8 +115,6 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	err = collector.Load(nil, "", loader, etl.TransformArgs{})
 	require.NoError(tb, err)
-
-	collector.Close()
 
 	err = comp.Compress()
 	require.NoError(tb, err)
@@ -127,7 +128,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = btindex.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath
@@ -157,7 +158,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
 	for i := 0; i < keyCount; i++ {
-		n, err := rnd.Read(bk[:])
+		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
@@ -459,6 +460,101 @@ func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRa
 	})
 	defer commitmentR.Close()
 	populateFiles2(t, dirs, commitmentR, ranges)
+}
+
+// generateCommitmentHistoryAndIndexFiles creates only the history (.v) and inverted-index (.ef)
+// files for the commitment domain, without touching the KV domain files. Use this when you want
+// commitment values to appear already-merged while history still needs merging.
+func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
+	t.Helper()
+	ver := version.V1_0_standart
+	histRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+			Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
+			Build()
+		return "commitment", schema
+	})
+	defer histRepo.Close()
+	populateFiles2(t, dirs, histRepo, ranges)
+
+	idxRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+			Data(dirs.SnapIdx, "commitment", DataExtensionEf, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
+			Build()
+		return "commitment", schema
+	})
+	defer idxRepo.Close()
+	populateFiles2(t, dirs, idxRepo, ranges)
+}
+
+// TestAggregator_CommittedTxNumGuard verifies the stepFullyCommitted predicate
+// used by buildFilesInBackground: a step S should only be collated when
+// committedTxNum+1 >= firstTxNum(S+1), meaning all txNums in step S have been
+// committed to the DB. ComputeCommitment writes the last txNum of the block
+// (e.g. firstTxNum(S+1)-1 when the step boundary aligns with a block), so
+// the +1 avoids an off-by-one that would delay collation unnecessarily.
+func TestAggregator_CommittedTxNumGuard(t *testing.T) {
+	t.Parallel()
+	stepSize := uint64(100)
+
+	// Step 5 covers txNums [500, 600). firstTxNum(6) = 600.
+	assert.False(t, stepFullyCommitted(550, 5, stepSize),
+		"guard should block: committed txNum is mid-step")
+	assert.True(t, stepFullyCommitted(0, 5, stepSize),
+		"guard should be bypassed when committedTxNum is 0 (no commitment)")
+	assert.False(t, stepFullyCommitted(598, 5, stepSize),
+		"guard should block: committed txNum is 1 before last txNum of step")
+
+	// committedTxNum = 599 = lastTxNumOfStep(5) = firstTxNum(6)-1
+	// This is the value ComputeCommitment writes at the step boundary.
+	assert.True(t, stepFullyCommitted(599, 5, stepSize),
+		"guard should allow: committed txNum is last txNum of the step")
+	assert.True(t, stepFullyCommitted(600, 5, stepSize),
+		"guard should allow: committed txNum is past the step")
+	assert.True(t, stepFullyCommitted(1000, 5, stepSize),
+		"guard should allow: committed txNum is well past the step")
+}
+
+func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
+	// Regression: when commitment values are already merged (values.needMerge=false) but history
+	// is not, the old aggregator.mergeFiles called commitmentValTransformDomain with a zero
+	// MergeRange, causing "failed to create commitment value transformer: file
+	// v2.0-storage.0-0.kv was not found".
+	stepSize := uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	dirs := agg.Dirs()
+
+	// Accounts/storage/code: all files merged {0,2}, no further merge needed.
+	generateAccountsFile(t, dirs, []testFileRange{{0, 2}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 2}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 2}})
+	// Commitment KV: merged {0,2} — values.needMerge will be false.
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 2}})
+	// Commitment history+index: unmerged {0,1},{1,2} — history.needMerge will be true.
+	generateCommitmentHistoryAndIndexFiles(t, dirs, []testFileRange{{0, 1}, {1, 2}})
+
+	require.NoError(t, agg.OpenFolder())
+
+	aggTx := agg.BeginFilesRo()
+	r := aggTx.findMergeRange(2*stepSize, stepSize, 32)
+	aggTx.Close()
+
+	// Precondition: confirm the exact scenario that triggers the bug.
+	require.False(t, r.domain[kv.CommitmentDomain].values.needMerge, "commitment values already merged")
+	require.True(t, r.domain[kv.CommitmentDomain].history.any(), "commitment history needs merging")
+	require.True(t, r.domain[kv.CommitmentDomain].any())
+
+	// Before fix: mergeFiles returned "failed to create commitment value transformer: file
+	// v2.0-storage.0-0.kv was not found" because the transformer was called with the
+	// zero-value MergeRange from values (needMerge=false, from=0, to=0).
+	_, err := agg.mergeLoopStep(t.Context(), 2*stepSize)
+	if err != nil {
+		assert.NotContains(t, err.Error(), "failed to create commitment value transformer",
+			"transformer must not be called when values.needMerge=false")
+	}
 }
 
 func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema)) *SnapshotRepo {

@@ -21,8 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -175,7 +175,7 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 }
 
 func hashVal(v []byte) (common.Hash, error) {
-	sha := sha3.NewLegacyKeccak256().(keccakState)
+	sha := keccak.NewFastKeccak()
 	sha.Reset()
 	_, err := sha.Write(v)
 	if err != nil {

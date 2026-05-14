@@ -103,7 +103,7 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				t.operationsPool.BLSToExecutionChangesPool.Insert(mockMsg.SignedBLSToExecutionChange.Signature, mockMsg.SignedBLSToExecutionChange)
 			},
 			msg:     mockMsg,
-			wantErr: true,
+			wantErr: false, // Silent ignore: returns nil when already in pool
 		},
 		{
 			name: "version is less than CapellaVersion",

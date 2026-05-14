@@ -19,6 +19,7 @@ package aura
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -27,12 +28,13 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -551,8 +553,8 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	*/
 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
-			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
+		if !header.Difficulty.Eq(&expectedDifficulty) {
+			return fmt.Errorf("invalid difficulty: expect=%s, found=%s", &expectedDifficulty, &header.Difficulty)
 		}
 	}
 	return nil
@@ -724,7 +726,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 }
 
 // word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
+func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
@@ -869,7 +871,7 @@ func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to commo
 
 // FinalizeAndAssemble implements rules.Engine
 func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger) (*types.Block, types.FlatRequests, error) {
-	_, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
+	_, err := c.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -878,8 +880,11 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), nil, nil
 }
 
+// SignerFn hashes and signs the data to be signed by a backing account.
+type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
+
 // Authorize injects a private key into the rules engine to mint new blocks with.
-func (c *AuRa) Authorize(signer common.Address, signFn clique.SignerFn) {
+func (c *AuRa) Authorize(signer common.Address, signFn SignerFn) {
 	c.signerMutex.Lock()
 	defer c.signerMutex.Unlock()
 
@@ -995,26 +1000,61 @@ func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochR
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *big.Int {
+func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) uint256.Int {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen))
 }
 
 // calculateScore - analog of PoW difficulty:
 //
 //	sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
-func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+func calculateScore(parentStep, currentStep, currentEmptySteps uint64) uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
 	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
 	res = res.Sub(res, uint256.NewInt(currentStep))
 	res = res.Add(res, uint256.NewInt(currentEmptySteps))
-	return res
+	return *res
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
-	return clique.SealHash(header)
+	return sealHash(header)
+}
+
+// sealHash returns the hash of a block prior to it being sealed.
+func sealHash(header *types.Header) (hash common.Hash) {
+	hasher := crypto.NewKeccakState()
+	defer crypto.ReturnToPool(hasher)
+	encodeSigHeader(hasher, header)
+	hasher.Sum(hash[:0])
+	return hash
+}
+
+func encodeSigHeader(w io.Writer, header *types.Header) {
+	enc := []any{
+		header.ParentHash,
+		header.UncleHash,
+		header.Coinbase,
+		header.Root,
+		header.TxHash,
+		header.ReceiptHash,
+		header.Bloom,
+		header.Difficulty,
+		header.Number,
+		header.GasLimit,
+		header.GasUsed,
+		header.Time,
+		header.Extra[:len(header.Extra)-crypto.SignatureLength], // Yes, this will panic if extra is too short
+		header.MixDigest,
+		header.Nonce,
+	}
+	if header.BaseFee != nil {
+		enc = append(enc, header.BaseFee)
+	}
+	if err := rlp.Encode(w, enc); err != nil {
+		panic("can't encode: " + err.Error())
+	}
 }
 
 // See https://openethereum.github.io/Permissioning.html#gas-price
@@ -1050,7 +1090,7 @@ func (c *AuRa) IsServiceTransaction(sender accounts.Address, syscall rules.Syste
 	return false
 }
 
-// Close implements rules.Engine. It's a noop for clique as there are no background threads.
+// Close implements rules.Engine.
 func (c *AuRa) Close() error {
 	c.db.Close()
 	common.SafeClose(c.exitCh)
@@ -1060,14 +1100,7 @@ func (c *AuRa) Close() error {
 // APIs implements rules.Engine, returning the user facing RPC API to allow
 // controlling the signer voting.
 func (c *AuRa) APIs(chain rules.ChainHeaderReader) []rpc.API {
-	return []rpc.API{
-		//{
-		//Namespace: "clique",
-		//Version:   "1.0",
-		//Service:   &API{chain: chain, clique: c},
-		//Public:    false,
-		//}
-	}
+	return []rpc.API{}
 }
 
 // nolint
@@ -1162,7 +1195,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 }
 
 func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
-	return rules.Transfer
+	return misc.Transfer
 }
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

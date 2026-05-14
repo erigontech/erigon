@@ -34,6 +34,8 @@ import (
 const (
 	ETH68 = 68
 	ETH69 = 69
+	ETH70 = 70
+	ETH71 = 71
 
 	WIT0 = 1
 )
@@ -42,10 +44,14 @@ var (
 	ProtocolToUintMap = map[sentryproto.Protocol]uint{
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
+		sentryproto.Protocol_ETH70: ETH70,
+		sentryproto.Protocol_ETH71: ETH71,
 	}
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
+		ETH70: sentryproto.Protocol_ETH70,
+		ETH71: sentryproto.Protocol_ETH71,
 	}
 	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
 		sentryproto.Protocol_WIT0: {},
@@ -243,7 +249,7 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.Messa
 	in = &sentryproto.MessagesRequest{
 		Ids: filterIds(in.Ids, allProtocols),
 	}
-	ch := make(chan *inboundMessageReply, 16384)
+	ch := make(chan *inboundMessageReply, libsentry.MessagesQueueSize)
 	streamServer := &SentryMessagesStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
@@ -266,6 +272,7 @@ type SentryMessagesStreamS struct {
 
 func (s *SentryMessagesStreamS) Send(m *sentryproto.InboundMessage) error {
 	s.ch <- &inboundMessageReply{r: m}
+	libsentry.EvictOldestIfHalfFull(s.ch)
 	return nil
 }
 
@@ -308,7 +315,7 @@ func (c *SentryMessagesStreamC) RecvMsg(anyMessage any) error {
 // -- start Peers
 
 func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-	ch := make(chan *peersReply, 16384)
+	ch := make(chan *peersReply, libsentry.MessagesQueueSize)
 	streamServer := &SentryPeersStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
@@ -325,6 +332,14 @@ func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.Rem
 	return c.server.RemovePeer(ctx, in)
 }
 
+func (c *SentryClientDirect) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	return c.server.AddTrustedPeer(ctx, in)
+}
+
+func (c *SentryClientDirect) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemoveTrustedPeer(ctx, in)
+}
+
 type peersReply struct {
 	r   *sentryproto.PeerEvent
 	err error
@@ -339,6 +354,7 @@ type SentryPeersStreamS struct {
 
 func (s *SentryPeersStreamS) Send(m *sentryproto.PeerEvent) error {
 	s.ch <- &peersReply{r: m}
+	libsentry.EvictOldestIfHalfFull(s.ch)
 	return nil
 }
 

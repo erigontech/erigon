@@ -11,4 +11,5 @@ const (
 	PolygonBridgeDB = "polygon-bridge"
 	CaplinDB        = "caplin"
 	TemporaryDB     = "temporary"
+	MigrationsDB    = "migrations"
 )

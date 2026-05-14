@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type MockBlockReader struct {
@@ -36,4 +37,7 @@ func (t *MockBlockReader) Transactions(number uint64, hash common.Hash) (*solid.
 }
 
 func (t *MockBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {
+}
+
+func (t *MockBlockReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
 }

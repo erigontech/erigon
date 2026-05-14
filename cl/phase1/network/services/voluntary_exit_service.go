@@ -95,7 +95,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return ErrIgnore
+		return nil
 	}
 
 	var (
@@ -183,5 +183,5 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }

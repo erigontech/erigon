@@ -938,7 +938,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.BlockAccessList)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1320,18 +1320,31 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	return nil
 }
 
-func (r *BlockReader) IntegrityTxnID(failFast bool) error {
+func (r *BlockReader) IntegrityTxnID(ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] BlocksTxnID done")
 	view := r.sn.View()
 	defer view.Close()
 
 	var expectedFirstTxnID uint64
-	for _, snb := range view.Bodies() {
+	for i, snb := range view.Bodies() {
+		if i%1000 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
 		if snb.Src() == nil {
 			continue
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
+		if sn == nil || sn.Src() == nil {
+			err := fmt.Errorf("[integrity] BlocksTxnID: missing txs segment for bn=%d", firstBlockNum)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+			continue
+		}
 		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err

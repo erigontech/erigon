@@ -122,22 +122,22 @@ func main() {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */, logger)
+	db, err := enode.OpenDBEx(ctx, "" /* path */, "" /* tmpDir */, logger)
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, nodeKey, logger)
+	ln := enode.NewLocalNode(db, nodeKey)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
 
 	if *runv5 {
-		if _, err := discover.ListenV5(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

@@ -48,6 +48,9 @@ func TestVersioMonitorHeimdallV1(t *testing.T) {
 }
 
 func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()
 
@@ -92,6 +95,9 @@ func TestVersioMonitorHeimdallUpgrade(t *testing.T) {
 }
 
 func TestVersioMonitorHeimdallDowngrade(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx, clean := context.WithTimeout(context.Background(), time.Minute)
 	defer clean()
 

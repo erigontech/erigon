@@ -33,7 +33,7 @@ func init() {
 }
 
 func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig, eth_clock.EthereumClock) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
 
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)

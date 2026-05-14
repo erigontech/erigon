@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -126,7 +127,7 @@ func GenStructStepEx(
 		if len(groups) > 0 {
 			precLen = len(groups) - 1
 		}
-		succLen := prefixLen(succ, curr)
+		succLen := nibbles.CommonPrefixLen(succ, curr)
 		var maxLen int
 		maxLen = max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
@@ -370,7 +371,7 @@ func GenStructStepOld(
 		if len(groups) > 0 {
 			precLen = len(groups) - 1
 		}
-		succLen := prefixLen(succ, curr)
+		succLen := nibbles.CommonPrefixLen(succ, curr)
 		var maxLen int
 		maxLen = max(precLen, succLen)
 		if trace || maxLen >= len(curr) {

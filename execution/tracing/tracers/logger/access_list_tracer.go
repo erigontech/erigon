@@ -20,7 +20,7 @@
 package logger
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -131,8 +131,8 @@ func (al accessList) accessListSorted() types.AccessList {
 		for slot, pos := range storage.slots {
 			storageKeys[pos] = slot
 		}
-		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].Cmp(storageKeys[j]) < 0
+		slices.SortFunc(storageKeys, func(a, b common.Hash) int {
+			return a.Cmp(b)
 		})
 		acl = append(acl, types.AccessTuple{
 			Address:     addr,
@@ -235,7 +235,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 			// t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
+		inithash := accounts.InternCodeHash(crypto.HashData(init))
 		salt := stackData[stackLen-4]
 		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {

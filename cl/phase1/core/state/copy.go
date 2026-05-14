@@ -42,7 +42,7 @@ func (bs *CachingBeaconState) reinitCaches() error {
 	}
 
 	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = maphash.NewMap[uint64]()
+		bs.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	} else {
 		bs.publicKeyIndicies.Clear()
 	}

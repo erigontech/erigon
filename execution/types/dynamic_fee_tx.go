@@ -21,7 +21,6 @@ package types
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 
@@ -35,30 +34,16 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
-	ChainID    *uint256.Int
-	TipCap     *uint256.Int
-	FeeCap     *uint256.Int
+	ChainID    uint256.Int
+	TipCap     uint256.Int
+	FeeCap     uint256.Int
 	AccessList AccessList
 }
 
-func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
-func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return tx.TipCap }
+func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return &tx.FeeCap }
+func (tx *DynamicFeeTransaction) GetTipCap() *uint256.Int { return &tx.TipCap }
 func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	// transaction max fee is below base fee
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
@@ -74,30 +59,17 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			To:              tx.To, // TODO: copy pointed-to address
 			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
-			// These are copied below.
-			Value: new(uint256.Int),
+			Value:           tx.Value,
+			V:               tx.V,
+			R:               tx.R,
+			S:               tx.S,
 		},
-		ChainID:    new(uint256.Int),
+		ChainID:    tx.ChainID,
 		AccessList: make(AccessList, len(tx.AccessList)),
-		TipCap:     new(uint256.Int),
-		FeeCap:     new(uint256.Int),
+		TipCap:     tx.TipCap,
+		FeeCap:     tx.FeeCap,
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	if tx.Value != nil {
-		cpy.Value.Set(tx.Value)
-	}
-	if tx.ChainID != nil {
-		cpy.ChainID.Set(tx.ChainID)
-	}
-	if tx.TipCap != nil {
-		cpy.TipCap.Set(tx.TipCap)
-	}
-	if tx.FeeCap != nil {
-		cpy.FeeCap.Set(tx.FeeCap)
-	}
-	cpy.V.Set(&tx.V)
-	cpy.R.Set(&tx.R)
-	cpy.S.Set(&tx.S)
 	return cpy
 }
 
@@ -116,10 +88,10 @@ func (tx *DynamicFeeTransaction) EncodingSize() int {
 }
 
 func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen int) {
-	payloadSize += rlp.Uint256Len(*tx.ChainID)
+	payloadSize += rlp.Uint256Len(tx.ChainID)
 	payloadSize += rlp.U64Len(tx.Nonce)
-	payloadSize += rlp.Uint256Len(*tx.TipCap)
-	payloadSize += rlp.Uint256Len(*tx.FeeCap)
+	payloadSize += rlp.Uint256Len(tx.TipCap)
+	payloadSize += rlp.Uint256Len(tx.FeeCap)
 	payloadSize += rlp.U64Len(tx.GasLimit)
 
 	// size of To
@@ -128,7 +100,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen i
 		payloadSize += 20
 	}
 
-	payloadSize += rlp.Uint256Len(*tx.Value)
+	payloadSize += rlp.Uint256Len(tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
 
 	// size of AccessList
@@ -150,7 +122,7 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	cpy.R.Set(r)
 	cpy.S.Set(s)
 	cpy.V.Set(v)
-	cpy.ChainID = signer.ChainID()
+	cpy.ChainID = *signer.ChainID()
 	return cpy, nil
 }
 
@@ -159,8 +131,8 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -174,35 +146,35 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.TipCap, w, b); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.FeeCap, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -210,7 +182,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -236,10 +208,10 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -258,39 +230,27 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.ChainID); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.TipCap); err != nil {
 		return err
 	}
-	tx.TipCap = new(uint256.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.FeeCap); err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -300,23 +260,20 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
-	tx.S.SetBytes(b)
 	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress
@@ -326,11 +283,11 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 	msg := Message{
 		nonce:            tx.Nonce,
 		gasLimit:         tx.GasLimit,
-		gasPrice:         *tx.FeeCap,
-		tipCap:           *tx.TipCap,
-		feeCap:           *tx.FeeCap,
+		gasPrice:         tx.FeeCap,
+		tipCap:           tx.TipCap,
+		feeCap:           tx.FeeCap,
 		to:               to,
-		amount:           *tx.Value,
+		amount:           tx.Value,
 		data:             tx.Data,
 		accessList:       tx.AccessList,
 		checkNonce:       true,
@@ -341,14 +298,11 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		return nil, errors.New("eip-1559 transactions require London")
 	}
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return nil, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.Set(baseFee)
 	}
-	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
-	if msg.gasPrice.Gt(tx.FeeCap) {
-		msg.gasPrice.Set(tx.FeeCap)
+	msg.gasPrice.Add(&msg.gasPrice, &tx.TipCap)
+	if msg.gasPrice.Gt(&tx.FeeCap) {
+		msg.gasPrice.Set(&tx.FeeCap)
 	}
 
 	var err error
@@ -364,13 +318,13 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 		return *hash
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []any{
-		tx.ChainID,
+		&tx.ChainID,
 		tx.Nonce,
-		tx.TipCap,
-		tx.FeeCap,
+		&tx.TipCap,
+		&tx.FeeCap,
 		tx.GasLimit,
 		tx.To,
-		tx.Value,
+		&tx.Value,
 		tx.Data,
 		tx.AccessList,
 		tx.V, tx.R, tx.S,
@@ -397,11 +351,11 @@ func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 		&dynamicFeeTxSigHash{
 			ChainID:    chainID,
 			Nonce:      tx.Nonce,
-			GasTipCap:  tx.TipCap,
-			GasFeeCap:  tx.FeeCap,
+			GasTipCap:  &tx.TipCap,
+			GasFeeCap:  &tx.FeeCap,
 			Gas:        tx.GasLimit,
 			To:         tx.To,
-			Value:      tx.Value,
+			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
 		})
@@ -415,7 +369,7 @@ func (tx *DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.In
 }
 
 func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
-	return tx.ChainID
+	return &tx.ChainID
 }
 
 func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
@@ -444,12 +398,12 @@ func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address,
 		CommonTx: CommonTx{
 			Nonce:    nonce,
 			To:       &to,
-			Value:    amount,
+			Value:    *amount,
 			GasLimit: gasLimit,
 			Data:     data,
 		},
-		ChainID: &chainID,
-		TipCap:  gasTip,
-		FeeCap:  gasFeeCap,
+		ChainID: chainID,
+		TipCap:  *gasTip,
+		FeeCap:  *gasFeeCap,
 	}
 }

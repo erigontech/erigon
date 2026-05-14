@@ -21,15 +21,19 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -245,6 +249,11 @@ func Test_checkPath(t *testing.T) {
 func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
 	t.Helper()
 
+	// Ensure RpcConcurrencyLimit is always set so admission control wiring is exercised.
+	// A high value avoids interfering with existing tests while still activating the path.
+	if conf.RpcConcurrencyLimit == 0 {
+		conf.RpcConcurrencyLimit = 1000
+	}
 	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
 	require.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
@@ -281,11 +290,14 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 		headers.Set("Origin", browserOrigin)
 	}
 	//nolint
-	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
-	if conn != nil {
-		conn.Close()
+	conn, resp, err := websocket.Dial(context.Background(), url, &websocket.DialOptions{HTTPHeader: headers})
+	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return err
 	}
-	return err
+	return conn.Close(websocket.StatusNormalClosure, "")
 }
 
 func TestAllowList(t *testing.T) {
@@ -344,4 +356,181 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 		t.Fatal(err)
 	}
 	return resp
+}
+
+func TestHTTP2H2C(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	srv := createAndStartServer(t, &httpConfig{}, false, &wsConfig{})
+	defer srv.stop()
+
+	// Create an HTTP/2 cleartext client.
+	transport := &http.Transport{}
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetUnencryptedHTTP2(true)
+	client := &http.Client{Transport: transport}
+
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
+	resp, err := client.Post("http://"+srv.listenAddr(), "application/json", body)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Validate protocol
+	assert.Equal(t, "HTTP/2.0", resp.Proto, "expected HTTP/2.0 protocol")
+
+	// Validate status
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Validate response body
+	result, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+}
+
+// TestRPCAdmissionHandler verifies that rpcAdmissionHandler correctly limits
+// concurrent requests and returns HTTP 503 when the limit is exceeded.
+func TestRPCAdmissionHandler(t *testing.T) {
+	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("disabled when limit is zero", func(t *testing.T) {
+		h := newRPCAdmissionHandler(0, okHandler)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("allows requests under the limit", func(t *testing.T) {
+		h := newRPCAdmissionHandler(5, okHandler)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("returns 503 when limit is exceeded", func(t *testing.T) {
+		// Use a gate channel to hold inflight requests open long enough to
+		// trigger the limit.
+		gate := make(chan struct{})
+		blockingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-gate
+			w.WriteHeader(http.StatusOK)
+		})
+
+		const limit = 2
+		h := newRPCAdmissionHandler(limit, blockingHandler)
+
+		var wg sync.WaitGroup
+		for i := 0; i < limit; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
+			}()
+		}
+
+		// Give goroutines time to enter the handler and increment the counter.
+		// We busy-wait on the inflight counter rather than sleeping.
+		admission := h.(*rpcAdmissionHandler)
+		for admission.inflight.Load() < limit {
+			// spin
+		}
+
+		// Now the limit is reached — next request must be rejected.
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
+
+		// Release the held requests.
+		close(gate)
+		wg.Wait()
+	})
+}
+
+// TestWsConnectionLimit verifies that WsConnectionLimit rejects excess WebSocket
+// connections with HTTP 503 and allows new ones once a slot is freed.
+func TestWsConnectionLimit(t *testing.T) {
+	const limit = 1
+	srv := createAndStartServer(t, &httpConfig{}, true, &wsConfig{
+		Origins:           []string{"*"},
+		WsConnectionLimit: limit,
+	})
+	defer srv.stop()
+	url := fmt.Sprintf("ws://%v", srv.listenAddr())
+
+	// First connection should succeed.
+	conn1, resp1, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil && resp1 != nil {
+		resp1.Body.Close()
+	}
+	require.NoError(t, err, "first connection should succeed")
+
+	// Wait until the server increments its counter.
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 1 },
+		5*time.Second, 5*time.Millisecond)
+
+	// While first connection is open the second must be rejected.
+	_, resp, err2 := websocket.Dial(context.Background(), url, nil)
+	require.Error(t, err2, "second connection should be rejected")
+	if resp != nil {
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+		resp.Body.Close()
+	}
+
+	// Close first connection and wait for the counter to drop.
+	require.NoError(t, conn1.Close(websocket.StatusNormalClosure, ""))
+	require.Eventually(t, func() bool { return srv.wsLimiter.count.Load() == 0 },
+		5*time.Second, 5*time.Millisecond)
+
+	// A new connection should now succeed.
+	conn3, resp3, err := websocket.Dial(context.Background(), url, nil)
+	if err != nil && resp3 != nil {
+		resp3.Body.Close()
+	}
+	require.NoError(t, err, "connection after limit released should succeed")
+	require.NoError(t, conn3.Close(websocket.StatusNormalClosure, ""))
+}
+
+// TestNewWSConnectionLimiter tests the standalone NewWSConnectionLimiter handler.
+func TestNewWSConnectionLimiter(t *testing.T) {
+	// limit=0: handler passes through without restriction.
+	passthrough := NewWSConnectionLimiter(0, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	rr0 := httptest.NewRecorder()
+	passthrough.ServeHTTP(rr0, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusOK, rr0.Code)
+
+	// Build a limiter with limit=1.
+	// Use a channel to keep "connections" open until the test releases them.
+	hold := make(chan struct{})
+	slow := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-hold
+		w.WriteHeader(http.StatusOK)
+	})
+	limiter := NewWSConnectionLimiter(1, slow)
+
+	// First request: should be accepted (blocks on hold).
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		limiter.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	// Give the goroutine time to increment the counter.
+	require.Eventually(t, func() bool {
+		return limiter.(*wsConnectionLimiter).count.Load() == 1
+	}, 2*time.Second, time.Millisecond)
+
+	// Second request: should be rejected with 503.
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	limiter.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+
+	// Release the first "connection".
+	close(hold)
+	require.Eventually(t, func() bool {
+		return limiter.(*wsConnectionLimiter).count.Load() == 0
+	}, 2*time.Second, time.Millisecond)
 }

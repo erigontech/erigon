@@ -27,38 +27,21 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 )
 
 type FinishCfg struct {
-	db                kv.RwDB
-	tmpDir            string
-	forkValidator     *engine_helpers.ForkValidator
 	initialCycleStart *time.Time
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
+func StageFinishCfg() FinishCfg {
 	initialCycleStart := time.Now()
 	return FinishCfg{
-		db:                db,
-		tmpDir:            tmpDir,
-		forkValidator:     forkValidator,
 		initialCycleStart: &initialCycleStart,
 	}
 }
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	defer updateInitialCycleDuration(s, cfg)
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
@@ -73,23 +56,17 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
-	if cfg.forkValidator != nil {
-		cfg.forkValidator.NotifyCurrentHeight(executionAt)
-	}
-
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := rawdb.SetErigonVersion(tx, version.VersionKeyFinished); err != nil {
 			return err
 		}
 	}
 
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
+}
+
+func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	return u.Done(tx)
 }
 
 func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
@@ -99,45 +76,6 @@ func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
 		*cfg.initialCycleStart = time.Now()
 		initialCycleDurationSecs.Set(0)
 	}
-}
-
-func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // [from,to)

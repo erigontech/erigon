@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -44,8 +44,8 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type InvertedIndex struct {
@@ -67,24 +68,19 @@ type InvertedIndex struct {
 	// dirtyFiles - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
 	// thread-safe, but maybe need 1 RWLock for all trees in Aggregator
 	//
-	// _visible derivative from field `file`, but without garbage:
-	//  - no files with `canDelete=true`
-	//  - no overlaps
-	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
-	//
-	// BeginRo() using _visible in zero-copy way
+	// The visible view (derivative of dirtyFiles, without garbage: no `canDelete=true`,
+	// no overlaps, no un-indexed files) is computed by Aggregator into an immutable
+	// iiVisible snapshot and published atomically via Aggregator.visible. BeginFilesRo
+	// opens readers against that snapshot in zero-copy way.
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
-	_visible *iiVisible
-	logger   log.Logger
+	logger log.Logger
 
 	checker *DependencyIntegrityChecker
 }
 
 type iiVisible struct {
-	files  []visibleFile
+	files  visibleFiles
 	name   string
 	caches *sync.Pool
 }
@@ -107,7 +103,6 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,
 
 		stepSize:          stepSize,
@@ -125,6 +120,11 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 	}
 
 	return &ii, nil
+}
+
+func (ii *InvertedIndex) setStepSize(stepSize, stepsInFrozenFile uint64) {
+	ii.stepSize = stepSize
+	ii.stepsInFrozenFile = stepsInFrozenFile
 }
 
 func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string {
@@ -146,8 +146,12 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 	}
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep))
 }
-func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
+
+func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
+}
+func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
@@ -184,10 +188,10 @@ func filesFromDir(dir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (ii *InvertedIndex) openList(fNames []string) error {
+func (ii *InvertedIndex) openList(fNames, accessorFiles []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
-	if err := ii.openDirtyFiles(); err != nil {
+	if err := ii.openDirtyFiles(fNames, accessorFiles); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
 	}
 	return nil
@@ -197,7 +201,7 @@ func (ii *InvertedIndex) openFolder(r *ScanDirsResult) error {
 	if ii.Disable {
 		return nil
 	}
-	return ii.openList(r.iiFiles)
+	return ii.openList(r.iiFiles, r.accessorFiles)
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
@@ -218,7 +222,9 @@ func (ii *InvertedIndex) SetChecker(checker *DependencyIntegrityChecker) {
 	ii.checker = checker
 }
 
-func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
+// calcVisibleFiles is pure — it does not mutate ii. Used by the Aggregator to
+// assemble a cross-entity snapshot published atomically as aggregatorVisible.
+func (ii *InvertedIndex) calcVisibleFiles(toTxNum uint64) *iiVisible {
 	var checker func(startTxNum, endTxNum uint64) bool
 	c := ii.checker
 	if c != nil {
@@ -227,25 +233,23 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 			return c.CheckDependentPresent(ue, All, startTxNum, endTxNum)
 		}
 	}
-	ii._visible = newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
+	return newIIVisible(ii.FilenameBase, calcVisibleFiles(ii.dirtyFiles, ii.Accessors, checker, false, toTxNum))
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
-	return ii.missedMapAccessors(ii.dirtyFiles.Items())
+	return ii.missedMapAccessors(ii.dirtyFiles.Items(), readDirNames(ii.dirs.SnapAccessors))
 }
 
-func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		return []string{
-			fPath,
-		}
+		return []string{fPath}
 	})
 }
 
@@ -405,17 +409,17 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	return w
 }
 
-func (ii *InvertedIndex) BeginFilesRo() *InvertedIndexRoTx {
-	files := ii._visible.files
-	for i := 0; i < len(files); i++ {
-		if !files[i].src.frozen {
-			files[i].src.refcount.Add(1)
-		}
-	}
+func (ii *InvertedIndex) beginForTests() *InvertedIndexRoTx {
+	iv := ii.calcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	return ii.beginFilesRo(iv)
+}
+
+func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
+	iv.files.refcntIncrement()
 	return &InvertedIndexRoTx{
 		ii:                ii,
-		visible:           ii._visible,
-		files:             files,
+		visible:           iv,
+		files:             iv.files,
 		stepSize:          ii.stepSize,
 		stepsInFrozenFile: ii.stepsInFrozenFile,
 		name:              ii.Name,
@@ -491,6 +495,8 @@ type InvertedIndexRoTx struct {
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
+
+	reUsableSeq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -572,12 +578,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		encodedSeq, _ := g.Next(nil)
 
-		// TODO: implement merge Reset+Seek
-		// if iit.ef == nil {
-		// 	iit.ef = eliasfano32.NewEliasFano(1, 1)
-		// }
-		// equalOrHigherTxNum, found = iit.ef.Reset(encodedSeq).Seek(txNum)
-		equalOrHigherTxNum, found = multiencseq.Seek(iit.files[i].startTxNum, encodedSeq, txNum)
+		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
+		equalOrHigherTxNum, found = iit.reUsableSeq.Seek(txNum)
 		if !found {
 			continue
 		}
@@ -629,16 +631,33 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		}
 	}
 
+	// Adjust DB query bounds to exclude the range already covered by files.
+	// RangeDupSort semantics: asc=[from,to), desc=(to,from].
+	// Files cover [0, filesEndTxNum).
+	// Asc:  DB should cover [filesEndTxNum, endTxNum) — adjust inclusive lower bound.
+	// Desc: DB should cover (filesEndTxNum-1, startTxNum] — adjust exclusive lower bound.
+	//       filesEndTxNum-1 because `to` is exclusive, so value > (filesEndTxNum-1) ≡ value >= filesEndTxNum.
+	dbStartTxNum := startTxNum
+	dbEndTxNum := endTxNum
+	if len(iit.files) > 0 {
+		filesEndTxNum := int(iit.files.EndTxNum())
+		if asc {
+			dbStartTxNum = max(dbStartTxNum, filesEndTxNum)
+		} else {
+			dbEndTxNum = max(dbEndTxNum, filesEndTxNum-1)
+		}
+	}
+
 	var from []byte
-	if startTxNum >= 0 {
+	if dbStartTxNum >= 0 {
 		from = make([]byte, 8)
-		binary.BigEndian.PutUint64(from, uint64(startTxNum))
+		binary.BigEndian.PutUint64(from, uint64(dbStartTxNum))
 	}
 
 	var to []byte
-	if endTxNum >= 0 {
+	if dbEndTxNum >= 0 {
 		to = make([]byte, 8)
-		binary.BigEndian.PutUint64(to, uint64(endTxNum))
+		binary.BigEndian.PutUint64(to, uint64(dbEndTxNum))
 	}
 	it, err := roTx.RangeDupSort(iit.ii.ValuesTable, key, from, to, asc, limit)
 	if err != nil {
@@ -714,11 +733,25 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 	return it, nil
 }
 
-func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
+func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 	if min := iit.ii.minTxNumInDB(tx); min == 0 || min < iit.files.EndTxNum() {
 		return true
 	}
 	return false
+}
+
+func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
+	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	if err != nil {
+		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
+		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+	}
+	min := iit.ii.minTxNumInDB(tx)
+
+	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
+
+	//println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
+	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -732,10 +765,12 @@ type InvertedIndexPruneStat struct {
 	MaxTxNum         uint64
 	PruneCountTx     uint64
 	PruneCountValues uint64
+	DupsDeleted      uint64
+	Progress         prune.Progress
 }
 
 func (is *InvertedIndexPruneStat) PrunedNothing() bool {
-	return is.PruneCountTx == 0 && is.PruneCountValues == 0
+	return is.PruneCountTx == 0 && is.PruneCountValues == 0 && is.Progress == prune.Done
 }
 
 func (is *InvertedIndexPruneStat) String() string {
@@ -744,7 +779,8 @@ func (is *InvertedIndexPruneStat) String() string {
 	}
 	vstr := ""
 	if is.PruneCountValues > 0 {
-		vstr = fmt.Sprintf("values: %s,", common.PrettyCounter(is.PruneCountValues))
+		vstr = fmt.Sprintf("values: %s, dups: %s,", common.PrettyCounter(is.PruneCountValues),
+			common.PrettyCounter(is.DupsDeleted))
 	}
 	return fmt.Sprintf("%s txns: %d from %s-%s",
 		vstr, is.PruneCountTx, common.PrettyCounter(is.MinTxNum), common.PrettyCounter(is.MaxTxNum))
@@ -758,10 +794,11 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.MaxTxNum = max(is.MaxTxNum, other.MaxTxNum)
 	is.PruneCountTx += other.PruneCountTx
 	is.PruneCountValues += other.PruneCountValues
+	is.DupsDeleted += other.DupsDeleted
 }
 
-func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, _ bool, fn func(key []byte, txnum []byte) error) error {
-	_, err := iit.prune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
+func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, _ bool) error {
+	_, err := iit.hashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, nil, nil, prune.DefaultStorageMode)
 	if err != nil {
 		return err
 	}
@@ -770,132 +807,148 @@ func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, 
 
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (iit *InvertedIndexRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	if !forced {
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
 		}
-		if !iit.CanPrune(tx) {
+		if !iit.CanPrune(tx, txTo) && valTable == nil /* it's not a history prune */ {
+			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
+		}
+	}
+	if txTo == MaxUint64 {
+		return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
+	}
+	return iit.tableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, valTable, pruneSizeMetric, mode)
+}
+
+func (iit *InvertedIndexRoTx) HashSeekingPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+	if !forced {
+		if iit.files.EndTxNum() > 0 {
+			txTo = min(txTo, iit.files.EndTxNum())
+		}
+		if !iit.CanHashPrune(tx) {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, nil
 		}
 	}
-	return iit.prune(ctx, tx, txFrom, txTo, limit, logEvery, fn)
+	return iit.hashSeekingPrune(ctx, tx, txFrom, txTo, limit, logEvery, valDelCursor, pruneSizeMetric, mode)
 }
 
-func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
-	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-
+func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-
-	if limit == 0 { // limits amount of txn to be pruned
-		limit = math.MaxUint64
-	}
-
-	ii := iit.ii
-	//defer func() {
-	//	ii.logger.Error("[snapshots] prune index",
-	//		"name", ii.filenameBase,
-	//		"forced", forced,
-	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(iit.stepSize), float64(maxTxnum)/float64(iit.stepSize)),
-	//		"pruned values", pruneCount,
-	//		"tx until limit", limit)
-	//}()
-
-	keysCursor, err := rwTx.CursorDupSort(ii.KeysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
 	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.FilenameBase, err)
+		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
-	idxDelCursor, err := rwTx.RwCursorDupSort(ii.ValuesTable)
+	if valDelCursor == nil {
+		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer valDelCursor.Close()
+
+	if pruneSizeMetric == nil {
+		pruneSizeMetric = mxPruneSizeIndex
+	}
+	pruneStat, err := prune.HashSeekingPrune(ctx, iit.name.String(), iit.ii.FilenameBase, iit.ii.dirs.Tmp, txFrom, txTo, limit, iit.stepSize,
+		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, mode)
 	if err != nil {
 		return nil, err
 	}
-	defer idxDelCursor.Close()
+	if pruneStat == nil {
+		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
+	}
+	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
+	return &InvertedIndexPruneStat{
+		MinTxNum:         pruneStat.MinTxNum,
+		MaxTxNum:         pruneStat.MaxTxNum,
+		PruneCountTx:     pruneStat.PruneCountTx,
+		PruneCountValues: pruneStat.PruneCountValues,
+		DupsDeleted:      pruneStat.DupsDeleted,
+	}, nil
+}
 
-	collector := etl.NewCollectorWithAllocator(ii.FilenameBase+".prune.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger)
-	defer collector.Close()
-	collector.LogLvl(log.LvlTrace)
-	collector.SortAndFlushInBackground(false)
-
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
-
-	// Invariant: if some `txNum=N` pruned - it's pruned Fully
-	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
-	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.NextNoDup() {
+func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, valDelCursor kv.PseudoDupSortRwCursor, valTable *string, pruneSizeMetric metrics.Counter, mode prune.StorageMode) (stat *InvertedIndexPruneStat, err error) {
+	mxPruneInProgress.Inc()
+	defer mxPruneInProgress.Dec()
+	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
+	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
+	}
+	defer keysCursor.Close()
+	if valDelCursor == nil {
+		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
 		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-		}
-
-		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo || limit == 0 {
-			break
-		}
-		if asserts && txNum < txFrom {
-			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
-		}
-
-		limit--
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-
-		for ; v != nil; _, v, err = keysCursor.NextDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-			}
-			if err := collector.Collect(v, k); err != nil {
-				return nil, err
-			}
-		}
-
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, err
 		}
 	}
+	defer valDelCursor.Close()
 
-	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		if fn != nil {
-			if err = fn(key, txnm); err != nil {
-				return fmt.Errorf("fn error: %w", err)
-			}
-		}
-		if err = idxDelCursor.DeleteExact(key, txnm); err != nil {
-			return err
-		}
-		mxPruneSizeIndex.Inc()
-		stat.PruneCountValues++
-
-		select {
-		case <-logEvery.C:
-			txNum := binary.BigEndian.Uint64(txnm)
-			ii.logger.Info("[snapshots] prune index", "name", ii.FilenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.stepSize), float64(txNum)/float64(ii.stepSize)))
-		default:
-		}
-		return nil
-	}, etl.TransformArgs{Quit: ctx.Done()})
-
-	if stat.MinTxNum != math.MaxUint64 {
-		binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
-		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		for txnb, _, err := keysCursor.Seek(txKey[:]); txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.FilenameBase, err)
-			}
-			if binary.BigEndian.Uint64(txnb) > stat.MaxTxNum {
-				break
-			}
-			stat.PruneCountTx++
-			if err = rwTx.Delete(ii.KeysTable, txnb); err != nil {
-				return nil, err
-			}
-		}
+	if pruneSizeMetric == nil {
+		pruneSizeMetric = mxPruneSizeIndex
 	}
 
-	return stat, err
+	var vtbl, name string
+	if valTable != nil {
+		vtbl = *valTable
+		name = "history: " + iit.name.String()
+	} else {
+		vtbl = iit.ii.ValuesTable
+		name = "ii: " + iit.name.String()
+	}
+
+	prs, err := GetPruneValProgress(rwTx, []byte(vtbl))
+	if err != nil {
+		return nil, err
+	}
+	if prs != nil && prs.TxTo >= txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
+		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
+		stat.Progress = prune.Done
+		return stat, nil
+	}
+	// Rolling scan: preserve B-tree key cursor across txTo advances.
+	// Keys cursor seeks by txNum directly (no scan penalty on reset),
+	// but values cursor has no txNum ordering — preserve its position.
+	if prs.ValueProgress == prune.Done {
+		prs.ValueProgress = prune.First
+		prs.LastPrunedValue = nil
+		prs.KeyProgress = prune.First
+		prs.LastPrunedKey = nil
+	}
+	prs.TxFrom = txFrom
+	prs.TxTo = txTo
+
+	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
+		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
+	if err != nil {
+		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
+		return nil, err
+	}
+	defer func() {
+		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+		err = SavePruneValProgress(rwTx, vtbl, pruneStat)
+		if err != nil {
+			iit.ii.logger.Error("prune val progress", "name", iit.name, "err", err)
+		}
+	}()
+	if pruneStat == nil {
+		return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}, errors.New("prune stat is nil")
+	}
+	pruneSizeMetric.AddUint64(pruneStat.PruneCountValues)
+	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
+	return &InvertedIndexPruneStat{
+		MinTxNum:         pruneStat.MinTxNum,
+		MaxTxNum:         pruneStat.MaxTxNum,
+		PruneCountTx:     pruneStat.PruneCountTx,
+		PruneCountValues: pruneStat.PruneCountValues,
+		DupsDeleted:      pruneStat.DupsDeleted,
+		Progress:         min(pruneStat.ValueProgress, pruneStat.KeyProgress),
+	}, nil
 }
 
 // collate [stepFrom, stepTo)
@@ -953,13 +1006,17 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	coll.writer = seg.NewWriter(comp, ii.Compression)
 
+	baseTxNum := uint64(step) * ii.stepSize
 	var (
 		prevEf      []byte
 		prevKey     []byte
 		initialized bool
-		bitmap      = bitmapdb.NewBitmap64()
+		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
+		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
+		// Worst case: one key touched every txNum in the step → stepSize uint32 entries.
+		offsets = make([]uint32, 0, 64)
+		ef      multiencseq.SequenceBuilder
 	)
-	defer bitmapdb.ReturnToPool64(bitmap)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -969,18 +1026,19 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(txNum)
-			prevKey = append(prevKey[:0], k...)
+			offsets = append(offsets, uint32(txNum-baseTxNum))
 			return nil
 		}
-
-		baseTxNum := uint64(step) * ii.stepSize
-		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		it := bitmap.Iterator()
-		for it.HasNext() {
-			ef.AddOffset(it.Next())
+		absMin, absMax := baseTxNum+uint64(offsets[0]), baseTxNum+uint64(offsets[len(offsets)-1])
+		if absMin < txFrom || absMax >= txTo {
+			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
+				ii.FilenameBase, txFrom, txTo, step, absMin, absMax, prevKey)
 		}
-		bitmap.Clear()
+		ef.Reset(baseTxNum, uint64(len(offsets)), absMax)
+		for _, off := range offsets {
+			ef.AddOffset(baseTxNum + uint64(off))
+		}
+		offsets = offsets[:0]
 		ef.Build()
 
 		prevEf = ef.AppendBytes(prevEf[:0])
@@ -992,9 +1050,13 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 			return fmt.Errorf("add %s efi index val: %w", ii.FilenameBase, err)
 		}
 
+		if k == nil { // sentinel flush: no next group to start
+			return nil
+		}
+
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(txNum)
+		offsets = append(offsets[:0], uint32(txNum-baseTxNum))
 
 		return nil
 	}
@@ -1003,7 +1065,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	if err != nil {
 		return InvertedIndexCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(offsets) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
@@ -1072,13 +1134,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	}
 
 	{
-		p := ps.AddNew(path.Base(coll.iiPath), 1)
 		if err = coll.writer.Compress(); err != nil {
-			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
 		}
 		coll.Close()
-		ps.Delete(p)
 	}
 
 	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
@@ -1111,6 +1170,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		IndexFile:  idxPath,
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
+		Workers:    ii.BuildAccessorsWorkers,
 
 		Version:            versionOfRs,
 		Enums:              true,
@@ -1144,7 +1204,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger, nil); err != nil {
 		return err
 	}
 	return nil
@@ -1153,6 +1213,9 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
+	if sf.decomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
 	}
 	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.stepsInFrozenFile)
 	fi.decompressor = sf.decomp
@@ -1173,6 +1236,7 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	if to == 0 {
 		to = from
 	}
+
 	return from, to
 }
 

@@ -17,11 +17,9 @@
 package jsonrpc
 
 import (
-	"bytes"
-	"context"
+	"cmp"
 	"errors"
-	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -30,8 +28,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 const (
@@ -61,48 +57,6 @@ var (
 	errMissingVanity = errors.New("extra-data 32 byte vanity prefix missing")
 )
 
-// getHeaderByNumber returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
-// derived from erigon_getHeaderByNumber implementation (see ./erigon_block.go)
-func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl, tx kv.Tx) (*types.Header, error) {
-	// Pending block is only known by the miner
-	if number == rpc.PendingBlockNumber {
-		block := api.pendingBlock()
-		if block == nil {
-			return nil, nil
-		}
-		return block.Header(), nil
-	}
-
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %d", blockNum)
-	}
-
-	return header, nil
-}
-
-// getHeaderByHash returns a block's header given a block's hash.
-// derived from erigon_getHeaderByHash implementation (see ./erigon_block.go)
-func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Hash) (*types.Header, error) {
-	header, err := api._blockReader.HeaderByHash(ctx, tx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if header == nil {
-		return nil, fmt.Errorf("block header not found: %s", hash.String())
-	}
-
-	return header, nil
-}
-
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error) {
 	// Retrieve the signature from the header extra-data
@@ -122,43 +76,7 @@ func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error
 	return signer, nil
 }
 
-// validatorContains checks for a validator in given validator set
-func validatorContains(a []*heimdall.Validator, x *heimdall.Validator) (*heimdall.Validator, bool) {
-	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
-			return n, true
-		}
-	}
-	return nil, false
-}
-
 type ValidatorSet = heimdall.ValidatorSet
-
-// getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*heimdall.Validator) *ValidatorSet {
-	v := oldValidatorSet
-	oldVals := v.Validators
-
-	changes := make([]*heimdall.Validator, 0, len(oldVals))
-	for _, ov := range oldVals {
-		if f, ok := validatorContains(newVals, ov); ok {
-			ov.VotingPower = f.VotingPower
-		} else {
-			ov.VotingPower = 0
-		}
-
-		changes = append(changes, ov)
-	}
-
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
-
-	v.UpdateWithChangeSet(changes)
-	return v
-}
 
 // author returns the Ethereum address recovered
 // from the signature in the header's extra-data section.
@@ -173,8 +91,8 @@ func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
 		ss = append(ss, difficultiesKV{k, v})
 	}
 
-	sort.Slice(ss, func(i, j int) bool {
-		return ss[i].Difficulty > ss[j].Difficulty
+	slices.SortFunc(ss, func(a, b difficultiesKV) int {
+		return cmp.Compare(b.Difficulty, a.Difficulty)
 	})
 
 	return ss

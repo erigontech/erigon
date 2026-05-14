@@ -2,11 +2,15 @@
 description: >-
   Unmatched Efficiency: How Erigon's Architecture Benefits Stakers, Developers,
   and Home Users
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/readme/why-using-erigon
 ---
 
 # Why using Erigon?
 
-Erigon is a cutting-edge Ethereum execution client engineered for **unmatched speed, efficiency, and modularity**.&#x20;
+Erigon is a cutting-edge Ethereum execution client engineered for **unmatched speed, efficiency, and modularity**.
 
 A core benefit of Erigon is its **dramatically reduced disk footprint** across all available sync modes. This reduction is achieved through advanced compression and efficient state storage, making node operation feasible even on consumer-grade hardware. Furthermore, Erigon features an **integrated Consensus Layer (Caplin)**, which eliminates the need to run and manage separate CL software. Finally, it uses a unique implementation of the **BitTorrent protocol for historical data**, enabling the efficient and quick repair of node snapshots and simplified data distribution.
 

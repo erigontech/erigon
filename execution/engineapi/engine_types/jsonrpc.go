@@ -49,7 +49,8 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -66,6 +67,7 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -84,6 +86,41 @@ type BlobsBundle struct {
 	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
 }
 
+// BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,
+// commitments, and proofs from blob transactions in the given list.
+func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
+	bundle := &BlobsBundle{
+		Commitments: make([]hexutil.Bytes, 0),
+		Proofs:      make([]hexutil.Bytes, 0),
+		Blobs:       make([]hexutil.Bytes, 0),
+	}
+	for i, txn := range txs {
+		if txn.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := txn.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
+		}
+		for _, c := range blobTx.Commitments {
+			cp := make([]byte, len(c))
+			copy(cp, c[:])
+			bundle.Commitments = append(bundle.Commitments, cp)
+		}
+		for _, p := range blobTx.Proofs {
+			pp := make([]byte, len(p))
+			copy(pp, p[:])
+			bundle.Proofs = append(bundle.Proofs, pp)
+		}
+		for _, b := range blobTx.Blobs {
+			bp := make([]byte, len(b))
+			copy(bp, b[:])
+			bundle.Blobs = append(bundle.Blobs, bp)
+		}
+	}
+	return bundle, nil
+}
+
 // BlobAndProofV1 holds one item for engine_getBlobsV1
 type BlobAndProofV1 struct {
 	Blob  hexutil.Bytes `json:"blob" gencodec:"required"`
@@ -99,6 +136,12 @@ type BlobAndProofV2 struct {
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+}
+
+type ExecutionPayloadBodyV2 struct {
+	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 
 type PayloadStatus struct {
@@ -170,7 +213,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	body := payload.Body
 
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(body.Transactions))
@@ -190,7 +233,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -203,15 +246,16 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
-	if body.BlockAccessList != nil {
-		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
+	if header.SlotNumber != nil {
+		slotNumber := *header.SlotNumber
+		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 	}
 	return res
 }
 
 func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(payload.Transactions))
@@ -231,7 +275,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
@@ -245,7 +289,13 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	if payload.Version >= 4 {
-		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
+		if payload.SlotNumber != nil {
+			slotNumber := *payload.SlotNumber
+			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		}
+		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
+			res.BlockAccessList = blockAccessList
+		}
 	}
 	return res
 }

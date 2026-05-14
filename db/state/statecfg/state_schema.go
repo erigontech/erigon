@@ -73,7 +73,11 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	return nil
 }
 
+// AggregatorSqueezeCommitmentValues controls whether commitment aggregator should replace keys in values during merge once file range reaches threshold.
+// This can significantly reduce size of commitment values, but makes them non-human readable and requires additional processing during reads.
+// This is not needed for correctness, but can be used to save space if needed.
 const AggregatorSqueezeCommitmentValues = true
+
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
@@ -198,7 +202,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,

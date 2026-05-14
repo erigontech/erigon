@@ -1,7 +1,6 @@
 package test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -70,9 +69,9 @@ func TestUnmarked_PutToDb(t *testing.T) {
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
-	rwtx, err := db.BeginRw(context.Background())
-	defer rwtx.Rollback()
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	num := Num(0)
 	value := []byte{1, 2, 3, 4, 5}
@@ -90,13 +89,16 @@ func TestUnmarked_PutToDb(t *testing.T) {
 }
 
 func TestUnmarkedPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64
 		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
 			dir, db, log := setup(t)
 			borSpanId, uma := setupBorSpans(t, log, dir, db)
 
-			ctx := context.Background()
+			ctx := t.Context()
 			cfg := state.Registry.SnapshotConfig(borSpanId)
 			extras_count := uint64(5) // db
 			entries_count = cfg.MinimumSize + cfg.SafetyMargin + extras_count
@@ -104,8 +106,8 @@ func TestUnmarkedPrune(t *testing.T) {
 			uma_tx := uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			getData := func(i int) (Num, state.Bytes) {
 				return Num(i), fmt.Appendf(nil, "data%d", i)
@@ -140,8 +142,8 @@ func TestUnmarkedPrune(t *testing.T) {
 			defer uma_tx.Close()
 
 			rwtx, err = db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			stat, err := uma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
@@ -179,13 +181,13 @@ func CustomSpanIdAt(blockNum uint64) heimdall.SpanId {
 func TestBuildFiles_Unmarked(t *testing.T) {
 	dir, db, log := setup(t)
 	borSpanId, uma := setupBorSpans(t, log, dir, db)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 	cfg := state.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
@@ -235,8 +237,8 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstSpanIdNotInSnap := Num(CustomSpanIdAt(uint64(firstRootNumNotInSnap)))
@@ -276,13 +278,13 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	dir, db, log := setup(t)
 	pagedDataId, uma := setupPagedEntity(t, log, dir, db)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 	cfg := state.Registry.SnapshotConfig(pagedDataId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
@@ -332,8 +334,8 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxNum()
@@ -393,11 +395,12 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 		state.NewAccessorArgs(false, false, cfg.ValuesOnCompressedPage, stepSize),
 		id, dirs.Tmp, log)
 
-	rwtx, err := db.BeginRw(context.Background())
+	rwtx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 
 	require.NoError(t, rwtx.CreateTable(cfg.ValsTbl))
+	require.NoError(t, rwtx.Commit())
 
 	uma, err := state.NewUnmarkedForkable(id,
 		cfg,

@@ -1,5 +1,9 @@
 ---
 description: Connecting Erigon (EL) to Consensus Clients (CL)
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/engine
 ---
 
 # engine
@@ -12,7 +16,7 @@ For API usage refer to the below official resources:
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
-{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+{% embed url="https://ethereum.github.io/execution-apis/" %}
 
 #### Default Erigon Behavior (Caplin)
 
@@ -28,6 +32,7 @@ When in use (with external CL clients), the Engine API provides essential method
 * Fork Choice Updates: `engine_forkchoiceUpdatedV1/V2/V3` updates the chain head and triggers block building.
 * Payload Retrieval: `engine_getPayloadV1/V2/V3/V4` retrieves built blocks for the CL to propose.
 * Payload Bodies: `engine_getPayloadBodiesByHashV1` and `engine_getPayloadBodiesByRangeV1` fetch historical data.
+* Blob Retrieval: `engine_getBlobsV1/V2/V3` retrieves blobs by versioned hash, with V3 adding support for PeerDAS data columns.
 
 #### Configuration and Security
 

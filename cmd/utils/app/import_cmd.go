@@ -37,14 +37,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -75,6 +74,22 @@ func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
 		utils.Fatalf("This command requires an argument.")
 	}
+
+	// Force-disable subsystems the one-shot import doesn't need, via the normal
+	// flag path so the downstream config build skips their setup entirely.
+	// --nat=none in particular avoids a ~2s UPnP/NAT-PMP autodiscovery probe in
+	// downloadernat.DoNat that otherwise dominates per-run startup (observable
+	// in hive eest/consume-rlp).
+	for flag, value := range map[string]string{
+		utils.NATFlag.Name:               "none",
+		utils.NoDownloaderFlag.Name:      "true",
+		utils.ExternalConsensusFlag.Name: "true",
+	} {
+		if err := cliCtx.Set(flag, value); err != nil {
+			return fmt.Errorf("importChain: set %s=%s: %w", flag, value, err)
+		}
+	}
+
 	logger, tracer, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -86,8 +101,6 @@ func importChain(cliCtx *cli.Context) error {
 	}
 
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
-	ethCfg.Snapshot.NoDownloader = true // no need to run this for import chain (also used in hive eest/consume-rlp tests)
-	ethCfg.InternalCL = false           // no need to run this for import chain (also used in hive eest/consume-rlp tests)
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()
 
@@ -255,7 +268,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		insertedBlocks[block.NumberU64()] = struct{}{}
 	}
 
-	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
+	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
 	ctx := context.Background()
 	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
@@ -267,9 +280,18 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
+	}
+	// On any non-success status the commit is skipped and no state-diff events
+	// will be emitted, so skip the wait below — otherwise stream.Recv() hangs.
+	if status != execmodule.ExecutionStatusSuccess {
+		blockNum := chain.Blocks[chain.Length()-1].NumberU64()
+		if validationErr != nil {
+			return fmt.Errorf("fork-choice rejected block %d, status: %s: %s", blockNum, status.String(), *validationErr)
+		}
+		return fmt.Errorf("fork-choice rejected block %d, status: %s", blockNum, status.String())
 	}
 
 	// UpdateForkChoice has an async commit so we need to wait to make sure
@@ -301,16 +323,8 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 		}
 	}
 
-	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
+	return ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {
 		rawdb.WriteHeadBlockHash(tx, lvh)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if status != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("insertion failed for block %d, code: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String())
-	}
-
-	return nil
 }

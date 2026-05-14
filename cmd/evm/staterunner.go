@@ -25,11 +25,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -68,10 +68,10 @@ func stateTestCmd(ctx *cli.Context) error {
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	cfg := vm.Config{}
 	if machineFriendlyOutput {
@@ -122,7 +122,12 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool, bench bool) error {
 func aggregateResultsFromStateTests(
 	stateTests map[string]testutil.StateTest, cfg vm.Config,
 	jsonOut bool, bench bool) ([]StatetestResult, error) {
-	dirs := datadir.New(filepath.Join(os.TempDir(), "erigon-statetest"))
+	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.RemoveAll(tmpDir)
+	dirs := datadir.New(tmpDir)
 
 	db := temporaltest.NewTestDB(nil, dirs)
 	defer db.Close()

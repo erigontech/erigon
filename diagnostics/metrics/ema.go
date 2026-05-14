@@ -2,15 +2,17 @@ package metrics
 
 import (
 	"sync/atomic"
-
-	"golang.org/x/exp/constraints"
 )
+
+type number interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64
+}
 
 // EMA holds the Exponential Moving Average of a float64 with a the given
 // default α value. Safe to access concurrently.
 // https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average.
 // It can also optionally have β which controls decrease rate seperately.
-type EMA[T constraints.Integer | constraints.Float] struct {
+type EMA[T number] struct {
 	defaultAlpha float64
 	defaultBeta  float64
 	defaultValue T
@@ -18,13 +20,13 @@ type EMA[T constraints.Integer | constraints.Float] struct {
 }
 
 // New creates an EMA with the given default value and alpha
-func NewEma[T constraints.Integer | constraints.Float](defaultValue T, defaultAlpha float64) *EMA[T] {
+func NewEma[T number](defaultValue T, defaultAlpha float64) *EMA[T] {
 	return NewEmaWithBeta(defaultValue, defaultAlpha, defaultAlpha)
 }
 
 // NewWithBeta is the same as New but supplies a seperate beta to control the
 // decrease rate
-func NewEmaWithBeta[T constraints.Integer | constraints.Float](defaultValue T, defaultAlpha float64, defaultBeta float64) *EMA[T] {
+func NewEmaWithBeta[T number](defaultValue T, defaultAlpha float64, defaultBeta float64) *EMA[T] {
 	return &EMA[T]{defaultAlpha: defaultAlpha, defaultBeta: defaultBeta, defaultValue: defaultValue}
 }
 

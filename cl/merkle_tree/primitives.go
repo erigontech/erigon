@@ -30,13 +30,6 @@ func Uint64Root(val uint64) common.Hash {
 	return root
 }
 
-func BoolRoot(b bool) (root common.Hash) {
-	if b {
-		root[0] = 1
-	}
-	return
-}
-
 func BytesRoot(b []byte) (out [32]byte, err error) {
 	leafCount := NextPowerOfTwo(uint64((len(b) + 31) / length.Hash))
 	leaves := make([]byte, leafCount*length.Hash)

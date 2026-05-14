@@ -76,7 +76,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+		Usage: `Choose a pruning preset to run on. Available values: "full", "archive", "minimal", "blocks".
 				full: Keep only necessary blocks and latest state,
 				blocks: Keep all blocks but not the state history,
 				archive: Keep the entire state history and all blocks,
@@ -91,26 +91,6 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-	// mTLS flags
-	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
-	}
-	TLSCertFlag = cli.StringFlag{
-		Name:  "tls.cert",
-		Usage: "Specify certificate",
-		Value: "",
-	}
-	TLSKeyFlag = cli.StringFlag{
-		Name:  "tls.key",
-		Usage: "Specify key file",
-		Value: "",
-	}
-	TLSCACertFlag = cli.StringFlag{
-		Name:  "tls.cacert",
-		Usage: "Specify certificate authority",
-		Value: "",
-	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
@@ -118,6 +98,7 @@ var (
 	ExperimentalBALFlag = cli.BoolFlag{
 		Name:  "experimental.bal",
 		Usage: "generate block access list",
+		Value: false,
 	}
 
 	// Throttling Flags
@@ -149,11 +130,6 @@ var (
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
-	}
-
-	HealthCheckFlag = cli.BoolFlag{
-		Name:  "healthcheck",
-		Usage: "Enable grpc health check",
 	}
 
 	HTTPReadTimeoutFlag = cli.DurationFlag{
@@ -233,7 +209,23 @@ var (
 	}
 )
 
+// BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
+// entry point for flag-to-config mapping — it calls utils.SetEthConfig internally
+// and then applies the remaining flags defined in this package.
+//
+// After this function returns, the config is fully populated from CLI flags.
+func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+// Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
@@ -446,6 +438,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
+		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
@@ -455,9 +449,12 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
+		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
 		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
 		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),
@@ -468,6 +465,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+
+		RpcTxSyncDefaultTimeout: ctx.Duration(utils.RpcTxSyncDefaultTimeoutFlag.Name),
+		RpcTxSyncMaxTimeout:     ctx.Duration(utils.RpcTxSyncMaxTimeoutFlag.Name),
 	}
 
 	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {
@@ -527,9 +527,9 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit
 	}
-	if ctx.Bool(TLSFlag.Name) {
-		certFile := ctx.String(TLSCertFlag.Name)
-		keyFile := ctx.String(TLSKeyFlag.Name)
+	if ctx.Bool(utils.TLSFlag.Name) {
+		certFile := ctx.String(utils.TLSCertFlag.Name)
+		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
 			log.Warn("Could not establish TLS grpc: missing certificate")
 			return
@@ -540,7 +540,7 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
-		cfg.TLSCACert = ctx.String(TLSCACertFlag.Name)
+		cfg.TLSCACert = ctx.String(utils.TLSCACertFlag.Name)
 	}
-	cfg.HealthCheck = ctx.Bool(HealthCheckFlag.Name)
+	cfg.HealthCheck = ctx.Bool(utils.HealthCheckFlag.Name)
 }

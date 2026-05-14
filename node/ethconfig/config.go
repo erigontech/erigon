@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -53,17 +53,17 @@ var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
 
-func DefaultBlockGasLimitByChain(config *Config) uint64 {
-	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
+func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
+	if chainConfig.DefaultBlockGasLimit == nil {
 		return DefaultBlockGasLimit
 	}
-	return *config.Genesis.Config.DefaultBlockGasLimit
+	return *chainConfig.DefaultBlockGasLimit
 }
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          big.NewInt(0),
+	Default:          uint256.NewInt(0),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
@@ -106,13 +106,15 @@ var Defaults = Config{
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
-
-	ImportMode: false,
 	Snapshot: BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+	FcuTimeout:          1 * time.Second,
+	FcuBackgroundPrune:  true,
+	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	ExperimentalBAL:     false,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -148,9 +150,13 @@ type BlocksFreezing struct {
 	ProduceE2         bool // produce new block files
 	ProduceE3         bool // produce new state files
 	NoDownloader      bool // possible to use snapshots without calling Downloader
+	P2PManifest       bool // discover snapshot manifest from P2P peers instead of centralized preverified.toml
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ManifestReady is closed when P2P manifest discovery completes.
+	// Set by the backend when P2PManifest is enabled. Nil otherwise.
+	ManifestReady <-chan struct{}
 }
 
 func (s BlocksFreezing) String() string {
@@ -192,8 +198,6 @@ type Config struct {
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
 
-	ImportMode bool
-
 	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot     BlocksFreezing
@@ -209,14 +213,13 @@ type Config struct {
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	// Mining options
-	Miner buildercfg.MiningConfig
+	// Block builder options
+	Builder buildercfg.BuilderConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config
 
-	Clique chainspec.ConsensusSnapshotConfig
-	Aura   chain.AuRaConfig
+	Aura chain.AuRaConfig
 
 	// Transaction pool options
 	TxPool  txpoolcfg.Config
@@ -246,25 +249,11 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverrideOsakaTime     *big.Int `toml:",omitempty"`
-	OverrideAmsterdamTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime     *uint64 `toml:",omitempty"`
+	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
-
-	// Embedded Silkworm support
-	SilkwormExecution            bool
-	SilkwormRpcDaemon            bool
-	SilkwormSentry               bool
-	SilkwormVerbosity            string
-	SilkwormNumContexts          uint32
-	SilkwormRpcLogEnabled        bool
-	SilkwormRpcLogDirPath        string
-	SilkwormRpcLogMaxFileSize    uint16
-	SilkwormRpcLogMaxFiles       uint16
-	SilkwormRpcLogDumpResponse   bool
-	SilkwormRpcNumWorkers        uint32
-	SilkwormRpcJsonCompatibility bool
 
 	// PoS Single Slot finality
 	PolygonPosSingleSlotFinality        bool
@@ -274,7 +263,17 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout time.Duration
+	FcuTimeout          time.Duration
+	FcuBackgroundPrune  bool
+	FcuBackgroundCommit bool
+
+	MCPAddress string
+
+	// ErigondbDomainStepsInFrozenFile overrides erigondb.toml stepsInFrozenFile for the
+	// domain merge cap only (history/II are unaffected). nil = no override;
+	// config3.UnboundedDomainMerge disables the cap; any other positive value is used
+	// directly as the cap in steps.
+	ErigondbDomainStepsInFrozenFile *uint64 `toml:",omitempty"`
 }
 
 type Sync struct {
@@ -289,10 +288,11 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey              bool
-	AlwaysGenerateChangesets bool
-	MaxReorgDepth            uint64
-	KeepExecutionProofs      bool
-	PersistReceiptsCacheV2   bool
-	SnapshotDownloadToBlock  uint64 // exclusive [0,toBlock)
+	ChaosMonkey                      bool
+	AlwaysGenerateChangesets         bool
+	MaxReorgDepth                    uint64
+	KeepExecutionProofs              bool
+	ExperimentalConcurrentCommitment bool
+	PersistReceiptsCacheV2           bool
+	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }

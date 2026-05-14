@@ -20,6 +20,7 @@
 package rlp
 
 import (
+	"encoding/binary"
 	"io"
 	"reflect"
 )
@@ -30,20 +31,6 @@ import (
 type RawValue []byte
 
 var rawValueType = reflect.TypeFor[RawValue]()
-
-// ListSize returns the encoded size of an RLP list with the given
-// content size.
-func ListSize(contentSize uint64) uint64 {
-	return uint64(headsize(contentSize)) + contentSize
-}
-
-// IntSize returns the encoded size of the integer x.
-func IntSize(x uint64) int {
-	if x < 0x80 {
-		return 1
-	}
-	return 1 + intsize(x)
-}
 
 // Split returns the content of first RLP value and any
 // bytes after the value as subslices of b.
@@ -75,18 +62,20 @@ func SplitUint64(b []byte) (x uint64, rest []byte, err error) {
 	if err != nil {
 		return 0, b, err
 	}
-	switch {
-	case len(content) == 0:
+	switch n := len(content); n {
+	case 0:
 		return 0, rest, nil
-	case len(content) == 1:
+	case 1:
 		if content[0] == 0 {
 			return 0, b, ErrCanonInt
 		}
 		return uint64(content[0]), rest, nil
-	case len(content) > 8:
-		return 0, b, errUintOverflow
 	default:
-		x, err = readSize(content, byte(len(content)))
+		if n > 8 {
+			return 0, b, errUintOverflow
+		}
+
+		x, err = readSize(content, byte(n))
 		if err != nil {
 			return 0, b, ErrCanonInt
 		}
@@ -107,13 +96,15 @@ func SplitList(b []byte) (content, rest []byte, err error) {
 	return content, rest, nil
 }
 
-// CountValues counts the number of encoded values in b.
+// CountValues returns the number of encoded values in b.
+// If an error is encountered while parsing, the count
+// includes the item that caused the error.
 func CountValues(b []byte) (int, error) {
 	i := 0
 	for ; len(b) > 0; i++ {
 		_, tagsize, size, err := readKind(b)
 		if err != nil {
-			return 0, err
+			return i + 1, err
 		}
 		b = b[tagsize+size:]
 	}
@@ -126,30 +117,30 @@ func readKind(buf []byte) (k Kind, tagsize, contentsize uint64, err error) {
 	}
 	b := buf[0]
 	switch {
-	case b < 0x80:
+	case b < SingleByteThreshold:
 		k = Byte
 		tagsize = 0
 		contentsize = 1
-	case b < 0xB8:
+	case b < LongStringCode+1:
 		k = String
 		tagsize = 1
-		contentsize = uint64(b - 0x80)
+		contentsize = uint64(b - EmptyStringCode)
 		// Reject strings that should've been single bytes.
-		if contentsize == 1 && len(buf) > 1 && buf[1] < 128 {
+		if contentsize == 1 && len(buf) > 1 && buf[1] < SingleByteThreshold {
 			return 0, 0, 0, ErrCanonSize
 		}
-	case b < 0xC0:
+	case b < EmptyListCode:
 		k = String
-		tagsize = uint64(b-0xB7) + 1
-		contentsize, err = readSize(buf[1:], b-0xB7)
-	case b < 0xF8:
+		tagsize = uint64(b-LongStringCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongStringCode)
+	case b < LongListCode+1:
 		k = List
 		tagsize = 1
-		contentsize = uint64(b - 0xC0)
+		contentsize = uint64(b - EmptyListCode)
 	default:
 		k = List
-		tagsize = uint64(b-0xF7) + 1
-		contentsize, err = readSize(buf[1:], b-0xF7)
+		tagsize = uint64(b-LongListCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongListCode)
 	}
 	if err != nil {
 		return 0, 0, 0, err
@@ -165,25 +156,9 @@ func readSize(b []byte, slen byte) (uint64, error) {
 	if int(slen) > len(b) {
 		return 0, io.ErrUnexpectedEOF
 	}
-	var s uint64
-	switch slen {
-	case 1:
-		s = uint64(b[0])
-	case 2:
-		s = uint64(b[0])<<8 | uint64(b[1])
-	case 3:
-		s = uint64(b[0])<<16 | uint64(b[1])<<8 | uint64(b[2])
-	case 4:
-		s = uint64(b[0])<<24 | uint64(b[1])<<16 | uint64(b[2])<<8 | uint64(b[3])
-	case 5:
-		s = uint64(b[0])<<32 | uint64(b[1])<<24 | uint64(b[2])<<16 | uint64(b[3])<<8 | uint64(b[4])
-	case 6:
-		s = uint64(b[0])<<40 | uint64(b[1])<<32 | uint64(b[2])<<24 | uint64(b[3])<<16 | uint64(b[4])<<8 | uint64(b[5])
-	case 7:
-		s = uint64(b[0])<<48 | uint64(b[1])<<40 | uint64(b[2])<<32 | uint64(b[3])<<24 | uint64(b[4])<<16 | uint64(b[5])<<8 | uint64(b[6])
-	case 8:
-		s = uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 | uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
-	}
+	var buf [8]byte
+	copy(buf[8-slen:], b[:slen])
+	s := binary.BigEndian.Uint64(buf[:])
 	// Reject sizes < 56 (shouldn't have separate size) and sizes with
 	// leading zero bytes.
 	if s < 56 || b[0] == 0 {
@@ -194,71 +169,7 @@ func readSize(b []byte, slen byte) (uint64, error) {
 
 // AppendUint64 appends the RLP encoding of i to b, and returns the resulting slice.
 func AppendUint64(b []byte, i uint64) []byte {
-	if i == 0 {
-		return append(b, 0x80)
-	} else if i < 128 {
-		return append(b, byte(i))
-	}
-	switch {
-	case i < (1 << 8):
-		return append(b, 0x81, byte(i))
-	case i < (1 << 16):
-		return append(b, 0x82,
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 24):
-		return append(b, 0x83,
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 32):
-		return append(b, 0x84,
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 40):
-		return append(b, 0x85,
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-
-	case i < (1 << 48):
-		return append(b, 0x86,
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 56):
-		return append(b, 0x87,
-			byte(i>>48),
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-
-	default:
-		return append(b, 0x88,
-			byte(i>>56),
-			byte(i>>48),
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	}
+	var buf [9]byte
+	n := EncodeU64ToBuf(i, buf[:])
+	return append(b, buf[:n]...)
 }

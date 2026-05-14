@@ -19,12 +19,11 @@ package main
 import (
 	"cmp"
 	"fmt"
-	"net/http"
 	"os"
 
-	"github.com/anacrolix/envpprof"
-	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
@@ -38,15 +37,18 @@ import (
 )
 
 func main() {
-	defer envpprof.Stop()
-	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
-	if err := app.Run(os.Args); err != nil {
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("Fprintln error", "err", printErr)
+	var err error
+	common.WithProfilersMain(func() {
+		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
+		err = app.Run(os.Args)
+		if err != nil {
+			_, printErr := fmt.Fprintln(os.Stderr, err)
+			if printErr != nil {
+				log.Warn("Fprintln error", "err", printErr)
+			}
 		}
-		envpprof.Stop()
+	})
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -67,18 +69,6 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
-	if version.Major == 3 {
-		logger.Info(`
-	########b          oo                               d####b. 
-	##                                                      '## 
-	##aaaa    ##d###b. dP .d####b. .d####b. ##d###b.     aaad#' 
-	##        ##'  '## ## ##'  '## ##'  '## ##'  '##        '## 
-	##        ##       ## ##.  .## ##.  .## ##    ##        .## 
-	########P dP       dP '####P## '#####P' dP    dP    d#####P 
-	                           .##                              
-	                       d####P                               
-		`)
-	}
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 

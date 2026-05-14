@@ -383,7 +383,12 @@ func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp",
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "0f", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "10", t) }
 func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "11", t) }
-func TestPrecompiledPointEvaluation(t *testing.T)    { testJson("pointEvaluation", "0a", t) }
+func TestPrecompiledPointEvaluation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testJson("pointEvaluation", "0a", t)
+}
 
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0b", b) }
 func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0c", b) }
@@ -438,7 +443,7 @@ func BenchmarkPrecompiledBLS12381G1MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG1",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "f0c", testcase)
+	benchmarkPrecompiled(b, "0c", testcase)
 }
 
 // BenchmarkPrecompiledBLS12381G2MultiExpWorstCase benchmarks the worst case we could find that still fits a gaslimit of 10MGas.
@@ -459,7 +464,7 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		Name:        "WorstCaseG2",
 		NoBenchmark: false,
 	}
-	benchmarkPrecompiled(b, "f0f", testcase)
+	benchmarkPrecompiled(b, "0e", testcase)
 }
 
 // Benchmarks the sample inputs from the P256VERIFY precompile.

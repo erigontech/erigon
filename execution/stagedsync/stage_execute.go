@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -51,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -86,7 +84,6 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
 }
 
@@ -106,7 +103,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
@@ -129,9 +125,26 @@ func StageExecuteBlocksCfg(
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
-		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
 	}
+}
+
+// ChainConfig returns the chain configuration.
+func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig }
+
+// IsExperimentalBAL returns whether experimental BAL is enabled.
+func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
+
+// BlockReader returns the block reader.
+func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
+
+// DirsDataDir returns the data directory path.
+func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
+
+// WithAuthor returns a copy of the config with the author set.
+func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
+	cfg.author = author
+	return cfg
 }
 
 // ================ Erigon3 ================
@@ -140,14 +153,6 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-
-	if doms == nil {
-		doms, err = execctx.NewSharedDomains(ctx, rwTx, logger)
-		if err != nil {
-			return err
-		}
-		defer doms.Close()
-	}
 	txNumsReader := br.TxnumReader()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -203,8 +208,23 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
+	// Get the hash of the last executed block (the tip we're unwinding from)
+	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
+	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
+	if err != nil {
+		lastExecHash = common.Hash{}
+	}
+	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
+	}
+	// Surgically evict keys touched by the unwound blocks from the state cache.
+	// Keys not in the diffset remain cached (they weren't modified by the unwound range).
+	if stateCache := doms.GetStateCache(); stateCache != nil && changeSet != nil {
+		unwindTargetHash, _, err := br.CanonicalHash(ctx, rwTx, u.UnwindPoint)
+		if err != nil {
+			unwindTargetHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeSet, lastExecHash, unwindTargetHash)
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
@@ -218,7 +238,7 @@ func unwindExec3State(ctx context.Context,
 	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, lastExecutedBlockHash common.Hash, logger log.Logger) error {
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
@@ -276,34 +296,27 @@ func unwindExec3State(ctx context.Context,
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-				if len(entry.Value) > 0 {
+				if entry.Value != nil && len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
+				} else if entry.Value == nil {
+					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				} else {
-					if keyStep != prevStep {
-						if prevStep == 0 {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [empty], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-						} else {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockUnwindTo, txUnwindTo, address, keyStep, prevStep)
-						}
-					} else {
-						fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-					}
+					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
 				return err
 			}
 		}
@@ -323,18 +336,17 @@ func unwindExec3State(ctx context.Context,
 				}
 			}
 		}
+
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
 	sd.SetTxNum(txUnwindTo)
-	sd.SetBlockNum(blockUnwindTo)
 	return nil
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
@@ -363,12 +375,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if doms == nil || rwTx == nil {
-		// to support parallel execution unwind must be called with the same
-		// shared domains and transaction which are used by the execution stage
-		return fmt.Errorf("can't execute: need external domains & tx")
-	}
-
 	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
@@ -382,7 +388,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger); err != nil {
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
 		return err
 	}
 	return nil
@@ -394,13 +400,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return nil
 	}
 
-	if doms == nil || rwTx == nil {
-		// to support parallel execution unwind must be called with the same
-		// shared domains and transaction which are used by the execution stage
-		return fmt.Errorf("can't unwind: need external domains & tx")
-	}
+	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint)
 
-	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+	// Discard any pending deferred commitment updates from the previous
+	// (failed) execution. If left in place, the next ComputeCommitment
+	// would flush stale branch data that doesn't match the unwound state.
+	doms.ResetPendingUpdates()
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
@@ -443,21 +448,12 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	doms.SeekCommitment(ctx, rwTx)
+	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
@@ -466,7 +462,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 500 * time.Millisecond
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
@@ -499,8 +495,28 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
 			)
+		}
+	}
+
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		pruneBalLimit := 10_000
+		pruneTimeout := quickPruneTimeout
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneBalLimit = math.MaxInt
+			pruneTimeout = time.Hour
+		}
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 
@@ -510,20 +526,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
-			)
-		}
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
@@ -535,17 +537,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
 			"duration", duration,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			"externalTx", useExternalTx,
 		)
 	}
-
 	if err = s.Done(tx); err != nil {
 		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }

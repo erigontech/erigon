@@ -1,5 +1,8 @@
 ---
 description: Erigon's embedded Consensus Layer
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/caplin
 ---
 
 # Caplin
@@ -24,4 +27,26 @@ In addition, Caplin can backfill recent blobs for an op-node or other uses with 
 
 * `--caplin.blobs-immediate-backfill`: Backfills the last 18 days' worth of blobs to quickly populate historical blob data for operational needs or analytics.
 
+### PeerDAS Data Column Retention
+
+For nodes participating in PeerDAS (EIP-7594), Caplin retains data column sidecars for a configurable window:
+
+* `--caplin.columns-keep-slots` (default: `131072`, ~18 days): Number of slots to retain PeerDAS data column sidecars. The default matches `MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS × SLOTS_PER_EPOCH`. Increase this value for DA oracle or rollup nodes that require a longer column history.
+
 Caplin can also be used for [block production](../staking/caplin.md), aka **staking**.
+
+## Beacon API Configuration
+
+When Caplin is running, it exposes a Beacon API that external tools can query. The following flags control the Beacon API server:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--beacon.api.addr` | `localhost` | Listening address for the Beacon API |
+| `--beacon.api.port` | `5555` | Listening port for the Beacon API |
+| `--beacon.api.cors.allow-origins` | (empty) | CORS allowed origins |
+| `--beacon.api.cors.allow-methods` | `GET, POST, PUT, DELETE, OPTIONS` | CORS allowed methods |
+| `--beacon.api.cors.allow-credentials` | `false` | Allow credentials in CORS requests |
+| `--beacon.api.protocol` | `tcp` | Network protocol (`tcp` or `tcp4` or `tcp6`) |
+| `--beacon.api.read.timeout` | `5s` | HTTP server read timeout |
+| `--beacon.api.write.timeout` | `31536000s` (~1 year) | HTTP server write timeout |
+| `--beacon.api.ide.timeout` | `25s` | HTTP server idle timeout (note: flag name is `ide` not `idle` — typo in source) |

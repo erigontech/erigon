@@ -99,24 +99,36 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		panic(opts.GetLabel())
 	}
 
-	rawDB := opts.MustOpen()
+	// Apply migrations BEFORE the accede-mode open. In accede mode MDBX cannot
+	// create new tables, so if a table was added to the schema after the DB was
+	// originally created (e.g. BlockAccessList) the open would panic. The
+	// exclusive-mode open used during migration creates any missing tables as a
+	// side-effect, preventing the subsequent accede-mode open from panicking.
 	if applyMigrations {
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
+		if err != nil {
+			return nil, fmt.Errorf("open migrations db: %w", err)
+		}
+		defer migrationsDB.Close()
+
 		migrator := migrations.NewMigrator(opts.GetLabel())
-		has, err := migrator.HasPendingMigrations(rawDB)
+		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
 		}
 		if has {
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
-			rawDB.Close()
-			rawDB = opts.Exclusive(true).MustOpen()
-			if err := migrator.Apply(rawDB, datadirCli, "", logger); err != nil {
+			rawDBExcl := opts.Exclusive(true).MustOpen()
+			if err := migrator.Apply(rawDBExcl, migrationsDB, datadirCli, "", logger); err != nil {
+				rawDBExcl.Close()
 				return nil, err
 			}
-			rawDB.Close()
-			rawDB = opts.MustOpen()
+			rawDBExcl.Close()
 		}
 	}
+
+	rawDB := opts.MustOpen()
 
 	dirs := datadir.New(datadirCli)
 	if err := CheckSaltFilesExist(dirs); err != nil {

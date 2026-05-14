@@ -86,7 +86,7 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	}
 	updateAttestedPeriod := cfg.SyncCommitteePeriod(attestedBlock.Block.Slot)
 
-	update := cltypes.NewLightClientUpdate(block.Version())
+	update := cltypes.NewLightClientUpdate(block.Version(), cfg)
 	update.AttestedHeader, err = BlockToLightClientHeader(attestedBlock)
 	if err != nil {
 		return nil, err

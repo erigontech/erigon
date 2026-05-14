@@ -17,11 +17,10 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"

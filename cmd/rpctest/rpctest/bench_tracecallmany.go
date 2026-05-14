@@ -17,9 +17,7 @@
 package rpctest
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -32,26 +30,11 @@ import (
 func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonURL, oeURL)
 
-	var rec *bufio.Writer
-	if recordFile != "" {
-		f, err := os.Create(recordFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFile != "" {
-		ferr, err := os.Create(errorFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer cleanup()
 
 	var res CallResult
 	reqGen := &RequestGenerator{}
@@ -66,14 +49,12 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
 	for bn := blockFrom; bn <= blockTo; bn++ {
-
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, false, nil)
+		if err != nil {
+			return err
 		}
-		if b.Error != nil {
-			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		if skip {
+			continue
 		}
 
 		n := len(b.Result.Transactions)

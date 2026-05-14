@@ -110,7 +110,6 @@ func StartSentinelService(
 	if err != nil {
 		return nil, nil, err
 	}
-	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if srvCfg.InitialStatus != nil {
 		sent.SetStatus(srvCfg.InitialStatus)

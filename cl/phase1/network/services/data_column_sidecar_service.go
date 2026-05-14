@@ -105,7 +105,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
-		return ErrIgnore
+		return nil
 	}
 
 	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()

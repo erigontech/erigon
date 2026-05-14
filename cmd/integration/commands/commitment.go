@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -29,7 +30,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,25 +46,28 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 )
 
-var branchPrefixFlag string
+var (
+	branchPrefixFlag string
+	txnumFlag        uint64
+)
 
 // visualize command flags
 var (
@@ -79,14 +83,22 @@ var (
 var (
 	benchSampleSize int
 	benchSeed       int64
+	benchUseGetAsOf bool
+)
+
+// bench-history-lookup command flags
+var (
+	benchHistoryPrefix    string
+	benchHistorySamplePct float64
+	benchHistorySeed      int64
 )
 
 func init() {
-
 	// commitment branch
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
 	withConfig(commitmentBranchCmd)
+	commitmentBranchCmd.Flags().Uint64Var(&txnumFlag, "txnum", 0, "txnum to read as of")
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
 
@@ -103,6 +115,10 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withYes(cmdCommitmentRebuild)
+	withClearCommitment(cmdCommitmentRebuild)
+	withResume(cmdCommitmentRebuild)
+	withNoHistory(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -126,10 +142,19 @@ func init() {
 	withConfig(cmdCommitmentBenchLookup)
 	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 10000000, "number of random keys to sample via reservoir sampling")
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
+	cmdCommitmentBenchLookup.Flags().BoolVar(&benchUseGetAsOf, "use-get-as-of", false, "use GetAsOf(math.MaxUint64) instead of GetLatest() for lookups")
 	commitmentCmd.AddCommand(cmdCommitmentBenchLookup)
 
-	rootCmd.AddCommand(commitmentCmd)
+	// commitment bench-history-lookup
+	withChain(cmdCommitmentBenchHistoryLookup)
+	withDataDir(cmdCommitmentBenchHistoryLookup)
+	withConfig(cmdCommitmentBenchHistoryLookup)
+	cmdCommitmentBenchHistoryLookup.Flags().StringVar(&benchHistoryPrefix, "prefix", "", "hex-encoded key prefix to look up in commitment domain (empty = root lookup)")
+	cmdCommitmentBenchHistoryLookup.Flags().Float64Var(&benchHistorySamplePct, "sample-percentage", 10.0, "percentage of txnums to sample from each history file's range or from MDBX (0-100)")
+	cmdCommitmentBenchHistoryLookup.Flags().Int64Var(&benchHistorySeed, "seed", 0, "random seed for sampling (0 = use current time)")
+	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
+	rootCmd.AddCommand(commitmentCmd)
 }
 
 var commitmentCmd = &cobra.Command{
@@ -144,9 +169,13 @@ var commitmentBranchCmd = &cobra.Command{
 	Long: `Opens the commitment domain from a given datadir and reads the branch data
 for the specified prefix. The prefix should be provided as hex nibbles.
 
+Use --txnum to read the state as of a specific txnum  (historical read via GetAsOf).
+Without --txnum, reads the latest state.
+
 Examples:
   integration commitment branch --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
+  integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -173,29 +202,37 @@ Examples:
 			return
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-		if err != nil {
-			logger.Error("Failed to create shared domains", "error", err)
-			return
-		}
-		defer sd.Close()
-		// Use LatestStateReader to read from the commitment domain.
-		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
-		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
-		if err := readBranch(commitmentReader, prefix, logger); err != nil {
-			logger.Error("Failed to read branch", "error", err)
-			return
+		stepSize := tx.Debug().StepSize()
+		if txnumFlag > 0 {
+			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
+			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
+		} else {
+			// Latest state read
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				logger.Error("Failed to create shared domains", "error", err)
+				return
+			}
+			defer sd.Close()
+			reader := commitmentdb.NewLatestStateReader(tx, sd)
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
 		}
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	compactKey := nibbles.HexToCompact(prefix)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -241,6 +278,13 @@ var cmdCommitmentRebuild = &cobra.Command{
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if clearCommitment && resume {
+		return errors.New("--clear-commitment and --resume are mutually exclusive")
+	}
+	if noHistory && clearCommitment {
+		return errors.New("--no-history and --clear-commitment are mutually exclusive")
+	}
+
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
@@ -249,27 +293,91 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer rwTx.Rollback()
 
-	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
-		return err
-	}
-
-	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := statecfg.Schema.CommitmentDomain
-	for _, tn := range sconf.Tables() {
-		log.Info("Clearing", "table", tn)
-		if err := rwTx.ClearTable(tn); err != nil {
-			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+	if !clearCommitment {
+		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("max tx num is not populated; run: integration stage_headers --reset --datadir=<dir> --chain=<chain>")
 		}
 	}
-	if err := rwTx.Commit(); err != nil {
+
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(rwTx)
+	if err != nil {
 		return err
+	}
+	if commitmentHistoryEnabled {
+		statecfg.EnableHistoricalCommitment()
+	}
+
+	if resume && !commitmentHistoryEnabled && !noHistory {
+		logger.Info("[commitment_rebuild] commitment history not enabled in DB; resuming in --no-history mode")
+		noHistory = true
+	}
+
+	withHistory := false
+	if noHistory {
+		// --no-history explicitly requested: skip history regeneration entirely
+		withHistory = false
+	} else if commitmentHistoryEnabled {
+		if clearCommitment || resume || yes {
+			withHistory = true
+		} else {
+			fmt.Print("commitment history is enabled. Rebuild with history? (yes/no): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
+			switch resp {
+			case "y", "yes":
+				withHistory = true
+			case "n", "no":
+			default:
+				return fmt.Errorf("invalid response %q: expected yes or no", resp)
+			}
+		}
+	}
+
+	if !resume {
+		// remove all existing state commitment snapshots
+		// when not rebuilding with history, only delete domain files (preserve existing history/index)
+		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
+			Dirs:                   dirs,
+			RemoveLatest:           false,
+			PromptUserBeforeDelete: !yes,
+			DryRun:                 false,
+			StepRange:              "0-999999",
+			OnlyDomain:             !withHistory,
+			DomainNames:            []string{kv.CommitmentDomain.String()},
+		}); err != nil {
+			return err
+		}
+
+		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+		sconf := statecfg.Schema.CommitmentDomain
+		for _, tn := range sconf.Tables() {
+			log.Info("Clearing", "table", tn)
+			if err := rwTx.ClearTable(tn); err != nil {
+				return fmt.Errorf("failed to clear table %s: %w", tn, err)
+			}
+		}
+		if err := rwTx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		rwTx.Rollback()
+	}
+
+	if clearCommitment {
+		log.Info("Commitment data removed from DB and state files deleted")
+		return nil
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -280,13 +388,17 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
-		return err
+	if withHistory {
+		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
+			return err
+		}
+	} else {
+		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -317,9 +429,6 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -390,6 +499,30 @@ Examples:
 		ctx, _ := common.RootContext()
 
 		if err := benchLookup(ctx, logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+// integration commitment bench-history-lookup
+var cmdCommitmentBenchHistoryLookup = &cobra.Command{
+	Use:   "bench-history-lookup",
+	Short: "Benchmark commitment history lookup performance across different files",
+	Long: `Benchmarks GetAsOf() lookup times for a specific key across commitment history files.
+Samples txnums from each history file's range and measures lookup latencies per file.
+
+Examples:
+  integration commitment bench-history-lookup --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
+  integration commitment bench-history-lookup --datadir /path/to/datadir --prefix 0a1b2c --sample-percentage 5
+  integration commitment bench-history-lookup --datadir /path/to/datadir --prefix aa --seed 12345`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		ctx, _ := common.RootContext()
+
+		if err := benchHistoryLookup(ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -469,19 +602,28 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create shared domains: %w", err)
+
+	var commitmentReader commitmentdb.StateReader
+	if benchUseGetAsOf {
+		logger.Info("Using GetAsOf(math.MaxUint64) for lookups")
+		commitmentReader = commitmentdb.NewHistoryStateReader(tx, math.MaxUint64)
+	} else {
+		logger.Info("Using GetLatest() for lookups")
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return fmt.Errorf("failed to create shared domains: %w", err)
+		}
+		defer sd.Close()
+		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
 	}
-	defer sd.Close()
-	commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
+	stepSize := tx.Debug().StepSize()
 
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, config3.DefaultStepSize)
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -507,6 +649,350 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	printBenchResults("Commitment Domain Lookups", stats, totalSize, len(keys), totalCount)
 
 	return nil
+}
+
+type HistoryBenchStats struct {
+	Name        string
+	StartTxNum  uint64
+	EndTxNum    uint64
+	SampleCount int
+	TotalTime   time.Duration
+	Stats       BenchStats
+}
+
+func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
+	if benchHistorySamplePct <= 0 || benchHistorySamplePct > 100 {
+		return fmt.Errorf("--sample-percentage must be between 0 and 100, got %.2f", benchHistorySamplePct)
+	}
+
+	// Parse prefix from hex (empty string = root lookup)
+	var prefix []byte
+	var err error
+	if benchHistoryPrefix != "" {
+		prefix, err = hex.DecodeString(benchHistoryPrefix)
+		if err != nil {
+			return fmt.Errorf("invalid hex prefix %q: %w", benchHistoryPrefix, err)
+		}
+	}
+
+	// Convert hex nibbles to compact bytes for commitment lookup
+	compactKey := nibbles.HexToCompact(prefix)
+
+	seed := benchHistorySeed
+	if seed == 0 {
+		seed = time.Now().UnixNano()
+	}
+	rng := rand.New(rand.NewSource(seed))
+
+	dirs := datadir.New(datadirCli)
+	chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
+	if err != nil {
+		return fmt.Errorf("opening DB: %w", err)
+	}
+	defer chainDb.Close()
+
+	agg := chainDb.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.DisableAllDependencies()
+
+	acRo := agg.BeginFilesRo()
+	defer acRo.Close()
+
+	// Get commitment files and filter for history .v files
+	commitmentFiles := acRo.Files(kv.CommitmentDomain)
+
+	var historyFiles []dbstate.VisibleFile
+	for _, f := range commitmentFiles {
+		if strings.HasSuffix(f.Fullpath(), ".v") {
+			historyFiles = append(historyFiles, f)
+		}
+	}
+
+	// Sort by StartRootNum for consistent ordering
+	if len(historyFiles) > 0 {
+		slices.SortFunc(historyFiles, func(a, b dbstate.VisibleFile) int {
+			if a.StartRootNum() < b.StartRootNum() {
+				return -1
+			}
+			if a.StartRootNum() > b.StartRootNum() {
+				return 1
+			}
+			return 0
+		})
+	}
+
+	// Find the max txnum covered by history files
+	var maxFileTxNum uint64
+	for _, f := range historyFiles {
+		if f.EndRootNum() > maxFileTxNum {
+			maxFileTxNum = f.EndRootNum()
+		}
+	}
+
+	logger.Info("Found commitment history files",
+		"historyFiles", len(historyFiles),
+		"totalFiles", len(commitmentFiles),
+		"maxFileTxNum", maxFileTxNum,
+		"prefix", benchHistoryPrefix,
+		"samplePercentage", benchHistorySamplePct)
+
+	tx, err := chainDb.BeginTemporalRo(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin temporal tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Benchmark lookup in snapshot history files
+	allFileStats, err := benchSnapshotsHistoryLookup(ctx, tx, historyFiles, compactKey, benchHistorySamplePct, rng, logger)
+	if err != nil {
+		return err
+	}
+
+	// Sample and benchmark keys from MDBX
+	mdbxStats, err := benchMdbxHistoryLookup(ctx, tx, compactKey, maxFileTxNum, benchHistorySamplePct, rng, logger)
+	if err != nil {
+		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
+	}
+	allStats := allFileStats
+	if mdbxStats != nil {
+		allStats = append(allStats, *mdbxStats)
+	}
+
+	// Print results table
+	printHistoryBenchResultsTable(prefix, compactKey, allStats)
+
+	return nil
+}
+
+// benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
+func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
+	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
+	stepSize := tx.Debug().StepSize()
+
+	for _, f := range historyFiles {
+		fpath := f.Fullpath()
+		fname := filepath.Base(fpath)
+		startTxNum := f.StartRootNum()
+		endTxNum := f.EndRootNum()
+		txnumRange := endTxNum - startTxNum
+
+		if txnumRange == 0 {
+			logger.Warn("Skipping file with empty range", "file", fname)
+			continue
+		}
+
+		// Calculate number of samples based on percentage
+		sampleCount := int(float64(txnumRange) * samplePct / 100.0)
+
+		logger.Info("Benchmarking file...",
+			"file", fname,
+			"startTxNum", startTxNum,
+			"endTxNum", endTxNum,
+			"range", txnumRange,
+			"sampleCount", sampleCount)
+
+		// Generate random sample of txnums within this file's range
+		sampledTxNums := make([]uint64, sampleCount)
+		for i := 0; i < sampleCount; i++ {
+			// Generate random txnum in [startTxNum, endTxNum)
+			sampledTxNums[i] = startTxNum + uint64(rng.Int63n(int64(txnumRange)))
+		}
+
+		// Shuffle for random access pattern
+		rng.Shuffle(len(sampledTxNums), func(i, j int) {
+			sampledTxNums[i], sampledTxNums[j] = sampledTxNums[j], sampledTxNums[i]
+		})
+
+		// Benchmark lookups for this file using HistoryStateReader
+		durations := make([]time.Duration, 0, sampleCount)
+
+		startTime := time.Now()
+		for _, txNum := range sampledTxNums {
+			// Create a HistoryStateReader for this txNum
+			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
+
+			lookupStart := time.Now()
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
+			elapsed := time.Since(lookupStart)
+
+			if err != nil {
+				logger.Warn("Lookup failed", "txNum", txNum, "error", err)
+				continue
+			}
+
+			durations = append(durations, elapsed)
+
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+		totalTime := time.Since(startTime)
+
+		// Calculate statistics for this file
+		stats := calculateBenchStats(durations)
+		if len(durations) > 0 {
+			stats.Throughput = float64(len(durations)) / totalTime.Seconds()
+		}
+
+		fileStats := HistoryBenchStats{
+			Name:        fname,
+			StartTxNum:  startTxNum,
+			EndTxNum:    endTxNum,
+			SampleCount: len(durations),
+			TotalTime:   totalTime,
+			Stats:       stats,
+		}
+		allFileStats = append(allFileStats, fileStats)
+
+		logger.Info("File complete",
+			"file", fname,
+			"samples", len(durations),
+			"throughput", fmt.Sprintf("%.0f ops/sec", stats.Throughput),
+			"p50", stats.P50,
+			"p99", stats.P99)
+	}
+
+	return allFileStats, nil
+}
+
+// benchMdbxHistoryLookup benchmarks history lookups for txnums in the MDBX range
+func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []byte, minTxNum uint64, samplePct float64, rng *rand.Rand, logger log.Logger) (*HistoryBenchStats, error) {
+	// Get the max txnum in MDBX via DomainProgress API
+	aggTx := dbstate.AggTx(tx)
+	maxTxNum := aggTx.DomainProgress(kv.CommitmentDomain, tx)
+
+	logger.Info("Finding MDBX txnum range...",
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum)
+
+	txnumRange := maxTxNum - minTxNum
+	if txnumRange <= 0 {
+		logger.Info("No MDBX history entries found for txnums > minTxNum",
+			"minTxNum", minTxNum,
+			"maxTxNum", maxTxNum)
+		return nil, nil
+	}
+
+	// Calculate number of samples based on sampling percentage
+	sampleCount := int(float64(txnumRange) * samplePct / 100.0)
+
+	logger.Info("Benchmarking MDBX history lookups...",
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum,
+		"range", txnumRange,
+		"sampleCount", sampleCount)
+
+	// Generate random txnums in [minTxNum, maxTxNum)
+	sampledTxNums := make([]uint64, sampleCount)
+	for i := 0; i < sampleCount; i++ {
+		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
+	}
+
+	// Shuffle for random access pattern
+	rng.Shuffle(len(sampledTxNums), func(i, j int) {
+		sampledTxNums[i], sampledTxNums[j] = sampledTxNums[j], sampledTxNums[i]
+	})
+
+	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
+	// The reader has logic to determine whether to look in snapshots or MDBX
+	durations := make([]time.Duration, 0, sampleCount)
+	stepSize := tx.Debug().StepSize()
+
+	benchStart := time.Now()
+	for _, txNum := range sampledTxNums {
+		// Create a HistoryStateReader for this txNum
+		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
+
+		lookupStart := time.Now()
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
+		elapsed := time.Since(lookupStart)
+
+		if err != nil {
+			logger.Warn("MDBX lookup failed", "txNum", txNum, "error", err)
+			continue
+		}
+
+		durations = append(durations, elapsed)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+	totalTime := time.Since(benchStart)
+
+	// Calculate statistics
+	stats := calculateBenchStats(durations)
+	if len(durations) > 0 {
+		stats.Throughput = float64(len(durations)) / totalTime.Seconds()
+	}
+
+	mdbxStats := &HistoryBenchStats{
+		Name:        "MDBX",
+		StartTxNum:  minTxNum,
+		EndTxNum:    maxTxNum,
+		SampleCount: len(durations),
+		TotalTime:   totalTime,
+		Stats:       stats,
+	}
+
+	logger.Info("MDBX benchmark complete",
+		"samples", len(durations),
+		"throughput", fmt.Sprintf("%.0f ops/sec", stats.Throughput),
+		"p50", stats.P50,
+		"p99", stats.P99)
+
+	return mdbxStats, nil
+}
+
+func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats []HistoryBenchStats) {
+	fmt.Println()
+	fmt.Println("================================================================================")
+	fmt.Printf("  HISTORY LOOKUP BENCHMARK RESULTS\n")
+	if len(prefix) == 0 {
+		fmt.Printf("  Prefix: (empty - root lookup)\n")
+	} else {
+		fmt.Printf("  Prefix: %x\n", prefix)
+	}
+	fmt.Printf("  Compact Key: %x\n", compactKey)
+	fmt.Println("================================================================================")
+	fmt.Println()
+
+	// Print header
+	fmt.Printf("%-45s %12s %12s %8s %10s %10s %10s %10s\n",
+		"File", "StartTxNum", "EndTxNum", "Samples", "Mean", "P50", "P95", "P99")
+	fmt.Println(strings.Repeat("-", 127))
+
+	// Print each file's stats
+	var totalSamples int
+	var totalDuration time.Duration
+
+	for _, fs := range fileStats {
+		fmt.Printf("%-45s %12d %12d %8d %10v %10v %10v %10v\n",
+			fs.Name,
+			fs.StartTxNum,
+			fs.EndTxNum,
+			fs.SampleCount,
+			fs.Stats.Mean,
+			fs.Stats.P50,
+			fs.Stats.P95,
+			fs.Stats.P99)
+
+		totalSamples += fs.SampleCount
+		totalDuration += fs.TotalTime
+	}
+
+	fmt.Println(strings.Repeat("-", 127))
+
+	fmt.Println()
+	fmt.Printf("  Total Files:    %d\n", len(fileStats))
+	fmt.Printf("  Total Samples:  %d\n", totalSamples)
+	fmt.Printf("  Total Duration: %v\n", totalDuration)
+	fmt.Println()
+	fmt.Println("================================================================================")
+	fmt.Println()
 }
 
 // sampleCommitmentKeysFromFiles samples keys from all commitment domain .kv files using reservoir sampling.
@@ -601,9 +1087,7 @@ func calculateBenchStats(durations []time.Duration) BenchStats {
 	// Sort for percentile calculations
 	sorted := make([]time.Duration, len(durations))
 	copy(sorted, durations)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i] < sorted[j]
-	})
+	slices.Sort(sorted)
 
 	// Calculate basic stats
 	var total time.Duration
@@ -893,7 +1377,7 @@ func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
 }
 
 func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.TreeMap {
-	var TreeMap = []opts.TreeMapNode{
+	TreeMap := []opts.TreeMapNode{
 		{Name: "prefixes"},
 		{Name: "values"},
 	}
@@ -952,14 +1436,16 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#777",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							UpperLabel: &opts.UpperLabel{Show: opts.Bool(true)},
 						},
 						{ // Level
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#666",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							Emphasis: &opts.Emphasis{
 								ItemStyle: &opts.ItemStyle{BorderColor: "#555"},
 							},
@@ -1005,7 +1491,7 @@ function (info) {
     for (var i = 1; i < treePathInfo.length; i++) {
         treePath.push(treePathInfo[i].name);
     }
-    
+
     return [
         '<div class="tooltip-title" style="color: white;">' + formatUtil.encodeHTML(treePath.join('/')) + '</div>',
 				'<span style="color: white;">Disk Usage: ' + result + '</span>',

@@ -68,8 +68,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
-						{Index: 1, Value: common.Hash(uint256.NewInt(2).Bytes32())},
-						{Index: 5, Value: common.Hash(uint256.NewInt(3).Bytes32())},
+						{Index: 1, Value: *uint256.NewInt(2)},
+						{Index: 5, Value: *uint256.NewInt(3)},
 					},
 				},
 			},
@@ -83,7 +83,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{Index: 9, Value: 7},
 			},
 			CodeChanges: []*CodeChange{
-				{Index: 2, Data: []byte{0xbe, 0xef}},
+				{Index: 2, Bytecode: []byte{0xbe, 0xef}},
 			},
 		},
 	}
@@ -93,7 +93,9 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 		t.Fatalf("encode failed: %v", err)
 	}
 
-	expected := common.FromHex("0xf8b4f8b29400000000000000000000000000000000000000aaf86bf869a00000000000000000000000000000000000000000000000000000000000000001f846e201a00000000000000000000000000000000000000000000000000000000000000002e205a00000000000000000000000000000000000000000000000000000000000000003e1a00000000000000000000000000000000000000000000000000000000000000002c3c20104c3c20907c5c40282beef")
+	// Fixed-size encoding: slot keys and storage values are 32-byte strings,
+	// storage reads are 32-byte strings, balances are 16-byte strings.
+	expected := common.FromHex("0xf0ef9400000000000000000000000000000000000000aac9c801c6c20102c20503c102c3c20104c3c20907c5c40282beef")
 	if !bytes.Equal(encoded, expected) {
 		t.Fatalf("unexpected encoding\nhave: %x\nwant: %x", encoded, expected)
 	}
@@ -105,6 +107,66 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 
 	if !reflect.DeepEqual(decoded, bal) {
 		t.Fatalf("decoded BAL mismatch\nhave: %#v\nwant: %#v", decoded, bal)
+	}
+}
+
+func TestBlockAccessListValidateMaxItems(t *testing.T) {
+	makeBAL := func(numAccounts, slotsPerAccount int) BlockAccessList {
+		bal := make(BlockAccessList, numAccounts)
+		for i := range bal {
+			var addr common.Address
+			addr[18] = byte(i >> 8)
+			addr[19] = byte(i)
+			reads := make([]accounts.StorageKey, slotsPerAccount)
+			for j := range reads {
+				var h common.Hash
+				h[30] = byte(j >> 8)
+				h[31] = byte(j)
+				reads[j] = accounts.InternKey(h)
+			}
+			bal[i] = &AccountChanges{
+				Address:      accounts.InternAddress(addr),
+				StorageReads: reads,
+			}
+		}
+		return bal
+	}
+
+	// 10 accounts + 5 slots each = 60 items; gasLimit 120000 → max 60 items → exactly at limit
+	bal := makeBAL(10, 5)
+	if err := bal.ValidateMaxItems(120_000); err != nil {
+		t.Fatalf("expected valid at limit, got: %v", err)
+	}
+
+	// Same BAL with lower gas limit → over limit
+	if err := bal.ValidateMaxItems(119_999); err == nil {
+		t.Fatal("expected error for over-limit BAL")
+	}
+
+	// Empty BAL always valid
+	if err := (BlockAccessList{}).ValidateMaxItems(0); err != nil {
+		t.Fatalf("expected empty BAL valid, got: %v", err)
+	}
+}
+
+func TestBlockAccessListSlotUniqueness(t *testing.T) {
+	var addr common.Address
+	addr[19] = 0x01
+	slot := common.HexToHash("0x01")
+
+	ac := &AccountChanges{
+		Address: accounts.InternAddress(addr),
+		StorageChanges: []*SlotChanges{
+			{
+				Slot:    accounts.InternKey(slot),
+				Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+			},
+		},
+		StorageReads: []accounts.StorageKey{accounts.InternKey(slot)},
+	}
+	bal := BlockAccessList{ac}
+	if err := bal.Validate(); err == nil {
+		t.Fatal("expected error for slot in both changes and reads")
 	}
 }
 

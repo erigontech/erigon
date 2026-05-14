@@ -20,8 +20,6 @@
 package t8ntool
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -51,17 +49,17 @@ type ommer struct {
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 type stEnv struct {
 	Coinbase         common.Address                      `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty       *big.Int                            `json:"currentDifficulty"`
-	Random           *big.Int                            `json:"currentRandom"`
+	Difficulty       *uint256.Int                        `json:"currentDifficulty"`
+	Random           *uint256.Int                        `json:"currentRandom"`
 	MixDigest        common.Hash                         `json:"mixHash,omitempty"`
-	ParentDifficulty *big.Int                            `json:"parentDifficulty"`
+	ParentDifficulty *uint256.Int                        `json:"parentDifficulty"`
 	GasLimit         uint64                              `json:"currentGasLimit"   gencodec:"required"`
 	Number           uint64                              `json:"currentNumber"     gencodec:"required"`
 	Timestamp        uint64                              `json:"currentTimestamp"  gencodec:"required"`
 	ParentTimestamp  uint64                              `json:"parentTimestamp,omitempty"`
 	BlockHashes      map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
 	Ommers           []ommer                             `json:"ommers,omitempty"`
-	BaseFee          *big.Int                            `json:"currentBaseFee,omitempty"`
+	BaseFee          *uint256.Int                        `json:"currentBaseFee,omitempty"`
 	ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
 	UncleHash        common.Hash                         `json:"uncleHash,omitempty"`
 	Withdrawals      []*types.Withdrawal                 `json:"withdrawals,omitempty"`
@@ -116,7 +114,7 @@ func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.Share
 // parent timestamp + difficulty.
 // Note: this method only works for ethash engine.
 func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64,
-	parentDifficulty *big.Int, parentUncleHash common.Hash) *big.Int {
+	parentDifficulty uint256.Int, parentUncleHash common.Hash) *uint256.Int {
 	uncleHash := parentUncleHash
 	if uncleHash == (common.Hash{}) {
 		uncleHash = empty.UncleHash
@@ -125,8 +123,9 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 		ParentHash: common.Hash{},
 		UncleHash:  uncleHash,
 		Difficulty: parentDifficulty,
-		Number:     new(big.Int).SetUint64(number - 1), // nolint:govet
 		Time:       parentTime,
 	}
-	return ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)
+	parent.Number.SetUint64(number - 1)
+	diff := ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)
+	return &diff
 }

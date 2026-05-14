@@ -1,21 +1,18 @@
 package diaglib
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/gorilla/websocket"
 )
 
 type DiagMessages struct {
 	MessageType string `json:"messageType"`
 	Message     any    `json:"message"`
-}
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
 }
 
 // SetupNotifier configures the diagnostics WebSocket endpoint.
@@ -41,7 +38,7 @@ func (d *DiagnosticClient) Notify(msg DiagMessages) {
 		return
 	}
 
-	if err := d.conn.WriteJSON(msg); err != nil {
+	if err := wsjson.Write(context.Background(), d.conn, msg); err != nil {
 		log.Debug("[Diagnostics] Error writing message to WebSocket client", "err", err)
 	}
 }
@@ -53,18 +50,18 @@ func (d *DiagnosticClient) Notify(msg DiagMessages) {
 // This function supports the following message types:
 //   - TextMessage: Logs the message content.
 func (d *DiagnosticClient) HandleConnections(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
 	if err != nil {
 		log.Debug("[Diagnostics] Error upgrading to WebSocket", "err", err)
 		return
 	}
-	defer conn.Close()
+	defer conn.CloseNow()
 
 	log.Debug("[Diagnostics] WebSocket client connected")
 	d.setConnection(conn)
 
 	for {
-		mt, message, err := conn.ReadMessage()
+		mt, message, err := conn.Read(r.Context())
 		if err != nil {
 			log.Debug("[Diagnostics] WebSocket client disconnected", "err", err)
 			d.clearConnection()
@@ -72,11 +69,11 @@ func (d *DiagnosticClient) HandleConnections(w http.ResponseWriter, r *http.Requ
 		}
 
 		switch mt {
-		case websocket.TextMessage:
+		case websocket.MessageText:
 			log.Debug("[Diagnostics] Received message", "message", string(message))
-		case websocket.BinaryMessage:
+		case websocket.MessageBinary:
 			log.Debug("[Diagnostics] Binary messages not supported")
-			if writeErr := conn.WriteMessage(websocket.TextMessage, []byte("server doesn't support binary messages")); writeErr != nil {
+			if writeErr := conn.Write(r.Context(), websocket.MessageText, []byte("server doesn't support binary messages")); writeErr != nil {
 				log.Debug("[Diagnostics] Error responding to binary message", "err", writeErr)
 			}
 			return

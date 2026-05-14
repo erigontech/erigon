@@ -20,32 +20,43 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon/common/dir"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 type dataProvider interface {
-	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
 	Dispose()    // Safe for repeated call, doesn't return error - means defer-friendly
 	Wait() error // join point for async providers
 	String() string
 }
 
 type fileDataProvider struct {
-	file       *os.File
-	reader     io.Reader
-	byteReader io.ByteReader // Different interface to the same object as reader
-	wg         *errgroup.Group
+	file        *os.File
+	mmapReader  *mmapBytesReader       // zero-copy reader over mmap'd data
+	mmapData    []byte                 // mmap'd file content
+	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
+	wg          *errgroup.Group
+}
+
+// mmapBytesReader tracks position for reading from mmap'd data
+type mmapBytesReader struct {
+	data []byte // mmap'd file content
+	pos  int    // current read position
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool) (dataProvider, error) {
 	if b.Len() == 0 {
 		if allocator != nil {
 			allocator.Put(b)
@@ -53,12 +64,13 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 		return nil, nil
 	}
 
-	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
+	provider := &fileDataProvider{wg: &errgroup.Group{}}
 	provider.wg.Go(func() (err error) {
 		defer func() {
 			if allocator != nil {
 				allocator.Put(b)
 			}
+			inProgress.Store(false)
 		}()
 		provider.file, err = sortAndFlush(b, tmpdir)
 		if err != nil {
@@ -79,7 +91,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	}
 
 	var err error
-	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
+	provider := &fileDataProvider{wg: &errgroup.Group{}}
 	provider.file, err = sortAndFlush(b, tmpdir)
 	if err != nil {
 		return nil, err
@@ -88,6 +100,19 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	log.Log(lvl, fmt.Sprintf("[%s] Flushed buffer file", logPrefix), "name", fName)
 	return provider, nil
 }
+
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
 
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
@@ -105,87 +130,110 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
-	defer w.Flush() //nolint:errcheck
+	w := getBufioWriter(bufferFile)
+	defer putBufioWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
 	}
+	if err = w.Flush(); err != nil {
+		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
+	}
 	return bufferFile, nil
 }
 
-func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
-	if p.reader == nil {
-		_, err := p.file.Seek(0, 0)
-		if err != nil {
+func (p *fileDataProvider) Next() ([]byte, []byte, error) {
+	if p.mmapReader == nil {
+		if err := p.initMmap(); err != nil {
 			return nil, nil, err
 		}
-		r := bufio.NewReaderSize(p.file, BufIOSize)
-		p.reader = r
-		p.byteReader = r
-
 	}
-	return readElementFromDisk(p.reader, p.byteReader, keyBuf, valBuf)
+	key, err := readField(p.mmapReader)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := readField(p.mmapReader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, val, nil
+}
+
+func (p *fileDataProvider) initMmap() error {
+	fi, err := p.file.Stat()
+	if err != nil {
+		return err
+	}
+	if fi.Size() == 0 {
+		return io.EOF
+	}
+	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
+	if err != nil {
+		return fmt.Errorf("mmap failed: %w", err)
+	}
+	_ = mmap.MadviseSequential(p.mmapData)
+	p.mmapReader = &mmapBytesReader{data: p.mmapData, pos: 0}
+	return nil
+}
+
+func (m *mmapBytesReader) readVarint() (int, error) {
+	v, n := binary.Varint(m.data[m.pos:])
+	if n <= 0 {
+		if n == 0 {
+			return 0, io.EOF
+		}
+		return 0, fmt.Errorf("varint overflow")
+	}
+	m.pos += n
+	return int(v), nil
+}
+
+// readAt returns a zero-copy slice directly from mmap'd memory
+func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
+	if m.pos+length > len(m.data) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	result := m.data[m.pos : m.pos+length]
+	m.pos += length
+	return result, nil
+}
+
+// readField reads a varint-prefixed byte slice from mmap data (zero-copy).
+// Negative length means nil.
+func readField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readVarint()
+	if err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		return nil, nil
+	}
+	return m.readAt(n)
 }
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
-	if p.file != nil { //invariant: safe to call multiple time
-		p.Wait()
-		file := p.file
-		p.file = nil
-
-		go func() {
-			filePath := file.Name()
-			file.Close()
-			_ = dir.RemoveFile(filePath)
-		}()
+	if p.file == nil {
+		return
 	}
+
+	p.Wait()
+
+	if p.mmapData != nil {
+		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		p.mmapData = nil
+		p.mmapHandle2 = nil
+		p.mmapReader = nil
+	}
+
+	filePath := p.file.Name()
+	p.file.Close()
+	p.file = nil
+	_ = dir.RemoveFile(filePath)
 }
 
 func (p *fileDataProvider) String() string {
 	return fmt.Sprintf("%T(file: %s)", p, p.file.Name())
-}
-
-func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) ([]byte, []byte, error) {
-	n, err := binary.ReadVarint(br)
-	if err != nil {
-		return nil, nil, err
-	}
-	if n >= 0 {
-		// Reallocate the slice or extend it if there is enough capacity
-		if keyBuf == nil || len(keyBuf)+int(n) > cap(keyBuf) {
-			newKeyBuf := make([]byte, len(keyBuf)+int(n))
-			copy(newKeyBuf, keyBuf)
-			keyBuf = newKeyBuf
-		} else {
-			keyBuf = keyBuf[:len(keyBuf)+int(n)]
-		}
-		if _, err = io.ReadFull(r, keyBuf[len(keyBuf)-int(n):]); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		keyBuf = nil
-	}
-	if n, err = binary.ReadVarint(br); err != nil {
-		return nil, nil, err
-	}
-	if n >= 0 {
-		// Reallocate the slice or extend it if there is enough capacity
-		if valBuf == nil || len(valBuf)+int(n) > cap(valBuf) {
-			newValBuf := make([]byte, len(valBuf)+int(n))
-			copy(newValBuf, valBuf)
-			valBuf = newValBuf
-		} else {
-			valBuf = valBuf[:len(valBuf)+int(n)]
-		}
-		if _, err = io.ReadFull(r, valBuf[len(valBuf)-int(n):]); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		valBuf = nil
-	}
-	return keyBuf, valBuf, err
 }
 
 type memoryDataProvider struct {
@@ -197,11 +245,11 @@ func KeepInRAM(buffer Buffer) dataProvider {
 	return &memoryDataProvider{buffer, 0}
 }
 
-func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
+func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
 	if p.currentIndex >= p.buffer.Len() {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex, keyBuf, valBuf)
+	key, value := p.buffer.Get(p.currentIndex)
 	p.currentIndex++
 	return key, value, nil
 }

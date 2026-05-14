@@ -18,7 +18,8 @@ package chain
 
 import (
 	"embed"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -42,7 +43,7 @@ func AmoyGenesisBlock() *types.Genesis {
 		Nonce:      0,
 		Timestamp:  1700225065,
 		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/amoy.json"),
@@ -56,7 +57,7 @@ func BorMainnetGenesisBlock() *types.Genesis {
 		Nonce:      0,
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_mainnet.json"),
@@ -69,7 +70,7 @@ func BorDevnetGenesisBlock() *types.Genesis {
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/bor_devnet.json"),
@@ -83,7 +84,7 @@ func MumbaiGenesisBlock() *types.Genesis {
 		Nonce:      0,
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      chainspec.ReadPrealloc(allocs, "allocs/mumbai.json"),

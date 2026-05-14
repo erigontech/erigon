@@ -19,13 +19,13 @@ package sync
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/synctest"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/p2p"
 )

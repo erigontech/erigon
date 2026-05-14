@@ -40,8 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/seg/sais"
 )
 
-func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
-	matches := mf2.FindLongestMatches(input)
+func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.MatchFinder3, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+	matches := mf3.FindLongestMatches(input)
 
 	if len(matches) == 0 {
 		output = append(output, 0) // Encoding of 0 in VarUint is 1 zero byte
@@ -179,19 +179,19 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 	return output, patterns, uncovered
 }
 
-func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, ft *patricia.FlatTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
 	cellRing := NewRing()
-	mf2 := patricia.NewMatchFinder2(trie)
+	mf3 := patricia.NewMatchFinder3(ft)
 	var numBuf [binary.MaxVarintLen64]byte
 	for compW := range inputCh {
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf3, output, uncovered, patterns, cellRing, posMap)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -255,6 +255,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		code2pattern = append(code2pattern, p)
 	})
 	dictBuilder.Close()
+	ft := pt.Flatten()
+	pt = patricia.PatriciaTree{} // release heap nodes for GC
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
@@ -277,7 +279,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
 	cellRing := NewRing()
-	mf2 := patricia.NewMatchFinder2(&pt)
+	mf3 := patricia.NewMatchFinder3(ft)
 
 	var posMaps []map[uint64]uint64
 	uncompPosMap := make(map[uint64]uint64) // For the uncompressed words
@@ -288,7 +290,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, ft, inputSize, outputSize, posMap)
 		}
 	}
 	t := time.Now()
@@ -302,7 +304,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	intermediatePath := intermediateFile.Name()
 	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
-	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+	intermediateW := getBufioWriter(intermediateFile)
+	defer putBufioWriter(intermediateW)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -384,7 +387,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf3, output[:0], uncovered, patterns, cellRing, uncompPosMap)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
@@ -535,7 +538,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
+	cw := getBufioWriter(cf)
+	defer putBufioWriter(cw)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -568,82 +572,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pattern=[%x]\n", p.depth, p.code, p.codeBits, p.word)
 	}
 
-	var positionList PositionList
-	pos2code := make(map[uint64]*Position)
-	for pos, uses := range posMap {
-		p := &Position{pos: pos, uses: uses, code: pos, codeBits: 0}
-		positionList = append(positionList, p)
-		pos2code[pos] = p
-	}
-	slices.SortFunc(positionList, positionListCmp)
-	i = 0
-	// Build Huffman tree for codes
-	var posHeap PositionHeap
-	heap.Init(&posHeap)
-	tieBreaker = uint64(0)
-	for posHeap.Len()+(positionList.Len()-i) > 1 {
-		// New node
-		h := &PositionHuff{
-			tieBreaker: tieBreaker,
-		}
-		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
-			// Take h0 from the heap
-			h.h0 = heap.Pop(&posHeap).(*PositionHuff)
-			h.h0.AddZero()
-			h.uses += h.h0.uses
-		} else {
-			// Take p0 from the list
-			h.p0 = positionList[i]
-			h.p0.code = 0
-			h.p0.codeBits = 1
-			h.uses += h.p0.uses
-			i++
-		}
-		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
-			// Take h1 from the heap
-			h.h1 = heap.Pop(&posHeap).(*PositionHuff)
-			h.h1.AddOne()
-			h.uses += h.h1.uses
-		} else {
-			// Take p1 from the list
-			h.p1 = positionList[i]
-			h.p1.code = 1
-			h.p1.codeBits = 1
-			h.uses += h.p1.uses
-			i++
-		}
-		tieBreaker++
-		heap.Push(&posHeap, h)
-	}
-	if posHeap.Len() > 0 {
-		posRoot := heap.Pop(&posHeap).(*PositionHuff)
-		posRoot.SetDepth(0)
-	}
-	// Calculate the size of pos dictionary
-	var posSize uint64
-	for _, p := range positionList {
-		ns := binary.PutUvarint(numBuf[:], uint64(p.depth)) // Length of the position's depth
-		n := binary.PutUvarint(numBuf[:], p.pos)
-		posSize += uint64(ns + n)
-	}
-	// First, output dictionary size
-	binary.BigEndian.PutUint64(numBuf[:], posSize) // Dictionary size
-	if _, err = cw.Write(numBuf[:8]); err != nil {
+	positionList, pos2code, posSize, err := buildAndWritePosDict(posMap, cw)
+	if err != nil {
 		return err
-	}
-	//fmt.Printf("posSize = %d\n", posSize)
-	// Write all the positions
-	slices.SortFunc(positionList, positionListCmp)
-	for _, p := range positionList {
-		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
-		if _, err = cw.Write(numBuf[:ns]); err != nil {
-			return err
-		}
-		n := binary.PutUvarint(numBuf[:], p.pos)
-		if _, err = cw.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		//fmt.Printf("[comp] depth=%d, code=[%b], codeLen=%d pos=%d\n", p.depth, p.code, p.codeBits, p.pos)
 	}
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
@@ -652,7 +583,8 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	wc := 0
 	var hc BitWriter
 	hc.w = cw
-	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	r := getBufioReader(intermediateFile)
+	defer putBufioReader(r)
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
@@ -745,6 +677,153 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	return nil
 }
 
+// compressNoWordPatterns is a fast path for Compress when no words were submitted to the
+// pattern-dictionary pipeline (superstringCount == 0). This happens for history .v files
+// that use CompressNone. Instead of building a dictionary and writing/reading an intermediate
+// file, it makes two sequential passes over the raw words file and writes directly to cf.
+func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger) error {
+	var numBuf [binary.MaxVarintLen64]byte
+
+	// Pass 1: collect word counts and position-length frequencies for the Huffman tree.
+	var inCount, emptyWordsCount uint64
+	posMap := make(map[uint64]uint64)
+	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
+		inCount++
+		l := uint64(len(v))
+		posMap[l+1]++
+		posMap[0]++
+		if l == 0 {
+			emptyWordsCount++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	cw := getBufioWriter(cf)
+	defer putBufioWriter(cw)
+
+	// Write data header: word count, empty word count, patternsSize=0, then position dict.
+	binary.BigEndian.PutUint64(numBuf[:], inCount)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCount)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], 0) // patternsSize = 0
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	_, pos2code, posSize, err := buildAndWritePosDict(posMap, cw)
+	if err != nil {
+		return err
+	}
+	if lvl < log.LvlTrace {
+		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary (no-pattern fast path)", logPrefix), "posSize", common.ByteCount(posSize))
+	}
+
+	// Pass 2: Huffman-encode position codes and copy raw word bytes to output.
+	var hc BitWriter
+	hc.w = cw
+	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
+		l := uint64(len(v))
+		if c := pos2code[l+1]; c != nil {
+			if e := hc.encode(c.code, c.codeBits); e != nil {
+				return e
+			}
+		}
+		if l == 0 {
+			return hc.flush()
+		}
+		if c := pos2code[0]; c != nil {
+			if e := hc.encode(c.code, c.codeBits); e != nil {
+				return e
+			}
+		}
+		if e := hc.flush(); e != nil {
+			return e
+		}
+		_, e := cw.Write(v)
+		return e
+	}); err != nil {
+		return err
+	}
+	return cw.Flush()
+}
+
+// buildAndWritePosDict builds the Huffman tree for position codes from posMap, writes the
+// position dictionary size and entries to cw, and returns (positionList, pos2code, posSize).
+func buildAndWritePosDict(posMap map[uint64]uint64, cw *bufio.Writer) (PositionList, map[uint64]*Position, uint64, error) {
+	var numBuf [binary.MaxVarintLen64]byte
+	positionList := make(PositionList, 0, len(posMap))
+	pos2code := make(map[uint64]*Position, len(posMap))
+	for pos, uses := range posMap {
+		p := &Position{pos: pos, uses: uses, code: pos, codeBits: 0}
+		positionList = append(positionList, p)
+		pos2code[pos] = p
+	}
+	slices.SortFunc(positionList, positionListCmp)
+	i := 0
+	var posHeap PositionHeap
+	heap.Init(&posHeap)
+	tieBreaker := uint64(0)
+	for posHeap.Len()+(positionList.Len()-i) > 1 {
+		h := &PositionHuff{tieBreaker: tieBreaker}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			h.h0 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h0.AddZero()
+			h.uses += h.h0.uses
+		} else {
+			h.p0 = positionList[i]
+			h.p0.code = 0
+			h.p0.codeBits = 1
+			h.uses += h.p0.uses
+			i++
+		}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			h.h1 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h1.AddOne()
+			h.uses += h.h1.uses
+		} else {
+			h.p1 = positionList[i]
+			h.p1.code = 1
+			h.p1.codeBits = 1
+			h.uses += h.p1.uses
+			i++
+		}
+		tieBreaker++
+		heap.Push(&posHeap, h)
+	}
+	if posHeap.Len() > 0 {
+		posRoot := heap.Pop(&posHeap).(*PositionHuff)
+		posRoot.SetDepth(0)
+	}
+	var posSize uint64
+	for _, p := range positionList {
+		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
+		n := binary.PutUvarint(numBuf[:], p.pos)
+		posSize += uint64(ns + n)
+	}
+	binary.BigEndian.PutUint64(numBuf[:], posSize)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return nil, nil, 0, err
+	}
+	slices.SortFunc(positionList, positionListCmp)
+	for _, p := range positionList {
+		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
+		if _, err := cw.Write(numBuf[:ns]); err != nil {
+			return nil, nil, 0, err
+		}
+		n := binary.PutUvarint(numBuf[:], p.pos)
+		if _, err := cw.Write(numBuf[:n]); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+	return positionList, pos2code, posSize, nil
+}
+
 // copyN - is alloc-free analog of io.CopyN func
 func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	// Replace the io.CopyN call with manual copy using the buffer
@@ -777,7 +856,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
-	var lcp, sa, inv []int32
+	var lcp, sa, inv, saisBuf []int32
 	for superstring := range superstringCh {
 		select {
 		case <-ctx.Done():
@@ -792,7 +871,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byt
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		if err := sais.Sais(superstring, sa); err != nil {
+		if err := sais.Sais(superstring, sa, &saisBuf); err != nil {
 			panic(err)
 		}
 		//log.Info("Suffix array built", "in", time.Since(start))
@@ -984,7 +1063,8 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, 2*etl.BufIOSize)
+	w := getBufioWriter(df)
+	defer putBufioWriter(w)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err
@@ -1003,7 +1083,8 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return err
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	r := getBufioReader(f)
+	defer putBufioReader(r)
 	buf := make([]byte, 4096)
 	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
 		if e != nil {
