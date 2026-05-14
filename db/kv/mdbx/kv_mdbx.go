@@ -500,14 +500,14 @@ func (db *MdbxKV) CHandle() unsafe.Pointer {
 // pages already in the freelist that MDBX cannot yet hand to the next writer
 // because the oldest live RO tx was started before they were retired.
 type GCStats struct {
-	DBSize             uint64 // bytes
-	GCPages            uint64 // total pages in the freelist (= retained + reclaimable)
-	RetainedPages      uint64 // pages with entry_txid >= oldestLiveRoTxID
-	ReclaimablePages   uint64 // GCPages - RetainedPages
-	FreelistEntries    uint64 // number of GC b-tree entries
-	LastTxID           uint64 // mi_recent_txnid
-	OldestRoTxID       uint64 // min mdbx txid across in-process RO txns
-	PageSize           uint64 // bytes per page
+	DBSize           uint64 // bytes
+	GCPages          uint64 // total pages in the freelist (= retained + reclaimable)
+	RetainedPages    uint64 // pages with entry_txid >= oldestLiveRoTxID
+	ReclaimablePages uint64 // GCPages - RetainedPages
+	FreelistEntries  uint64 // number of GC b-tree entries
+	LastTxID         uint64 // mi_recent_txnid
+	OldestRoTxID     uint64 // min mdbx txid across in-process RO txns
+	PageSize         uint64 // bytes per page
 }
 
 // GCStats walks DBI 0 (FREE_DBI) and computes the freelist accounting. Each GC
