@@ -505,8 +505,8 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
-					copyReferencedState = nil
+					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					return nil, nil
 				}
 				continue
 			}
