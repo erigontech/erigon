@@ -17,13 +17,13 @@
   {
     "shard": "blocktests-stable-parallel",
     "workers": 12,
-    "max-allowed-failures": 370,
+    "max-allowed-failures": 110,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-devnet",
     "workers": 12,
-    "max-allowed-failures": 380,
+    "max-allowed-failures": 130,
     "exec3-parallel": true
   },
   {
