@@ -483,15 +483,6 @@ func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
 	sdb.refund.State += gas
 }
 
-func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
-	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund.State {
-		return errors.New("state refund counter below zero")
-	}
-	sdb.refund.State -= gas
-	return nil
-}
-
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self destructed accounts.
 func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error) {
