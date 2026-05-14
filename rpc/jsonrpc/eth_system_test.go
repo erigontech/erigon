@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -63,7 +64,7 @@ func TestCapabilities(t *testing.T) {
 		Blocks:      prune.Distance(testPruneDistance),
 	}
 
-	setupAPI := func(t *testing.T, pruneMode prune.Mode, commitmentHistory bool) (*APIImpl, uint64) {
+	setupAPI := func(t *testing.T, pruneMode prune.Mode, commitmentHistory bool, persistReceiptsOpts ...bool) (*APIImpl, uint64) {
 		t.Helper()
 		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -95,6 +96,9 @@ func TestCapabilities(t *testing.T) {
 		_, err = prune.EnsureNotChanged(tx, pruneMode)
 		require.NoError(t, err)
 		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(tx, commitmentHistory))
+		if len(persistReceiptsOpts) > 0 && persistReceiptsOpts[0] {
+			require.NoError(t, kvcfg.PersistReceipts.ForceWrite(tx, true))
+		}
 		require.NoError(t, tx.Commit())
 
 		roTx, err := m.DB.BeginTemporalRo(ctx)
@@ -162,12 +166,27 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.State))
 		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		require.Equal(t, testPruneDistance, window(t, result.Receipts))
-		// full keeps all block snapshots via DefaultBlocksPruneMode: no delete strategy
+		// DefaultBlocksPruneMode: no explicit window; oldest depends on chain history expiry
+		// (here 0 because the test chain has no MergeHeight)
 		require.Equal(t, uint64(0), oldest(t, result.Tx))
 		require.Equal(t, uint64(0), oldest(t, result.Blocks))
 		require.Nil(t, result.Tx.DeleteStrategy)
 		require.Nil(t, result.Blocks.DeleteStrategy)
 		require.True(t, result.StateProofs.Disabled)
+	})
+
+	t.Run("full_persist_receipts", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testFullMode, false, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		// --persist.receipts: receipts available from genesis, not limited by state prune window.
+		require.Equal(t, uint64(0), oldest(t, result.Receipts))
+		require.Nil(t, result.Receipts.DeleteStrategy)
+		// state and logs still respect history prune distance
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Logs))
 	})
 
 	t.Run("full_with_commitment", func(t *testing.T) {

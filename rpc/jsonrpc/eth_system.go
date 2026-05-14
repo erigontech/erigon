@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -125,8 +126,10 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return f
 	}
 
-	// For KeepAllBlocksPruneMode (MaxUint64-1) and DefaultBlocksPruneMode (MaxUint64),
-	// PruneTo returns 0 because distance > headBlock.
+	// PruneTo returns 0 for both KeepAllBlocksPruneMode (MaxUint64-1, keep all) and
+	// DefaultBlocksPruneMode (MaxUint64, chain-specific history expiry) because their
+	// distances exceed headBlock. For DefaultBlocksPruneMode the true oldest is then
+	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
 	// DefaultBlocksPruneMode uses chain-specific history expiry: on chains that have
@@ -143,17 +146,31 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		stateproofs = CapabilityField{Disabled: true}
 	}
 
-	// state, logs and receipts share the same history prune distance.
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return nil, err
+	}
+
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
+
+	var receiptsField CapabilityField
+	if persistReceipts {
+		// --persist.receipts stores receipts for all blocks from genesis.
+		zero := hexutil.Uint64(0)
+		receiptsField = CapabilityField{OldestBlock: &zero}
+	} else {
+		// Without --persist.receipts, receipts are re-executed on demand; the
+		// available range is bounded by the state history prune window.
+		receiptsField = stateField
+	}
+
 	return &CapabilitiesResult{
-		Head:  CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
-		State: stateField,
-		Tx:    blocksField,
-		Logs:  stateField,
-		// receipts are read from DB (RCacheDomain) if --persist.receipts is enabled, otherwise
-		// recalculated via re-execution; in both cases the available range matches state history
-		Receipts:    stateField,
+		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
+		State:       stateField,
+		Tx:          blocksField,
+		Logs:        stateField,
+		Receipts:    receiptsField,
 		Blocks:      blocksField,
 		StateProofs: stateproofs,
 	}, nil
