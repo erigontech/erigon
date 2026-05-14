@@ -206,6 +206,24 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return nil, err
 	}
 	if baseState == nil {
+		block, hasBlock := f.forkGraph.GetBlock(checkpoint.Root)
+		header, hasHeader := f.forkGraph.GetHeader(checkpoint.Root)
+		blockSlot := uint64(0)
+		if hasBlock {
+			blockSlot = block.Block.Slot
+		} else if hasHeader {
+			blockSlot = header.Slot
+		}
+		log.Warn("[getCheckpointState] baseState not found",
+			"checkpointRoot", checkpoint.Root,
+			"checkpointEpoch", checkpoint.Epoch,
+			"blockSlot", blockSlot,
+			"slotMod4", blockSlot%4,
+			"inBlocks", hasBlock,
+			"inHeaders", hasHeader,
+			"anchorSlot", f.forkGraph.AnchorSlot(),
+			"anchorRoot", f.forkGraph.AnchorRoot(),
+		)
 		return nil, errors.New("getCheckpointState: baseState not found in graph")
 	}
 	// By default use the no change encoding to signal that there is no future epoch here.

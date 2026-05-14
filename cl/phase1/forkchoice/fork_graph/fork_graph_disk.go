@@ -501,7 +501,9 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	var err error
 
 	// try and find the point of reconnection
+	walkSteps := 0
 	for copyReferencedState == nil {
+		walkSteps++
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
@@ -509,18 +511,22 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
-					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
+					log.Warn("[getState] header-only root state read failed", "root", currentIteratorRoot, "slot", bHeader.Slot, "err", err, "walkSteps", walkSteps, "startRoot", blockRoot)
 					return nil, nil
 				}
 				continue
 			}
-			log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			if ok {
+				log.Warn("[getState] header-only root slot not aligned", "root", currentIteratorRoot, "slot", bHeader.Slot, "slotMod4", bHeader.Slot%dumpSlotFrequency, "walkSteps", walkSteps, "startRoot", blockRoot)
+			} else {
+				log.Warn("[getState] root not in blocks or headers", "root", currentIteratorRoot, "walkSteps", walkSteps, "startRoot", blockRoot, "anchorRoot", f.anchorRoot, "anchorSlot", f.anchorSlot)
+			}
 			return nil, nil
 		}
 		if block.Block.Slot%dumpSlotFrequency == 0 {
 			copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 			if err != nil {
-				log.Trace("Could not retrieve state: Missing header", "missing", currentIteratorRoot, "err", err)
+				log.Warn("[getState] block state read failed, continuing walk", "root", currentIteratorRoot, "slot", block.Block.Slot, "err", err, "walkSteps", walkSteps, "startRoot", blockRoot)
 			}
 			if copyReferencedState != nil {
 				break
@@ -590,6 +596,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		return true
 	})
 	if pruneSlot >= highestStoredBeaconStateSlot {
+		log.Debug("[Prune] skipped: pruneSlot >= highestStoredBeaconStateSlot", "pruneSlot", pruneSlot, "highestStoredBeaconStateSlot", highestStoredBeaconStateSlot)
 		return
 	}
 
@@ -597,8 +604,12 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.currentIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 	f.previousIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 
+	stateFilesDeleted := 0
 	f.lowestAvailableBlock.Store(pruneSlot + 1)
 	for _, root := range oldRoots {
+		if f.hasBeaconState(root) {
+			stateFilesDeleted++
+		}
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
 		f.lightclientBootstraps.Delete(root)
@@ -611,7 +622,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.envelopeExists.Delete(root)
 		f.fs.Remove(getEnvelopeFilename(root))
 	}
-	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
+	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot, "blocksRemoved", len(oldRoots), "stateFilesDeleted", stateFilesDeleted, "highestStoredBeaconStateSlot", highestStoredBeaconStateSlot)
 	return
 }
 
