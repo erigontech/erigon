@@ -246,6 +246,101 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(10, 2), res.value)
 }
 
+// TestBALPrePop_SameSenderTxs_NoConflicts simulates an EIP-7928 BAL where N
+// transactions from the same sender each write BalancePath and NoncePath, and
+// fees accrue to a single coinbase. With the BAL pre-populated into the
+// VersionMap at FlagDone, every parallel worker should read the correct
+// floor-N-1 value for BalancePath/NoncePath via the btree, and validation
+// should produce zero conflicts.
+//
+// Worker reads simulated per tx K (K = 0..N-1):
+//   - sender.AddressPath:   StorageRead at UnknownVersion (BAL doesn't
+//     pre-populate AddressPath, so versionedRead with readStorage=nil falls
+//     through to storage).
+//   - sender.BalancePath:   MapRead at (K-1, 0) for K>=1 (btree floor hit),
+//     StorageRead at UnknownVersion for K=0.
+//   - sender.NoncePath:     same shape as BalancePath.
+//   - coinbase.AddressPath: StorageRead at UnknownVersion.
+//   - coinbase.BalancePath: same shape as sender.BalancePath.
+//
+// This test reproduces the BAL retry storm seen on the point_evaluation
+// benchmark: with the current validateRead BalancePath cross-check on the
+// AddressPath MVReadResultNone branch, every tx K>=1 is invalidated solely
+// because BAL has a BalancePath entry below K, even though the underlying
+// AddressPath read from storage is unchanged.
+func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(7)
+	coinbase := getAddress(8)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	for i := 0; i < numTxs; i++ {
+		vm.Write(sender, BalancePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64(1000 - i)), true)
+		vm.Write(sender, NoncePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, uint64(i+1), true)
+		vm.Write(coinbase, BalancePath, accounts.NilKey,
+			Version{TxIndex: i, Incarnation: 0}, *uint256.NewInt(uint64((i + 1) * 50)), true)
+	}
+
+	sourceFor := func(r ReadResult) ReadSource {
+		if r.Status() == MVReadResultDone {
+			return MapRead
+		}
+		return StorageRead
+	}
+
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{
+			Address: sender, Path: AddressPath, Source: StorageRead, Version: UnknownVersion,
+		})
+		balRes := vm.Read(sender, BalancePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: sender, Path: BalancePath,
+			Source:  sourceFor(balRes),
+			Version: balRes.Version(),
+			Val:     balRes.Value(),
+		})
+		nonceRes := vm.Read(sender, NoncePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: sender, Path: NoncePath,
+			Source:  sourceFor(nonceRes),
+			Version: nonceRes.Version(),
+			Val:     nonceRes.Value(),
+		})
+		rs.Set(VersionedRead{
+			Address: coinbase, Path: AddressPath, Source: StorageRead, Version: UnknownVersion,
+		})
+		cbBalRes := vm.Read(coinbase, BalancePath, accounts.NilKey, txIdx)
+		rs.Set(VersionedRead{
+			Address: coinbase, Path: BalancePath,
+			Source:  sourceFor(cbBalRes),
+			Version: cbBalRes.Version(),
+			Val:     cbBalRes.Value(),
+		})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionValid, valid,
+			"tx %d: BAL-pre-populated reads should validate without conflicts; got %s", txIdx, valid)
+	}
+}
+
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a

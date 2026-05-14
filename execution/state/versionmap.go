@@ -438,19 +438,16 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
+					// Account-existence changes are signalled by AddressPath
+					// MVReadResultDone (newObject in a prior tx) or
+					// SelfDestructPath. BalancePath/NoncePath/Code/Storage
+					// writes — whether produced by runtime UpdateAccountData
+					// on a pre-existing account or by EIP-7928 BAL
+					// pre-population — never imply that the AddressPath
+					// storage read became stale, so we deliberately do not
+					// cross-check them here.
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix)
-
-					// If a prior tx created this account, BalancePath will
-					// have an entry at a lower txIndex (from BAL pre-population
-					// or worker flush). A nil AddressPath read from storage
-					// is then stale and must be invalidated.
-					if valid == VersionValid {
-						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
-						if balRR.Status() == MVReadResultDone {
-							valid = VersionInvalid
-						}
-					}
 				}
 			}
 		}
