@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // TestLightCollectorNoncePreservation verifies that a balance-only transfer
@@ -56,7 +55,7 @@ func TestLightCollectorNoncePreservation(t *testing.T) {
 	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xA1B2C3"))
 
@@ -128,7 +127,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xDEAD"))
 	addrVal := addr.Value()
@@ -191,7 +190,7 @@ func TestLightCollectorNewAccountCodeHash(t *testing.T) {
 	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xNEW1"))
 	addrVal := addr.Value()
@@ -251,7 +250,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	contract := accounts.InternAddress(common.HexToAddress("0xC0NTRACT"))
 	contractVal := contract.Value()
@@ -330,7 +329,7 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	tx, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	contract := accounts.InternAddress(common.HexToAddress("0xC0NTRACT2"))
 	contractVal := contract.Value()
