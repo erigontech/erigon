@@ -242,6 +242,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 					a.Agg().(*state.Aggregator).UnlockCollation()
 				}
 			}()
+		} else {
+			panic("assert")
 		}
 
 		// Flush execution state + overlay via brief RwTx, then commit.
@@ -267,6 +269,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if a, ok := db.(state.HasAgg); ok {
 			a.Agg().(*state.Aggregator).UnlockCollation()
 			collationLocked = false
+		} else {
+			panic("assert")
 		}
 
 		// Read the actual committed txNum from the DB "state" key.
