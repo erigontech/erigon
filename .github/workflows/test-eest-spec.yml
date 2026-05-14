@@ -9,25 +9,29 @@ defaults:
     shell: bash
 
 jobs:
+  # Matrix entries (shard / workers / max-allowed-failures) come from
+  # tools/eest-spec-shards.json so this workflow and tools/run-eest-spec-test.sh
+  # share a single source of truth. enginextests-devnet is intentionally absent
+  # from the manifest (the devnet tarball doesn't yet ship
+  # blockchain_tests_engine_x/); re-add it there when the fixture lands.
+  load-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.load.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - id: load
+        run: echo "matrix=$(jq -c . tools/eest-spec-shards.json)" >> "$GITHUB_OUTPUT"
+
   eest-spec-tests:
+    needs: load-matrix
     name: eest-spec-${{ matrix.shard }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { shard: statetests-stable,            workers: 12, max-allowed-failures: 37 }
-          - { shard: statetests-devnet,            workers: 12, max-allowed-failures: 5253 }
-          - { shard: blocktests-stable,            workers: 12, max-allowed-failures: 0 }
-          - { shard: blocktests-devnet,            workers: 12, max-allowed-failures: 6206 }
-          - { shard: enginextests-stable,          workers: 8,  max-allowed-failures: 0 }
-          - { shard: enginextests-devnet,          workers: 8,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-1m,    workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-5m,    workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-10m,   workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-30m,   workers: 1,  max-allowed-failures: 0 }
-          - { shard: enginextests-benchmark-60m,   workers: 1,  max-allowed-failures: 7 }
-          - { shard: enginextests-benchmark-100m,  workers: 1,  max-allowed-failures: 7 }
-          - { shard: enginextests-benchmark-150m,  workers: 1,  max-allowed-failures: 59 }
+        include: ${{ fromJson(needs.load-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -66,23 +70,11 @@ jobs:
           restore-keys: |
             test-fixtures-eest-${{ runner.os }}-
 
-      # Skip enginextests-devnet until the devnet tarball ships
-      # blockchain_tests_engine_x/. The non-`_x` `blockchain_tests_engine/`
-      # variant uses a different JSON schema (inline `pre`, no `preHash`)
-      # that the cmd/evm enginextest runner cannot consume. Matrix entry
-      # stays so re-enabling is a one-line guard removal once the fixture
-      # lands. Job-level `if:` can't see `matrix.*`, so the guard lives on
-      # the run step.
       - name: Run eest-spec-${{ matrix.shard }}
-        if: matrix.shard != 'enginextests-devnet'
         env:
           EEST_SPEC_MAX_FAILURES: ${{ matrix.max-allowed-failures }}
           EEST_SPEC_WORKERS: ${{ matrix.workers }}
         run: make eest-spec-${{ matrix.shard }}
-
-      - name: Skipped (devnet lacks blockchain_tests_engine_x fixtures)
-        if: matrix.shard == 'enginextests-devnet'
-        run: echo "Skipping eest-spec-enginextests-devnet; see workflow comment."
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

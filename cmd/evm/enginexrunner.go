@@ -104,24 +104,17 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("invalid --run regex: %w", err)
 	}
-	workers := cliCtx.Int(WorkersFlag.Name)
+	workers := cliCtx.Uint64(WorkersFlag.Name)
+	if workers == 0 {
+		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
+	}
 	cpuProfileDir := cliCtx.String("pprof.cpu")
 	wallProfileDir := cliCtx.String("fgprof")
 	profilingEnabled := cpuProfileDir != "" || wallProfileDir != ""
-	if profilingEnabled {
+	if profilingEnabled && workers > 1 {
 		// pprof.StartCPUProfile and fgprof.Start are process-global, so
 		// concurrent workers cannot produce isolated per-request profiles.
-		// Reject anything but 1.
-		if workers > 1 {
-			return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
-		}
-		workers = 1
-	} else if workers <= 0 {
-		// Knee of the wall-time vs. RAM curve on the full EEST engine_x set
-		// (~64k tests / ~36k groups): workers=8 reaches plateau speedup at
-		// ~4.3GB peak RSS. Higher values barely improve wall time and
-		// values >24 risk MDBX virtual-memory exhaustion.
-		workers = 8
+		return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
 	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
@@ -131,8 +124,8 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if workers > len(groups) && len(groups) > 0 {
-		workers = len(groups)
+	if workers > uint64(len(groups)) && len(groups) > 0 {
+		workers = uint64(len(groups))
 	}
 	fmt.Fprintf(os.Stderr, "Collected %d tests across %d (fork, preAllocHash) groups; running with %d workers\n", totalTests, len(groups), workers)
 
@@ -179,7 +172,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 
 	timeIt := cliCtx.Bool(TimeFlag.Name)
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := uint64(0); w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -311,21 +304,27 @@ func runEngineXGroup(
 	}()
 	for _, t := range tests {
 		r := testResult{Name: t.name, Pass: true}
-		// Always timedExec(bench=false): single execution with memstats.
-		// We deliberately don't expose bench=true (testing.Benchmark loop)
-		// for engine_x tests because NewPayload + FCU are idempotent for a
-		// block hash the EL has already processed — iterations 2..N would
-		// short-circuit through the already-known-block fast path instead
-		// of re-executing, so the resulting NsPerOp reflects the
-		// fast-path lookup cost, not the actual execution cost.
-		_, stats, err := timedExec(false, func() ([]byte, uint64, error) {
-			return nil, 0, runner.RunNamed(ctx, t.name, t.def)
-		})
+		// timedExec(bench=false): single execution with memstats. We
+		// deliberately don't expose bench=true (testing.Benchmark loop) for
+		// engine_x tests because NewPayload + FCU are idempotent for a block
+		// hash the EL has already processed — iterations 2..N would
+		// short-circuit through the already-known-block fast path instead of
+		// re-executing.
+		var err error
+		if timeIt {
+			var stats execStats
+			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
+				return nil, 0, runner.RunNamed(ctx, t.name, t.def)
+			})
+			if err == nil {
+				r.Stats = &stats
+			}
+		} else {
+			err = runner.RunNamed(ctx, t.name, t.def)
+		}
 		if err != nil {
 			r.Pass = false
 			r.Error = err.Error()
-		} else if timeIt {
-			r.Stats = &stats
 		}
 		resultCh <- r
 	}

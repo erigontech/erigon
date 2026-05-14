@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
@@ -318,11 +319,15 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
+		// benchmark fixtures at 150M-gas peak ~2.75GB SizeEstimate
+		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
 		},
 		DisableTxPool: true,
 		DisableSentry: true,
+		// 8 GiB headroom for benchmark fixtures with large pre-alloc bytecode.
+		MdbxDBSizeLimit: 8 * datasize.GB,
 	})
 	if err != nil {
 		// Best-effort: drop the temp dir we just created. The tester wasn't

@@ -1,13 +1,35 @@
 #!/usr/bin/env bash
 # Runs one shard of the EEST spec-test workflow:
 #
-#     tools/run-eest-spec-test.sh <suite> <fixtures> [gas]
+#     tools/run-eest-spec-test.sh <shard>
 #
-#   suite    = statetests | blocktests | enginextests
-#   fixtures = stable     | devnet     | benchmark
-#   gas      = 1m | 5m | 10m | 30m | 60m | 100m | 150m  (only for
-#              enginextests-benchmark; each value corresponds to one
-#              for_osaka_at_<NNNN>M/ directory under the engine_x fixtures)
+# Where <shard> is one of:
+#
+#   statetests-stable                          state tests vs. eest_stable
+#   statetests-devnet                          state tests vs. eest_devnet
+#   blocktests-stable                          blockchain tests vs. eest_stable
+#   blocktests-devnet                          blockchain tests vs. eest_devnet
+#   enginextests-stable                        engine-x tests vs. eest_stable
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}
+#                                              engine-x benchmark fixtures per
+#                                              gas-target subdir; each value
+#                                              maps to one for_osaka_at_<NNNN>M/
+#                                              directory under the engine_x
+#                                              benchmark fixtures
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}
+#                                              race-detector variant of
+#                                              blocktests-stable, split by
+#                                              fork via the --run regex so
+#                                              each sub-shard fits under ~30
+#                                              min. Caller (Makefile / CI) must
+#                                              export EVM_BIN to the race-built
+#                                              binary; otherwise -race
+#                                              detection doesn't fire.
+#   blocktests-devnet-race-amsterdam           race-detector variant filtered
+#                                              to the Amsterdam fork only.
+#   *-parallel                                  any of the above with "-parallel"
+#                                              appended sets ERIGON_EXEC3_PARALLEL=true
+#                                              from the manifest entry.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -23,78 +45,74 @@
 
 set -euo pipefail
 
-if (( $# < 2 || $# > 3 )); then
-	echo "usage: $0 <suite> <fixtures> [gas]" >&2
+if (( $# != 1 )); then
+	echo "usage: $0 <shard>" >&2
 	exit 2
 fi
-suite="$1"
-fixtures="$2"
-gas="${3:-}"
+shard="$1"
 
-case "$fixtures" in
-	stable)    base=test-fixtures-cache/eest_stable/fixtures ;;
-	devnet)    base=test-fixtures-cache/eest_devnet/fixtures ;;
-	benchmark) base=test-fixtures-cache/eest_benchmark/fixtures ;;
-	*) echo "unknown fixtures: $fixtures" >&2; exit 2 ;;
+# Resolve fixtures base from the shard name. blocktests-{stable,devnet}-race-*
+# inherit from the parent shard (stable/devnet).
+case "$shard" in
+	*-stable*)    base=test-fixtures-cache/eest_stable/fixtures ;;
+	*-devnet*)    base=test-fixtures-cache/eest_devnet/fixtures ;;
+	*-benchmark*) base=test-fixtures-cache/eest_benchmark/fixtures ;;
+	*) echo "cannot resolve fixtures for shard: $shard" >&2; exit 2 ;;
 esac
 
-# Per-shard config. Worker counts: statetests/blocktests=12 (CPU-bound, scale
-# with cores); enginextests=8 (memory-bound knee documented at
-# cmd/evm/enginexrunner.go:101 — higher values barely help and risk MDBX
-# virtual-memory exhaustion). Failure budgets mirror the values committed in
-# .github/workflows/test-eest-spec.yml's matrix.include: keep them in sync.
-# enginextests-benchmark is sharded per gas target; everything else is 2-arg.
-shard="$suite-$fixtures"
-if [[ -n "$gas" ]]; then
-	shard="$shard-$gas"
+# Resolve workers + failure budget + exec3-parallel flag from the single-source
+# manifest. Both this script and the test-eest-spec.yml load-matrix job read
+# tools/eest-spec-shards.json, so adding a shard / tweaking a budget is a
+# one-file edit.
+manifest=tools/eest-spec-shards.json
+budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"' "$manifest")
+if [[ -z "$budget_row" ]]; then
+	echo "shard $shard not found in $manifest" >&2
+	exit 2
+fi
+IFS=$'\t' read -r default_workers default_max exec3_parallel <<<"$budget_row"
+if [[ "$exec3_parallel" == "true" ]]; then
+	export ERIGON_EXEC3_PARALLEL=true
 fi
 
+# Strip "-parallel" suffix for case-arm routing — the parallel variant has the
+# same fixture path / regex as the non-parallel parent shard; only the
+# ERIGON_EXEC3_PARALLEL env var differs.
+shard_route="${shard%-parallel}"
+
+# Per-shard structural config (cmd / fixture path / extra CLI flags). Match
+# against shard_route so "-parallel" variants reuse the same arm as their
+# non-parallel parent.
 extra=()
-case "$shard" in
-	statetests-stable)
-		cmd=statetest;    path="$base/state_tests";              default_workers=12; default_max=37 ;;
-	statetests-devnet)
-		cmd=statetest;    path="$base/state_tests";              default_workers=12; default_max=5253 ;;
-	blocktests-stable)
-		cmd=blocktest;    path="$base/blockchain_tests";         default_workers=12; default_max=0 ;;
-	blocktests-devnet)
-		cmd=blocktest;    path="$base/blockchain_tests";         default_workers=12; default_max=6206 ;;
+case "$shard_route" in
+	statetests-stable | statetests-devnet)
+		cmd=statetest;   path="$base/state_tests" ;;
+	blocktests-stable | blocktests-devnet)
+		cmd=blocktest;   path="$base/blockchain_tests" ;;
+	blocktests-stable-race-pre-cancun)
+		cmd=blocktest;   path="$base/blockchain_tests"
+		extra=(--run 'fork_(Frontier|Homestead|Byzantium|ConstantinopleFix|Istanbul|Berlin|London|Paris|Shanghai)') ;;
+	blocktests-stable-race-cancun)
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Cancun') ;;
+	blocktests-stable-race-prague)
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Prague') ;;
+	blocktests-stable-race-osaka)
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Osaka') ;;
+	blocktests-devnet-race-amsterdam)
+		cmd=blocktest;   path="$base/blockchain_tests"; extra=(--run 'fork_Amsterdam') ;;
 	enginextests-stable)
-		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
+		cmd=enginextest; path="$base/blockchain_tests_engine_x"
 		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
-	enginextests-devnet)
-		# devnet tarball does not currently ship blockchain_tests_engine_x;
-		# the test-eest-spec workflow skips this shard via step-level if:.
-		cmd=enginextest;  path="$base/blockchain_tests_engine_x"; default_workers=8;  default_max=0
-		extra=(--pre-alloc-dir "$path/pre_alloc") ;;
-	enginextests-benchmark-1m   | \
-	enginextests-benchmark-5m   | \
-	enginextests-benchmark-10m  | \
-	enginextests-benchmark-30m  | \
-	enginextests-benchmark-60m  | \
-	enginextests-benchmark-100m | \
-	enginextests-benchmark-150m)
-		# Per-gas-target benchmark shard. workers=1 so the per-test wall-time
-		# recorded via --time isn't noised by sibling goroutines competing
-		# for CPU/MDBX. Default failure budgets per gas target are calibrated
-		# below from observed runs; tighten in follow-ups.
-		# Map "1m" -> "0001M", "150m" -> "0150M" (4-digit zero-padded).
-		gas_num="${gas%m}"
+	enginextests-benchmark-*)
+		# Per-gas-target shard: "...-1m" → for_osaka_at_0001M/, etc. Use
+		# shard_route (with any "-parallel" suffix stripped) so the parallel
+		# variants resolve to the same gas-target subdir.
+		gas="${shard_route##*-}"; gas_num="${gas%m}"
 		printf -v gas_dir 'for_osaka_at_%04dM' "$gas_num"
 		cmd=enginextest
 		path="$base/blockchain_tests_engine_x/$gas_dir"
-		default_workers=1
-		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time)
-		case "$shard" in
-			enginextests-benchmark-1m)   default_max=0 ;;
-			enginextests-benchmark-5m)   default_max=0 ;;
-			enginextests-benchmark-10m)  default_max=0 ;;
-			enginextests-benchmark-30m)  default_max=0 ;;
-			enginextests-benchmark-60m)  default_max=7 ;;
-			enginextests-benchmark-100m) default_max=7 ;;
-			enginextests-benchmark-150m) default_max=59 ;;
-		esac ;;
-	*) echo "unknown shard: $shard" >&2; exit 2 ;;
+		extra=(--pre-alloc-dir "$base/blockchain_tests_engine_x/pre_alloc" --time) ;;
+	*) echo "unknown shard: $shard (route: $shard_route)" >&2; exit 2 ;;
 esac
 
 workers="${EEST_SPEC_WORKERS:-$default_workers}"
@@ -140,8 +158,14 @@ echo "tmpdir:  $TMPDIR"
 echo "max-allowed-failures: $max"
 
 # Don't fail on non-zero — the runners report all results via JSON regardless,
-# and we want to inspect the JSON to drive the pass/fail decision.
-"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$result_file" || true
+# and we want to inspect the JSON to drive the pass/fail decision. The grep
+# filter strips any init-time log lines (e.g. dbg.envLookup's "[WARN] [env]"
+# message when ERIGON_EXEC3_PARALLEL is set fires before cmd/evm sets the log
+# handler, and the default log handler writes to stdout) so jq sees only JSON.
+raw_file=$(mktemp)
+"$evm_bin" "$cmd" --workers "$workers" --jsonout "${extra[@]}" "$path" > "$raw_file" || true
+grep -v '^\[[A-Z][A-Z]*\]' "$raw_file" > "$result_file"
+rm -f "$raw_file"
 
 total=$(jq 'length' "$result_file")
 failed=$(jq '[.[] | select(.pass == false)] | length' "$result_file")

@@ -250,9 +250,33 @@ test-fixtures-cl:
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
-	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7732
 	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
-	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/gloas
+
+## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
+.PHONY: test-fixtures-eest
+test-fixtures-eest:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
+
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+# against EEST fixtures. The shard list, workers, and failure budgets live in
+# tools/eest-spec-shards.json (single source of truth shared with
+# .github/workflows/test-eest-spec.yml's load-matrix job and
+# tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
+# "-race-" dispatch through the race-instrumented evm.race binary so race
+# coverage works without polluting the non-race shards.
+EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
+EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
+
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
+
+evm.race:
+	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
+
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+	@bash tools/run-eest-spec-test.sh "$*"
+
+$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
+	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 
 ## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
 .PHONY: test-fixtures-eest

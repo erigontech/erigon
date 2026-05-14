@@ -20,8 +20,7 @@ set -euo pipefail
 
 manifest="${1:-test-fixtures.json}"
 cache="${2:-test-fixtures-cache}"
-shift 2 2>/dev/null || true
-keys=("$@")
+keys=("${@:3}")
 
 for tool in jq curl tar; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "test-fixtures: $tool not found in PATH" >&2; exit 1; }
