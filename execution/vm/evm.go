@@ -94,8 +94,7 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	stateGasConsumed        uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
-	childPendingStateRefund uint64 // EIP-8037 state-gas refund pending from most recent successful child frame
+	stateGasConsumed uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -164,7 +163,6 @@ func (evm *EVM) StateGasConsumed() uint64 { return evm.stateGasConsumed }
 // ResetGasConsumed resets the gas consumed counters for a new transaction
 func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
-	evm.childPendingStateRefund = 0
 }
 
 // handleFrameRevert handles the full error path for a call or create frame:
@@ -234,16 +232,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	depth := evm.depth
 
 	// EIP-8037: on top-level error refund the full execution state_gas_used
-	// to the reservoir via state_refund; on success, route any pending
-	// state-gas refund credit from the child frame through state_refund as
-	// well (the tx-level "frame" has no caller to absorb it).
+	// to the reservoir via state_refund. Successful inline state-gas refunds
+	// (SSTORE 0→x→0, child-frame credits) already landed in gas.State during
+	// execution and bubble up via the normal leftover-gas return path.
 	if depth == 0 && evm.chainRules.IsAmsterdam {
 		defer func() {
 			if err != nil {
 				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
-			} else if evm.childPendingStateRefund > 0 {
-				evm.intraBlockState.AddStateRefund(evm.childPendingStateRefund)
-				evm.childPendingStateRefund = 0
 			}
 		}()
 	}
@@ -482,16 +477,15 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 	// EIP-8037: on top-level CREATE error (revert, halt, address collision,
 	// insufficient balance, …), refund the full execution state_gas_used plus
-	// the intrinsic NEW_ACCOUNT state gas via state_refund. On success route
-	// any pending child state-gas refund credit through state_refund.
+	// the intrinsic NEW_ACCOUNT state gas via state_refund. Successful inline
+	// state-gas refunds (SSTORE 0→x→0, child-frame credits) already landed in
+	// gas.State during execution and bubble up via the normal leftover-gas
+	// return path.
 	if depth == 0 && evm.chainRules.IsAmsterdam {
 		defer func() {
 			if err != nil {
 				evm.intraBlockState.AddStateRefund(evm.stateGasConsumed)
 				evm.intraBlockState.AddStateRefund(uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte)
-			} else if evm.childPendingStateRefund > 0 {
-				evm.intraBlockState.AddStateRefund(evm.childPendingStateRefund)
-				evm.childPendingStateRefund = 0
 			}
 		}()
 	}
