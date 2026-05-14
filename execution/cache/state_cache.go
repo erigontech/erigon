@@ -105,6 +105,28 @@ func (c *StateCache) PutCodeWithHash(addr, code, ethHash []byte) {
 	cc.PutWithEthHash(addr, common.Copy(code), ethHash)
 }
 
+// GetCodeSizeByHash returns the size of code by its Ethereum codeHash
+// without loading the bytes. Returns (0, false) when the size-only layer
+// is not populated for this hash.
+func (c *StateCache) GetCodeSizeByHash(ethHash []byte) (int, bool) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return 0, false
+	}
+	return cc.GetCodeSizeByEthHash(ethHash)
+}
+
+// PutCodeSizeByHash records the code size for a given ethHash. Useful when
+// the caller has the size in hand (e.g. from an account-domain probe that
+// resolved a sibling addr to the same code) but doesn't have the bytes.
+func (c *StateCache) PutCodeSizeByHash(ethHash []byte, size int) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	cc.PutCodeSizeByEthHash(ethHash, size)
+}
+
 // Put stores data for the given domain and key.
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]

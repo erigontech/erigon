@@ -109,6 +109,43 @@ func TestCodeCache_PutWithEthHash_RespectsCodeCapacity(t *testing.T) {
 	assert.False(t, ok, "second L2b entry should not exist when capacity is exceeded")
 }
 
+func TestCodeCache_CodeSize_PopulatedAlongsideBytes(t *testing.T) {
+	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	code := []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x60, 0x10}
+	ethHash := makeEthHash(0xee)
+
+	// Miss before any populate.
+	_, ok := c.GetCodeSizeByEthHash(ethHash)
+	require.False(t, ok)
+
+	// PutWithEthHash should fill the size layer alongside the bytes.
+	c.PutWithEthHash(makeAddr(1), code, ethHash)
+
+	size, ok := c.GetCodeSizeByEthHash(ethHash)
+	require.True(t, ok)
+	require.Equal(t, len(code), size)
+}
+
+func TestCodeCache_CodeSize_DirectPutAndGet(t *testing.T) {
+	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	ethHash := makeEthHash(0xff)
+
+	// Direct Put without going through the bytes layer.
+	c.PutCodeSizeByEthHash(ethHash, 4096)
+
+	size, ok := c.GetCodeSizeByEthHash(ethHash)
+	require.True(t, ok)
+	require.Equal(t, 4096, size)
+}
+
+func TestCodeCache_CodeSize_EmptyHashOrNegativeIsNoOp(t *testing.T) {
+	c := NewCodeCache(1*datasize.MB, 1*datasize.MB)
+	c.PutCodeSizeByEthHash(nil, 100)
+	c.PutCodeSizeByEthHash(makeEthHash(1), -1)
+	_, ok := c.GetCodeSizeByEthHash(makeEthHash(1))
+	assert.False(t, ok)
+}
+
 // =============================================================================
 // Microbenchmarks — measure the per-op cost of the L2b path.
 // =============================================================================
