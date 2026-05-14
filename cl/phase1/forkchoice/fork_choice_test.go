@@ -227,3 +227,237 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }
+
+// TestGetHeadAfterProcessingBlocks verifies that GetHead succeeds after
+// processing blocks through OnBlock. This exercises the full path:
+// GetHead → getCheckpointState → getState (backward walk + state file read).
+// This is the exact path that fails in production with "baseState not found".
+func TestGetHeadAfterProcessingBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx := context.Background()
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	emitters := beaconevents.NewEventEmitter()
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+
+	genesisState, err := initial_state.GetGenesisState(1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	localValidators := validator_params.NewValidatorParams()
+
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		nil,
+		pool,
+		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+			Beacon: true,
+		}, emitters),
+		emitters,
+		sd,
+		blobStorage,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+
+	// Advance store time so blocks are not in the future.
+	store.OnTick(2000)
+
+	// Process all 96 blocks (3 epochs).
+	for i, block := range blocks {
+		err := store.OnBlock(ctx, block, false, true, false)
+		require.NoError(t, err, "OnBlock failed at block %d (slot %d)", i, block.Block.Slot)
+	}
+
+	// Log the justified/finalized state for debugging.
+	justified := store.JustifiedCheckpoint()
+	finalized := store.FinalizedCheckpoint()
+	t.Logf("After processing %d blocks:", len(blocks))
+	t.Logf("  Justified: epoch=%d root=%x", justified.Epoch, justified.Root)
+	t.Logf("  Finalized: epoch=%d root=%x", finalized.Epoch, finalized.Root)
+	t.Logf("  HighestSeen: %d", store.HighestSeen())
+
+	// Verify the justified root is accessible via GetStateAtBlockRoot.
+	justifiedState, err := store.GetStateAtBlockRoot(justified.Root, true)
+	require.NoError(t, err, "GetStateAtBlockRoot failed for justified root %x", justified.Root)
+	require.NotNil(t, justifiedState, "GetStateAtBlockRoot returned nil for justified root %x", justified.Root)
+	t.Logf("  Justified state slot: %d", justifiedState.Slot())
+
+	// Now call GetHead — this is the exact call that fails in production.
+	headRoot, headSlot, err := store.GetHead(nil)
+	require.NoError(t, err, "GetHead failed: %v", err)
+	t.Logf("  Head: slot=%d root=%x", headSlot, headRoot)
+
+	// The head should be at or near the last processed block.
+	lastBlock := blocks[len(blocks)-1]
+	lastRoot, err := lastBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(lastRoot), headRoot, "head should be the last block")
+}
+
+// TestGetStateAfterPrune verifies that getState still works after Prune
+// deletes old blocks and state files. This simulates the production scenario
+// where onNewFinalized calls Prune, and then getCheckpointState needs to
+// recover the justified checkpoint state from disk.
+func TestGetStateAfterPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx := context.Background()
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	emitters := beaconevents.NewEventEmitter()
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+
+	genesisState, err := initial_state.GetGenesisState(1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	localValidators := validator_params.NewValidatorParams()
+
+	fg := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	}, emitters)
+
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		nil,
+		pool,
+		fg,
+		emitters,
+		sd,
+		blobStorage,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2000)
+
+	// Process all 96 blocks.
+	for i, block := range blocks {
+		err := store.OnBlock(ctx, block, false, true, false)
+		require.NoError(t, err, "OnBlock failed at block %d (slot %d)", i, block.Block.Slot)
+	}
+
+	justified := store.JustifiedCheckpoint()
+	finalized := store.FinalizedCheckpoint()
+	t.Logf("Justified: epoch=%d root=%x", justified.Epoch, justified.Root)
+	t.Logf("Finalized: epoch=%d root=%x", finalized.Epoch, finalized.Root)
+
+	// Verify GetState works before prune.
+	preState, err := store.GetStateAtBlockRoot(justified.Root, true)
+	require.NoError(t, err)
+	require.NotNil(t, preState, "pre-prune: state should exist for justified root")
+	t.Logf("Pre-prune justified state slot: %d", preState.Slot())
+
+	// Prune blocks below a slot that's below the justified root but high enough
+	// to delete some early blocks. The justified root is at epoch 3 (slot 96).
+	// Prune at slot 80 to delete old blocks while keeping justified root intact.
+	pruneSlot := uint64(80)
+	t.Logf("Pruning at slot %d", pruneSlot)
+	require.NoError(t, fg.Prune(pruneSlot))
+
+	// After prune, the justified root (slot 96) should still be in the fork graph.
+	_, hasHeader := fg.GetHeader(justified.Root)
+	require.True(t, hasHeader, "justified root header should survive prune (slot 96 > prune slot 80)")
+
+	// GetState should still work for the justified root.
+	postState, err := store.GetStateAtBlockRoot(justified.Root, true)
+	require.NoError(t, err)
+	require.NotNil(t, postState, "post-prune: state should still be retrievable for justified root")
+	t.Logf("Post-prune justified state slot: %d", postState.Slot())
+
+	// GetHead should still work.
+	headRoot, headSlot, err := store.GetHead(nil)
+	require.NoError(t, err, "GetHead failed after prune")
+	t.Logf("Post-prune head: slot=%d root=%x", headSlot, headRoot)
+}
+
+// TestGetStateWalkAfterAggressivePrune verifies that getState's backward walk
+// works correctly when pruning removes most blocks, forcing the walk to traverse
+// through blocks close to the justified root. This tests:
+// 1. State files exist at slot % 4 == 0 boundaries (from AddChainSegment dump)
+// 2. The backward walk correctly finds and reads these state files
+// 3. GetHead (→ getCheckpointState → getState) still works after Prune
+func TestGetStateWalkAfterAggressivePrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx := context.Background()
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	emitters := beaconevents.NewEventEmitter()
+	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+
+	genesisState, err := initial_state.GetGenesisState(1)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	localValidators := validator_params.NewValidatorParams()
+
+	fg := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	}, emitters)
+
+	store, err := forkchoice.NewForkChoiceStore(
+		ethClock,
+		anchorState,
+		nil,
+		pool,
+		fg,
+		emitters,
+		sd,
+		blobStorage,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		localValidators,
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick(2000)
+
+	// Process all 96 blocks.
+	for i, block := range blocks {
+		err := store.OnBlock(ctx, block, false, true, false)
+		require.NoError(t, err, "OnBlock failed at block %d (slot %d)", i, block.Block.Slot)
+	}
+
+	justified := store.JustifiedCheckpoint()
+	t.Logf("Justified: epoch=%d root=%x", justified.Epoch, justified.Root)
+
+	justifiedHeader, hasJH := fg.GetHeader(justified.Root)
+	require.True(t, hasJH, "justified root must be in headers")
+	t.Logf("Justified block slot: %d, slot%%4=%d", justifiedHeader.Slot, justifiedHeader.Slot%4)
+
+	// Prune aggressively — up to 2 slots below the justified root.
+	// This simulates a production scenario where the prune boundary is close to
+	// but still below the justified checkpoint. The justified root (and its nearby
+	// ancestors with state files) must survive.
+	pruneSlot := justifiedHeader.Slot - 2
+	t.Logf("Pruning at slot %d (justified at slot %d)", pruneSlot, justifiedHeader.Slot)
+	require.NoError(t, fg.Prune(pruneSlot))
+
+	// Verify GetState still works for the justified root.
+	state, err := store.GetStateAtBlockRoot(justified.Root, true)
+	require.NoError(t, err, "GetStateAtBlockRoot failed for justified root after aggressive prune")
+	require.NotNil(t, state, "state nil for justified root (slot %d) after prune at slot %d",
+		justifiedHeader.Slot, pruneSlot)
+	t.Logf("Post-prune justified state slot: %d", state.Slot())
+
+	// GetHead should succeed — this is the exact path that fails in production.
+	headRoot, headSlot, err := store.GetHead(nil)
+	require.NoError(t, err, "GetHead failed after aggressive prune")
+	t.Logf("Post-prune head: slot=%d root=%x", headSlot, headRoot)
+}
