@@ -838,7 +838,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	a.logger.Warn("[dbg] buildFiles called", "step", step)
 	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
@@ -986,8 +985,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
-	a.logger.Warn("[dbg] readyForCollation called",
-		"step", step, "reorgBlockDepth", a.reorgBlockDepth, "hasFrozenBlocks", a.frozenBlocks != nil)
 	if a.reorgBlockDepth == 0 {
 		a.logger.Warn("[dbg] readyForCollation reorgBlockDepth=0, always ok")
 		return 0, 0, 0, true, nil
