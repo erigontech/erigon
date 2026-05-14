@@ -1257,10 +1257,17 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		return err
 	}
 	if written {
-		if codeHash == baseCodeHash {
+		// SKIP when the new code matches either:
+		//   (1) the value seen by *this* SetCode call (revert-to-base — handles
+		//       the case where a prior SetCode in the same tx already wrote
+		//       a non-original value, and we now revert to it), or
+		//   (2) the pre-tx original (cumulative net-zero — e.g. EIP-7702
+		//       authority that sets a delegation then resets to no-delegation
+		//       within the same tx).
+		if codeHash == baseCodeHash || codeHash == stateObject.original.CodeHash {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x codeLen=%d\n",
-					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
+				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
+					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
 			}
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeHashPath})
@@ -1430,15 +1437,6 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, stateObject.data.Incarnation)
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
-
-	// Record storage deletes for the parallel commitment calculator.
-	// When versionMap is active, the calculator needs explicit DELETE entries
-	// for each storage slot — it can't use DomainDelPrefix like the serial path.
-	if sdb.versionMap != nil {
-		for key := range stateObject.dirtyStorage {
-			versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
-		}
-	}
 
 	return true, nil
 }
@@ -2137,6 +2135,15 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
+		}
+		// EIP-6780: storage deletion for self-destructed accounts is deferred
+		// from the SELFDESTRUCT opcode to tx end so that intra-tx reads after
+		// SELFDESTRUCT still see real values. The parallel commitment
+		// calculator needs explicit per-slot DELETE entries — emit them here.
+		if sdb.versionMap != nil && stateObject.selfdestructed {
+			for key := range stateObject.dirtyStorage {
+				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
+			}
 		}
 	}
 

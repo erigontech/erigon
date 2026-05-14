@@ -2012,13 +2012,27 @@ func (result *execResult) finalizeTxSimple(
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			// PostApplyMessage needs an IBS — create a minimal one
+			// Build a tip-credited IBS so PostApplyMessage sees the same
+			// post-tip state the serial path does. The worker skipped tip/burn
+			// credit (noFeeBurnAndTip=true) and its PostApplyMessage call, so
+			// finalize is the sole emitter of EIP-7708 burn logs in parallel.
 			ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 			ibs.SetTxContext(blockNum, txIndex)
 			if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 				return nil, nil, nil, err
 			}
+			if !result.ExecutionResult.FeeTipped.IsZero() {
+				if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+			if hasBurnt && !result.ExecutionResult.FeeBurnt.IsZero() && txTask.Config.IsLondon(blockNum) {
+				if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
+			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 		}
 	}
 

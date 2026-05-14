@@ -747,7 +747,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	result.BurntContractAddress = burntContractAddress
 
-	if st.evm.Context.PostApplyMessage != nil {
+	// In parallel exec3, the fee tip is credited at finalize, not here; running
+	// PostApplyMessage now would emit EIP-7708 burn logs with the pre-tip
+	// coinbase balance. Finalize re-runs PostApplyMessage on a tip-credited IBS.
+	if st.evm.Context.PostApplyMessage != nil && !st.noFeeBurnAndTip {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
 	}
 
