@@ -486,10 +486,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				quickPruneTimeout = maxTimeout
 			}
 		} else {
-			panic("assert")
+			panic("assert: cfg.db.(state.HasAgg).Agg() must return a non-nil *state.Aggregator; got " + fmt.Sprintf("%T", hasAgg.Agg()))
 		}
 	} else {
-		panic("assert")
+		panic("assert: cfg.db must implement state.HasAgg; got " + fmt.Sprintf("%T", cfg.db))
 	}
 
 	if timeout > 0 && timeout > quickPruneTimeout {

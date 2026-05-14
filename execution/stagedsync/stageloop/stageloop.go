@@ -224,7 +224,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
 			}
 		} else {
-			panic("assert")
+			panic("assert: db must implement state.HasAgg; got " + fmt.Sprintf("%T", db))
 		}
 
 		// Lock commitGate so background collation RO txs are closed
@@ -243,7 +243,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				}
 			}()
 		} else {
-			panic("assert")
+			panic("assert: db must implement state.HasAgg; got " + fmt.Sprintf("%T", db))
 		}
 
 		// Flush execution state + overlay via brief RwTx, then commit.
@@ -270,7 +270,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			a.Agg().(*state.Aggregator).UnlockCollation()
 			collationLocked = false
 		} else {
-			panic("assert")
+			panic("assert: db must implement state.HasAgg; got " + fmt.Sprintf("%T", db))
 		}
 
 		// Read the actual committed txNum from the DB "state" key.
@@ -287,6 +287,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				committedTxNum := binary.BigEndian.Uint64(v[:8])
 				if a, ok := db.(state.HasAgg); ok {
 					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
+				} else {
+					panic("assert: db must implement state.HasAgg; got " + fmt.Sprintf("%T", db))
 				}
 			}
 			verifyTx.Rollback()
@@ -388,7 +390,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 				return err
 			}
 		} else {
-			panic("assert")
+			panic("assert: db must implement state.HasAgg; got " + fmt.Sprintf("%T", db))
 		}
 	}
 	return nil

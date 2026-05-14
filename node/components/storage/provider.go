@@ -149,10 +149,10 @@ func (p *Provider) Initialize(deps Deps) error {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
 			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
 		} else {
-			panic("assert")
+			panic("assert: p.ChainDB.(dbstate.HasAgg).Agg() must return a non-nil *dbstate.Aggregator; got " + fmt.Sprintf("%T", hasAgg.Agg()))
 		}
 	} else {
-		panic("assert")
+		panic("assert: p.ChainDB must implement dbstate.HasAgg; got " + fmt.Sprintf("%T", p.ChainDB))
 	}
 
 	// Wire file-change callbacks so completed snapshots are seeded and
