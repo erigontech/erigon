@@ -61,11 +61,25 @@ import (
 //     receipts are kept; SyncSnapshots' running-loop applies the
 //     finer filter once the node has bodies on disk.
 //
-// Single source of truth follow-up: SyncSnapshots itself should call
-// this helper rather than re-implement rules 1–2 inline. Deferred —
-// the running-loop also handles the receipts / blacklist axes and
-// refactoring those into the helper widens scope. Tracked in
-// docs/plans/time-to-get-back-generic-mist.md "Pickup state 2026-05-14".
+// Divergence from SyncSnapshots' inline filter is intentional. The
+// inline filter uses head-anchored predicates: it keeps state history
+// at the prune horizon (range >= max(0, head-distance)) and drops only
+// what's been retired off the tail. At fresh bootstrap, head==0 and
+// the horizon collapses to "keep everything" — which is exactly the
+// degenerate case bug N exposed. The bootstrap-side filter therefore
+// applies an all-or-nothing rule: "if this prune mode runtime-prunes
+// history, don't download any of it at startup; the publisher will
+// rebuild what's needed during execution." Two filters, two contexts,
+// two policies; trying to unify produces either an unsafe relaxation
+// (bootstrap downloads things it would prune — bug N) or a wrong
+// restriction (running-node keeps too little).
+//
+// The invariant the two filters share — and which
+// TestFilterIsSubsetOfArchive pins below — is monotonicity:
+// FilterPreverifiedByPruneMode(items, *, mode).len <= len(items) for
+// every mode. The bootstrap-side filter never adds entries that
+// weren't in preverified to begin with; SyncSnapshots' running-loop
+// has the same property.
 func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Config, pruneMode prune.Mode) snapcfg.PreverifiedItems {
 	if !pruneMode.Initialised {
 		// Defensive: an uninitialised mode should not silently

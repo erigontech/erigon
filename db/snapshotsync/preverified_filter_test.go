@@ -165,3 +165,61 @@ func namesOf(items snapcfg.PreverifiedItems) []string {
 	}
 	return names
 }
+
+// TestFilterIsSubsetOfArchive pins the monotonicity invariant the
+// bootstrap-side filter shares with SyncSnapshots' inline filter:
+// no mode ever produces a larger kept set than archive (the no-op
+// case). A regression that synthesizes entries — for instance a
+// future "merge two adjacent items into one" optimisation — would
+// trip this immediately. Caught here instead of in the live publisher.
+//
+// Also catches accidental rule inversions: if someone flips a
+// `continue` check the wrong way, a prune mode could end up keeping
+// MORE than archive, which is nonsensical.
+func TestFilterIsSubsetOfArchive(t *testing.T) {
+	t.Parallel()
+
+	const sampleHash = "0123456789abcdef0123456789abcdef01234567"
+	items := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "domain/v1.0-accounts.0-1024.kv", Hash: sampleHash},
+		preverified.Item{Name: "history/v1.0-accountsHistory.0-1024.v", Hash: sampleHash},
+		preverified.Item{Name: "idx/v1.0-accountsIdx.0-1024.ef", Hash: sampleHash},
+		preverified.Item{Name: "accessor/v1.0-history.0-1024.vi", Hash: sampleHash},
+		preverified.Item{Name: "v1.0-000000-000500-headers.seg", Hash: sampleHash},
+		preverified.Item{Name: "v1.0-000000-000500-bodies.seg", Hash: sampleHash},
+		preverified.Item{Name: "v1.0-000000-000500-transactions.seg", Hash: sampleHash},
+		preverified.Item{Name: "v1.0-020000-020500-transactions.seg", Hash: sampleHash},
+		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: sampleHash},
+		preverified.Item{Name: "salt-state.txt", Hash: sampleHash},
+		preverified.Item{Name: "erigondb.toml", Hash: sampleHash},
+	}
+	mergeHeight := uint64(15_000_000)
+	cc := &chain.Config{MergeHeight: &mergeHeight}
+
+	archive := FilterPreverifiedByPruneMode(items, cc, prune.ArchiveMode)
+	archiveSet := make(map[string]struct{}, len(archive))
+	for _, p := range archive {
+		archiveSet[p.Name] = struct{}{}
+	}
+
+	for _, mode := range []struct {
+		name string
+		m    prune.Mode
+	}{
+		{"full", prune.FullMode},
+		{"blocks", prune.BlocksMode},
+		{"minimal", prune.MinimalMode},
+	} {
+		t.Run(mode.name+" is subset of archive", func(t *testing.T) {
+			got := FilterPreverifiedByPruneMode(items, cc, mode.m)
+			require.LessOrEqual(t, len(got), len(archive),
+				"%s mode must never keep more entries than archive", mode.name)
+			for _, p := range got {
+				_, inArchive := archiveSet[p.Name]
+				require.Truef(t, inArchive,
+					"%s mode kept %q but archive dropped it — this means a non-archive mode is producing entries archive doesn't, which is nonsensical (modes only restrict, never relax)",
+					mode.name, p.Name)
+			}
+		})
+	}
+}
