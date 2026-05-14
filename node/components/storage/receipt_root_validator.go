@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // ReceiptRootValidator verifies DeriveSha(receipts) == header.ReceiptHash
@@ -71,12 +72,23 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		txNumReader := v.BlockReader.TxnumReader()
 
 		fb, ok, err := txNumReader.FindBlockNum(ctx, tx, startTxNum)
-		if err != nil || !ok {
-			return fmt.Errorf("FindBlockNum(startTxNum=%d): %w (ok=%v)", startTxNum, err, ok)
+		if err != nil {
+			return fmt.Errorf("FindBlockNum(startTxNum=%d): %w", startTxNum, err)
+		}
+		if !ok {
+			// TxNum not yet covered by an imported block. Transient
+			// at fresh-bootstrap (state files on disk, EL hasn't
+			// OpenSegments'd yet). ErrPause makes the lifecycle
+			// retry next sweep instead of accumulating toward
+			// quarantine.
+			return fmt.Errorf("FindBlockNum(startTxNum=%d) returned ok=false: %w", startTxNum, validation.ErrPause)
 		}
 		tb, ok, err := txNumReader.FindBlockNum(ctx, tx, endTxNum-1)
-		if err != nil || !ok {
-			return fmt.Errorf("FindBlockNum(endTxNum-1=%d): %w (ok=%v)", endTxNum-1, err, ok)
+		if err != nil {
+			return fmt.Errorf("FindBlockNum(endTxNum-1=%d): %w", endTxNum-1, err)
+		}
+		if !ok {
+			return fmt.Errorf("FindBlockNum(endTxNum-1=%d) returned ok=false: %w", endTxNum-1, validation.ErrPause)
 		}
 		fromBlock, toBlock = fb, tb
 		return nil

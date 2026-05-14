@@ -154,6 +154,18 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		return fmt.Errorf("CommitmentDomainValidator: nil BlockReader")
 	}
 
+	// At fresh bootstrap, the snapshot files are on disk but the EL
+	// hasn't OpenSegments'd yet — BlockReader.FrozenBlocks() returns
+	// 0 and any header lookup will fail. Return ErrPause so the
+	// lifecycle retries on next sweep instead of accumulating
+	// failures toward quarantine. The block-aligned validators
+	// (HeaderChain / TxRoot / Receipt) detect this via per-block
+	// nil-header checks; commitment's deeper LoadCommitmentRoot path
+	// makes per-block detection awkward, so an early gate is cleaner.
+	if v.BlockReader.FrozenBlocks() == 0 {
+		return fmt.Errorf("BlockReader frozen tip = 0 (EL hasn't opened segments yet): %w", validation.ErrPause)
+	}
+
 	tx, err := v.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

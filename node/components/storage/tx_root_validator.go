@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // TxRootValidator verifies DeriveSha(block.Transactions) == header.TxHash
@@ -78,7 +79,14 @@ func (v TxRootValidator) ValidateStep(ctx context.Context, files []*snapshot.Fil
 				return fmt.Errorf("BlockByNumber(%d): %w", n, err)
 			}
 			if block == nil {
-				return fmt.Errorf("missing block %d in transactions.seg [%d, %d)", n, seg.from, seg.to)
+				// Block not yet imported into the chain DB. Transient
+				// at fresh-bootstrap: the transactions.seg is on disk
+				// but the EL hasn't OpenSegments'd yet, so BlockReader
+				// can't see the block. ErrPause keeps the file in
+				// Indexed and the lifecycle retries next sweep
+				// instead of ticking the failure counter toward
+				// quarantine.
+				return fmt.Errorf("missing block %d in transactions.seg [%d, %d): %w", n, seg.from, seg.to, validation.ErrPause)
 			}
 			derived := types.DeriveSha(types.Transactions(block.Transactions()))
 			if h := block.Header(); h.TxHash != derived {

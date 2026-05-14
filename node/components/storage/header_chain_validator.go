@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 )
 
 // HeaderChainValidator verifies header[N].ParentHash == hash(header[N-1])
@@ -96,7 +97,14 @@ func verifyHeaderChain(ctx context.Context, tx kv.Getter, br services.FullBlockR
 		return fmt.Errorf("HeaderByNumber(%d): %w", start-1, err)
 	}
 	if prev == nil {
-		return fmt.Errorf("missing header at block %d", start-1)
+		// Block not yet imported into the chain DB. Transient at
+		// fresh-bootstrap: the headers.seg is on disk but the EL
+		// hasn't OpenSegments'd yet, so BlockReader can't see it.
+		// Return ErrPause so the lifecycle driver retries on the
+		// next sweep without ticking the per-file failure counter
+		// — otherwise validation fails 5× before OpenSegments
+		// finally fires and the file is quarantined permanently.
+		return fmt.Errorf("missing header at block %d: %w", start-1, validation.ErrPause)
 	}
 	for n := start; n < to; n++ {
 		h, err := br.HeaderByNumber(ctx, tx, n)
@@ -104,7 +112,7 @@ func verifyHeaderChain(ctx context.Context, tx kv.Getter, br services.FullBlockR
 			return fmt.Errorf("HeaderByNumber(%d): %w", n, err)
 		}
 		if h == nil {
-			return fmt.Errorf("missing header at block %d", n)
+			return fmt.Errorf("missing header at block %d: %w", n, validation.ErrPause)
 		}
 		if h.ParentHash != prev.Hash() {
 			return fmt.Errorf("parent-hash chain broken at block %d: header.parentHash=%x, hash(header[%d])=%x",
