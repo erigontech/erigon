@@ -107,6 +107,16 @@ type Provider struct {
 	Orchestrator      *flow.Orchestrator
 	InitialStateReady <-chan struct{}
 
+	// bootstrapChainName is set in Initialize when
+	// --snap.bootstrap-from-preverified is configured. The actual
+	// synthetic-manifest publish is deferred until backend.go calls
+	// BootstrapFromPreverified() — after BindBus wires the downloader
+	// to the bus. Without the deferral, DownloadRequested events fire
+	// into a bus whose downloader-side subscriber doesn't yet exist
+	// and the wedge symptom is the same as the gap the bootstrap is
+	// meant to fix. Empty string disables the bootstrap publish.
+	bootstrapChainName string
+
 	// pausedCommitmentCache is the partial-block-pause cache shared
 	// by CommitmentDomainValidator. Held here so the ChangeSet
 	// subscriber can drop entries for files that get retired before
@@ -662,32 +672,52 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: start orchestrator: %w", err)
 		}
 
-		// Bootstrap-from-preverified: seed the orchestrator with a
-		// synthetic peer-manifest derived from preverified.toml so a
-		// fresh publisher can drive its initial download even when no
-		// V2-advertising peer is reachable on the swarm. Without this,
-		// the orchestrator only fires DownloadRequested on
-		// PeerManifestReceived events — and a bootstrap publisher
-		// (first publisher on a chain, or a publisher restarting in
-		// a network where every existing V2 peer has churned) has no
-		// such event to react to → OtterSync's storage-owned-download
-		// gate sits forever waiting on InitialStateReady. The previous
-		// (pre-V2) publisher path triggered downloads via OtterSync's
-		// direct SyncSnapshots call; under
-		// --snap.lifecycle-driven-by-storage that path is no-op'd, so
-		// the synthetic-manifest path here is the new bootstrap.
-		//
-		// Idempotent: re-firing the manifest is safe — requestGapsFor
-		// dedups against existing pending/local entries via
-		// haveLocally + coverageForRoleLocked.
+		// Record the chain name so BootstrapFromPreverified — invoked
+		// later by backend.go after BindBus has wired the downloader
+		// — knows which preverified registry to read. Bootstrap can't
+		// fire here: the orchestrator subscribes to PeerManifestReceived,
+		// would process the synthetic manifest, and publish
+		// DownloadRequested events into a bus whose downloader-side
+		// subscriber doesn't exist yet (BindBus runs in backend.go
+		// AFTER storage.Initialize returns). The events would be lost
+		// and the wedge symptoms would be indistinguishable from the
+		// no-peer-bootstrap case the path is meant to fix.
 		if config.Snapshot.BootstrapFromPreverified {
-			if err := p.bootstrapFromPreverified(config.Snapshot.ChainName); err != nil {
-				logger.Warn("[storage] bootstrap from preverified failed", "err", err)
-			}
+			p.bootstrapChainName = config.Snapshot.ChainName
 		}
 	}
 
 	return nil
+}
+
+// BootstrapFromPreverified seeds the orchestrator with a synthetic
+// peer-manifest derived from preverified.toml so a fresh publisher can
+// drive its initial download even when no V2-advertising peer is
+// reachable on the swarm. Without this, the orchestrator only fires
+// DownloadRequested on PeerManifestReceived events — and a bootstrap
+// publisher (first publisher on a chain, or one restarting in a network
+// whose V2 peers have all churned) has no such event to react to.
+//
+// Must be called AFTER all bus subscribers are wired (in particular,
+// after downloader.BindBus). Backend.go owns the sequencing: it calls
+// this method right after sentry/downloader BindBus completes.
+//
+// No-op when --snap.bootstrap-from-preverified wasn't set (the chain
+// name is empty), the storage component isn't running an orchestrator
+// (eventBus is nil), or the preverified registry doesn't know about
+// the configured chain.
+//
+// Idempotent: re-firing the manifest is safe — requestGapsFor dedups
+// against existing pending/local entries via haveLocally +
+// coverageForRoleLocked. The intended call site fires exactly once,
+// but no harm if backend.go invokes it again on resume.
+func (p *Provider) BootstrapFromPreverified() {
+	if p == nil || p.bootstrapChainName == "" || p.eventBus == nil {
+		return
+	}
+	if err := p.bootstrapFromPreverified(p.bootstrapChainName); err != nil {
+		p.logger.Warn("[storage] bootstrap from preverified failed", "err", err)
+	}
 }
 
 // bootstrapFromPreverified builds a synthetic flow.PeerManifestReceived

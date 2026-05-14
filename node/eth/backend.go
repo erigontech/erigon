@@ -566,6 +566,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				})
 			}
 		}
+
+		// All bus subscribers are now wired: sentry, downloader,
+		// manifest_exchange, plus the orchestrator from
+		// storage.Initialize. Now safe to fire the synthetic
+		// bootstrap-from-preverified manifest — the orchestrator
+		// will publish DownloadRequested events and the downloader's
+		// SubscribeAsync handler will pick them up. Firing earlier
+		// (e.g. from inside storage.Initialize) loses the events
+		// because the downloader subscriber doesn't exist yet, and
+		// the wedge symptom is indistinguishable from the original
+		// no-V2-peer-bootstrap gap this is meant to close.
+		backend.components.Storage.BootstrapFromPreverified()
 	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
