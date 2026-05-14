@@ -176,7 +176,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -767,21 +767,18 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	// Open a thread-local roTx for domain reads during commitment.
-	// The rwTx (applyTx) is only needed for stage updates above.
-	commitRoTx, err := cfg.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return false, times, fmt.Errorf("commitment: open roTx: %w", err)
-	}
-	defer commitRoTx.Rollback()
-
-	// Get current txNum from the block being committed
+	// Use applyTx, not a fresh BeginTemporalRo: Headers wrote MaxTxNum for
+	// header.Number to applyTx in this batch and a fresh RO snapshot would
+	// miss it, silently falling back to the previous block's max txNum via
+	// c.Last(). Pairing that stale txNum with header.Number in
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
+	// see issue #21171.
 	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
 	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
