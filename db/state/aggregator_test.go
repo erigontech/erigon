@@ -623,15 +623,14 @@ func TestReadyForCollation_FrozenBlocksZero(t *testing.T) {
 	assert.True(t, ok, "FrozenBlocks==0 must not block collation")
 }
 
-// TestReadyForCollation_FrozenBlocksExceedsLastBlock checks that when
-// FrozenBlocks() is larger than the last executed block (snapshot files cover
-// more chain than has been executed so far), collation is not blocked.
+// TestReadyForCollation_FrozenBlocksCap verifies that when FrozenBlocks() is
+// within the executed range, readyForCollation blocks steps whose txNum range
+// extends past the frozen boundary but allows steps that fall within it.
 //
-// Before the fix the code called TxNums.Max(tx, frozenBlocks) for a block not
-// yet in MDBX. TxNums.Max silently falls back to the last DB entry and happens
-// to return the right answer, but the intent was unclear. The fix caps the
-// lookup at lastBlockInDB explicitly. Either way collation must proceed.
-func TestReadyForCollation_FrozenBlocksExceedsLastBlock(t *testing.T) {
+// stepSize=10, blocks 0-50 in MDBX (one txNum per block), frozenBlocks=25
+// (capTxNum=25).  Step 2 ends at txNum 29 (> 25) → blocked.
+//                 Step 1 ends at txNum 19 (≤ 25) → allowed.
+func TestReadyForCollation_FrozenBlocksCap(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(10)
 	const reorgDepth = uint64(5)
@@ -644,9 +643,9 @@ func TestReadyForCollation_FrozenBlocksExceedsLastBlock(t *testing.T) {
 	t.Cleanup(agg.Close)
 	require.NoError(t, agg.OpenFolder())
 
-	// Write 20 blocks into MDBX (lastBlockInDB = 20).
+	// Write 50 blocks, one txNum per block: block N has maxTxNum = N.
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		for blockNum := uint64(0); blockNum <= 20; blockNum++ {
+		for blockNum := uint64(0); blockNum <= 50; blockNum++ {
 			if err := rawdbv3.TxNums.Append(tx, blockNum, blockNum); err != nil {
 				return err
 			}
@@ -654,12 +653,19 @@ func TestReadyForCollation_FrozenBlocksExceedsLastBlock(t *testing.T) {
 		return nil
 	}))
 
-	// FrozenBlocks() = 5000 >> lastBlockInDB = 20. Block 5000 is not in MDBX.
-	agg.frozenBlocks = &mockFrozenBlocks{n: 5000}
+	// frozenBlocks=25 → capTxNum = TxNums.Max(tx, 25) = 25.
+	agg.frozenBlocks = &mockFrozenBlocks{n: 25}
 
-	_, _, _, ok, err := agg.readyForCollation(t.Context(), 0)
+	// Step 2 covers txNums [20, 30); (2+1)*10 = 30 > 25 → must be blocked.
+	_, _, _, ok, err := agg.readyForCollation(t.Context(), 2)
 	require.NoError(t, err)
-	assert.True(t, ok, "FrozenBlocks > lastBlockInDB must not block collation")
+	assert.False(t, ok, "step extending past frozen boundary must be blocked")
+
+	// Step 1 covers txNums [10, 20); (1+1)*10 = 20 ≤ 25 → must be allowed
+	// (lastBlockInDB=50 > lastBlockInStep(~19)+reorgDepth(5)=24 → passes).
+	_, _, _, ok, err = agg.readyForCollation(t.Context(), 1)
+	require.NoError(t, err)
+	assert.True(t, ok, "step within frozen boundary must be allowed")
 }
 
 type mockFrozenBlocks struct{ n uint64 }
