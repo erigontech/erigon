@@ -13,6 +13,10 @@ on:
         description: 'Chain to test (default: mainnet)'
         required: false
         default: 'mainnet'
+      test_name:
+        description: 'Name of the test to run with the bisect script'
+        required: false
+        default: ''
 
 jobs:
   sync-test-bisect:
@@ -92,10 +96,11 @@ jobs:
       - name: Run Git Bisect with Test Script
         id: bisect_run
         env:
+          CHAIN: ${{ inputs.chain }}
           TEST_NAME: ${{ inputs.test_name }}
         run: |
           set -o pipefail
-          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh $TEST_NAME
+          git bisect run $GITHUB_WORKSPACE/.github/scripts/test_script.sh "$CHAIN" "$TEST_NAME"
 
       - name: Get Bisect Result
         if: success()
