@@ -149,21 +149,41 @@ func (li *LiveInventory) SetTorrentHash(name string, hash [20]byte) {
 	SetTorrentHash(li.current, name, hash)
 }
 
-// SetTorrentHash sets the torrent hash for a file by name.
+// SetTorrentHash sets the torrent hash for a file by name. Tries each
+// inventory bucket in turn (blocks → domains → caplin → meta → salt) so
+// every entry kind gets its hash stamped. Missing a bucket here is
+// gap-K: populateInventoryTorrentHashes still scans the .torrent files
+// fine, but the kind whose bucket is skipped stays at zero-hash,
+// GenerateV2 drops it from the manifest, and consumers never download
+// it — for salt that surfaces downstream as "salt not found on ReloadSalt".
 func SetTorrentHash(inv *Inventory, name string, hash [20]byte) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
-	if e := findByName(inv.blocks, name); e != nil {
+	stamp := func(e *FileEntry) {
 		e.TorrentHash = hash
 		e.Seeding = true
+	}
+	if e := findByName(inv.blocks, name); e != nil {
+		stamp(e)
 		return
 	}
 	for _, entries := range inv.domains {
 		if e := findByName(entries, name); e != nil {
-			e.TorrentHash = hash
-			e.Seeding = true
+			stamp(e)
 			return
 		}
+	}
+	if e := findByName(inv.caplin, name); e != nil {
+		stamp(e)
+		return
+	}
+	if e := findByName(inv.meta, name); e != nil {
+		stamp(e)
+		return
+	}
+	if e := findByName(inv.salt, name); e != nil {
+		stamp(e)
+		return
 	}
 }

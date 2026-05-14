@@ -35,6 +35,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -250,6 +251,15 @@ func (r *RollingV2Publisher) Publish(
 		}
 	}
 
+	// The storage component doesn't yet feed torrent hashes back into
+	// the inventory after Seed (no downloader→storage callback wired),
+	// so a publisher whose files are all on disk still has inventory
+	// entries with zero TorrentHash — and GenerateV2 skips those,
+	// emitting an effectively empty manifest. Stamp hashes from the
+	// .torrent files on disk first so the published V2 manifest
+	// actually lists the node's files.
+	populateInventoryTorrentHashes(inv, r.snapDir)
+
 	manifest := GenerateV2(inv)
 	manifest.UCANHash = ucanHashHex
 	tomlBytes, err := MarshalV2(manifest)
@@ -392,4 +402,54 @@ func (r *RollingV2Publisher) History() []uint64 {
 // MaxRetained returns the configured rolling-buffer cap.
 func (r *RollingV2Publisher) MaxRetained() int {
 	return r.maxRetained
+}
+
+// populateInventoryTorrentHashes scans snapDir (and the known state
+// subdirs) for .torrent files and stamps their infohashes onto matching
+// inventory entries. It's the stop-gap until the downloader feeds hashes
+// back into the inventory after Seed: without it, a node whose snapshot
+// files are all on disk still has zero-hash inventory entries, and
+// GenerateV2 skips those — yielding an essentially empty V2 manifest.
+//
+// SetTorrentHash is a no-op for names with no matching entry, so scanning
+// every .torrent file (including chain.v2.*.toml.torrent) is safe.
+func populateInventoryTorrentHashes(inv *snapshotinv.Inventory, snapDir string) {
+	if inv == nil || snapDir == "" {
+		return
+	}
+	// stamp tries the basename (matches inventory entries that store the
+	// bare basename, the form discoverNewFiles produces for state
+	// domains) and, when scanning a subdir, also the subdir-prefixed
+	// form (matches entries like caplin's "caplin/foo.seg" that include
+	// the subdir in their Name). SetTorrentHash returns on first match,
+	// so the second call is a no-op when the first matched.
+	stamp := func(d, sub string) {
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".torrent") {
+				continue
+			}
+			mi, err := metainfo.LoadFromFile(filepath.Join(d, e.Name()))
+			if err != nil {
+				continue
+			}
+			base := strings.TrimSuffix(e.Name(), ".torrent")
+			hash := [20]byte(mi.HashInfoBytes())
+			snapshotinv.SetTorrentHash(inv, base, hash)
+			if sub != "" {
+				snapshotinv.SetTorrentHash(inv, sub+"/"+base, hash)
+			}
+		}
+	}
+	stamp(snapDir, "")
+	for _, sub := range chainTomlScanSubdirs {
+		stamp(filepath.Join(snapDir, sub), sub)
+	}
+	// Caplin lives in caplin/ and its inventory entries carry the
+	// "caplin/" prefix in Name — NOT in chainTomlScanSubdirs (that's V1's
+	// state-only scan list); scan it explicitly so caplin hashes land.
+	stamp(filepath.Join(snapDir, "caplin"), "caplin")
 }

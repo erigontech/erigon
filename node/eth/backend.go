@@ -93,6 +93,7 @@ import (
 	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/views"
 	"github.com/erigontech/erigon/node/direct"
@@ -588,6 +589,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					if validPort {
 						p2p.LocalNode().Set(enr.BT(torrentPort))
 					}
+					// Keep the downloader's notion of our own external
+					// IP fresh so the peer-sidecar fetch can recognise
+					// same-host peers (see fetchPeerSidecar).
+					if selfIP := p2p.LocalNode().Node().IP(); selfIP != nil {
+						dl.SetSelfIP(selfIP)
+					}
 				}
 			}
 			if !validPort {
@@ -602,6 +609,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				p2pSrv := srv.GetP2PServer()
 				if p2pSrv == nil {
 					continue
+				}
+				// Keep the downloader's notion of our own external IP
+				// fresh here too — the enr-updater path only fires when
+				// PublishLocalChainToml has something to publish, which
+				// it doesn't on a fresh consumer datadir, so without
+				// this the same-host loopback fallback never engages.
+				if selfIP := p2pSrv.LocalNode().Node().IP(); selfIP != nil {
+					dl.SetSelfIP(selfIP)
 				}
 				dv5 := p2pSrv.DiscV5()
 				// Add directly connected devp2p peers FIRST — resolved peers take
@@ -1098,6 +1113,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	config.Snapshot.InitialStateReady = backend.components.Storage.InitialStateReady
+	if bus := backend.components.Storage.Bus(); bus != nil {
+		// Bridge the stage-side hook to the storage event bus so Caplin's
+		// DownloadHistoricalBlocks (subscribed via flow.BlockHeadersReadyChannel)
+		// can read a real frozen-headers tip instead of racing OpenSegments
+		// and walking back to genesis.
+		config.Snapshot.BlockHeadersOpenedHook = func(tipBlock uint64) {
+			bus.Publish(flow.BlockHeadersReady{TipBlock: tipBlock})
+		}
+	}
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder

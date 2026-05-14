@@ -167,6 +167,16 @@ type BlocksFreezing struct {
 	// is enabled. Nil otherwise.
 	InitialStateReady <-chan struct{}
 
+	// BlockHeadersOpenedHook is invoked once, by stage_snapshots.go,
+	// after the first successful OpenSegments(Headers, Bodies). The
+	// hook receives FrozenBlocks() as the EL's authoritative
+	// frozen-headers tip. Production wiring (backend.go) installs a
+	// hook that publishes flow.BlockHeadersReady on the storage
+	// event bus so Caplin's DownloadHistoricalBlocks can read a real
+	// lowestBlockToReach instead of racing the EL's snapshot-open and
+	// silently walking to genesis. Nil otherwise.
+	BlockHeadersOpenedHook func(tipBlock uint64)
+
 	// LifecycleDrivenByStorage cuts over file-import orchestration
 	// (BuildMissedIndices, BuildMissedAccessors) from the stage loop
 	// to the storage component's lifecycle driver. Defaults false:

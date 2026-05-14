@@ -189,19 +189,19 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 	// ignore the per-peer Storage we pass below — bytes stay in the
 	// local snap-dir while ReadFile(peerDir/...) returns ENOENT.
 	// Detect that case up front and read the local file directly.
+	//
+	// Non-blocking on purpose: a locally-seeded torrent has its info
+	// available immediately (we built the .torrent from the on-disk
+	// file). A torrent that's registered-but-info-pending is some other
+	// code path's in-flight magnet fetch (e.g. the legacy chain.toml
+	// discovery loop's AddTorrentInfoHash) — NOT a local seed — so we
+	// must not block on its GotInfo(); fall through to the normal path
+	// with its own bounded timeout instead.
 	if existing, ok := client.Torrent(infoHash); ok {
-		select {
-		case <-existing.GotInfo():
-		case <-ctx.Done():
-			fetch.err = ctx.Err()
-			return nil, fetch.err
-		}
-		if info := existing.Info(); info != nil && len(info.Files) == 0 {
-			if kind.parseName(info.Name) {
-				if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil {
-					fetch.data = data
-					return data, nil
-				}
+		if info := existing.Info(); info != nil && len(info.Files) == 0 && kind.parseName(info.Name) {
+			if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil {
+				fetch.data = data
+				return data, nil
 			}
 		}
 	}
@@ -223,11 +223,19 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 	})
 	defer t.Drop()
 
+	var addedPeers []anatorrent.PeerInfo
 	if peerIP != nil && peerPort != 0 {
-		t.AddPeers([]anatorrent.PeerInfo{{
-			Addr:    &net.TCPAddr{IP: peerIP, Port: int(peerPort)},
-			Trusted: true,
-		}})
+		for _, dialIP := range dl.PeerDialIPs(peerIP, p.Downloader.SelfIP()) {
+			addedPeers = append(addedPeers, anatorrent.PeerInfo{
+				Addr:    &net.TCPAddr{IP: dialIP, Port: int(peerPort)},
+				Trusted: true,
+			})
+		}
+		t.AddPeers(addedPeers)
+	}
+	if p.logger != nil {
+		p.logger.Info("[downloader] fetching peer sidecar", "kind", kind.label(), "peer", peerID[:min(16, len(peerID))],
+			"infoHash", fmt.Sprintf("%x", infoHash[:8]), "peerIP", peerIP, "peerPort", peerPort, "peerCandidates", len(addedPeers))
 	}
 
 	dlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -237,6 +245,9 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 	case <-t.GotInfo():
 	case <-dlCtx.Done():
 		fetch.err = fmt.Errorf("waiting for %s info from peer %s: %w", kind.label(), peerID, dlCtx.Err())
+		if p.logger != nil {
+			p.logger.Warn("[downloader] peer sidecar: no torrent info", "kind", kind.label(), "peer", peerID[:min(16, len(peerID))], "err", fetch.err)
+		}
 		return nil, fetch.err
 	}
 

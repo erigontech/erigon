@@ -247,10 +247,7 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	view := d.Inv.View()
 	defer view.Close()
 
-	for _, domain := range []snapshot.Domain{
-		snapshot.DomainAccounts, snapshot.DomainStorage,
-		snapshot.DomainCode, snapshot.DomainCommitment,
-	} {
+	for _, domain := range snapshot.AllDomains {
 		for _, e := range view.Files(domain) {
 			d.dispatch(ctx, e, logger)
 		}
@@ -303,6 +300,11 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 		{filepath.Join(d.SnapDir, "history"), "history"},
 		{filepath.Join(d.SnapDir, "idx"), "idx"},
 		{filepath.Join(d.SnapDir, "accessor"), "accessor"},
+		// Caplin .seg files live in caplin/. Without scanning here the
+		// publisher's inventory never picks them up, GenerateV2 emits an
+		// empty Caplin section, and consumers can't fetch the beacon
+		// archive. Same pattern as the salt/meta gap below.
+		{filepath.Join(d.SnapDir, "caplin"), "caplin"},
 	}
 	for _, sd := range dirs {
 		entries, err := os.ReadDir(sd.path)
@@ -319,7 +321,24 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(e.Name()))
-			if _, ok := snapshotPrimaryExts[ext]; !ok {
+			// Primary-ext files (.seg/.kv/.v/.ef) trigger an
+			// Indexing transition — see snapshotPrimaryExts. We
+			// also pick up the chain-config files that live at
+			// snap-dir top level (salt-*.txt and erigondb.toml):
+			// they don't trigger Indexing (no index to build) but
+			// they MUST be in the inventory so the V2 manifest
+			// advertises them — without that, consumers can't
+			// fetch them and OtterSync's post-download
+			// ReloadSalt errors with "salt not found". They're
+			// recognised by name, not extension, because plain
+			// .txt/.toml aren't snapshot-primary in general.
+			isPrimary := false
+			if _, ok := snapshotPrimaryExts[ext]; ok {
+				isPrimary = true
+			}
+			isConfigTopLevel := sd.prefix == "" && (e.Name() == "erigondb.toml" ||
+				(strings.HasPrefix(e.Name(), "salt-") && strings.HasSuffix(e.Name(), ".txt")))
+			if !isPrimary && !isConfigTopLevel {
 				continue
 			}
 			name := e.Name()

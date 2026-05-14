@@ -232,8 +232,11 @@ func TestTrustFilter_QueuedBlocksDroppedWhenTrustRevokedBeforeDrain(t *testing.T
 		Name:        "v1.0-accounts.0-2048.kv",
 		TorrentHash: [20]byte{0x01},
 	}
+	// bodies.seg (not headers.seg) so this exercises phase-2 queueing.
+	// Under piece A header files are phase 1 alongside state and would
+	// not enter the trust-drain queue this test targets.
 	blockEntry := &snapshot.FileEntry{
-		Name: "v1.0-000000-000500-headers.seg", FromStep: 0, ToStep: 500,
+		Name: "v1.0-000000-000500-bodies.seg", FromStep: 0, ToStep: 500,
 		TorrentHash: [20]byte{0x02},
 	}
 

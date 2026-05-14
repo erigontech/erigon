@@ -242,11 +242,19 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 
 	var ct enr.ChainToml
 	if err := e.Peer.Record().Load(&ct); err != nil {
-		// Peer doesn't advertise chain-toml. Common during rollout.
+		if p.log != nil {
+			p.log.Debug("[manifest_exchange] onPeerConnected: no chain-toml in ENR", "peer", peerID[:16], "err", err)
+		}
 		return
 	}
 	if ct.InfoHash == ([20]byte{}) {
+		if p.log != nil {
+			p.log.Debug("[manifest_exchange] onPeerConnected: zero info-hash", "peer", peerID[:16])
+		}
 		return
+	}
+	if p.log != nil {
+		p.log.Info("[manifest_exchange] onPeerConnected: triggering fetch", "peer", peerID[:16], "infoHash", fmt.Sprintf("%x", ct.InfoHash[:8]))
 	}
 
 	// Extract BT endpoint from the ENR so the fetcher can add the peer

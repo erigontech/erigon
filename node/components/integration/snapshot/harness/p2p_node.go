@@ -48,6 +48,7 @@ import (
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/node/components/storage/validation"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -69,13 +70,19 @@ import (
 type P2PNode struct {
 	T          *testing.T
 	Bus        *CapturedBus
-	Storage    *MockStorage
+	Storage    *MockStorage // nil when the node was built with real storage
 	Inventory  *snapshot.Inventory
 	Downloader *downloader.Provider
 	Sentry     *sentrycomp.Provider
 	Mx         *manifest_exchange.Provider
 	Orch       *flow.Orchestrator
 	Dirs       datadir.Dirs
+
+	// InitialStateReady is non-nil only for real-storage nodes (built
+	// via NewP2PNodeWithRealStorage). It closes when the orchestrator's
+	// minimal-state-domain set is downloaded + recorded — the signal
+	// production wiring feeds into OtterSync's wait gate.
+	InitialStateReady <-chan struct{}
 
 	dCore       *dl.Downloader
 	cfg         *downloadercfg.Cfg
@@ -318,12 +325,27 @@ func NewP2PNode(t *testing.T, logger log.Logger) *P2PNode {
 	return NewP2PNodeAt(t, t.TempDir(), logger)
 }
 
+// NewP2PNodeWithRealStorage builds a P2PNode whose orchestrator runs
+// against the production flow.InventoryStorage (real RecordFile +
+// validation chain, files resolved on disk) instead of MockStorage.
+// Use this for the consumer side of publisher→consumer e2e tests so the
+// download → RecordFile → InitialStateReady path exercises the same code
+// production does. The node's InitialStateReady channel is wired.
+func NewP2PNodeWithRealStorage(t *testing.T, logger log.Logger) *P2PNode {
+	t.Helper()
+	return newP2PNodeAt(t, t.TempDir(), logger, true)
+}
+
 // NewP2PNodeAt is NewP2PNode with an explicit base directory. Use when
 // the test needs the node's data to live on a specific filesystem —
 // e.g. so hardlinks from a fixture directory on the same filesystem
 // work for cheap content sharing across peers. Cleans up at test end
 // the same way TempDir does.
 func NewP2PNodeAt(t *testing.T, baseDir string, logger log.Logger) *P2PNode {
+	return newP2PNodeAt(t, baseDir, logger, false)
+}
+
+func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage bool) *P2PNode {
 	t.Helper()
 	if logger == nil {
 		logger = log.New()
@@ -368,8 +390,20 @@ func NewP2PNodeAt(t *testing.T, baseDir string, logger log.Logger) *P2PNode {
 	innerBus := event.NewEventBus(pool)
 	bus := NewCapturedBus(innerBus)
 
-	storage := NewMockStorage()
-	orch := flow.NewWithStorage(bus, storage, logger)
+	var mockStorage *MockStorage
+	var orchStorage flow.Storage
+	var inv *snapshot.Inventory
+	var initialStateReady <-chan struct{}
+	if realStorage {
+		inv = snapshot.NewInventory()
+		orchStorage = flow.NewInventoryStorage(inv, validation.DefaultStage1ChainWithDisk(dirs.Snap), dirs.Snap)
+		initialStateReady = flow.InitialStateReadyChannel(bus)
+	} else {
+		mockStorage = NewMockStorage()
+		orchStorage = mockStorage
+		inv = mockStorage.Inventory()
+	}
+	orch := flow.NewWithStorage(bus, orchStorage, logger)
 
 	// --- Chain stack for sentry -------------------------------------------
 	chainDB := temporal.NewTestDB(t, dbcfg.ChainDB)
@@ -440,22 +474,23 @@ func NewP2PNodeAt(t *testing.T, baseDir string, logger log.Logger) *P2PNode {
 	require.NoError(t, orch.Start(ctx))
 
 	n := &P2PNode{
-		T:          t,
-		Bus:        bus,
-		Storage:    storage,
-		Inventory:  storage.Inventory(),
-		Downloader: dlProvider,
-		Sentry:     sp,
-		Mx:         mx,
-		Orch:       orch,
-		Dirs:       dirs,
-		dCore:      d,
-		cfg:        cfg,
-		pool:       pool,
-		workers:    workers,
-		unregPeer:  unregPeer,
-		ctx:        ctx,
-		cancel:     cancel,
+		T:                 t,
+		Bus:               bus,
+		Storage:           mockStorage,
+		Inventory:         inv,
+		InitialStateReady: initialStateReady,
+		Downloader:        dlProvider,
+		Sentry:            sp,
+		Mx:                mx,
+		Orch:              orch,
+		Dirs:              dirs,
+		dCore:             d,
+		cfg:               cfg,
+		pool:              pool,
+		workers:           workers,
+		unregPeer:         unregPeer,
+		ctx:               ctx,
+		cancel:            cancel,
 	}
 	t.Cleanup(n.Close)
 	return n

@@ -26,10 +26,15 @@ type TorrentPeerManager struct {
 
 	mu         sync.Mutex
 	knownPeers map[enode.ID]btPeerInfo // peers we've added to the torrent client
+	selfIP     net.IP                  // our external IP, for same-host loopback fallback
 }
 
 type btPeerInfo struct {
-	addr torrent.PeerInfo
+	// addrs is the set of dial candidates for a peer — usually one (the
+	// ENR-advertised address), but two when the peer is on the same
+	// host: ENR-IP + 127.0.0.1 fallback, so a setup without hairpin NAT
+	// can still reach the local BT port.
+	addrs []torrent.PeerInfo
 }
 
 func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSource, logger log.Logger) *TorrentPeerManager {
@@ -39,6 +44,16 @@ func NewTorrentPeerManager(client *torrent.Client, nodeSourceFn func() NodeSourc
 		logger:       logger,
 		knownPeers:   make(map[enode.ID]btPeerInfo),
 	}
+}
+
+// SetSelfIP records this node's externally-advertised IP. When a peer's
+// ENR-IP matches it, sync also installs a 127.0.0.1:<bt> dial candidate
+// for that peer so a same-host (no-hairpin-NAT) setup can reach it.
+// Pass nil to clear.
+func (m *TorrentPeerManager) SetSelfIP(ip net.IP) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.selfIP = ip
 }
 
 // Run starts the peer management loop. It should be called in a goroutine.
@@ -107,14 +122,19 @@ func (m *TorrentPeerManager) sync() {
 		m.mu.Lock()
 		_, already := m.knownPeers[id]
 		if !already {
-			pi := torrent.PeerInfo{
-				Addr:    ipPortAddr{IP: ip, Port: int(bt)},
-				Trusted: true,
+			dialIPs := PeerDialIPs(ip, m.selfIP)
+			addrs := make([]torrent.PeerInfo, 0, len(dialIPs))
+			for _, dialIP := range dialIPs {
+				addrs = append(addrs, torrent.PeerInfo{
+					Addr:    ipPortAddr{IP: dialIP, Port: int(bt)},
+					Trusted: true,
+				})
 			}
-			m.knownPeers[id] = btPeerInfo{addr: pi}
+			m.knownPeers[id] = btPeerInfo{addrs: addrs}
 			m.logger.Debug("[bt-peers] added torrent peer from ENR",
 				"node", id.TerminalString(),
-				"addr", fmt.Sprintf("%s:%d", ip, bt))
+				"addr", fmt.Sprintf("%s:%d", ip, bt),
+				"candidates", len(addrs))
 		}
 		m.mu.Unlock()
 	}
@@ -133,7 +153,7 @@ func (m *TorrentPeerManager) sync() {
 	// up torrents added since each peer's first-discovery sync.
 	pis := make([]torrent.PeerInfo, 0, len(m.knownPeers))
 	for _, info := range m.knownPeers {
-		pis = append(pis, info.addr)
+		pis = append(pis, info.addrs...)
 	}
 	m.mu.Unlock()
 

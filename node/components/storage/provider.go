@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/app/event"
+	"github.com/erigontech/erigon/node/app/workerpool"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/lifecycle"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -98,6 +100,7 @@ type Provider struct {
 	// InitialStateReady will not fire in production today — see
 	// memory/shared-bus-wiring-todo.md.
 	eventBus          event.EventBus
+	eventPool         *workerpool.WorkerPool
 	Orchestrator      *flow.Orchestrator
 	InitialStateReady <-chan struct{}
 
@@ -392,10 +395,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					alreadySeeded[relPath] = struct{}{}
 					toSeed = append(toSeed, relPath)
 				}
-				for _, domain := range []snapshot.Domain{
-					snapshot.DomainAccounts, snapshot.DomainStorage,
-					snapshot.DomainCode, snapshot.DomainCommitment,
-				} {
+				for _, domain := range snapshot.AllDomains {
 					for _, e := range inv.AllDomainFiles(domain) {
 						visit(e)
 					}
@@ -641,7 +641,13 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
 		}
 
-		p.eventBus = event.NewEventBus(nil)
+		// Real worker pool, not nil: async subscribers (downloader's
+		// onDownloadRequested via SubscribeAsync, auto-publish) call
+		// bus.execPool.Exec — a nil pool panics the moment the first
+		// DownloadRequested fires. Sized to NumCPU like the framework's
+		// root bus and the integration harness.
+		p.eventPool = workerpool.New(runtime.NumCPU())
+		p.eventBus = event.NewEventBus(execPoolAdapter{p.eventPool})
 		p.InitialStateReady = flow.InitialStateReadyChannel(p.eventBus)
 		p.Orchestrator = flow.NewWithStorage(
 			p.eventBus,
@@ -656,6 +662,18 @@ func (p *Provider) Initialize(deps Deps) error {
 
 	return nil
 }
+
+// execPoolAdapter wraps a *workerpool.WorkerPool so it satisfies
+// app/util.ExecPool (the interface event.NewEventBus expects). The
+// framework's componentDomain and the integration harness both wrap a
+// workerpool the same way; this is the storage component's local copy
+// since it constructs its own bus rather than going through a
+// componentDomain.
+type execPoolAdapter struct{ wp *workerpool.WorkerPool }
+
+func (a execPoolAdapter) Exec(task func()) { a.wp.Submit(task) }
+func (a execPoolAdapter) PoolSize() int    { return a.wp.Size() }
+func (a execPoolAdapter) QueueSize() int   { return a.wp.WaitingQueueSize() }
 
 // Bus returns the storage component's event bus, or nil when storage
 // isn't running its own orchestrator (LifecycleDrivenByStorage=false
@@ -675,5 +693,8 @@ func (p *Provider) Stop() {
 	}
 	if p.Orchestrator != nil {
 		_ = p.Orchestrator.Close()
+	}
+	if p.eventPool != nil {
+		p.eventPool.Stop()
 	}
 }

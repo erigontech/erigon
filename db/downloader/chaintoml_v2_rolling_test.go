@@ -270,3 +270,65 @@ func TestParseChainTomlV2FileName(t *testing.T) {
 		}
 	}
 }
+
+// TestPublishV2NonEmptyFromDiskTorrents is the regression guard for the
+// gap-D2 failure mode. In production the storage component never feeds
+// torrent hashes back into the inventory, so inventory FileEntries carry
+// a zero TorrentHash even when the files — and their .torrent metainfo —
+// are on disk. GenerateV2 skips zero-hash entries, so without the
+// disk-scan backfill (populateInventoryTorrentHashes, run inside
+// RollingV2Publisher.Publish) the publisher emits an empty "version = 2"
+// manifest that silently starves every V2 consumer. This test builds
+// that exact setup and asserts the published manifest is non-empty and
+// the inventory itself gets backfilled.
+func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
+	snapDir := t.TempDir()
+	torrentFS := NewAtomicTorrentFS(snapDir)
+
+	relFiles := []string{
+		"domain/v1.0-accounts.0-1024.kv",
+		"domain/v1.0-storage.0-1024.kv",
+	}
+	for i, rel := range relFiles {
+		p := filepath.Join(snapDir, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte{'s', 'n', 'a', 'p', byte(i)}, 0o644))
+		ok, err := BuildTorrentIfNeed(context.Background(), rel, snapDir, torrentFS)
+		require.NoError(t, err)
+		require.True(t, ok, "%s.torrent must be built", rel)
+	}
+
+	inv := snapshotinv.NewInventory()
+	inv.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 1024,
+		Name: "v1.0-accounts.0-1024.kv", Local: true, Trust: snapshotinv.TrustVerified,
+	})
+	inv.AddFile(&snapshotinv.FileEntry{
+		Domain: snapshotinv.DomainStorage, FromStep: 0, ToStep: 1024,
+		Name: "v1.0-storage.0-1024.kv", Local: true, Trust: snapshotinv.TrustVerified,
+	})
+
+	// Precondition: a zero-hash inventory yields an empty manifest — the bug.
+	require.Empty(t, GenerateV2(inv).Domains,
+		"precondition: GenerateV2 on a zero-hash inventory must be empty")
+
+	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil, 0)
+	require.NoError(t, err)
+	hash, err := pub.Publish(context.Background(), inv, 0, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, [20]byte{}, hash)
+
+	gen0 := ChainTomlV2FileNameForSeq(0)
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
+	require.NoError(t, err)
+	m, err := ParseV2(tomlBytes)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(m.Domains), 2,
+		"published manifest must list the on-disk domain files, got %d domains", len(m.Domains))
+
+	// The inventory entries were backfilled with the on-disk hashes.
+	for _, e := range inv.LocalFiles(snapshotinv.DomainAccounts) {
+		require.NotEqual(t, [20]byte{}, e.TorrentHash,
+			"inventory entry %s should have its hash backfilled from disk", e.Name)
+	}
+}

@@ -18,6 +18,7 @@ package snapshot
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -167,6 +168,31 @@ func PopulateFromName(entry *FileEntry) bool {
 // matches the pre-V2 era and any future singleton files).
 func PathForName(snapDir, name string) string {
 	return filepath.Join(snapDir, RelPathForName(name))
+}
+
+// ResolveExistingPath returns the on-disk path of a snapshot file given
+// its bare name (or already-relative form), tolerating both layouts: the
+// production kind-subdir layout (PathForName — domain/, history/, …) and
+// the flat top-level layout some tests and the legacy preverified path
+// use. It returns the kind-subdir path if that file exists, otherwise
+// the top-level path, otherwise the kind-subdir path again (so callers
+// get a stable "expected" path to report in not-found errors).
+//
+// Use this anywhere a component needs to *open* or *stat* a snapshot
+// file by name without knowing which layout produced it (e.g. the
+// orchestrator validating a freshly-downloaded file: the downloader
+// wrote it wherever the publisher's torrent info.Name said).
+func ResolveExistingPath(snapDir, name string) string {
+	primary := PathForName(snapDir, name)
+	if _, err := os.Stat(primary); err == nil {
+		return primary
+	}
+	if alt := filepath.Join(snapDir, name); alt != primary {
+		if _, err := os.Stat(alt); err == nil {
+			return alt
+		}
+	}
+	return primary
 }
 
 // RelPathForName returns the snap-dir-relative path for a file given

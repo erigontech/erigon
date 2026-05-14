@@ -163,6 +163,14 @@ type Downloader struct {
 	// manifestReady is closed after the first successful P2P manifest discovery.
 	// Non-nil only when --snap.p2p-manifest is enabled.
 	manifestReady chan struct{}
+
+	// selfIP is this node's externally-advertised IP (the discv5 ENR
+	// "ip" entry), kept fresh by production wiring. Used to detect when
+	// a peer's advertised BT endpoint shares our outbound IP — i.e. the
+	// peer is on the same host without hairpin NAT — so the peer-sidecar
+	// fetch can add a loopback dial candidate. nil until set / when P2P
+	// hasn't resolved an external IP yet. Guarded by lock.
+	selfIP net.IP
 }
 
 type AggStats struct {
@@ -455,6 +463,29 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 	d.enrUpdater = fn
 }
 
+// SetSelfIP records this node's externally-advertised IP. Production
+// wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
+// Also forwards to the TorrentPeerManager so the same-host loopback
+// fallback applies to general torrent-peer connections too — not just
+// the per-fetch peer-sidecar path.
+func (d *Downloader) SetSelfIP(ip net.IP) {
+	d.lock.Lock()
+	d.selfIP = ip
+	pm := d.peerManager
+	d.lock.Unlock()
+	if pm != nil {
+		pm.SetSelfIP(ip)
+	}
+}
+
+// SelfIP returns this node's externally-advertised IP, or nil if not
+// yet known. The peer-sidecar fetch uses it to spot same-host peers.
+func (d *Downloader) SelfIP() net.IP {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	return d.selfIP
+}
+
 // PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
 // builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
@@ -582,7 +613,17 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if cfg, known := snapcfg.KnownCfg(d.cfg.ChainName); known {
 		authoritativeBlocks = cfg.ExpectBlocks
 	}
-	hash, err := PublishChainTomlV2(d.snapDir(), d.torrentFS, inv, authoritativeBlocks, updater)
+	// Wire the rolling publisher to this Downloader so the new
+	// chain.v2.<seq>.toml sidecar is added to the live torrent client
+	// for seeding (AddNewSeedableFile). The free PublishChainTomlV2
+	// helper passes a nil downloader — fine for tests, but in
+	// production it would leave the sidecar on disk + advertised in the
+	// ENR yet unseeded, so peers' GotInfo on its infohash never fires.
+	pub, err := NewRollingV2Publisher(d.snapDir(), d.torrentFS, d, 0)
+	if err != nil {
+		return fmt.Errorf("publishing chain.toml.v2: %w", err)
+	}
+	hash, err := pub.Publish(context.Background(), inv, authoritativeBlocks, updater)
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
 	}
@@ -590,7 +631,46 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	d.lastV2InfoHash = hash
 	d.lock.Unlock()
 	d.logger.Info("[chaintoml] published v2 manifest", "infoHash", hash.HexString())
+
+	// Canary: if the inventory has Local files but the manifest we just
+	// wrote is essentially empty ("version = 2" is 12 bytes), something
+	// upstream lost the torrent hashes — that's the gap-D2 failure mode
+	// and it silently starves every V2 consumer. Surface it loudly
+	// rather than letting consumers infer it from a 12-byte fetch.
+	if seq, ok := pub.LatestSeq(); ok && d.localInventoryFileCount(inv) > 0 {
+		p := filepath.Join(d.snapDir(), ChainTomlV2FileNameForSeq(seq))
+		if fi, statErr := os.Stat(p); statErr == nil && fi.Size() < 32 {
+			d.logger.Warn("[chaintoml] published an effectively empty v2 manifest while the inventory has local files — torrent hashes missing?",
+				"file", filepath.Base(p), "bytes", fi.Size())
+		}
+	}
 	return nil
+}
+
+// localInventoryFileCount counts FileEntries the inventory marks Local
+// across the state domains + block/meta/salt/caplin sets. Used only by
+// the empty-manifest canary; cheap enough for the content-change-gated
+// publish path.
+func (d *Downloader) localInventoryFileCount(inv *storagesnapshot.Inventory) int {
+	if inv == nil {
+		return 0
+	}
+	n := 0
+	count := func(es []*storagesnapshot.FileEntry) {
+		for _, e := range es {
+			if e != nil && e.Local {
+				n++
+			}
+		}
+	}
+	for _, dom := range inv.Domains() {
+		count(inv.LocalFiles(dom))
+	}
+	count(inv.BlockFiles())
+	count(inv.MetaFiles())
+	count(inv.SaltFiles())
+	count(inv.CaplinFiles())
+	return n
 }
 
 // seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.

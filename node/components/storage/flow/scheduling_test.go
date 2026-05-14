@@ -132,3 +132,125 @@ func TestOrchestratorDownloadRequestedBlockFilesOrderedByName(t *testing.T) {
 		"v1.0-000000-000500-headers.seg",
 	}, observed, "block files must be requested latest-first")
 }
+
+// TestOrchestratorHeaderFilesDispatchInPhase1 pins the contract that
+// block-header files (*-headers.seg) are part of phase 1 alongside
+// state-domain files. The reason: every cryptographic state validator
+// cross-references header.stateRoot for the snapshot tip block, so
+// "InitialStateReady" without headers landed would mean "state files
+// arrived and pass internal-consistency checks" — not "state is
+// validated against consensus". Including headers in phase 1 keeps the
+// gate's contract honest, and as a side-effect collapses Caplin's
+// historical-blocks wait (it targets the EL's frozen-headers tip as
+// lowestBlockToReach).
+//
+// Concrete shape verified here:
+//   - State entry + header entry dispatch immediately in parallel.
+//   - Bodies entry does NOT dispatch until InitialStateReady.
+//   - InitialStateReady does NOT fire until both state and header have
+//     completed.
+//   - Once both complete, InitialStateReady fires AND the bodies entry
+//     drains from the phase-2 queue.
+func TestOrchestratorHeaderFilesDispatchInPhase1(t *testing.T) {
+	bus := newBusForTest()
+	storage := &recordingStorage{inv: snapshot.NewInventory()}
+	o := NewWithStorage(bus, storage, logger())
+
+	require.NoError(t, o.Start(context.Background()))
+	t.Cleanup(func() { _ = o.Close() })
+
+	var (
+		mu              sync.Mutex
+		downloads       []string
+		stateReadyFired bool
+	)
+	require.NoError(t, bus.Subscribe(func(e DownloadRequested) {
+		mu.Lock()
+		downloads = append(downloads, e.FileName)
+		mu.Unlock()
+	}))
+	require.NoError(t, bus.Subscribe(func(InitialStateReady) {
+		mu.Lock()
+		stateReadyFired = true
+		mu.Unlock()
+	}))
+
+	stateEntry := &snapshot.FileEntry{
+		Domain: testDomain, FromStep: 0, ToStep: 2048,
+		Name: "v1.0-accounts.0-2048.kv",
+	}
+	headerEntry := &snapshot.FileEntry{
+		FromStep: 0, ToStep: 2000,
+		Name: "v1.0-000000-002000-headers.seg",
+	}
+	bodyEntry := &snapshot.FileEntry{
+		FromStep: 0, ToStep: 2000,
+		Name: "v1.0-000000-002000-bodies.seg",
+	}
+
+	bus.Publish(PeerManifestReceived{
+		PeerID:  "peer-Z",
+		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateEntry}},
+		Blocks:  []*snapshot.FileEntry{headerEntry, bodyEntry},
+	})
+
+	// State and header dispatch in parallel; bodies are held for phase 2.
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(downloads) == 2
+	}, 2*time.Second, "state + header dispatched in phase 1")
+
+	mu.Lock()
+	require.ElementsMatch(t,
+		[]string{"v1.0-accounts.0-2048.kv", "v1.0-000000-002000-headers.seg"},
+		downloads,
+		"phase 1 must include state + header, exclude bodies",
+	)
+	require.False(t, stateReadyFired,
+		"InitialStateReady must wait while header is still pending")
+	mu.Unlock()
+
+	// Complete the state file; header still pending → InitialStateReady
+	// must NOT fire yet. This is the contract change vs. pre-piece-A:
+	// state alone is no longer sufficient.
+	bus.Publish(DownloadComplete{
+		FileName: "v1.0-accounts.0-2048.kv",
+		InfoHash: [20]byte{0xaa},
+		Size:     1024,
+	})
+
+	// Brief settle window; assert the negative.
+	for i := 0; i < 5; i++ {
+		mu.Lock()
+		fired := stateReadyFired
+		mu.Unlock()
+		require.False(t, fired,
+			"InitialStateReady fired prematurely — header not yet landed")
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Complete the header; now phase 1 is done.
+	bus.Publish(DownloadComplete{
+		FileName: "v1.0-000000-002000-headers.seg",
+		InfoHash: [20]byte{0xbb},
+		Size:     2048,
+	})
+
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return stateReadyFired
+	}, 2*time.Second, "InitialStateReady fires after state + header complete")
+
+	waitUntil(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(downloads) == 3
+	}, 2*time.Second, "body drains from phase-2 queue after InitialStateReady")
+
+	mu.Lock()
+	require.Contains(t, downloads, "v1.0-000000-002000-bodies.seg",
+		"body must dispatch from the phase-2 queue once state-ready fires")
+	mu.Unlock()
+}

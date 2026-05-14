@@ -23,7 +23,7 @@
 //   - Peer exchange: PeerManifestReceived, PeerDeparted, ManifestPublished
 //   - Download / seed: DownloadRequested, DownloadComplete, DownloadFailed, FileSeeded
 //   - Merge cycle: MergeStarted, MergeComplete, RetirementStarted, RetirementDone
-//   - Execution: BlocksFlushed, SnapshotsReady
+//   - Execution: BlocksFlushed, InitialStateReady, BlockHeadersReady
 //
 // See cocoon/pocs-and-proposals/app-components/snapshot-flow-design.md for the
 // ordering and timing invariants each event family is expected to satisfy.
@@ -37,8 +37,14 @@ import (
 )
 
 // InitialStateReadyChannel returns a channel that closes the first time
-// InitialStateReady is published on bus. Subscribes via SubscribeOnce
-// so the handler self-removes after firing.
+// InitialStateReady is published on bus.
+//
+// Uses a plain Subscribe rather than SubscribeOnce: the close is
+// idempotent (sync.Once-guarded), and SubscribeOnce on this bus does not
+// reliably fire for struct-typed events, leaving the channel open and
+// the staged-sync OtterSync gate stuck forever. The handler is a tiny
+// closure registered once per node lifetime — leaving it subscribed
+// after the single InitialStateReady is harmless.
 //
 // Used by production wiring (backend.go) to bridge the bus event into
 // the staged-sync OtterSync gate (SnapshotsCfg.SetInitialStateReady) —
@@ -52,7 +58,7 @@ func InitialStateReadyChannel(bus event.BusSubscriber) <-chan struct{} {
 	ch := make(chan struct{})
 	var once sync.Once
 	closeOnce := func() { once.Do(func() { close(ch) }) }
-	if err := bus.SubscribeOnce(func(InitialStateReady) {
+	if err := bus.Subscribe(func(InitialStateReady) {
 		closeOnce()
 	}); err != nil {
 		closeOnce()
@@ -193,13 +199,6 @@ type BlocksFlushed struct {
 	FromBlock   uint64 // first block in the range flushed since the previous event
 }
 
-// SnapshotsReady is level-triggered: the ranges [FromBlock, ToBlock) are
-// covered at the time of publication. Safe to receive multiple times.
-type SnapshotsReady struct {
-	FromBlock uint64
-	ToBlock   uint64
-}
-
 // InitialStateReady signals that the state-domain phase of a peered sync
 // has finished — every state file the orchestrator gap-filled for is now
 // in the local inventory at TrustVerified. Execution can begin replaying
@@ -217,4 +216,63 @@ type InitialStateReady struct {
 	// read this; consumers that only care about "is the gate open?"
 	// can ignore it.
 	StateDomains []snapshot.Domain
+}
+
+// BlockHeadersReady is the primary state transition that signals the
+// EL has opened its frozen block-header (and body) snapshot files —
+// the moment FrozenBlocks() begins returning a usable value.
+//
+// Fires once per node lifetime, published by stage_snapshots.go
+// immediately after a successful OpenSegments(Headers, Bodies). Any
+// stage that reads FrozenBlocks() before this event has fired will
+// see zero and (silently) walk back to genesis — Caplin's historical-
+// blocks stage in particular targets FrozenBlocks() as its
+// lowestBlockToReach and a stale read would turn a minutes-long tip
+// hand-off into a multi-day genesis backfill.
+//
+// One-shot edge transition that establishes "FrozenBlocks() is now
+// meaningful". Pair it with BlockHeadersReadyChannel for a channel-
+// based wait.
+type BlockHeadersReady struct {
+	// TipBlock is the highest block number covered by the frozen
+	// header snapshots at the time of publication — matches
+	// FrozenBlocks() observed by the publisher.
+	TipBlock uint64
+}
+
+// BlockHeadersReadyChannel returns a channel that closes the first
+// time BlockHeadersReady is published on bus, along with a getter
+// returning the published TipBlock (zero until the channel closes).
+//
+// Uses plain Subscribe + sync.Once rather than SubscribeOnce: the
+// close is idempotent and SubscribeOnce on this bus does not reliably
+// fire for struct-typed events (same constraint InitialStateReadyChannel
+// works around). If the subscription itself fails, the channel is
+// closed immediately so callers do not block forever.
+//
+// Used by Caplin's DownloadHistoricalBlocks gating: Caplin waits on
+// the channel before reading FrozenBlocks(); once closed, the getter
+// returns the EL's authoritative tip and Caplin sets lowestBlockToReach
+// from it instead of racing the EL's OpenSegments.
+func BlockHeadersReadyChannel(bus event.BusSubscriber) (<-chan struct{}, func() uint64) {
+	ch := make(chan struct{})
+	var (
+		once sync.Once
+		mu   sync.Mutex
+		tip  uint64
+	)
+	closeOnce := func() { once.Do(func() { close(ch) }) }
+	if err := bus.Subscribe(func(e BlockHeadersReady) {
+		mu.Lock()
+		tip = e.TipBlock
+		mu.Unlock()
+		closeOnce()
+	}); err != nil {
+		closeOnce()
+	}
+	return ch, func() uint64 {
+		mu.Lock()
+		defer mu.Unlock()
+		return tip
+	}
 }

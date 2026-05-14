@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -240,7 +239,13 @@ func (s SizeMatchesTorrent) Validate(file *snapshot.FileEntry, content ContentSo
 		return fmt.Errorf("empty SnapDir")
 	}
 
-	torrentPath := filepath.Join(s.SnapDir, file.Name+".torrent")
+	// ResolveExistingPath, not filepath.Join(snapDir, name): the
+	// .torrent sidecar lives next to its data file — in the kind subdir
+	// (domain/, history/, …) for the production layout, or top-level for
+	// flat/legacy layouts. Joining the bare name unconditionally only
+	// finds top-level sidecars, so in production the size check silently
+	// no-ops.
+	torrentPath := snapshot.ResolveExistingPath(s.SnapDir, file.Name) + ".torrent"
 	if _, err := os.Stat(torrentPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// No torrent sidecar → can't measure → accept silently.

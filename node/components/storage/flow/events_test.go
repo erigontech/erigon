@@ -61,3 +61,45 @@ func TestInitialStateReadyChannel(t *testing.T) {
 
 	require.True(t, true) // sanity
 }
+
+// TestBlockHeadersReadyChannel verifies the bus-event-to-channel adapter
+// that backend.go uses to bridge flow.BlockHeadersReady into Caplin's
+// DownloadHistoricalBlocks gate. Contract:
+//   - the channel stays open until BlockHeadersReady is published
+//   - on publication, the channel closes and the tip getter returns the
+//     published TipBlock
+//   - subsequent publishes don't panic and don't change the latched tip
+//     (one-shot edge transition — first wins)
+func TestBlockHeadersReadyChannel(t *testing.T) {
+	t.Parallel()
+	bus := newBusForTest()
+	ch, tipFn := BlockHeadersReadyChannel(bus)
+
+	select {
+	case <-ch:
+		t.Fatal("channel closed before BlockHeadersReady was published")
+	case <-time.After(20 * time.Millisecond):
+	}
+	require.Equal(t, uint64(0), tipFn(), "tip must be zero before publish")
+
+	bus.Publish(BlockHeadersReady{TipBlock: 25_049_601})
+
+	select {
+	case <-ch:
+		// ok
+	case <-time.After(time.Second):
+		t.Fatal("channel did not close after BlockHeadersReady published")
+	}
+	require.Equal(t, uint64(25_049_601), tipFn(),
+		"tip getter must return the published TipBlock once the channel closes")
+
+	// A second publish must not panic and must not reopen the channel.
+	// The tip is allowed to update or stay latched — both are acceptable
+	// shapes; the load-bearing contract is "channel-close is one-shot".
+	bus.Publish(BlockHeadersReady{TipBlock: 25_049_700})
+	select {
+	case <-ch:
+	default:
+		t.Fatal("channel reopened (impossible) — close-once semantics broken")
+	}
+}

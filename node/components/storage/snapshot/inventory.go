@@ -34,6 +34,15 @@ const (
 	DomainReceipt    Domain = "receipt"
 )
 
+// AllDomains is the canonical enumeration of state domains. Any code that
+// iterates "all domains" (seeding, lifecycle dispatch, manifest checks)
+// MUST use this rather than a hand-rolled list — otherwise a newly-added
+// domain is silently advertised in chain.toml but never seeded, which
+// stalls consumers' initialStateReady forever (the gap-G failure mode).
+var AllDomains = []Domain{
+	DomainAccounts, DomainStorage, DomainCode, DomainCommitment, DomainReceipt,
+}
+
 // FileKind identifies what role a file plays in the snapshot archive. Empty
 // kind means a domain primary (.kv) when Domain is set, or a block primary
 // (.seg) when Domain is empty — preserves back-compat with callers that

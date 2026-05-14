@@ -458,11 +458,20 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	// manifest_exchange the up-to-date ENR view it didn't have when
 	// the original PeerConnected event fired (peer's discv5 ENR
 	// hadn't propagated chain-toml yet).
+	//
+	// When the hook is set, manifest_exchange owns the chain.toml fetch
+	// end-to-end (fetch → parse → orchestrator). Running the legacy
+	// torrent download below as well would collide on the torrent
+	// client (anacrolix keys torrents by infohash; the two paths step
+	// on each other's storage) and produce no useful result — so we
+	// stop here and let manifest_exchange + the flow orchestrator drive
+	// download.
 	d.lock.RLock()
 	hook := d.onPeerWithChainTomlDiscovered
 	d.lock.RUnlock()
 	if hook != nil {
 		hook(best)
+		return
 	}
 
 	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
@@ -515,6 +524,17 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 // verifyChainToml discovers chain.toml from peers and compares against the local manifest.
 // Logs agreement, new entries, and hash mismatches without modifying the local state.
 func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns NodeSource) {
+	// When manifest_exchange is wired (hook set), the legacy
+	// fetch-and-compare path is redundant: manifest_exchange + the
+	// cryptographic-loop validators cover correctness, and running the
+	// torrent download here would collide on the torrent client. Skip.
+	d.lock.RLock()
+	hookSet := d.onPeerWithChainTomlDiscovered != nil
+	d.lock.RUnlock()
+	if hookSet {
+		return
+	}
+
 	best := DiscoverChainToml(ns)
 	if best == nil {
 		d.logger.Debug("[chaintoml] verify: no peers with chain-toml ENR entry")

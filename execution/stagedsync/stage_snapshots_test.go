@@ -67,6 +67,25 @@ func TestSetLifecycleDrivenByStorage_DefaultsFalse(t *testing.T) {
 	require.False(t, cfg.lifecycleDrivenByStorage)
 }
 
+// TestSetBlockHeadersOpenedHook_DefaultsNil pins the hook contract: nil
+// by default (tests and tools that don't run the storage component see
+// no behaviour change) and round-trips through the setter so production
+// wiring (backend.go → stageloop → snapCfg) can install a publisher
+// that translates the stage-side signal into a flow.BlockHeadersReady
+// event on the storage event bus.
+func TestSetBlockHeadersOpenedHook_DefaultsNil(t *testing.T) {
+	cfg := SnapshotsCfg{}
+	require.Nil(t, cfg.blockHeadersOpened,
+		"default must be nil — stage no-ops the call when no hook is wired")
+
+	var seenTip uint64
+	cfg.SetBlockHeadersOpenedHook(func(tip uint64) { seenTip = tip })
+	require.NotNil(t, cfg.blockHeadersOpened)
+	cfg.blockHeadersOpened(12345)
+	require.Equal(t, uint64(12345), seenTip,
+		"installed hook must receive the tip passed by the stage")
+}
+
 func TestParseFileStepRange(t *testing.T) {
 	tests := []struct {
 		name      string

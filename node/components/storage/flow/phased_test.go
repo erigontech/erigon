@@ -71,14 +71,18 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 		obs.mu.Unlock()
 	}))
 
-	// Peer advertises one state-domain file and one block file.
+	// Peer advertises one state-domain file and one block file. The
+	// block is bodies.seg specifically — headers.seg files are phase 1
+	// (they carry header.stateRoot, the consensus anchor every state
+	// validator cross-references), so they no longer queue behind
+	// state-ready. Bodies have no such role and still queue.
 	stateFile := &snapshot.FileEntry{
 		Domain: testDomain, FromStep: 0, ToStep: 256,
 		Name: "v1.0-accounts.0-256.kv",
 	}
 	blockFile := &snapshot.FileEntry{
 		FromStep: 0, ToStep: 500,
-		Name: "v1.0-000000-000500-headers.seg",
+		Name: "v1.0-000000-000500-bodies.seg",
 	}
 	bus.Publish(PeerManifestReceived{
 		PeerID:  "peer-1",
@@ -96,7 +100,7 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 	first := obs.snapshot()
 	require.Contains(t, first, "state:v1.0-accounts.0-256.kv")
 	require.NotContains(t, first, "state-ready", "state-ready must wait for state completion")
-	require.NotContains(t, first, "block:v1.0-000000-000500-headers.seg",
+	require.NotContains(t, first, "block:v1.0-000000-000500-bodies.seg",
 		"block request must be held until state-ready fires")
 
 	// Now complete the state download. That should drain state-pending,
@@ -117,7 +121,7 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 	// state-ready must come before block request.
 	stateIdx := indexOf(got, "state:v1.0-accounts.0-256.kv")
 	readyIdx := indexOf(got, "state-ready")
-	blockIdx := indexOf(got, "block:v1.0-000000-000500-headers.seg")
+	blockIdx := indexOf(got, "block:v1.0-000000-000500-bodies.seg")
 
 	require.GreaterOrEqual(t, stateIdx, 0, "state request observed")
 	require.Greater(t, readyIdx, stateIdx, "state-ready must follow state request")
@@ -153,12 +157,16 @@ func TestPhasedScheduling_FiresImmediatelyWhenNoStateGap(t *testing.T) {
 		obs.mu.Unlock()
 	}))
 
-	// Peer advertises only block files — no state.
+	// Peer advertises only block files — no state, and no headers
+	// either (headers are phase 1 under piece A and would block this
+	// test's no-state-gap assertion). bodies.seg has no phase-1 role,
+	// so the no-state-gap path fires state-ready immediately and the
+	// queue drains.
 	bus.Publish(PeerManifestReceived{
 		PeerID: "peer-1",
 		Blocks: []*snapshot.FileEntry{
-			{FromStep: 0, ToStep: 500, Name: "v1.0-000000-000500-headers.seg"},
-			{FromStep: 500, ToStep: 1000, Name: "v1.0-000500-001000-headers.seg"},
+			{FromStep: 0, ToStep: 500, Name: "v1.0-000000-000500-bodies.seg"},
+			{FromStep: 500, ToStep: 1000, Name: "v1.0-000500-001000-bodies.seg"},
 		},
 	})
 
@@ -169,8 +177,8 @@ func TestPhasedScheduling_FiresImmediatelyWhenNoStateGap(t *testing.T) {
 
 	got := obs.snapshot()
 	readyIdx := indexOf(got, "state-ready")
-	block1Idx := indexOf(got, "block:v1.0-000500-001000-headers.seg") // later range first
-	block2Idx := indexOf(got, "block:v1.0-000000-000500-headers.seg")
+	block1Idx := indexOf(got, "block:v1.0-000500-001000-bodies.seg") // later range first
+	block2Idx := indexOf(got, "block:v1.0-000000-000500-bodies.seg")
 
 	require.GreaterOrEqual(t, readyIdx, 0, "state-ready fires on no-state-gap manifest")
 	require.Greater(t, block1Idx, readyIdx, "block request follows state-ready")

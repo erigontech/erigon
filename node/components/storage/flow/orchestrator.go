@@ -19,7 +19,6 @@ package flow
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -68,7 +67,17 @@ func (s *inventoryStorage) RecordFile(e *snapshot.FileEntry) error {
 	if len(s.chain) > 0 {
 		var content validation.ContentSource
 		if s.snapDir != "" && e != nil && e.Name != "" {
-			content = validation.FileContent{Path: filepath.Join(s.snapDir, e.Name)}
+			// ResolveExistingPath, not filepath.Join(snapDir, e.Name):
+			// inventory entry names are bare basenames, but the file on
+			// disk lives wherever the downloader wrote it — the kind
+			// subdir (domain/, history/, …) in production (the publisher's
+			// torrent info.Name carries the RelPathForName-prefixed form),
+			// or the top level for legacy/preverified/flat-layout cases.
+			// Joining the bare name unconditionally looks at the top level
+			// and ContentNotEmpty reports "marked Local but not present on
+			// disk", which fails RecordFile, leaves statePending stuck,
+			// and never fires InitialStateReady.
+			content = validation.FileContent{Path: snapshot.ResolveExistingPath(s.snapDir, e.Name)}
 		}
 		if err := s.chain.Validate(e, content); err != nil {
 			return fmt.Errorf("validation: %w", err)
@@ -334,12 +343,13 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	// Block files use zero Domain — handle separately.
 	o.requestGapsFor("", e.Blocks, e.PeerID)
 
-	// Non-ranged categories (caplin, meta, salt). Identified by
-	// name+infohash; no coverage check. Same phase gate as blocks: held
-	// behind InitialStateReady so state-domain bandwidth isn't contended.
-	o.requestSimpleGaps(e.Caplin, e.PeerID)
-	o.requestSimpleGaps(e.Meta, e.PeerID)
-	o.requestSimpleGaps(e.Salt, e.PeerID)
+	// Non-ranged categories. Meta + salt are phase-1 prerequisites (the
+	// EL can't start without the chain config / salts), so they count
+	// toward statePending and gate initialStateReady. Caplin is phase 2
+	// (EL doesn't need it to start exec, CL pulls it in the background).
+	o.requestSimpleGaps(e.Meta, e.PeerID, true /* phase1 */)
+	o.requestSimpleGaps(e.Salt, e.PeerID, true /* phase1 */)
+	o.requestSimpleGaps(e.Caplin, e.PeerID, false /* phase1 */)
 
 	// If the state phase has nothing pending and hasn't fired yet, open
 	// phase 2 now. Handles the all-local and blocks-only cases.
@@ -353,9 +363,18 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 
 // requestSimpleGaps emits DownloadRequested for non-ranged peer entries
 // (caplin .seg, meta, salt) that aren't already local. Bypasses
-// coverage logic since these files don't carry step semantics. Honours
-// the phase-2 gate the same way blocks do.
-func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peerID string) {
+// coverage logic since these files don't carry step semantics.
+//
+// phase1 controls participation in the initialStateReady gate:
+//   - phase1=true  → request immediately AND count toward statePending,
+//     so initialStateReady waits for these files. Use for meta and salt:
+//     they are prerequisites for state to be *usable* (ReloadSalt needs
+//     salt on disk before exec can start; meta carries the chain config).
+//     Without this the gate releases before salt lands and OtterSync's
+//     post-download bookkeeping errors with "salt not found on ReloadSalt".
+//   - phase1=false → queue behind stateReadyFired (current "blocks gate"
+//     behaviour). Use for caplin — the EL doesn't need it to start exec.
+func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peerID string, phase1 bool) {
 	if len(peerEntries) == 0 {
 		return
 	}
@@ -384,7 +403,12 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 		o.pending[entry.Name] = entry
 		toRequest = append(toRequest, entry)
 	}
-	holdForPhase2 := !o.stateReadyFired
+	// Phase-1 entries (meta/salt) count toward statePending so
+	// initialStateReady doesn't fire until they land on disk.
+	if phase1 && len(toRequest) > 0 {
+		o.statePending += len(toRequest)
+	}
+	holdForPhase2 := !phase1 && !o.stateReadyFired
 	if holdForPhase2 {
 		for _, entry := range toRequest {
 			o.blocksQueued = append(o.blocksQueued, queuedBlock{entry: entry, peerID: peerID})
@@ -442,9 +466,16 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	}
 	o.peerMu.Unlock()
 
-	// Schedule later files first. For domain files, "later" means higher
-	// ToStep (more recent state); for block files, FromStep / ToStep
-	// carry block numbers, so the same ordering works.
+	// Schedule later files first. Manifest-derived entries put both
+	// state-step ranges and block-number ranges in FromStep / ToStep
+	// (manifest_exchange/convert.go:parseBlockFileRange stores block
+	// numbers there for block files — disk-scan entries use the
+	// FromBlock/ToBlock axis but the orchestrator only ever sees
+	// manifest-derived inputs here). Higher ToStep = more recent,
+	// regardless of axis interpretation. Tip-first matters for blocks
+	// specifically: Caplin's DownloadHistoricalBlocks targets the
+	// latest header segment as its lowestBlockToReach, so landing the
+	// highest-range *-headers.seg first collapses Caplin's wait.
 	sort.SliceStable(toRequest, func(i, j int) bool {
 		if toRequest[i].ToStep != toRequest[j].ToStep {
 			return toRequest[i].ToStep > toRequest[j].ToStep
@@ -455,29 +486,51 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return toRequest[i].Name > toRequest[j].Name
 	})
 
-	// Phase routing. State-domain gaps publish now and count toward
-	// statePending. Block-file gaps publish now only if phase 2 is
-	// already open; otherwise they queue for release when the state
-	// phase completes.
+	// Phase routing.
+	//   - State-domain files: phase 1. Publish now, count toward
+	//     statePending so InitialStateReady gates on them.
+	//   - Block-header files (*-headers.seg): also phase 1. Every
+	//     cryptographic state validator cross-references
+	//     header.stateRoot as the consensus anchor for the commitment
+	//     root recorded inside the state files; without the headers
+	//     landed, "state ready" would mean "state files have arrived
+	//     and pass internal-consistency checks" — not actually
+	//     validated against consensus. Including them keeps the
+	//     InitialStateReady contract honest and unblocks Caplin
+	//     (which uses the EL's frozen-headers tip as its
+	//     lowestBlockToReach) without waiting for bodies/transactions.
+	//   - Other block files (bodies, transactions) and caplin: phase 2.
+	//     Queue if InitialStateReady hasn't fired; publish now if it has.
 	isState := domain != ""
-	o.peerMu.Lock()
-	holdForPhase2 := !isState && !o.stateReadyFired
-	if isState && len(toRequest) > 0 {
-		o.statePending += len(toRequest)
-		o.stateDomainsSeen[domain] = struct{}{}
+	var phase1, phase2 []*snapshot.FileEntry
+	if isState {
+		phase1 = toRequest
+	} else {
+		for _, e := range toRequest {
+			if isBlockHeader(e.Name) {
+				phase1 = append(phase1, e)
+			} else {
+				phase2 = append(phase2, e)
+			}
+		}
 	}
+
+	o.peerMu.Lock()
+	if len(phase1) > 0 {
+		o.statePending += len(phase1)
+		if isState {
+			o.stateDomainsSeen[domain] = struct{}{}
+		}
+	}
+	holdForPhase2 := !o.stateReadyFired
 	if holdForPhase2 {
-		for _, entry := range toRequest {
+		for _, entry := range phase2 {
 			o.blocksQueued = append(o.blocksQueued, queuedBlock{entry: entry, peerID: peerID})
 		}
 	}
 	o.peerMu.Unlock()
 
-	if holdForPhase2 {
-		return
-	}
-
-	for _, entry := range toRequest {
+	for _, entry := range phase1 {
 		o.bus.Publish(DownloadRequested{
 			FileName:  entry.Name,
 			InfoHash:  entry.TorrentHash,
@@ -486,6 +539,26 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			Range:     entry.Range(),
 		})
 	}
+	if !holdForPhase2 {
+		for _, entry := range phase2 {
+			o.bus.Publish(DownloadRequested{
+				FileName:  entry.Name,
+				InfoHash:  entry.TorrentHash,
+				FromPeers: []string{peerID},
+				Range:     entry.Range(),
+			})
+		}
+	}
+}
+
+// isBlockHeader reports whether name is a block-header snapshot file
+// (e.g. "v1.0-000000-000500-headers.seg"). Header files carry
+// header.stateRoot, the consensus anchor every cryptographic state
+// validator needs — they belong to phase 1 of the orchestrator's
+// scheduling alongside state-domain files. Only .seg here: .idx
+// accessors are built locally, not distributed in the manifest.
+func isBlockHeader(name string) bool {
+	return strings.HasSuffix(name, "-headers.seg")
 }
 
 // fireInitialStateReady publishes InitialStateReady exactly once and
@@ -749,11 +822,22 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	if len(claim.peers) == 0 {
 		delete(o.peerFiles, e.FileName)
 	}
-	// Decrement state-phase pending count for state-domain completions.
-	// If this drains the state phase, fire InitialStateReady + release
-	// the block queue (done after unlock via fireInitialStateReady).
+	// Decrement state-phase pending count for state-phase completions.
+	// State-phase = state-domain files (Domain != "") + the phase-1
+	// non-ranged entries Meta and Salt (prerequisites for state to be
+	// usable — ReloadSalt needs salt on disk before OtterSync's
+	// bookkeeping can run) + block-header files (*-headers.seg) which
+	// requestGapsFor moved into phase 1 because they carry
+	// header.stateRoot, the consensus anchor every cryptographic state
+	// validator cross-references. Without including any of these here,
+	// statePending would never drain for them and InitialStateReady
+	// would hang forever.
+	isStatePhase := peerEntry.Domain != "" ||
+		peerEntry.Kind == snapshot.KindMeta ||
+		peerEntry.Kind == snapshot.KindSalt ||
+		isBlockHeader(peerEntry.Name)
 	var shouldFireStateReady bool
-	if peerEntry.Domain != "" {
+	if isStatePhase {
 		if o.statePending > 0 {
 			o.statePending--
 		}

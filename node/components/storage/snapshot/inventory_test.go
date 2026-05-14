@@ -222,3 +222,53 @@ func TestInventoryNonKVKinds(t *testing.T) {
 	inv.RemoveFile("erigondb.toml")
 	require.Empty(t, inv.MetaFiles())
 }
+
+// TestSetTorrentHash_AllBuckets is the gap-K regression guard.
+// SetTorrentHash must stamp hashes on entries in every inventory bucket
+// — blocks, every state domain, caplin, meta, and salt — otherwise the
+// disk-scan that populateInventoryTorrentHashes runs leaves whole entry
+// kinds at zero-hash, GenerateV2 silently drops them from the manifest,
+// and consumers can't fetch them. The salt-missing case surfaces
+// downstream as "salt not found on ReloadSalt" at exec start.
+func TestSetTorrentHash_AllBuckets(t *testing.T) {
+	inv := NewInventory()
+
+	entries := []*FileEntry{
+		{Name: "v1.1-000000-001000-headers.seg", FromStep: 0, ToStep: 1000, Local: true, Trust: TrustVerified}, // block
+		{Domain: DomainAccounts, Kind: KindKV, Name: "v1.0-accounts.0-1024.kv", FromStep: 0, ToStep: 1024, Local: true, Trust: TrustVerified},
+		{Domain: DomainReceipt, Kind: KindKV, Name: "v3.0-receipt.0-1024.kv", FromStep: 0, ToStep: 1024, Local: true, Trust: TrustVerified},
+		{Kind: KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified},
+		{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified},
+		{Kind: KindSalt, Name: "salt-blocks.txt", Local: true, Trust: TrustVerified},
+		{Kind: KindSalt, Name: "salt-state.txt", Local: true, Trust: TrustVerified},
+	}
+	for _, e := range entries {
+		require.NoError(t, inv.AddFile(e), "AddFile %s", e.Name)
+		require.Equal(t, [20]byte{}, e.TorrentHash, "%s starts with zero hash", e.Name)
+	}
+
+	for i, e := range entries {
+		hash := [20]byte{byte(i + 1)}
+		SetTorrentHash(inv, e.Name, hash)
+	}
+
+	// Look entries up via the inventory's public surface (not by struct
+	// pointer) to confirm SetTorrentHash actually mutated the live entry.
+	check := func(es []*FileEntry, name string) {
+		for _, e := range es {
+			if e.Name == name {
+				require.NotEqual(t, [20]byte{}, e.TorrentHash, "%s hash should be stamped", name)
+				require.True(t, e.Seeding, "%s Seeding should be true after stamp", name)
+				return
+			}
+		}
+		t.Fatalf("%s not found in bucket", name)
+	}
+	check(inv.BlockFiles(), "v1.1-000000-001000-headers.seg")
+	check(inv.LocalFiles(DomainAccounts), "v1.0-accounts.0-1024.kv")
+	check(inv.LocalFiles(DomainReceipt), "v3.0-receipt.0-1024.kv")
+	check(inv.CaplinFiles(), "caplin/v1.1-000000-000010-beaconblocks.seg")
+	check(inv.MetaFiles(), "erigondb.toml")
+	check(inv.SaltFiles(), "salt-blocks.txt")
+	check(inv.SaltFiles(), "salt-state.txt")
+}

@@ -18,6 +18,8 @@ package flow
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -96,4 +98,51 @@ func TestInventoryStorage_DefaultStage1ChainRejectsInvertedRange(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "range_ordering")
+}
+
+// TestInventoryStorage_ResolvesFileInKindSubdir is the gap-I regression
+// guard. Inventory entry names are bare basenames, but the downloaded
+// file lives in its kind's subdir (domain/, history/, idx/, …) — the
+// publisher seeds via RelPathForName so the torrent info.Name carries
+// the subdir-prefixed form, and the downloader writes there. RecordFile's
+// content-presence check must resolve the file at PathForName(snapDir,
+// name); joining the bare name looks at the top level, ContentNotEmpty
+// reports "marked Local but not present on disk", RecordFile fails,
+// statePending never drains, and InitialStateReady never fires.
+func TestInventoryStorage_ResolvesFileInKindSubdir(t *testing.T) {
+	snapDir := t.TempDir()
+	mustWrite := func(rel string, b []byte) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(filepath.Join(snapDir, filepath.Dir(rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(snapDir, rel), b, 0o644))
+	}
+	// Files on disk in their kind subdirs, the way the downloader wrote
+	// them (torrent info.Name = RelPathForName(name)).
+	mustWrite("domain/v1.0-accounts.0-1024.kv", []byte("state"))
+	mustWrite("history/v1.0-accounts.0-1024.v", []byte("hist"))
+	mustWrite("idx/v1.0-accounts.0-1024.ef", []byte("idx"))
+	// Sanity: none of them are at the top level — a bare-name lookup fails.
+	for _, bare := range []string{"v1.0-accounts.0-1024.kv", "v1.0-accounts.0-1024.v", "v1.0-accounts.0-1024.ef"} {
+		_, err := os.Stat(filepath.Join(snapDir, bare))
+		require.True(t, os.IsNotExist(err), "%s should not exist at top level", bare)
+	}
+
+	inv := snapshot.NewInventory()
+	storage := NewInventoryStorage(inv, validation.DefaultStage1ChainWithDisk(snapDir), snapDir)
+
+	// Bare entry names — exactly what the orchestrator records on
+	// DownloadComplete. RecordFile must find each in its subdir.
+	require.NoError(t, storage.RecordFile(&snapshot.FileEntry{
+		Name: "v1.0-accounts.0-1024.kv", Domain: snapshot.DomainAccounts, Kind: snapshot.KindKV,
+		FromStep: 0, ToStep: 1024, Local: true, Trust: snapshot.TrustVerified,
+	}))
+	require.NoError(t, storage.RecordFile(&snapshot.FileEntry{
+		Name: "v1.0-accounts.0-1024.v", Domain: snapshot.DomainAccounts, Kind: snapshot.KindHistory,
+		FromStep: 0, ToStep: 1024, Local: true, Trust: snapshot.TrustVerified,
+	}))
+	require.NoError(t, storage.RecordFile(&snapshot.FileEntry{
+		Name: "v1.0-accounts.0-1024.ef", Domain: snapshot.DomainAccounts, Kind: snapshot.KindIdx,
+		FromStep: 0, ToStep: 1024, Local: true, Trust: snapshot.TrustVerified,
+	}))
+	require.Len(t, inv.AllDomainFiles(snapshot.DomainAccounts), 3)
 }
