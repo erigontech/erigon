@@ -1626,7 +1626,6 @@ func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 // while waiting for collation to produce more files. Exits when stepsInDB ≤
 // targetSteps or no progress is made.
 func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
-	log.Warn("[dbg] CollateAndPrune called", "stack", dbg.Stack())
 	const targetSteps = 1.5
 
 	// Kick background collation, capped to maxCollationTxNum if set.
@@ -1681,7 +1680,6 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 // CollateAndPruneIfNeeded is a backwards-compatible wrapper that only
 // runs collation+prune when stepsInDB exceeds the threshold.
 func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
-	log.Warn("[dbg] CollateAndPruneIfNeeded called", "stack", dbg.Stack())
 	// Always kick background collation — at the tip this keeps file
 	// building progressing even when stepsInDB is below the threshold.
 	toTxNum := a.EndTxNumMinimax() + a.StepSize()
