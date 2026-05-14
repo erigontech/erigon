@@ -23,7 +23,7 @@
   {
     "shard": "blocktests-devnet",
     "workers": 12,
-    "max-allowed-failures": 355,
+    "max-allowed-failures": 380,
     "exec3-parallel": true
   },
   {

@@ -827,9 +827,10 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 
 			// 6. Refund intrinsic state gas the auth wasn't going to spend:
-			//    NEW_ACCOUNT for existing account leaves, AUTH_BASE for slots
-			//    that already hold a delegation indicator. Pre-Amsterdam keeps
-			//    the legacy regular-gas refund (EIP-7702).
+			//    NEW_ACCOUNT for existing account leaves, AUTH_BASE when no new
+			//    delegation-indicator bytes are written — either overwriting an
+			//    existing indicator or clearing against `0x0`. Pre-Amsterdam
+			//    keeps the legacy regular-gas refund (EIP-7702).
 			exists, err := st.state.Exist(authority)
 			if err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
@@ -838,7 +839,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 				if exists {
 					stateIgasRefund += newAccountRefund
 				}
-				if hasDelegation {
+				if hasDelegation || auth.Address == (common.Address{}) {
 					stateIgasRefund += authBaseRefund
 				}
 			} else if exists {
