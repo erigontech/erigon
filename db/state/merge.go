@@ -27,8 +27,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -47,39 +45,17 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-
-	minimax := d.History.dirtyFilesEndTxNumMinimax()
-	if _max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return d.dirtyFiles.updateMinimax(d.History.dirtyFilesEndTxNumMinimax())
 }
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return ii.dirtyFiles.EndTxNumMax()
 }
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.SnapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
-	if _max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return h.dirtyFiles.updateMinimax(h.InvertedIndex.dirtyFilesEndTxNumMinimax())
 }
 
 type DomainRanges struct {
@@ -1021,7 +997,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
+func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
 	iter := dirtyFiles.Iter()

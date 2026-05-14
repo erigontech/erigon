@@ -152,6 +152,14 @@ func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPa
 		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
 
+	if payload.Version() >= clparams.GloasVersion {
+		if payload.BlockAccessList != nil {
+			request.BlockAccessList = payload.BlockAccessList.Bytes()
+		}
+		slotNumber := hexutil.Uint64(payload.SlotNumber)
+		request.SlotNumber = &slotNumber
+	}
+
 	return request
 }
 
@@ -182,8 +190,8 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV3(ctx, request, versionedHashes, beaconParentRoot)
 	case clparams.ElectraVersion, clparams.FuluVersion:
 		payloadStatus, err = cc.engine.NewPayloadV4(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
-	default:
-		return PayloadStatusNone, fmt.Errorf("unsupported payload version: %d", payload.Version())
+	default: // Gloas+ (Amsterdam)
+		payloadStatus, err = cc.engine.NewPayloadV5(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	}
 	if err != nil {
 		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
@@ -362,6 +370,8 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 
 	// Select Engine API version based on CL state version.
 	switch {
+	case version >= clparams.GloasVersion:
+		return cc.getAssembledBlockV6(ctx, id, version)
 	case version >= clparams.FuluVersion:
 		return cc.getAssembledBlockV5(ctx, id, version)
 	case version >= clparams.ElectraVersion:
@@ -444,6 +454,14 @@ func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []b
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
+func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV6(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
+	}
+	return cc.getAssembledBlockFromResponse(resp, version)
+}
+
 func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
 	block := cltypes.NewEth1Block(version, beaconCfg)
 	block.ParentHash = ep.ParentHash
@@ -504,6 +522,21 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clpa
 				Address:   w.Address,
 				Amount:    w.Amount,
 			})
+		}
+	}
+
+	// GLOAS fields
+	if ep.SlotNumber != nil {
+		block.SlotNumber = uint64(*ep.SlotNumber)
+	}
+	if len(ep.BlockAccessList) > 0 {
+		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
+		if beaconCfg != nil {
+			maxBytes = beaconCfg.MaxBytesPerTransaction
+		}
+		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
+		if err := block.BlockAccessList.SetBytes(ep.BlockAccessList); err != nil {
+			return nil, err
 		}
 	}
 
