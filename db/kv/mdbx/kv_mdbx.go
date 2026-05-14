@@ -508,6 +508,18 @@ type GCStats struct {
 	LastTxID         uint64 // mi_recent_txnid
 	OldestRoTxID     uint64 // min mdbx txid across in-process RO txns
 	PageSize         uint64 // bytes per page
+
+	// Cumulative MDBX page-operation counters since process start.
+	// Deltas across a single commit reveal the real per-commit page work,
+	// independent of the residual dirty-queue size at observation time.
+	PageOpsNewly   uint64 // pages newly allocated (extension or from GC)
+	PageOpsCow     uint64 // pages copied-on-write
+	PageOpsClone   uint64 // pages cloned (dup-sort split etc.)
+	PageOpsSplit   uint64 // b-tree node splits
+	PageOpsMerge   uint64 // b-tree node merges
+	PageOpsSpill   uint64 // pages spilled from dirty queue to disk mid-tx
+	PageOpsUnspill uint64 // pages re-faulted back from spill area
+	PageOpsWops    uint64 // total write-ops issued
 }
 
 // GCStats walks DBI 0 (FREE_DBI) and computes the freelist accounting. Each GC
@@ -531,6 +543,14 @@ func (db *MdbxKV) GCStats() (*GCStats, error) {
 		}
 		s.DBSize = info.Geo.Current
 		s.LastTxID = uint64(info.LastTxnID)
+		s.PageOpsNewly = info.PageOps.Newly
+		s.PageOpsCow = info.PageOps.Cow
+		s.PageOpsClone = info.PageOps.Clone
+		s.PageOpsSplit = info.PageOps.Split
+		s.PageOpsMerge = info.PageOps.Merge
+		s.PageOpsSpill = info.PageOps.Spill
+		s.PageOpsUnspill = info.PageOps.Unspill
+		s.PageOpsWops = info.PageOps.Wops
 
 		s.OldestRoTxID = math.MaxUint64
 		db.liveRoTxIDs.Range(func(_, v any) bool {

@@ -484,6 +484,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// reclaim retired pages while the RwTx is writing. Flush/ClearRam
 			// are write-only into commitRwTx and do not read through roTx.
 			roTx.Rollback()
+			// Capture the SharedDomains in-memory size BEFORE the flush —
+			// this is the true user-intended batch (bounded by --batchSize),
+			// not the residual MDBX dirty queue we see after spilling.
+			sdSizeBeforeFlush := sd.Size()
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
@@ -567,7 +571,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			args := []any{
 				"rwTxId", commitRwTxID,
 				"newRoTxId", roTx.ViewID(),
-				"spaceDirty_inmem", common.ByteCount(spaceDirty),
+				"sd_inmem_before_flush", common.ByteCount(sdSizeBeforeFlush),
+				"spaceDirty_residual", common.ByteCount(spaceDirty),
+			}
+			if before != nil && after != nil {
+				// Delta in MDBX page-op counters tells us the REAL per-commit
+				// page work, not the residual dirty queue. pageSize multiplied
+				// for human-readable bytes.
+				ps := after.PageSize
+				args = append(args,
+					"newly_pages_bytes", common.ByteCount((after.PageOpsNewly-before.PageOpsNewly)*ps),
+					"cow_pages_bytes", common.ByteCount((after.PageOpsCow-before.PageOpsCow)*ps),
+					"split_pages", after.PageOpsSplit-before.PageOpsSplit,
+					"spill_pages_bytes", common.ByteCount((after.PageOpsSpill-before.PageOpsSpill)*ps),
+					"unspill_pages_bytes", common.ByteCount((after.PageOpsUnspill-before.PageOpsUnspill)*ps),
+					"wops_delta", after.PageOpsWops-before.PageOpsWops,
+				)
 			}
 			if before != nil {
 				args = append(args,
