@@ -41,10 +41,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
@@ -116,6 +118,14 @@ type Provider struct {
 	// and the wedge symptom is the same as the gap the bootstrap is
 	// meant to fix. Empty string disables the bootstrap publish.
 	bootstrapChainName string
+
+	// bootstrapPruneMode is the prune.Mode passed in via Deps.Config.Prune.
+	// Used to filter the preverified manifest down to the subset this
+	// node will actually download — without this, a --prune.mode=minimal
+	// publisher pulls the full archive (~1.9 TB of state history) it
+	// would just prune anyway. See bug N in
+	// docs/plans/time-to-get-back-generic-mist.md.
+	bootstrapPruneMode prune.Mode
 
 	// pausedCommitmentCache is the partial-block-pause cache shared
 	// by CommitmentDomainValidator. Held here so the ChangeSet
@@ -672,18 +682,26 @@ func (p *Provider) Initialize(deps Deps) error {
 			return fmt.Errorf("storage: start orchestrator: %w", err)
 		}
 
-		// Record the chain name so BootstrapFromPreverified — invoked
-		// later by backend.go after BindBus has wired the downloader
-		// — knows which preverified registry to read. Bootstrap can't
-		// fire here: the orchestrator subscribes to PeerManifestReceived,
+		// Record the chain name + prune.Mode so
+		// BootstrapFromPreverified — invoked later by backend.go after
+		// BindBus has wired the downloader — knows which preverified
+		// registry to read AND how to filter it. Bootstrap can't fire
+		// here: the orchestrator subscribes to PeerManifestReceived,
 		// would process the synthetic manifest, and publish
 		// DownloadRequested events into a bus whose downloader-side
 		// subscriber doesn't exist yet (BindBus runs in backend.go
 		// AFTER storage.Initialize returns). The events would be lost
 		// and the wedge symptoms would be indistinguishable from the
 		// no-peer-bootstrap case the path is meant to fix.
+		//
+		// Prune mode lives alongside chain name because the filter
+		// must drop archive-only entries the running prune mode would
+		// just prune anyway — bug N filled the disk with 1.3 TB of
+		// .v history files a --prune.mode=minimal publisher would
+		// never keep.
 		if config.Snapshot.BootstrapFromPreverified {
 			p.bootstrapChainName = config.Snapshot.ChainName
+			p.bootstrapPruneMode = config.Prune
 		}
 	}
 
@@ -750,12 +768,61 @@ func (p *Provider) bootstrapFromPreverified(chainName string) error {
 		return fmt.Errorf("no preverified config for chain %q", chainName)
 	}
 
+	manifest := buildBootstrapManifest(cfg.Preverified.Items, p.ChainConfig, p.bootstrapPruneMode, p.logger)
+
+	totalEntries := len(manifest.Blocks) + len(manifest.Meta) + len(manifest.Salt) + len(manifest.Caplin)
+	for _, d := range manifest.Domains {
+		totalEntries += len(d)
+	}
+	p.logger.Info("[storage] bootstrap-from-preverified: seeding synthetic manifest",
+		"chain", chainName,
+		"total", totalEntries,
+		"domains", len(manifest.Domains),
+		"blocks", len(manifest.Blocks),
+		"caplin", len(manifest.Caplin),
+		"meta", len(manifest.Meta),
+		"salt", len(manifest.Salt),
+	)
+	p.eventBus.Publish(manifest)
+	return nil
+}
+
+// buildBootstrapManifest produces the synthetic
+// flow.PeerManifestReceived for the bootstrap-from-preverified path.
+// Composes the prune-mode filter (snapshotsync.FilterPreverifiedByPruneMode)
+// with the per-kind bucket routing (KindMeta → Meta, KindSalt → Salt,
+// KindCaplin → Caplin, Domain != "" → Domains[d], else → Blocks).
+//
+// Pure function: no event bus, no Provider state — testable in
+// isolation against synthetic preverified inputs and synthetic
+// prune.Mode values. Logging is optional via the passed logger.
+//
+// Filter is skipped when pruneMode.Initialised is false (defensive
+// no-op for callers that don't yet wire the mode through).
+func buildBootstrapManifest(
+	items snapcfg.PreverifiedItems,
+	chainConfig *chain.Config,
+	pruneMode prune.Mode,
+	logger log.Logger,
+) flow.PeerManifestReceived {
+	if pruneMode.Initialised {
+		raw := len(items)
+		items = snapshotsync.FilterPreverifiedByPruneMode(items, chainConfig, pruneMode)
+		if logger != nil {
+			logger.Info("[storage] bootstrap-from-preverified: filtered by prune mode",
+				"prune.mode", pruneMode.String(),
+				"raw", raw,
+				"kept", len(items),
+				"dropped", raw-len(items),
+			)
+		}
+	}
+
 	manifest := flow.PeerManifestReceived{
 		PeerID:  "bootstrap-preverified",
 		Domains: make(map[snapshot.Domain][]*snapshot.FileEntry),
 	}
-
-	for _, item := range cfg.Preverified.Items {
+	for _, item := range items {
 		entry := entryFromPreverifiedItem(item)
 		if entry == nil {
 			continue
@@ -773,22 +840,7 @@ func (p *Provider) bootstrapFromPreverified(chainName string) error {
 			manifest.Blocks = append(manifest.Blocks, entry)
 		}
 	}
-
-	totalEntries := len(manifest.Blocks) + len(manifest.Meta) + len(manifest.Salt) + len(manifest.Caplin)
-	for _, d := range manifest.Domains {
-		totalEntries += len(d)
-	}
-	p.logger.Info("[storage] bootstrap-from-preverified: seeding synthetic manifest",
-		"chain", chainName,
-		"total", totalEntries,
-		"domains", len(manifest.Domains),
-		"blocks", len(manifest.Blocks),
-		"caplin", len(manifest.Caplin),
-		"meta", len(manifest.Meta),
-		"salt", len(manifest.Salt),
-	)
-	p.eventBus.Publish(manifest)
-	return nil
+	return manifest
 }
 
 // entryFromPreverifiedItem translates a preverified.Item (name + hex

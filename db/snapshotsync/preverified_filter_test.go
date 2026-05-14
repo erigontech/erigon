@@ -1,0 +1,167 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package snapshotsync
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
+)
+
+// TestFilterPreverifiedByPruneMode locks the bug-N policy: the
+// bootstrap-from-preverified path filters preverified entries against
+// the running prune.Mode so a --prune.mode=minimal publisher doesn't
+// pull the full archive (state history) it would just prune anyway.
+//
+// Each case asserts the EXACT set of survivors so a change to the
+// filter that drops a different set of files trips this test.
+func TestFilterPreverifiedByPruneMode(t *testing.T) {
+	t.Parallel()
+
+	// Synthetic preverified covering every file shape the filter could
+	// decide on:
+	//   - state primary (.kv in domain/) — always kept
+	//   - state history (.v in history/, .ef in idx/, .vi in accessor/)
+	//     — dropped iff History pruning is enabled (every mode except
+	//     Archive)
+	//   - block snapshot files (top-level *.seg)
+	//   - pre-merge transactions — dropped iff Blocks == DefaultBlocksPruneMode
+	//     (Full mode only, by current prune.Mode constants)
+	//   - chain config (salt-*.txt, erigondb.toml) — always kept
+	//   - caplin — always kept
+	items := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "domain/v1.0-accounts.0-1024.kv", Hash: "0001"},
+		preverified.Item{Name: "domain/v1.0-storage.0-1024.kv", Hash: "0002"},
+		preverified.Item{Name: "domain/v1.0-commitment.0-1024.kv", Hash: "0003"},
+		preverified.Item{Name: "history/v1.0-accountsHistory.0-1024.v", Hash: "0004"},
+		preverified.Item{Name: "history/v1.0-storageHistory.0-1024.v", Hash: "0005"},
+		preverified.Item{Name: "idx/v1.0-accountsIdx.0-1024.ef", Hash: "0006"},
+		preverified.Item{Name: "idx/v1.0-logAddrIdx.0-1024.ef", Hash: "0007"},
+		preverified.Item{Name: "accessor/v1.0-history.0-1024.vi", Hash: "0008"},
+		preverified.Item{Name: "v1.0-000000-000500-headers.seg", Hash: "0009"},
+		preverified.Item{Name: "v1.0-000000-000500-bodies.seg", Hash: "000a"},
+		preverified.Item{Name: "v1.0-000000-000500-transactions.seg", Hash: "000b"}, // pre-merge
+		preverified.Item{Name: "v1.0-020000-020500-transactions.seg", Hash: "000c"}, // post-merge
+		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: "000d"},
+		preverified.Item{Name: "salt-state.txt", Hash: "000e"},
+		preverified.Item{Name: "erigondb.toml", Hash: "000f"},
+	}
+
+	// Chain config: merge at block 15M (mainnet-ish). Pre-merge =
+	// transactions whose .From < 15_000_000. With ×1000 multiplier
+	// embedded in the snaptype filename parser, the v1.0-000000-000500
+	// segment covers block range [0, 500_000) — pre-merge. The
+	// v1.0-020000-020500 segment covers [20_000_000, 20_500_000) —
+	// post-merge.
+	mergeHeight := uint64(15_000_000)
+	cc := &chain.Config{MergeHeight: &mergeHeight}
+
+	t.Run("archive keeps everything", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.ArchiveMode)
+		require.Len(t, got, len(items),
+			"archive mode must keep every preverified entry — pruning is disabled on every axis")
+		// Compare by name set for clarity.
+		gotNames := namesOf(got)
+		for _, want := range items {
+			require.Contains(t, gotNames, want.Name)
+		}
+	})
+
+	t.Run("minimal drops state history; keeps state primary + blocks + config + caplin", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.MinimalMode)
+		gotNames := namesOf(got)
+
+		// Kept under minimal:
+		mustKeep := []string{
+			"domain/v1.0-accounts.0-1024.kv",
+			"domain/v1.0-storage.0-1024.kv",
+			"domain/v1.0-commitment.0-1024.kv",
+			"v1.0-000000-000500-headers.seg",
+			"v1.0-000000-000500-bodies.seg",
+			"v1.0-000000-000500-transactions.seg", // Minimal keeps tx — only Full filters pre-merge tx
+			"v1.0-020000-020500-transactions.seg",
+			"caplin/v1.1-000000-000010-beaconblocks.seg",
+			"salt-state.txt",
+			"erigondb.toml",
+		}
+		for _, name := range mustKeep {
+			require.Contains(t, gotNames, name,
+				"minimal must keep %s — it's state primary / blocks / config / caplin", name)
+		}
+
+		// Dropped under minimal (bug-N regression sentinel — these are
+		// the ~1.3 TB of mainnet state history that filled the disk):
+		mustDrop := []string{
+			"history/v1.0-accountsHistory.0-1024.v",
+			"history/v1.0-storageHistory.0-1024.v",
+			"idx/v1.0-accountsIdx.0-1024.ef",
+			"idx/v1.0-logAddrIdx.0-1024.ef",
+			"accessor/v1.0-history.0-1024.vi",
+		}
+		for _, name := range mustDrop {
+			require.NotContains(t, gotNames, name,
+				"minimal must drop %s — it's state history (idx/, history/, accessor/) and History pruning is enabled", name)
+		}
+	})
+
+	t.Run("full mode drops state history AND pre-merge transactions", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.FullMode)
+		gotNames := namesOf(got)
+
+		// Full has History.Enabled() == true (DefaultPruneDistance) so
+		// state-history drops. AND Full has Blocks == DefaultBlocksPruneMode,
+		// triggering pre-merge transaction filtering via the existing
+		// isTransactionsSegmentExpired predicate.
+		require.NotContains(t, gotNames, "history/v1.0-accountsHistory.0-1024.v")
+		require.NotContains(t, gotNames, "idx/v1.0-accountsIdx.0-1024.ef")
+		require.NotContains(t, gotNames, "accessor/v1.0-history.0-1024.vi")
+		require.NotContains(t, gotNames, "v1.0-000000-000500-transactions.seg",
+			"full mode drops pre-merge transactions (this is the Blocks == DefaultBlocksPruneMode + IsPreMerge branch)")
+		// Post-merge transactions kept.
+		require.Contains(t, gotNames, "v1.0-020000-020500-transactions.seg")
+	})
+
+	t.Run("blocks mode drops state history; keeps all transactions", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.BlocksMode)
+		gotNames := namesOf(got)
+		require.NotContains(t, gotNames, "history/v1.0-accountsHistory.0-1024.v")
+		// Blocks mode has Blocks=KeepAllBlocksPruneMode, which is NOT
+		// DefaultBlocksPruneMode, so pre-merge tx filter is a no-op.
+		require.Contains(t, gotNames, "v1.0-000000-000500-transactions.seg")
+		require.Contains(t, gotNames, "v1.0-020000-020500-transactions.seg")
+	})
+
+	t.Run("uninitialised mode is a defensive no-op pass-through", func(t *testing.T) {
+		var zero prune.Mode // Initialised == false
+		got := FilterPreverifiedByPruneMode(items, cc, zero)
+		require.Len(t, got, len(items),
+			"uninitialised mode must not silently behave as archive (or anything else) — callers must pass an initialised mode")
+	})
+}
+
+func namesOf(items snapcfg.PreverifiedItems) []string {
+	names := make([]string, len(items))
+	for i, p := range items {
+		names[i] = p.Name
+	}
+	return names
+}

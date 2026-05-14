@@ -22,7 +22,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -113,4 +117,126 @@ func TestEntryFromPreverifiedItem(t *testing.T) {
 			require.Equal(t, c.wantDomain, got.Domain, "Domain must match name pattern")
 		})
 	}
+}
+
+// TestBuildBootstrapManifest_RespectsPruneMode pins the L2 contract:
+// buildBootstrapManifest must (1) apply the prune-mode filter via
+// snapshotsync.FilterPreverifiedByPruneMode and (2) route the
+// surviving entries into the correct PeerManifestReceived buckets. A
+// regression in either piece is the bug-N class — a publisher under
+// --prune.mode=minimal pulling the full archive history (1.3 TB+ of
+// .v files) onto disk.
+//
+// Integration sentinel linking L1's filter contract to the observable
+// manifest the orchestrator receives.
+func TestBuildBootstrapManifest_RespectsPruneMode(t *testing.T) {
+	t.Parallel()
+
+	const sampleHash = "0123456789abcdef0123456789abcdef01234567"
+	mkItem := func(name string) preverified.Item {
+		return preverified.Item{Name: name, Hash: sampleHash}
+	}
+	items := snapcfg.PreverifiedItems{
+		mkItem("domain/v1.0-accounts.0-1024.kv"),
+		mkItem("domain/v1.0-storage.0-1024.kv"),
+		mkItem("domain/v1.0-commitment.0-1024.kv"),
+		mkItem("history/v1.0-accountsHistory.0-1024.v"),
+		mkItem("idx/v1.0-accountsIdx.0-1024.ef"),
+		mkItem("accessor/v1.0-history.0-1024.vi"),
+		mkItem("v1.0-000000-000500-headers.seg"),
+		mkItem("v1.0-000000-000500-bodies.seg"),
+		mkItem("caplin/v1.1-000000-000010-beaconblocks.seg"),
+		mkItem("salt-state.txt"),
+		mkItem("erigondb.toml"),
+	}
+
+	mergeHeight := uint64(15_000_000)
+	cc := &chain.Config{MergeHeight: &mergeHeight}
+
+	gather := func(m flow.PeerManifestReceived) map[string]struct{} {
+		set := make(map[string]struct{})
+		for _, e := range m.Blocks {
+			set[e.Name] = struct{}{}
+		}
+		for _, e := range m.Caplin {
+			set[e.Name] = struct{}{}
+		}
+		for _, e := range m.Meta {
+			set[e.Name] = struct{}{}
+		}
+		for _, e := range m.Salt {
+			set[e.Name] = struct{}{}
+		}
+		for _, list := range m.Domains {
+			for _, e := range list {
+				set[e.Name] = struct{}{}
+			}
+		}
+		return set
+	}
+
+	t.Run("archive mode keeps every entry; bucket routing intact", func(t *testing.T) {
+		m := buildBootstrapManifest(items, cc, prune.ArchiveMode, nil)
+		require.Equal(t, "bootstrap-preverified", m.PeerID,
+			"PeerID sentinel must be stable — orchestrator peer-attribution depends on it")
+
+		got := gather(m)
+		require.Len(t, got, len(items), "archive must keep every preverified entry")
+
+		require.NotEmpty(t, m.Domains[snapshot.DomainAccounts],
+			"state-domain entries must land in Domains[<domain>]")
+		blockNames := make([]string, len(m.Blocks))
+		for i, e := range m.Blocks {
+			blockNames[i] = e.Name
+		}
+		require.Contains(t, blockNames, "v1.0-000000-000500-headers.seg",
+			"block files must land in Blocks")
+		caplinNames := make([]string, len(m.Caplin))
+		for i, e := range m.Caplin {
+			caplinNames[i] = e.Name
+		}
+		require.Contains(t, caplinNames, "caplin/v1.1-000000-000010-beaconblocks.seg",
+			"caplin/ entries must land in Caplin")
+		metaNames := make([]string, len(m.Meta))
+		for i, e := range m.Meta {
+			metaNames[i] = e.Name
+		}
+		require.Contains(t, metaNames, "erigondb.toml",
+			"meta entries must land in Meta")
+		saltNames := make([]string, len(m.Salt))
+		for i, e := range m.Salt {
+			saltNames[i] = e.Name
+		}
+		require.Contains(t, saltNames, "salt-state.txt",
+			"salt entries must land in Salt")
+	})
+
+	t.Run("minimal mode drops state history; bucket routing intact for survivors", func(t *testing.T) {
+		m := buildBootstrapManifest(items, cc, prune.MinimalMode, nil)
+		got := gather(m)
+
+		// Bug-N regression sentinel: history/idx/accessor must NOT
+		// appear under minimal mode.
+		require.NotContains(t, got, "history/v1.0-accountsHistory.0-1024.v",
+			"minimal must drop state history (.v in history/) — this is the file kind that filled the 1.3 TB disk in bug N")
+		require.NotContains(t, got, "idx/v1.0-accountsIdx.0-1024.ef",
+			"minimal must drop state-history indexes (.ef in idx/)")
+		require.NotContains(t, got, "accessor/v1.0-history.0-1024.vi",
+			"minimal must drop state-history accessors (.vi in accessor/)")
+
+		// State primaries + blocks + caplin + config still present.
+		require.Contains(t, got, "domain/v1.0-accounts.0-1024.kv")
+		require.Contains(t, got, "v1.0-000000-000500-headers.seg")
+		require.Contains(t, got, "caplin/v1.1-000000-000010-beaconblocks.seg")
+		require.Contains(t, got, "salt-state.txt")
+		require.Contains(t, got, "erigondb.toml")
+	})
+
+	t.Run("uninitialised prune mode is a defensive no-op pass-through", func(t *testing.T) {
+		var zero prune.Mode
+		m := buildBootstrapManifest(items, cc, zero, nil)
+		got := gather(m)
+		require.Len(t, got, len(items),
+			"uninitialised prune.Mode must not silently filter; callers wire an initialised mode when they want filtering")
+	})
 }
