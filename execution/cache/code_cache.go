@@ -39,14 +39,21 @@ const (
 	DefaultAddrCacheBytes = 16 * datasize.MB
 )
 
-// CodeCache is a two-level concurrent cache for contract code.
+// CodeCache is a multi-level concurrent cache for contract code.
 // Level 1: addr → maphash(code) (mutable, cleared on reorg)
 // Level 2: maphash(code) → code (immutable, never cleared)
+// Level 2b: ethHash(code) → code (immutable, never cleared) — enables
+//           bypass of the addr level when the caller already knows the
+//           Ethereum codeHash from a prior account read (common path
+//           for EXTCODESIZE / EXTCODEHASH / CALL where many addresses
+//           share the same bytecode — proxies, factory-deployed clones,
+//           ERC-20 holders, etc.).
 //
 // This design is efficient because:
 // - Multiple addresses can share the same code (common with proxies/clones)
-// - Uses fast maphash instead of cryptographic Keccak256
+// - Uses fast maphash instead of cryptographic Keccak256 for L1/L2
 // - Address mappings are small (8 bytes) so we can cache many more
+// - L2b lets callers with the codeHash in hand skip L1 entirely
 // - Thread-safe via sync.Map
 //
 // Capacity is byte-based. Once full, new puts are no-ops but
@@ -61,14 +68,25 @@ type CodeCache struct {
 	addrSize   atomic.Int64                     // current size in bytes
 	hashToCode *maphash.Map[[]byte]             // maphash(code) → code, concurrent
 	codeSize   atomic.Int64                     // current size in bytes (code only, hash is fixed 8 bytes)
-	blockHash  common.Hash                      // hash of the last block processed
-	mu         sync.RWMutex
+
+	// L2b: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
+	// alongside L2 when the caller provides ethHash on Put. Independent
+	// of L1 — Get-by-ethHash bypasses addr lookup entirely. Memory cost:
+	// duplicates code bytes vs L2 (worst case 2x byte storage); accepted
+	// for the per-key fast-path on many-addrs-one-code workloads.
+	ethHashToCode    *maphash.Map[[]byte] // keccak(code) → code, concurrent
+	ethHashCodeSize  atomic.Int64         // current size in bytes (ethHash layer)
+
+	blockHash common.Hash // hash of the last block processed
+	mu        sync.RWMutex
 
 	// Stats counters (atomic for concurrent access)
-	addrHits   atomic.Uint64
-	addrMisses atomic.Uint64
-	codeHits   atomic.Uint64
-	codeMisses atomic.Uint64
+	addrHits      atomic.Uint64
+	addrMisses    atomic.Uint64
+	codeHits      atomic.Uint64
+	codeMisses    atomic.Uint64
+	ethHashHits   atomic.Uint64
+	ethHashMisses atomic.Uint64
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
@@ -77,10 +95,11 @@ type CodeCache struct {
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
 func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
 	return &CodeCache{
-		addrToHash:    maphash.NewMap[versionedAddressID](),
-		hashToCode:    maphash.NewMap[[]byte](),
-		addrCapacityB: addrCapacityBytes,
-		codeCapacityB: codeCapacityBytes,
+		addrToHash:     maphash.NewMap[versionedAddressID](),
+		hashToCode:     maphash.NewMap[[]byte](),
+		ethHashToCode:  maphash.NewMap[[]byte](),
+		addrCapacityB:  addrCapacityBytes,
+		codeCapacityB:  codeCapacityBytes,
 	}
 }
 
@@ -141,6 +160,51 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 	}
 	c.hashToCode.Set(hashKey, code)
 	c.codeSize.Add(codeEntrySize)
+}
+
+// GetByEthHash retrieves contract code by its Ethereum codeHash (keccak256).
+// Bypasses the addr-keyed L1/L2 path. Returns (code, true) on hit, (nil, false) on miss.
+//
+// Designed for the common path where the caller has already loaded the
+// account and knows the codeHash (EXTCODESIZE, EXTCODEHASH, CALL targets
+// after account-load). Many addresses sharing one codeHash all hit this
+// single L2b entry after the first population.
+func (c *CodeCache) GetByEthHash(ethHash []byte) ([]byte, bool) {
+	code, ok := c.ethHashToCode.Get(ethHash)
+	if !ok || len(code) == 0 {
+		c.ethHashMisses.Add(1)
+		return nil, false
+	}
+	c.ethHashHits.Add(1)
+	return code, true
+}
+
+// PutWithEthHash stores contract code, populating both the addr-keyed
+// path (L1+L2) and the ethHash-keyed path (L2b). Use when the caller
+// has the codeHash in hand (typically from a just-loaded account record);
+// avoids the maphash-vs-keccak collision risk of re-deriving the ethHash
+// from the value, and ensures L2b is fillable without an extra keccak.
+//
+// addr may be empty to populate only L2b (e.g. when populating from a
+// codehash-only path that hasn't seen the addr yet).
+func (c *CodeCache) PutWithEthHash(addr []byte, code []byte, ethHash []byte) {
+	if len(code) == 0 || len(ethHash) == 0 {
+		return
+	}
+
+	if len(addr) > 0 {
+		c.Put(addr, code)
+	}
+
+	if _, exists := c.ethHashToCode.Get(ethHash); exists {
+		return
+	}
+	entrySize := int64(len(ethHash) + len(code))
+	if c.ethHashCodeSize.Load()+entrySize > int64(c.codeCapacityB) {
+		return
+	}
+	c.ethHashToCode.Set(ethHash, code)
+	c.ethHashCodeSize.Add(entrySize)
 }
 
 // Delete removes the address → codeHash mapping.
