@@ -88,19 +88,6 @@ type SnapshotsCfg struct {
 	// (backend.go) when the storage orchestrator is constructed.
 	// Defaults nil — existing callers see no behaviour change.
 	initialStateReady <-chan struct{}
-
-	// blockHeadersOpened is invoked once, after the first successful
-	// OpenSegments(Headers, Bodies), passing FrozenBlocks() as the
-	// EL's authoritative frozen-headers tip. Production wiring
-	// (backend.go) installs a hook that publishes
-	// flow.BlockHeadersReady on the event bus; Caplin's
-	// DownloadHistoricalBlocks waits on the matching channel and
-	// uses TipBlock as its lowestBlockToReach instead of racing the
-	// EL's snapshot-open and silently walking to genesis.
-	//
-	// Nil by default — tests and tools that don't run Caplin or the
-	// storage component see no behaviour change.
-	blockHeadersOpened func(tipBlock uint64)
 }
 
 // SetLifecycleDrivenByStorage opts the stage out of driving
@@ -124,17 +111,6 @@ func (cfg *SnapshotsCfg) SetLifecycleDrivenByStorage(b bool) {
 // component leave it nil.
 func (cfg *SnapshotsCfg) SetInitialStateReady(ch <-chan struct{}) {
 	cfg.initialStateReady = ch
-}
-
-// SetBlockHeadersOpenedHook installs a callback invoked once, after the
-// first successful OpenSegments(Headers, Bodies). The hook receives
-// FrozenBlocks() as the EL's authoritative frozen-headers tip.
-// Production wiring (backend.go) sets a hook that publishes
-// flow.BlockHeadersReady on the event bus so Caplin's
-// DownloadHistoricalBlocks stage can read a real lowestBlockToReach
-// instead of racing the EL's snapshot-open. Nil by default.
-func (cfg *SnapshotsCfg) SetBlockHeadersOpenedHook(hook func(tipBlock uint64)) {
-	cfg.blockHeadersOpened = hook
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -331,14 +307,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
 		return err
 	}
-	// FrozenBlocks() is now meaningful — fire the hook so consumers waiting
-	// on the frozen-headers tip (Caplin's DownloadHistoricalBlocks) can read
-	// it instead of racing this OpenSegments and seeing zero. Production
-	// wiring publishes flow.BlockHeadersReady on the event bus.
-	if cfg.blockHeadersOpened != nil {
-		cfg.blockHeadersOpened(cfg.blockReader.FrozenBlocks())
-	}
-
 	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
 	if !storageDriven {
 		if err := snapshotsync.SyncSnapshots(

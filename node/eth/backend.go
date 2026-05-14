@@ -93,7 +93,6 @@ import (
 	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
-	"github.com/erigontech/erigon/node/components/storage/flow"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/views"
 	"github.com/erigontech/erigon/node/direct"
@@ -1125,15 +1124,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	config.Snapshot.InitialStateReady = backend.components.Storage.InitialStateReady
-	if bus := backend.components.Storage.Bus(); bus != nil {
-		// Bridge the stage-side hook to the storage event bus so Caplin's
-		// DownloadHistoricalBlocks (subscribed via flow.BlockHeadersReadyChannel)
-		// can read a real frozen-headers tip instead of racing OpenSegments
-		// and walking back to genesis.
-		config.Snapshot.BlockHeadersOpenedHook = func(tipBlock uint64) {
-			bus.Publish(flow.BlockHeadersReady{TipBlock: tipBlock})
-		}
-	}
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
@@ -1228,7 +1218,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
+			// Pass storage's BlockHeadersReady channel so Caplin waits
+			// for the tip *-headers.seg to be readable before starting
+			// its clstages loop — see provider.watchTipHeaderForOpenSegments.
+			// Nil-safe: when storage isn't running its orchestrator the
+			// channel is nil and Caplin starts immediately (legacy path).
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.components.Storage.BlockHeadersReady); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}

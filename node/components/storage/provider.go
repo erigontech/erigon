@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -48,6 +49,8 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	snaptypelib "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -108,6 +111,24 @@ type Provider struct {
 	eventPool         *workerpool.WorkerPool
 	Orchestrator      *flow.Orchestrator
 	InitialStateReady <-chan struct{}
+
+	// BlockHeadersReady closes the first time the storage component
+	// observes the tip *-headers.seg reach LifecycleIndexed (i.e. the
+	// .seg + .idx are on disk and BlockReader can serve headers from
+	// them). At that point the Provider calls OpenSegments(Headers)
+	// on the EL's blockReader and publishes flow.BlockHeadersReady on
+	// the storage event bus.
+	//
+	// Caplin's RunCaplinService waits on this channel before starting
+	// its clstages loop so the historical-blocks download stage reads
+	// a meaningful FrozenBlocks() tip and doesn't race the EL's
+	// snapshot-open by walking back to Bellatrix epoch.
+	//
+	// Architectural rule: only the storage component is aware of the
+	// downloader / snapshot lifecycle; Caplin (and every other
+	// non-storage consumer) depends on the storage bus event, never
+	// on the downloader directly.
+	BlockHeadersReady <-chan struct{}
 
 	// bootstrapChainName is set in Initialize when
 	// --snap.bootstrap-from-preverified is configured. The actual
@@ -672,6 +693,13 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.eventPool = workerpool.New(runtime.NumCPU())
 		p.eventBus = event.NewEventBus(execPoolAdapter{p.eventPool})
 		p.InitialStateReady = flow.InitialStateReadyChannel(p.eventBus)
+		// BlockHeadersReady channel closes when the storage component
+		// publishes flow.BlockHeadersReady (see
+		// watchTipHeaderForOpenSegments below). Caplin's RunCaplinService
+		// receives this channel and blocks on it before starting its
+		// clstages loop.
+		blockHeadersReadyCh, _ := flow.BlockHeadersReadyChannel(p.eventBus)
+		p.BlockHeadersReady = blockHeadersReadyCh
 		p.Orchestrator = flow.NewWithStorage(
 			p.eventBus,
 			flow.NewInventoryStorage(deps.Inventory, validation.DefaultStage1ChainWithDisk(snapDir), snapDir),
@@ -680,6 +708,18 @@ func (p *Provider) Initialize(deps Deps) error {
 		if err := p.Orchestrator.Start(ctx); err != nil {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)
+		}
+
+		// Watch the inventory for the tip *-headers.seg reaching
+		// LifecycleIndexed. When it does, open EL header segments and
+		// publish flow.BlockHeadersReady so Caplin's stage_history_download
+		// reads a meaningful FrozenBlocks() tip on first call.
+		// Architectural rule: only the storage component is aware of the
+		// downloader / snapshot lifecycle; Caplin (and every other
+		// non-storage consumer) waits on this bus event, not on the
+		// downloader itself.
+		if p.BlockReader != nil {
+			go p.watchTipHeaderForOpenSegments(ctx, deps.Inventory)
 		}
 
 		// Record the chain name + prune.Mode so
@@ -729,6 +769,90 @@ func (p *Provider) Initialize(deps Deps) error {
 // against existing pending/local entries via haveLocally +
 // coverageForRoleLocked. The intended call site fires exactly once,
 // but no harm if backend.go invokes it again on resume.
+// watchTipHeaderForOpenSegments subscribes to the inventory's ChangeSet
+// stream and waits until the highest-range *-headers.seg file is at
+// LifecycleIndexed (its .idx accessor is built and the EL's
+// BlockReader can serve headers from it). When that happens, it calls
+// OpenSegments(Headers) on the EL's BlockReader so FrozenBlocks()
+// returns a meaningful tip, then publishes flow.BlockHeadersReady on
+// the storage event bus.
+//
+// Caplin's RunCaplinService waits on Provider.BlockHeadersReady before
+// starting clstages. Once published, Caplin's
+// stage_history_download reads FrozenBlocks() = tip and the loop's
+// destinationSlotForEL is computed against the real frozen tip instead
+// of falling back to Bellatrix-fork-epoch — eliminating the 273h
+// "Downloading Execution History" wedge.
+//
+// Single-fire: the goroutine exits once it has fired once, since the
+// flow.BlockHeadersReady event uses sync.Once-guarded close
+// (BlockHeadersReadyChannel). Later retire-driven tip advances are
+// handled by the running EL's own snapshot reopens, not by this
+// startup-bootstrap signal.
+func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snapshot.Inventory) {
+	if inv == nil || p.BlockReader == nil || p.eventBus == nil {
+		return
+	}
+	sub, unsubscribe := inv.Subscribe()
+	defer unsubscribe()
+
+	// Trigger once immediately in case the tip is already present on
+	// disk at startup (e.g. on a resume where the EL just needs the
+	// segments re-opened). Otherwise wait for ChangeSets as files land.
+	if p.tryFireBlockHeadersReady(inv) {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-sub:
+			if !ok {
+				return
+			}
+			if p.tryFireBlockHeadersReady(inv) {
+				return
+			}
+		}
+	}
+}
+
+// tryFireBlockHeadersReady inspects the inventory for the highest-range
+// *-headers.seg file. If it's at LifecycleIndexed or beyond, calls
+// OpenSegments(Headers) on the EL's BlockReader and publishes
+// flow.BlockHeadersReady. Returns true once the event has been fired
+// (signalling the watcher goroutine to exit).
+func (p *Provider) tryFireBlockHeadersReady(inv *snapshot.Inventory) bool {
+	var tipHeader *snapshot.FileEntry
+	for _, e := range inv.BlockFiles() {
+		if !strings.HasSuffix(e.Name, "-headers.seg") {
+			continue
+		}
+		if tipHeader == nil || e.ToBlock > tipHeader.ToBlock {
+			tipHeader = e
+		}
+	}
+	if tipHeader == nil || tipHeader.State < snapshot.LifecycleIndexed {
+		return false
+	}
+
+	// OpenSegments is idempotent — re-opening already-open snapshots is
+	// a cheap no-op. We re-call it on every Indexed advance of the
+	// tip header so the EL's snapshot view always reflects what's on
+	// disk, but only PUBLISH the event the first time.
+	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true, false); err != nil {
+		p.logger.Warn("[storage] OpenSegments(Headers) failed — Caplin will continue waiting",
+			"file", tipHeader.Name, "err", err)
+		return false
+	}
+	tip := p.BlockReader.FrozenBlocks()
+	p.logger.Info("[storage] tip header readable: OpenSegments(Headers) done, publishing BlockHeadersReady",
+		"file", tipHeader.Name, "tip_block", tip)
+	p.eventBus.Publish(flow.BlockHeadersReady{TipBlock: tip})
+	return true
+}
+
 func (p *Provider) BootstrapFromPreverified() {
 	if p == nil || p.bootstrapChainName == "" || p.eventBus == nil {
 		return

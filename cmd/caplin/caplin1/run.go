@@ -142,7 +142,35 @@ func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	blockHeadersReady <-chan struct{}) error {
+
+	// Block until the storage component signals that the tip
+	// *-headers.seg file is readable and OpenSegments(Headers) has
+	// been called on the EL's BlockReader. Without this wait,
+	// stage_history_download.go reads engine.FrozenBlocks() at
+	// stage-init time and sees zero — destinationSlotForEL falls
+	// back to Bellatrix-fork-epoch and Caplin walks ~25M blocks via
+	// DevP2P at ~25 blk/sec (273h ETA). With the wait, by the time
+	// Caplin reads FrozenBlocks() the EL's snapshot view is opened
+	// and the call returns the real tip.
+	//
+	// The channel is supplied by the storage component (see
+	// node/components/storage/provider.go:watchTipHeaderForOpenSegments).
+	// Caplin remains downloader-independent — its only dependency
+	// is on storage's bus event.
+	//
+	// Nil channel = no wait (test/standalone invocations,
+	// non-storage-driven configurations).
+	if blockHeadersReady != nil {
+		log.Info("[Caplin] waiting for storage to signal tip-header readable", "channel", "BlockHeadersReady")
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-blockHeadersReady:
+			log.Info("[Caplin] tip-header ready; proceeding with clstages")
+		}
+	}
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
