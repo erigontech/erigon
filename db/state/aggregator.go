@@ -838,6 +838,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
+	a.logger.Warn("[dbg] buildFiles called", "step", step)
 	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
@@ -985,7 +986,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+	a.logger.Warn("[dbg] readyForCollation called",
+		"step", step, "reorgBlockDepth", a.reorgBlockDepth, "hasFrozenBlocks", a.frozenBlocks != nil)
 	if a.reorgBlockDepth == 0 {
+		a.logger.Warn("[dbg] readyForCollation reorgBlockDepth=0, always ok")
 		return 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
@@ -998,6 +1002,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	defer tx.Rollback()
 
 	if a.frozenBlocks != nil {
+		a.logger.Warn("[dbg] readyForCollation1")
 		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 		if err != nil {
 			return 0, 0, 0, false, err
@@ -1022,6 +1027,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		}
 		return 0, lastBlockInDB, lastTxInDB, true, nil
 	}
+	a.logger.Warn("[dbg] readyForCollation2")
 
 	lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
 	if err != nil {
@@ -1035,7 +1041,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		lastBlockInStep = 0
 	}
 	ok = lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
-	a.logger.Warn("[dbg] readyForCollation live",
+	a.logger.Warn("[dbg] readyForCollation2 live",
 		"step", step, "lastBlockInStep", lastBlockInStep,
 		"lastBlockInDB", lastBlockInDB, "lastTxInDB", lastTxInDB,
 		"reorgBlockDepth", a.reorgBlockDepth, "ok", ok)
