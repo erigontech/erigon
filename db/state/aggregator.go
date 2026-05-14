@@ -995,56 +995,38 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 
-	tx, err := a.db.BeginRo(ctx)
+	err = a.db.View(ctx, func(tx kv.Tx) error {
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			lastBlockInStep = 0
+		}
+		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
+		return err
+	})
 	if err != nil {
 		return 0, 0, 0, false, err
 	}
-	defer tx.Rollback()
-
 	if a.frozenBlocks != nil {
-		a.logger.Warn("[dbg] readyForCollation1")
-		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
-		if err != nil {
-			return 0, 0, 0, false, err
+		var capTxNum uint64
+		if err = a.db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			return err
+		}); err != nil {
+			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
 		}
-		capTxNum, err := a.frozenBlocks.TxnumReader().Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-		if err != nil {
-			return 0, 0, 0, false, err
-		}
-		stepEnd := uint64(step+1) * a.StepSize()
-		ok = stepEnd <= capTxNum
-		a.logger.Warn("[dbg] readyForCollation frozen",
-			"step", step, "stepEnd", stepEnd, "capTxNum", capTxNum,
-			"frozenBlocks", a.frozenBlocks.FrozenBlocks(),
-			"lastBlockInDB", lastBlockInDB, "lastTxInDB", lastTxInDB,
-			"ok", ok)
-		if !ok {
+		if uint64(step+1)*a.StepSize() > capTxNum {
 			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
 			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
 				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
 				"lastCollatableStepInDb", lastStepInDb-1)
 			return 0, 0, 0, false, nil
 		}
-		return 0, lastBlockInDB, lastTxInDB, true, nil
 	}
-	a.logger.Warn("[dbg] readyForCollation2")
-
-	lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
-	if err != nil {
-		return 0, 0, 0, false, err
-	}
-	lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
-	if err != nil {
-		return 0, 0, 0, false, err
-	}
-	if !ok {
-		lastBlockInStep = 0
-	}
-	ok = lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
-	a.logger.Warn("[dbg] readyForCollation2 live",
-		"step", step, "lastBlockInStep", lastBlockInStep,
-		"lastBlockInDB", lastBlockInDB, "lastTxInDB", lastTxInDB,
-		"reorgBlockDepth", a.reorgBlockDepth, "ok", ok)
+	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
 	return
 }
 
