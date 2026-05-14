@@ -533,6 +533,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 				return s
 			}
+			// Tables we want a per-commit breakdown for. These are the state
+			// domains (values + history) most likely to dominate growth.
+			trackedTables := []string{
+				kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals,
+				kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals,
+				kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals,
+				kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals,
+				kv.ChangeSets3,
+			}
+			// Snapshot each table's on-disk size via the in-flight commitRwTx
+			// BEFORE commit. The rwtx already reflects this commit's writes
+			// (they're dirty pages in the tx), so its BucketSize sees the new
+			// totals. We compare against AFTER-commit BucketSize from a fresh
+			// RO tx to spot any post-commit consolidation.
+			beforeSizes := map[string]uint64{}
+			for _, t := range trackedTables {
+				if sz, serr := commitRwTx.BucketSize(t); serr == nil {
+					beforeSizes[t] = sz
+				}
+			}
+
 			before := getGCStats()
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
@@ -565,6 +586,21 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				)
 			}
 			e.logger.Info("[commit-cycle] committed", args...)
+			// Per-table growth breakdown — log a second line listing the
+			// tracked tables and how much each grew during this commit.
+			tableArgs := []any{"rwTxId", commitRwTxID}
+			for _, t := range trackedTables {
+				sz, serr := roTx.BucketSize(t)
+				if serr != nil {
+					continue
+				}
+				delta := int64(sz) - int64(beforeSizes[t])
+				tableArgs = append(tableArgs,
+					t+"_size", common.ByteCount(sz),
+					t+"_delta", deltaByteCount(delta),
+				)
+			}
+			e.logger.Info("[commit-cycle] table breakdown", tableArgs...)
 			// The MDBX commit above just made the overlay's canonical-hash
 			// writes visible to all other RO txs. This is the ONLY moment
 			// retire's background goroutine (which opens its own RO tx) can
@@ -953,4 +989,12 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		dbgLevel = log.LvlDebug
 	}
 	e.logger.Log(dbgLevel, msg, logArgs...)
+}
+
+// deltaByteCount formats a signed byte delta with a + or - prefix.
+func deltaByteCount(d int64) string {
+	if d >= 0 {
+		return "+" + common.ByteCount(uint64(d))
+	}
+	return "-" + common.ByteCount(uint64(-d))
 }
