@@ -375,6 +375,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	log.Warn("[dbg] SpawnExecuteBlocksStage")
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
@@ -458,6 +459,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
+	log.Warn("[dbg] PruneExecutionStage")
 	if dbg.NoPrune() {
 		return s.Done(tx)
 	}
