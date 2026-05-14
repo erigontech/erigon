@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -237,6 +238,17 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			sd.ClearRam(true)
 			if err := tx.Commit(); err != nil {
 				return nil, err
+			}
+
+			if a, ok := pe.db.(state.HasAgg); ok {
+				agg := a.Agg().(*state.Aggregator)
+				if err := agg.CollateAndPruneIfNeeded(ctx, pe.db, func(tx kv.TemporalRwTx) error {
+					return pe.sync.RunPrune(ctx, tx, true, 0)
+				}, pe.logger); err != nil {
+					return tx, err
+				}
+			} else {
+				panic("assert")
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {

@@ -847,7 +847,11 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 			} else {
 				e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
 			}
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	// Update head and announce block range (notifications already dispatched).
@@ -918,7 +922,11 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			}, e.logger); err != nil {
 				return nil, err
 			}
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	timings = append(timings, "prune", common.Round(time.Since(pruneStart), 0))

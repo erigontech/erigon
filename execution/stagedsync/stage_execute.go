@@ -485,7 +485,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			if quickPruneTimeout > maxTimeout {
 				quickPruneTimeout = maxTimeout
 			}
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	if timeout > 0 && timeout > quickPruneTimeout {

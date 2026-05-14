@@ -139,6 +139,7 @@ type Aggregator struct {
 
 type FrozenBlocksProvider interface {
 	FrozenBlocks() uint64
+	TxnumReader() rawdbv3.TxNumsReader
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -985,6 +986,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	if a.reorgBlockDepth == 0 {
+		a.logger.Warn("[dbg] readyForCollation reorgBlockDepth=0, always ok")
 		return 0, 0, 0, true, nil
 	}
 	a.commitGate.RLock()
@@ -1647,9 +1649,9 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		if err != nil {
 			return err
 		}
-
 		stepsInDB, err := a.StepsInDB(ctx, db)
 		if err != nil || stepsInDB <= targetSteps {
+			log.Warn("[dbg] exit1", "stepsInDB", stepsInDB, "targetSteps", targetSteps)
 			return nil
 		}
 
@@ -2107,6 +2109,8 @@ func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
 	a.frozenBlocks = p
 }
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+	log.Warn("[dbg] BuildFilesInBackground", "stack", dbg.Stack())
+
 	return a.buildFilesInBackground(txNum, true)
 }
 
@@ -2133,7 +2137,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
-		a.logger.Debug("[snapshots] buildFiles: already building")
+		a.logger.Warn("[snapshots] buildFiles: already building")
 		close(fin)
 		return fin
 	}

@@ -148,7 +148,11 @@ func (p *Provider) Initialize(deps Deps) error {
 	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
 			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
+		} else {
+			panic("assert")
 		}
+	} else {
+		panic("assert")
 	}
 
 	// Wire file-change callbacks so completed snapshots are seeded and

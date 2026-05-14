@@ -94,7 +94,12 @@ func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB
 	}
 	return tdb, nil
 }
-func (db *DB) Agg() any                         { return db.stateFiles }
+func (db *DB) Agg() any {
+	if db.stateFiles == nil {
+		panic("assert")
+	}
+	return db.stateFiles
+}
 func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
 func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
 func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }

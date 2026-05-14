@@ -772,7 +772,8 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 // With txnsPerBlock=1, fakeFrozenBlocks(N) yields capTxNum=N.
 type fakeFrozenBlocks uint64
 
-func (f fakeFrozenBlocks) FrozenBlocks() uint64 { return uint64(f) }
+func (f fakeFrozenBlocks) FrozenBlocks() uint64              { return uint64(f) }
+func (f fakeFrozenBlocks) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
 
 // Regression for #20701: cap must clamp the loop, not just early-return.
 func TestAggregatorV3_BuildFiles_RespectsMaxCollatableTxNumCap(t *testing.T) {
@@ -941,6 +942,78 @@ func TestAggregatorV3_BuildFiles_CapBelowVisibleIsNoop(t *testing.T) {
 	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(4))
 	require.NoError(t, agg.BuildFiles(txnNums))
 	require.Equal(t, uint64(8), agg.EndTxNumMinimax())
+}
+
+// TestAggregatorV3_ReadyForCollation_GappedMaxTxNum is a RED test that confirms
+// the bug: readyForCollation fails when MaxTxNum has a gap (the FillDBFromSnapshots
+// pattern — writes only blocks [frozenBlocks-threshold..frozenBlocks] plus genesis,
+// leaving blocks 1..threshold-1 absent). FindBlockNum's binary search hits the gap
+// and returns a "broken TxNum" error, blocking state file creation even after step 0
+// is fully executed and satisfies the reorg-depth guard.
+//
+// When blocks files > 0 and state files = 0 (re-exec from 0), erigon never creates
+// state snapshot files because of this error.
+func TestAggregatorV3_ReadyForCollation_GappedMaxTxNum(t *testing.T) {
+	t.Parallel()
+	const (
+		stepSize   = uint64(10)
+		reorgDepth = uint64(2)
+		// frozenBlocks is large enough that the binary search will land in the gap.
+		frozenBlocks = uint64(1000)
+		// execBlocks: blocks 0..execBlocks are "executed" (txNums 0..execBlocks).
+		// Step 0 needs txNums [0,10), reorgDepth=2 means we need block 11 executed too.
+		execBlocks = uint64(11)
+		// fillStart: FillDB writes MaxTxNum for blocks fillStart..frozenBlocks.
+		// Blocks execBlocks+1..fillStart-1 are the gap.
+		fillStart = uint64(851)
+	)
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(db.Close)
+
+	agg := state.NewTest(dirs).ReorgBlockDepth(reorgDepth).StepSize(stepSize).Logger(logger).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
+	require.NoError(t, agg.OpenFolder())
+
+	// FrozenBlocks = 1000 — many block snapshots exist.
+	agg.SetFrozenBlocksProvider(fakeFrozenBlocks(frozenBlocks))
+
+	// Populate MaxTxNum to simulate FillDBFromSnapshots + partial re-exec:
+	//   blocks 0..execBlocks  — execution range (step 0 complete + reorgDepth satisfied)
+	//   blocks execBlocks+1..fillStart-1 — GAP (FillDB skipped these old blocks)
+	//   blocks fillStart..frozenBlocks  — FillDB range
+	// We use tx.Put to write out of order (TxNums.Append would reject the gap).
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var k, v [8]byte
+		put := func(blockNum, txNum uint64) {
+			binary.BigEndian.PutUint64(k[:], blockNum)
+			binary.BigEndian.PutUint64(v[:], txNum)
+			require.NoError(t, tx.Put(kv.MaxTxNum, k[:], v[:]))
+		}
+		for i := uint64(0); i <= execBlocks; i++ {
+			put(i, i)
+		}
+		for i := fillStart; i <= frozenBlocks; i++ {
+			put(i, i)
+		}
+		return nil
+	}))
+
+	// Write a history entry at txNum=10 (step 1) so lastInDB=1 and the
+	// buildFilesInBackground loop attempts step 0.
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], 10)
+		return tx.Put(kv.TblAccountHistoryKeys, key[:], []byte("k"))
+	}))
+
+	require.NoError(t, agg.BuildFiles(execBlocks))
+
+	require.Equal(t, uint64(10), agg.EndTxNumMinimax(),
+		"step 0 should be collated: execution has covered txNums [0,10) with reorgDepth satisfied, "+
+			"but FindBlockNum binary search hits a MaxTxNum gap and silently blocks collation")
 }
 
 func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {

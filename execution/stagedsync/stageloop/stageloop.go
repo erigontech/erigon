@@ -200,6 +200,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	initialCycle, firstCycle := true, false
 	for more := true; more; {
 		overlay := doms.BlockOverlay()
+		log.Warn("[dbg] i'm here0")
+
 		more, err = sync.Run(doms, overlay, initialCycle, firstCycle)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
@@ -207,6 +209,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 		// Close RO tx so no reader holds back MDBX GC during prune.
 		roTx.Rollback()
+		log.Warn("[dbg] i'm here1")
 
 		// Collate+prune OLD data (its own RwTx).
 		if a, ok := db.(state.HasAgg); ok {
@@ -218,11 +221,14 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 				}
 				capRoTx.Rollback()
 			}
+			log.Warn("[dbg] i'm here2")
 			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
 				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
 			}, logger); err != nil {
 				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
 			}
+		} else {
+			panic("assert")
 		}
 
 		// Lock commitGate so background collation RO txs are closed
@@ -240,9 +246,13 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 					a.Agg().(*state.Aggregator).UnlockCollation()
 				}
 			}()
+		} else {
+			panic("assert")
 		}
 
 		// Flush execution state + overlay via brief RwTx, then commit.
+		log.Warn("[dbg] i'm here3")
+
 		commitTx, err := db.BeginTemporalRw(ctx)
 		if err != nil {
 			return fmt.Errorf("ProcessFrozenBlocks: begin rw: %w", err)
@@ -265,6 +275,8 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		if a, ok := db.(state.HasAgg); ok {
 			a.Agg().(*state.Aggregator).UnlockCollation()
 			collationLocked = false
+		} else {
+			panic("assert")
 		}
 
 		// Read the actual committed txNum from the DB "state" key.
@@ -357,6 +369,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	hasMore := true
 	for hasMore {
 		// Execution + flush in one transaction.
+		log.Warn("[dbg] StageLoopIteration1")
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
@@ -374,6 +387,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 			return err
 		}
 		// Collate (if steps accumulated) + prune in separate transaction.
+		log.Warn("[dbg] StageLoopIteration2")
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
 			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
@@ -381,6 +395,8 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 			}, logger); err != nil {
 				return err
 			}
+		} else {
+			panic("assert")
 		}
 	}
 	return nil
