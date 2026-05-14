@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
-	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -396,7 +395,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
+		filesGetter: func() *DirtyFiles { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
@@ -418,7 +417,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	ue := FromII(dd.InvertedIndex.InvIdxCfg.Name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *DirtyFiles {
 			return h.dirtyFiles
 		},
 		accessors: h.Accessors,
@@ -716,7 +715,7 @@ func (a *Aggregator) Files() []string {
 }
 func (a *Aggregator) LS() {
 	var stats seg.Stats
-	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
+	doLS := func(dirtyFiles *DirtyFiles) {
 		iter := dirtyFiles.Iter()
 		defer iter.Release()
 		for ok := iter.First(); ok; ok = iter.Next() {
@@ -1896,8 +1895,8 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	return r
 }
 
-func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticFiles, r *Ranges) (mf *MergedFilesV3, err error) {
-	mf = &MergedFilesV3{}
+func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, r *Ranges) (mf *MergeResult, err error) {
+	mf = &MergeResult{}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(at.a.workers.getMerge())
 	closeFiles := true
@@ -1985,7 +1984,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	return mf, err
 }
 
-func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
+func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
@@ -2006,7 +2005,7 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 	}
 }
 
-func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
+func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	var deleted []string
 
 	at := a.BeginFilesRo()
@@ -2536,20 +2535,12 @@ func (at *AggregatorRoTx) MadvNormal() *AggregatorRoTx {
 		return at
 	}
 	for _, d := range at.d {
-		for _, f := range d.files {
-			f.src.MadvNormal()
-		}
-		for _, f := range d.ht.files {
-			f.src.MadvNormal()
-		}
-		for _, f := range d.ht.iit.files {
-			f.src.MadvNormal()
-		}
+		d.files.MadvNormal()
+		d.ht.files.MadvNormal()
+		d.ht.iit.files.MadvNormal()
 	}
 	for _, ii := range at.standaloneIIs() {
-		for _, f := range ii.files {
-			f.src.MadvNormal()
-		}
+		ii.files.MadvNormal()
 	}
 	return at
 }
@@ -2558,40 +2549,24 @@ func (at *AggregatorRoTx) DisableReadAhead() {
 		return
 	}
 	for _, d := range at.d {
-		for _, f := range d.files {
-			f.src.DisableReadAhead()
-		}
-		for _, f := range d.ht.files {
-			f.src.DisableReadAhead()
-		}
-		for _, f := range d.ht.iit.files {
-			f.src.DisableReadAhead()
-		}
+		d.files.DisableReadAhead()
+		d.ht.files.DisableReadAhead()
+		d.ht.iit.files.DisableReadAhead()
 	}
 	for _, ii := range at.standaloneIIs() {
-		for _, f := range ii.files {
-			f.src.DisableReadAhead()
-		}
+		ii.files.DisableReadAhead()
 	}
 }
 func (a *Aggregator) MadvNormal() *Aggregator {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
-		for _, f := range d.dirtyFiles.Items() {
-			f.MadvNormal()
-		}
-		for _, f := range d.History.dirtyFiles.Items() {
-			f.MadvNormal()
-		}
-		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
-			f.MadvNormal()
-		}
+		d.dirtyFiles.MadvNormal()
+		d.History.dirtyFiles.MadvNormal()
+		d.History.InvertedIndex.dirtyFiles.MadvNormal()
 	}
 	for _, ii := range a.standaloneIIs() {
-		for _, f := range ii.dirtyFiles.Items() {
-			f.MadvNormal()
-		}
+		ii.dirtyFiles.MadvNormal()
 	}
 	return a
 }
@@ -2599,20 +2574,12 @@ func (a *Aggregator) DisableReadAhead() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
-		for _, f := range d.dirtyFiles.Items() {
-			f.DisableReadAhead()
-		}
-		for _, f := range d.History.dirtyFiles.Items() {
-			f.DisableReadAhead()
-		}
-		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
-			f.DisableReadAhead()
-		}
+		d.dirtyFiles.DisableReadAhead()
+		d.History.dirtyFiles.DisableReadAhead()
+		d.History.InvertedIndex.dirtyFiles.DisableReadAhead()
 	}
 	for _, ii := range a.standaloneIIs() {
-		for _, f := range ii.dirtyFiles.Items() {
-			f.DisableReadAhead()
-		}
+		ii.dirtyFiles.DisableReadAhead()
 	}
 }
 
