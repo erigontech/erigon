@@ -104,12 +104,8 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 }
 
 // Blocks is the resolver for the blocks field.
-func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
-	if from == nil {
-		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
-	}
-
-	fromBlockNumber := *from
+func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]*model.Block, error) {
+	fromBlockNumber := from
 
 	var toBlockNumber uint64
 	if to != nil {
@@ -127,7 +123,7 @@ func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([
 	}
 
 	const maxBlocks = 25
-	if toBlockNumber-fromBlockNumber+1 >= maxBlocks {
+	if toBlockNumber-fromBlockNumber+1 > maxBlocks {
 		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
 	}
 
@@ -138,9 +134,10 @@ func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([
 		if err != nil {
 			return nil, err
 		}
-		if block != nil {
-			blocks = append(blocks, block)
+		if block == nil {
+			return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
 		}
+		blocks = append(blocks, block)
 	}
 
 	return blocks, ctx.Err()
