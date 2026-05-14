@@ -564,18 +564,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			// Aggregated steps still live in chaindata domain tables because
 			// the in-loop PruneExecutionStage runs on the overlay (RO-backed
-			// MemoryMutation) and silently no-ops. Drain here on a real RW
-			// tx so chaindata doesn't accumulate prunable rows across the
-			// (potentially hours-long) hasMore catch-up.
+			// MemoryMutation) and silently no-ops. Reuse runForkchoicePrune
+			// here — it opens a real RW tx, applies the header/stepSize
+			// floors, uses the slot-derived timeout, and runs the full
+			// pipeline prune (pe.RunPrune) so every stage's prune fires
+			// correctly with initialCycle.
 			pruneStart := time.Now()
-			var pruneHaveMore bool
-			pruneErr := e.db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-				var perr error
-				pruneHaveMore, perr = tx.PruneSmallBatches(ctx, 2*time.Second)
-				return perr
-			})
+			pruneTimings, pruneErr := e.runForkchoicePrune(initialCycle)
 			pruneDur := time.Since(pruneStart)
-			if pruneErr != nil {
+			if pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			// Re-open RO tx + block overlay on the fresh committed state.
@@ -590,8 +587,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				"sd_inmem_before_flush", common.ByteCount(sdSizeBeforeFlush),
 				"spaceDirty_residual", common.ByteCount(spaceDirty),
 				"prune_dur", common.Round(pruneDur, 0),
-				"prune_have_more", pruneHaveMore,
 			}
+			args = append(args, pruneTimings...)
 			if before != nil && after != nil {
 				// Delta in MDBX page-op counters tells us the REAL per-commit
 				// page work, not the residual dirty queue. pageSize multiplied
