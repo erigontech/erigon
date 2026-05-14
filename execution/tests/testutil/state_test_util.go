@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -254,7 +253,7 @@ func (t *StateTest) Run(tb testing.TB, tx kv.TemporalRwTx, subtest StateSubtest,
 
 	checkedErr := t.checkError(subtest, err)
 	if checkedErr != nil {
-		return st, empty.RootHash, checkedErr
+		return st, root, checkedErr
 	}
 	if err != nil {
 		// Error was expected — check post-state root if specified

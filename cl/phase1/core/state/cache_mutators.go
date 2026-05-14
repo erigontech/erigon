@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 )
 
@@ -160,4 +161,32 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
 	return earliestExitEpoch
+}
+
+// InitiateBuilderExit initiates the exit of a builder by setting its withdrawable epoch.
+// If the builder has already initiated exit (withdrawable_epoch != FAR_FUTURE_EPOCH), this is a no-op.
+func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
+	builders := b.GetBuilders()
+	if builders == nil {
+		log.Debug("builders is nil")
+		return
+	}
+	if int(builderIndex) >= builders.Len() {
+		log.Debug("builder index out of range", "builderIndex", builderIndex, "len", builders.Len())
+		return
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Debug("builder is nil", "builderIndex", builderIndex)
+		return
+	}
+	if builder.WithdrawableEpoch != b.BeaconConfig().FarFutureEpoch {
+		return
+	}
+	// Copy-on-write: create a new Builder to avoid mutating a shared pointer
+	// (ShallowCopy shares *Builder pointers across state copies).
+	newBuilder := *builder
+	newBuilder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
+	builders.Set(int(builderIndex), &newBuilder)
+	b.SetBuilders(builders)
 }

@@ -16,8 +16,8 @@
     "size": 422845437
   },
   "cl_mainnet": {
-    "url": "https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.6/mainnet.tar.gz",
-    "sha256": "dc7ee6bb9c84f851b3d96aff9dcf0d77d684bbddd8a04a6c62d9f4cc14a87831",
-    "size": 677742673
+    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.7/mainnet.tar.gz",
+    "sha256": "a96c52b503e1da5305df1c8c09974a2b95a09545cffeea63b440be803059f5d6",
+    "size": 844604385
   }
 }
