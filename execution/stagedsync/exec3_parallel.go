@@ -2072,7 +2072,38 @@ func (result *execResult) finalizeTxSimple(
 			if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
 				return nil, nil, nil, err
 			}
+			// Mirror serial-exec's txn_executor.go post-message fee distribution
+			// (AddBalance(coinbase, tip) / AddBalance(burnt, burn)) AFTER applying
+			// TxOut. The parallel worker ran with shouldDelayFeeCalc=true, so the
+			// fees aren't in TxOut; the finalize accumulates them onto the
+			// version-map base separately. But the post-apply IBS handed to
+			// postApplyMessageFunc only sees TxOut — without crediting the fees
+			// here it underrepresents the coinbase's balance to LogSelfDestructedAccounts.
+			//
+			// The EIP-7708 case 2 path is the load-bearing one: when the coinbase
+			// is itself a contract that SELFDESTRUCTs during the tx, ApplyVersionedWrites
+			// has marked it selfdestructed with balance=0; AddBalance leaves the
+			// selfdestruct flag intact (Selfdestruct only fires on the addr→clear
+			// transition, not on subsequent balance writes) and restores the priority
+			// fee as residual balance. LogSelfDestructedAccounts' GetRemovedAccountsWithBalance
+			// then reports {coinbase, FeeTipped} and emits the Burn log — matching
+			// serial-exec exactly. https://github.com/erigontech/erigon/issues/21136
+			if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, nil, nil, err
+			}
+			if hasBurnt && txTask.Config.IsLondon(blockNum) {
+				if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
+
+			// Capture PostApplyMessage side effects (logs) — e.g. EIP-7708 Burn
+			// logs from LogSelfDestructedAccounts. Without this they're stranded
+			// on the post-apply ibs and never make it into the receipt, so the
+			// validating consumer recomputes a different receipts root and the
+			// block is rejected as a BadBlock.
+			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 		}
 	}
 

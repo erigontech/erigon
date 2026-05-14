@@ -34,7 +34,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -1305,13 +1304,6 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 }
 
 func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
-	if dbg.Exec3Parallel {
-		// Parallel-exec finalize uses a minIBS carrying only coinbase/burnt via
-		// SetBalance, so it doesn't know the coinbase was self-destructed → no
-		// EIP-7708 Burn log. Needs ExecutionResult.SelfDestructedAddresses.
-		// https://github.com/erigontech/erigon/issues/21136
-		t.Skip("known parallel-exec failure — issue #21136")
-	}
 	// Regression test for https://github.com/erigontech/erigon/issues/19951
 	//
 	// When the coinbase is a contract that self-destructs during execution,
