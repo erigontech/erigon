@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -494,10 +495,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			sd.ClearRam(true)
 			// Snapshot RW tx state just before commit: txid + dirty bytes (the
-			// in-mem write set about to land on disk).
+			// in-mem write set about to land on disk). temporal.RwTx embeds
+			// kv.RwTx as an interface, so methods on the underlying *MdbxTx
+			// (like SpaceDirty) aren't promoted through the interface — we
+			// have to reach into the embedded RwTx field.
 			commitRwTxID := commitRwTx.ViewID()
 			var spaceDirty uint64
-			if hd, ok := commitRwTx.(kv.HasSpaceDirty); ok {
+			if temporalRwTx, ok := commitRwTx.(*temporal.RwTx); ok {
+				if hd, ok := temporalRwTx.RwTx.(kv.HasSpaceDirty); ok {
+					if d, _, sderr := hd.SpaceDirty(); sderr == nil {
+						spaceDirty = d
+					}
+				}
+			} else if hd, ok := commitRwTx.(kv.HasSpaceDirty); ok {
 				if d, _, sderr := hd.SpaceDirty(); sderr == nil {
 					spaceDirty = d
 				}
