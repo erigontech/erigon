@@ -387,6 +387,8 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 			}, logger); err != nil {
 				return err
 			}
+		} else {
+			panic("assert")
 		}
 	}
 	return nil
