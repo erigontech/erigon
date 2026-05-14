@@ -310,17 +310,18 @@ func runEngineXGroup(
 		// hash the EL has already processed — iterations 2..N would
 		// short-circuit through the already-known-block fast path instead of
 		// re-executing.
+		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
 		var err error
 		if timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
-				return nil, 0, runner.RunNamed(ctx, t.name, t.def)
+				return nil, 0, runner.Run(testCtx, t.def)
 			})
 			if err == nil {
 				r.Stats = &stats
 			}
 		} else {
-			err = runner.RunNamed(ctx, t.name, t.def)
+			err = runner.Run(testCtx, t.def)
 		}
 		if err != nil {
 			r.Pass = false

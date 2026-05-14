@@ -188,19 +188,34 @@ func (extr *EngineXTestRunner) evict(entry testerEntry) error {
 	return errors.Join(errs...)
 }
 
-func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
-	return extr.RunNamed(ctx, "", test)
+// testNameKey is the unexported context key callers use to attach a test name
+// to the ctx passed into Run. The profile hook embeds the name in per-request
+// profile ids so callers can route profiles into named files.
+type testNameKey struct{}
+
+// ContextWithTestName returns a copy of ctx that carries the given test name,
+// retrievable inside Run by the runner's per-request profile hook plumbing.
+// An empty name is treated as "no name" and produces unprefixed profile ids.
+func ContextWithTestName(ctx context.Context, name string) context.Context {
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, testNameKey{}, name)
 }
 
-// RunNamed is Run with a caller-supplied test name. When a request profile
-// hook is installed, the name is embedded into the per-request profile id so
-// callers can route profiles into named files.
-func (extr *EngineXTestRunner) RunNamed(ctx context.Context, name string, test EngineXTestDefinition) error {
+func testNameFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(testNameKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
 	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
 	if err != nil {
 		return err
 	}
-	return extr.execute(ctx, name, tester, test)
+	return extr.execute(ctx, tester, test)
 }
 
 // EnsureTester pre-creates the tester for the given test's fork+preAllocHash.
@@ -210,7 +225,8 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 	return err
 }
 
-func (extr *EngineXTestRunner) execute(ctx context.Context, name string, tester EngineApiTester, test EngineXTestDefinition) error {
+func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
+	name := testNameFromContext(ctx)
 	for _, newPayload := range test.NewPayloads {
 		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
 		if err != nil {
