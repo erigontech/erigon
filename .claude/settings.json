@@ -16,7 +16,10 @@
       "Bash(git lfs ls-files:*)",
       "Bash(grep:*)",
       "Bash(git add:*)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(CGO_CFLAGS=-D__BLST_PORTABLE__ go test:*)",
+      "Bash(find:*)",
+      "Bash(gh pr:*)"
     ]
   }
 }
