@@ -87,6 +87,13 @@ type CodeCache struct {
 	hashToCode *maphash.Map[[]byte] // maphash(code) → code, concurrent
 	codeSize   atomic.Int64         // current size in bytes (code only, hash is fixed 8 bytes)
 
+	// addrToEthHash maps a 20-byte address to its 32-byte Ethereum codeHash
+	// (keccak), separately from addrToHash (which uses the cheap maphash
+	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
+	// skip a cold account-domain read when the EVM-known codeHash is
+	// already in cache. Nethermind-style addr → codeHash LRU.
+	addrToEthHash *lru.Cache[[20]byte, [32]byte]
+
 	// L2b: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
 	// alongside L2 when the caller provides ethHash on Put. Independent
 	// of L1 — Get-by-ethHash bypasses addr lookup entirely. Memory cost:
@@ -131,8 +138,13 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	if err != nil {
 		panic(err)
 	}
+	addrEthHashLRU, err := lru.New[[20]byte, [32]byte](addrEntries)
+	if err != nil {
+		panic(err)
+	}
 	return &CodeCache{
 		addrToHash:         addrLRU,
+		addrToEthHash:      addrEthHashLRU,
 		hashToCode:         maphash.NewMap[[]byte](),
 		ethHashToCode:      maphash.NewMap[[]byte](),
 		codeSizeByEthHash:  maphash.NewMap[int](),
@@ -203,6 +215,30 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 	}
 	c.hashToCode.Set(hashKey, code)
 	c.codeSize.Add(codeEntrySize)
+}
+
+// GetAddrCodeHash returns the Ethereum codeHash for addr if cached.
+// Nethermind-style lookup that lets SharedDomains.codeHashForAddr skip a
+// cold AccountsDomain read when the EVM-known codeHash is already known.
+// Eviction is LRU; freshly seen addrs replace coldest entries.
+func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
+	h, ok := c.addrToEthHash.Get(addrKey(addr))
+	return h, ok
+}
+
+// PutAddrCodeHash records the addr → codeHash mapping. Called from the
+// account-decode populate path inside SD.codeHashForAddr; also called by
+// readAhead's BAL prefetch when it learns the codeHash from the decoded
+// account record.
+func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte) {
+	c.addrToEthHash.Add(addrKey(addr), h)
+}
+
+// DeleteAddrCodeHash drops the addr → codeHash mapping. Called on
+// SELFDESTRUCT / CREATE2-replace / unwind where the account's codeHash
+// has been mutated.
+func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
+	c.addrToEthHash.Remove(addrKey(addr))
 }
 
 // GetByEthHash retrieves contract code by its Ethereum codeHash (keccak256).
