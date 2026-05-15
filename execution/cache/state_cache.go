@@ -127,6 +127,39 @@ func (c *StateCache) PutCodeSizeByHash(ethHash []byte, size int) {
 	cc.PutCodeSizeByEthHash(ethHash, size)
 }
 
+// GetAddrCodeHash returns the Ethereum codeHash for addr without an
+// account-domain round-trip. (0xff..ff/false, no entry on miss; (h, true)
+// on hit.)
+func (c *StateCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return [32]byte{}, false
+	}
+	return cc.GetAddrCodeHash(addr)
+}
+
+// PutAddrCodeHash records the addr → codeHash mapping in the addr-keyed
+// LRU above SD. Callers that have just decoded an account record should
+// call this so subsequent lookups skip the account-domain read.
+func (c *StateCache) PutAddrCodeHash(addr []byte, h [32]byte) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	cc.PutAddrCodeHash(addr, h)
+}
+
+// DeleteAddrCodeHash drops the addr → codeHash mapping. Used by
+// invalidation paths (SELFDESTRUCT / CREATE2-replace / unwind diffsets)
+// where the account's codeHash has been mutated.
+func (c *StateCache) DeleteAddrCodeHash(addr []byte) {
+	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
+	if !ok {
+		return
+	}
+	cc.DeleteAddrCodeHash(addr)
+}
+
 // Put stores data for the given domain and key.
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]
@@ -224,6 +257,10 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, revertF
 		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CodeDomain, k)
 		c.Delete(kv.AccountsDomain, k)
+		// Unwind may revert a codeHash change (SELFDESTRUCT undone, CREATE
+		// reverted) — drop the addr → codeHash mapping so the next read
+		// repopulates from the canonical post-revert account record.
+		c.DeleteAddrCodeHash(k)
 	}
 	for _, entry := range diffset[kv.CodeDomain] {
 		k := []byte(entry.Key[:len(entry.Key)-8])
