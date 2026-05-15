@@ -114,7 +114,7 @@ jobs:
 
         python3 $ERIGON_QA_PATH/test_system/qa-tests/stage-exec/run_and_check_stage_exec.py \
           ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN \
-          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json \
+          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json \
           ${{ matrix.extra_flags }}
 
         test_exit_status=$?
