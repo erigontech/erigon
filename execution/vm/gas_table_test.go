@@ -142,7 +142,7 @@ func TestEIP2200(t *testing.T) {
 			mdGas := mdgas.MdGas{
 				Regular: tt.gaspool,
 			}
-			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
+			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}

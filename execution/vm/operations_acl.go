@@ -104,7 +104,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 					// charges can consume the credit instead of spilling to
 					// gas_left. The unapplied remainder propagates to the
 					// caller on successful return.
-					callContext.creditStateGasRefund(evm, params.StateBytesPerStorageSet*evm.Context.CostPerStateByte)
+					callContext.creditStateGasRefund(params.StateBytesPerStorageSet * evm.Context.CostPerStateByte)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
@@ -378,7 +378,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		callContext.gas -= regularBase // temporary
 
 		if statefulBaseGas.State > 0 {
-			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			ok := callContext.useMdGas(statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
 				callContext.gas += regularBase // restore before error
 				return mdgas.MdGas{}, ErrOutOfGas

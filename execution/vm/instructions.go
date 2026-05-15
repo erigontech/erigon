@@ -1028,7 +1028,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		// check so that it is not consumed on early failures where no state is
 		// created (per execution-specs#2608).
 		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
-		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+		if !scope.useMdGas(stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
 		}
 	}
@@ -1045,7 +1045,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	res, addr, returnGas, childUsed, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1065,12 +1065,22 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
-	if evm.chainRules.IsAmsterdam && suberr != nil {
-		// EIP-8037: child CREATE failure refunds the NEW_ACCOUNT state gas
-		// the parent charged at entry. Child success: any inline state-gas
-		// refund credit already landed in the child's gas.State and was
-		// returned via restoreChildGas, so no extra absorb step is needed.
-		scope.creditStateGasRefund(evm, uint64(params.StateBytesNewAccount)*evm.Context.CostPerStateByte)
+	if evm.chainRules.IsAmsterdam {
+		if suberr != nil {
+			// EIP-8037: child CREATE failure refunds the NEW_ACCOUNT state gas
+			// the parent charged at entry. The reservoir was already restored
+			// to the parent via restoreChildGas (handleFrameRevert at depth>0
+			// added childUsed.State back to gas.State).
+			scope.creditStateGasRefund(uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte)
+		} else {
+			// EIP-8037: child success — fold child's state-gas usage into our
+			// frame and absorb any unapplied refund credit (SSTORE 0→x→0 inside
+			// the child) into this frame's reservoir/pending.
+			scope.frameStateUsed += childUsed.State
+			if childUsed.PendingStateGasCredit > 0 {
+				scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
+			}
+		}
 	}
 
 	if suberr == ErrExecutionReverted {
@@ -1120,7 +1130,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	ret, returnGas, childUsed, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -1134,6 +1144,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+		if childUsed.PendingStateGasCredit > 0 {
+			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
+		}
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1166,7 +1182,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	ret, returnGas, childUsed, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1179,6 +1195,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+		if childUsed.PendingStateGasCredit > 0 {
+			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
+		}
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1207,7 +1229,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	ret, returnGas, childUsed, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1220,6 +1242,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+		if childUsed.PendingStateGasCredit > 0 {
+			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
+		}
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1248,7 +1276,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	ret, returnGas, childUsed, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1260,6 +1288,12 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+		if childUsed.PendingStateGasCredit > 0 {
+			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
+		}
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }

@@ -429,7 +429,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
 	)
 
-	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
+	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.txnGasUsed,
@@ -600,16 +600,15 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
 	)
 
-	st.evm.ResetGasConsumed()
-
+	var txnGasUsed mdgas.MdGasUsage
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		ret, _, st.gasRemaining, txnGasUsed, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 	} else {
-		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, txnGasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
 	if refunds && !gasBailout {
@@ -625,7 +624,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			// issued from evm.{call,create} via AddStateRefund.
 			refundCounters := st.state.GetRefund()
 			st.gasRemaining.State += refundCounters.State
-			blockState := imdGas.State + st.evm.StateGasConsumed() - refundCounters.State
+			blockState := imdGas.State + txnGasUsed.State - refundCounters.State
 			// EIP-8037 block-regular: total gas charged across both dimensions
 			// is initialGas.Total − gasRemaining.Total; subtract the state
 			// dimension to get the regular contribution.
@@ -651,7 +650,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		blockState := imdGas.State + st.evm.StateGasConsumed()
+		blockState := imdGas.State + txnGasUsed.State
 		blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState

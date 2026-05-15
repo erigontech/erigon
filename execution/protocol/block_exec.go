@@ -279,7 +279,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		// so system calls keep their pre-EIP-8037 execution margin.
 		mdGas.State = params.StateBytesPerStorageSet * blockContext.CostPerStateByte * params.SystemMaxSstoresPerCall
 	}
-	ret, _, err := evm.Call(
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
