@@ -35,5 +35,5 @@ func IdxStepsInDB(tx kv.Tx, table string, stepSize uint64) float64 {
 }
 
 func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
-	return IdxStepsInDB(tx, kv.TblAccountHistoryKeys, stepSize)
+	return IdxStepsInDB(tx, kv.TblAccountHistoryData, stepSize)
 }

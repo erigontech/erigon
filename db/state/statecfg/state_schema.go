@@ -197,15 +197,14 @@ var Schema = SchemaGen{
 		Accessors: AccessorBTree | AccessorExistence,
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblAccountHistoryVals,
+			ValuesTable:   kv.TblAccountHistoryInvIdx,
 			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: false,
-			HistoryIdx:         kv.AccountsHistoryIdx,
+			HistoryIdx: kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
+				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryData, ValuesTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -218,15 +217,14 @@ var Schema = SchemaGen{
 		Accessors: AccessorBTree | AccessorExistence,
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblStorageHistoryVals,
+			ValuesTable:   kv.TblStorageHistoryInvIdx,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: false,
-			HistoryIdx:         kv.StorageHistoryIdx,
+			HistoryIdx: kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
+				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryData, ValuesTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -240,15 +238,14 @@ var Schema = SchemaGen{
 		LargeValues: true,
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblCodeHistoryVals,
+			ValuesTable:   kv.TblCodeHistoryInvIdx,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: true,
-			HistoryIdx:         kv.CodeHistoryIdx,
+			HistoryIdx: kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
+				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryData, ValuesTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -262,19 +259,18 @@ var Schema = SchemaGen{
 		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblCommitmentHistoryVals,
+			ValuesTable:   kv.TblCommitmentHistoryInvIdx,
 			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
-			HistoryLargeValues:            false,
 			HistoryValuesOnCompressedPage: 64,
 
 			SnapshotsDisabled: true,
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
+				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryData, ValuesTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -288,15 +284,14 @@ var Schema = SchemaGen{
 		Accessors: AccessorBTree | AccessorExistence,
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblReceiptHistoryVals,
+			ValuesTable:   kv.TblReceiptHistoryInvIdx,
 			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: false,
-			HistoryIdx:         kv.ReceiptHistoryIdx,
+			HistoryIdx: kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
+				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryData, ValuesTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -310,19 +305,18 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
-			ValuesTable:   kv.TblRCacheHistoryVals,
+			ValuesTable:   kv.TblRCacheHistoryInvIdx,
 			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 			Accessors: AccessorHashMap,
 
-			HistoryLargeValues: true,
-			HistoryIdx:         kv.RCacheHistoryIdx,
+			HistoryIdx: kv.RCacheHistoryIdx,
 
 			SnapshotsDisabled:             true,
 			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
-				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
+				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryData, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},

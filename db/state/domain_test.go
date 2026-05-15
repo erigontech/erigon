@@ -1782,7 +1782,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
@@ -1857,7 +1856,6 @@ func TestDomainRange(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.AccountsDomain.String()
@@ -1975,7 +1973,6 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
@@ -2058,6 +2055,102 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	domainRoTx.Close()
 }
 
+func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	aggStep, ctx := uint64(5), context.Background()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
+	d.FilenameBase = kv.CommitmentDomain.String()
+
+	domainRoTx := d.beginForTests()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(2500)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
+	// Put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
+			p = common.Copy(updates[i].value)
+		}
+	}
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainRoTx.Close()
+
+	stepToPrune := kv.Step(2)
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.beginForTests()
+	can, untilStep := domainRoTx.canPruneDomainTables(tx, aggStep)
+	defer domainRoTx.Close()
+	require.Falsef(t, can, "those step is already pruned")
+	require.Equal(t, stepToPrune, untilStep)
+
+	stepToPrune = 3
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	// refresh file list
+	domainRoTx = d.beginForTests()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 30
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.beginForTests()
+	can, untilStep = domainRoTx.canPruneDomainTables(tx, aggStep*uint64(stepToPrune))
+	require.False(t, can, "latter step is not yet pruned")
+	require.Equal(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 35
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	domainRoTx = d.beginForTests()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+}
+
 func TestDomain_PruneAfterAggregation(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2073,7 +2166,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
@@ -2228,11 +2320,12 @@ func TestDomain_PruneProgress(t *testing.T) {
 	)
 	ctx := t.Context()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-	d.HistoryLargeValues = false
-
 	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
+
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
@@ -2345,7 +2438,6 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 	)
 	ctx := t.Context()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-	d.HistoryLargeValues = false
 
 	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -2865,7 +2957,6 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = true
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
@@ -2947,7 +3038,6 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = true
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
@@ -2985,24 +3075,23 @@ func TestTraceKey_SmallVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	testTraceKey(t, false)
+	testTraceKey(t)
 }
 
 func TestTraceKey_LargeVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	testTraceKey(t, true)
+	testTraceKey(t)
 }
 
-func testTraceKey(t *testing.T, largeVals bool) {
+func testTraceKey(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := t.Context()
 
 	db, d := testDbAndDomain(t, logger)
-	d.HistoryLargeValues = largeVals
 
 	txs := fillDomain(t, d, db, logger)
 	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {

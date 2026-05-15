@@ -55,6 +55,7 @@ var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
+		HistoryTableFormatChange,
 		dbSchemaVersion6,
 		dbSchemaVersion7,
 	},

@@ -1443,10 +1443,10 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 	t.Parallel()
 
 	type domainCase struct {
-		domain          kv.Domain
-		makeKey         func() []byte
-		makeVal         func(i int) []byte
-		historyKeyTable string
+		domain           kv.Domain
+		makeKey          func() []byte
+		makeVal          func(i int) []byte
+		historyDataTable string
 	}
 
 	addr := make([]byte, length.Addr)
@@ -1465,19 +1465,19 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 				}
 				return accounts3.SerialiseV3(&acc)
 			},
-			historyKeyTable: kv.TblAccountHistoryKeys,
+			historyDataTable: kv.TblAccountHistoryData,
 		},
 		{
-			domain:          kv.StorageDomain,
-			makeKey:         func() []byte { return common.Copy(storageKey) },
-			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
-			historyKeyTable: kv.TblStorageHistoryKeys,
+			domain:           kv.StorageDomain,
+			makeKey:          func() []byte { return common.Copy(storageKey) },
+			makeVal:          func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
+			historyDataTable: kv.TblStorageHistoryData,
 		},
 		{
-			domain:          kv.CodeDomain,
-			makeKey:         func() []byte { return common.Copy(addr) },
-			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
-			historyKeyTable: kv.TblCodeHistoryKeys,
+			domain:           kv.CodeDomain,
+			makeKey:          func() []byte { return common.Copy(addr) },
+			makeVal:          func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
+			historyDataTable: kv.TblCodeHistoryData,
 		},
 	}
 
@@ -1582,7 +1582,7 @@ func TestDomainPut_HistoryCorrectness(t *testing.T) {
 				}
 			}
 
-			c, err := rwTx.CursorDupSort(dc.historyKeyTable)
+			c, err := rwTx.Cursor(dc.historyDataTable)
 			require.NoError(t, err)
 			defer c.Close()
 

@@ -1555,8 +1555,8 @@ func (a *Aggregator) EndTxNumMinimax() uint64 { return a.visible.Load().minimaxT
 func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error) {
 	var steps float64
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
-		lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+		fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryData)
+		lst, _ := kv.LastKey(tx, kv.TblAccountHistoryData)
 		if len(fst) > 0 && len(lst) > 0 {
 			fstTxNum := binary.BigEndian.Uint64(fst)
 			lstTxNum := binary.BigEndian.Uint64(lst)
