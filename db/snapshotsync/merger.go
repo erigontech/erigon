@@ -120,7 +120,7 @@ func (m *Merger) mergeSubSegment(
 	if len(toMerge) == 0 {
 		return
 	}
-	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
+	if newDirtySegment, sn, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
 		err = fmt.Errorf("mergeByAppendSegments: %w", err)
 		return
 	}
@@ -284,14 +284,14 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	}
 }
 
-func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {
+func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, snaptype.FileInfo, error) {
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
 	for i, cFile := range toMerge {
 		d, err := seg.NewDecompressor(cFile.FilePath())
 		if err != nil {
-			return nil, err
+			return nil, targetFile, err
 		}
 		defer d.Close()
 		cList[i] = d
@@ -302,7 +302,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	compresCfg.Workers = m.compressWorkers
 	f, err := seg.NewCompressor(ctx, "Snapshots merge", targetFile.Path, m.tmpDir, compresCfg, log.LvlTrace, m.logger)
 	if err != nil {
-		return nil, err
+		return nil, targetFile, err
 	}
 	defer f.Close()
 	if m.noFsync {
@@ -321,25 +321,30 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 			}
 			return nil
 		}); err != nil {
-			return nil, err
+			return nil, targetFile, err
 		}
 	}
 	if f.Count() != expectedTotal {
-		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
+		return nil, targetFile, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
-		return nil, err
+		return nil, targetFile, err
+	}
+	targetFile, err = snaptype.ApplyContentHash(targetFile)
+	if err != nil {
+		return nil, targetFile, err
 	}
 	sn := &DirtySegment{
 		segType: targetFile.Type,
 		version: targetFile.Version,
 		Range:   Range{targetFile.From, targetFile.To},
 		frozen:  m.snCfg.IsFrozen(targetFile),
+		hash:    targetFile.Hash,
 	}
 
 	err = sn.Open(snapDir)
 	if err != nil {
-		return nil, err
+		return nil, targetFile, err
 	}
-	return sn, nil
+	return sn, targetFile, nil
 }
