@@ -38,8 +38,9 @@ type FullMdGas struct {
 // MdGasUsage extends MdGas with EIP-8037 inline state-gas refund credit that
 // hasn't yet been applied to any frame's reservoir. The credit walks up the
 // call stack via this field (propagated by Run/Call/Create return values) until
-// an ancestor with positive frame state usage absorbs it, or the top-level
-// frame routes it to AddStateRefund; revert paths drop it.
+// an ancestor with positive frame state usage absorbs it, or TxnExecutor reads
+// it directly from the top-level Call/Create return on success. Revert paths
+// drop it.
 type MdGasUsage struct {
 	MdGas
 	PendingStateGasCredit uint64

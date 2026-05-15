@@ -611,25 +611,26 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037: state-gas refunds are credited directly to the
-			// reservoir and bypass the 20% cap; only the regular refund
-			// counter is capped. The top-level halt/revert refund (full
-			// state_gas_used, plus intrinsic NEW_ACCOUNT on CREATE tx) is
-			// issued from evm.{call,create} via AddStateRefund.
-			refundCounters := st.state.GetRefund()
-			st.blockStateGasUsed = imdGas.State + gasUsed.State - refundCounters.State
+			// EIP-8037 state-gas refund. Frame-local per the spec; the value
+			// is carried out via Call/Create's gasUsed.PendingStateGasCredit:
+			//   - success: any SSTORE-clear credit that no frame absorbed.
+			//   - error: the top frame's execution state-gas + (for CREATE)
+			//     the intrinsic NEW_ACCOUNT state-gas. Set inside the depth==0
+			//     defers in evm.call / evm.create.
+			// State refunds bypass the EIP-3529 quotient cap (regular only).
+			st.blockStateGasUsed = imdGas.State + gasUsed.State - gasUsed.PendingStateGasCredit
 			st.blockRegularGasUsed = max(imdGas.Regular+gasUsed.Regular, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total() - refundCounters.State
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, refundCounters.Regular)
+			st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total() - gasUsed.PendingStateGasCredit
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
 			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
 			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
