@@ -62,7 +62,7 @@ jobs:
       # Debug-only tracing for the parallel-exec from-0 failure at block
       # 46147. Address 0xA1E4380A… ends up with balance 0 in the parallel
       # view but should have ~1050 ETH; we want every write that touches it.
-      ERIGON_TRACE_ACCOUNTS: 0xA1E4380A3B1f749673E270229993eE55F35663b4
+      ERIGON_TRACE_ACCOUNTS: '0xA1E4380A3B1f749673E270229993eE55F35663b4'
       ERIGON_TRACE_TRANSACTION_IO: 'true'
       ERIGON_TRACE_APPLY: 'true'
 
