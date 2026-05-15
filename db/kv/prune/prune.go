@@ -341,7 +341,8 @@ func tableScanningPrune(
 		// Different storage modes have different dup-iteration orders:
 		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
 		//   - PrefixValStorageMode (txNum||val): FirstDup = oldest, LastDup = newest
-		// Be encoding-agnostic: read both endpoints, derive min/max.
+		// Be encoding-agnostic: read both endpoints, derive min/max, and infer
+		// iteration direction (firstIsOldest) for the selective branch's break.
 		txNumAtFirst := txNumGetter(val, txNumBytes)
 
 		lastDupTxNumB, err := valDelCursor.LastDup()
@@ -351,7 +352,8 @@ func tableScanningPrune(
 		txNumAtLast := txNumGetter(val, lastDupTxNumB)
 
 		minTxNum, maxTxNum := txNumAtFirst, txNumAtLast
-		if minTxNum > maxTxNum {
+		firstIsOldest := txNumAtFirst <= txNumAtLast
+		if !firstIsOldest {
 			minTxNum, maxTxNum = maxTxNum, minTxNum
 		}
 
@@ -360,14 +362,8 @@ func tableScanningPrune(
 			continue
 		}
 
-		stat.MinTxNum = min(stat.MinTxNum, minTxNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
-
-		if asserts && minTxNum < txFrom && maxTxNum >= txTo {
-			// dups straddle on both sides — unusual; let selective branch handle
-		}
-
 		// All dups in prune range [txFrom, txTo): safe bulk delete.
+		// Stats reflect what is actually deleted: the full [minTxNum, maxTxNum] span.
 		if minTxNum >= txFrom && maxTxNum < txTo {
 			if throttling != nil {
 				time.Sleep(*throttling)
@@ -384,12 +380,17 @@ func tableScanningPrune(
 				stat.DupsDeleted += dups
 			}
 			stat.PruneCountValues += dups
+			stat.MinTxNum = min(stat.MinTxNum, minTxNum)
+			stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
 			goto nextKey
 		}
 
 		// Partial overlap: iterate dups and delete those in range.
-		// Encoding-agnostic — use `continue` for all out-of-range cases
-		// (no early `break`, since iteration direction varies by storage mode).
+		// Stats are updated only for actually-deleted dups (per-dup below) so
+		// out-of-range survivors don't inflate Min/MaxTxNum.
+		// Order-aware early-break preserves the optimization from before the fix:
+		//   - firstIsOldest (PrefixVal): once we cross txTo, all remaining are newer.
+		//   - !firstIsOldest (StepValue): once we cross under txFrom, all are older.
 		{
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
@@ -400,8 +401,20 @@ func tableScanningPrune(
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
 				txNumDup := txNumGetter(val, txNumBytes)
-				if txNumDup < txFrom || txNumDup >= txTo {
-					continue
+				if firstIsOldest {
+					if txNumDup < txFrom {
+						continue
+					}
+					if txNumDup >= txTo {
+						break
+					}
+				} else {
+					if txNumDup >= txTo {
+						continue
+					}
+					if txNumDup < txFrom {
+						break
+					}
 				}
 				if throttling != nil {
 					time.Sleep(*throttling)
