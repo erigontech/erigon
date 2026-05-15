@@ -49,8 +49,6 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	snaptypelib "github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -866,6 +864,21 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 		return false
 	}
 
+	// OpenFolder before BuildMissedIndices: snapshots.BuildMissedIndices
+	// checks SegmentsReady() and returns "not all snapshot segments are
+	// available" if OpenFolder has never been called. OpenFolder is
+	// tolerant of missing .idx files (OpenIdxIfNeed silently returns nil
+	// on os.ErrNotExist), so calling it with only .seg files on disk
+	// just sets the ready flag and creates DirtySegments without indexes
+	// — RecalcVisibleSegments will skip them via !IsIndexed() until the
+	// builder produces the .idx files in the next step. Mirrors the
+	// legacy stage_snapshots sequence (OpenFolder → BuildMissedIndices).
+	if err := p.BlockReader.Snapshots().OpenFolder(); err != nil {
+		p.logger.Warn("[storage] OpenFolder failed — will retry on next inventory ChangeSet",
+			"file", tipHeader.Name, "err", err)
+		return false
+	}
+
 	if p.indexBuilder != nil {
 		if err := p.indexBuilder.BuildMissedIndices(ctx, tipHeader); err != nil {
 			p.logger.Warn("[storage] BuildMissedIndices failed — will retry on next inventory ChangeSet",
@@ -874,11 +887,6 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 		}
 	}
 
-	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true, false); err != nil {
-		p.logger.Warn("[storage] OpenSegments(Headers) failed — Caplin will continue waiting",
-			"file", tipHeader.Name, "err", err)
-		return false
-	}
 	tip := p.BlockReader.FrozenBlocks()
 	if tip == 0 {
 		// .idx still not on disk for the tip header (e.g. the builder's
