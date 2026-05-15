@@ -127,6 +127,42 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 		"no deps means no build call")
 }
 
+// Block-file entries (headers/bodies/transactions .seg) also arrive
+// with empty Dependencies on the bootstrap-from-preverified path —
+// preverified.toml carries only .seg files, not their .idx accessors,
+// and entryFromPreverifiedItem does not populate Dependencies for
+// block files. This test pins that block files share the same
+// trivially-advance behaviour as salt/meta/caplin.
+//
+// The trap: lifecycle's BuildOnIndexing short-circuits without
+// calling the builder, so the .idx accessor is never built via this
+// path. RecalcVisibleSegments excludes any DirtySegment where
+// !IsIndexed(), so headers without .idx are invisible — FrozenBlocks()
+// returns 0 and Caplin walks from genesis.
+//
+// Resolution lives in storage.Provider.tryFireBlockHeadersReady:
+// it invokes the IndexBuilder itself before OpenSegments(Headers)
+// (mirroring what stage_snapshots does in the non-storage-driven
+// path). This test documents the lifecycle-side gap that motivates
+// that explicit build call.
+func TestBuildOnIndexing_HandlesNoDependencies_BlockFile(t *testing.T) {
+	inv := snapshot.NewInventory()
+	primary := &snapshot.FileEntry{
+		Name:  "v1.1-025050-025060-headers.seg",
+		Local: true,
+	}
+	inv.AddFile(primary)
+
+	builder := &fakeBuilder{inv: inv}
+	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
+
+	state, _ := inv.LifecycleState(primary.Name)
+	require.Equal(t, snapshot.LifecycleIndexed, state,
+		"block .seg files with empty Dependencies advance trivially — the builder is NOT called via lifecycle")
+	require.Equal(t, 0, builder.calls,
+		"empty deps → no build call; storage Provider must invoke the builder itself for block-file index accessors")
+}
+
 func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
 	inv := snapshot.NewInventory()
 	primary := &snapshot.FileEntry{

@@ -154,6 +154,17 @@ type Provider struct {
 	// the cache map accumulates dead names.
 	pausedCommitmentCache *PausedCommitmentCache
 
+	// indexBuilder is the productionIndexBuilder constructed alongside
+	// LifecycleDriver. The watchTipHeaderForOpenSegments goroutine
+	// invokes it before OpenSegments(Headers) so block-file .idx
+	// accessors are produced — block files arrive in the inventory
+	// with empty Dependencies, so BuildOnIndexing's deps-already-local
+	// short-circuit advances them straight to LifecycleIndexed without
+	// ever invoking the builder. Without this, headers .seg downloads
+	// land but no .idx is built, RecalcVisibleSegments skips them
+	// (IsIndexed()==false), and FrozenBlocks() stays at 0.
+	indexBuilder lifecycle.IndexBuilder
+
 	logger log.Logger
 }
 
@@ -644,6 +655,7 @@ func (p *Provider) Initialize(deps Deps) error {
 			logger:       logger,
 			indexWorkers: deps.IndexWorkers,
 		}
+		p.indexBuilder = builder
 		snapDir := config.Dirs.Snap
 		batchChain := validation.DefaultStepChain(snapDir)
 		// Stage-2 commitment-domain validator: opens commitment.kv on
@@ -799,7 +811,7 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 	// Trigger once immediately in case the tip is already present on
 	// disk at startup (e.g. on a resume where the EL just needs the
 	// segments re-opened). Otherwise wait for ChangeSets as files land.
-	if p.tryFireBlockHeadersReady(inv) {
+	if p.tryFireBlockHeadersReady(ctx, inv) {
 		return
 	}
 
@@ -811,7 +823,7 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 			if !ok {
 				return
 			}
-			if p.tryFireBlockHeadersReady(inv) {
+			if p.tryFireBlockHeadersReady(ctx, inv) {
 				return
 			}
 		}
@@ -820,17 +832,27 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 
 // tryFireBlockHeadersReady inspects the inventory for the highest-range
 // *-headers.seg file. If it's at LifecycleDownloaded or beyond (i.e.
-// the .seg is on disk), calls OpenSegments(Headers) on the EL's
-// BlockReader and publishes flow.BlockHeadersReady. Returns true once
-// the event has been fired (signalling the watcher goroutine to exit).
+// the .seg is on disk), builds any missing block-file .idx accessors,
+// calls OpenSegments(Headers) on the EL's BlockReader, and publishes
+// flow.BlockHeadersReady. Returns true once the event has been fired
+// (signalling the watcher goroutine to exit).
 //
-// LifecycleDownloaded (not Indexed) is the gate: header .seg files do
-// not have an OnIndexing handler in the storage-driven lifecycle
-// (OnIndexing builds state-domain accessors, not block-file ones).
-// Headers stop at Downloaded permanently. OpenSegments(Headers) builds
-// the .idx accessor inline if missing, so Downloaded + readable-on-
-// disk is sufficient to make FrozenBlocks() return the right tip.
-func (p *Provider) tryFireBlockHeadersReady(inv *snapshot.Inventory) bool {
+// Why the explicit BuildMissedIndices: header .seg files arrive in the
+// bootstrap-from-preverified inventory with empty Dependencies. The
+// lifecycle's BuildOnIndexing handler's deps-already-local short-circuit
+// then advances them straight to LifecycleIndexed *without* invoking
+// the index builder. RecalcVisibleSegments excludes any DirtySegment
+// where !IsIndexed(), so a header.seg without its .idx is not in the
+// visible set — FrozenBlocks() returns 0 and Caplin walks from genesis.
+// OpenSegments does NOT build .idx files (it only opens existing ones
+// via OpenIdxIfNeed), so we must invoke the builder ourselves. This
+// mirrors what stage_snapshots.go does in the non-storage-driven path
+// (`cfg.blockRetire.BuildMissedIndicesIfNeed` before OpenFolder).
+//
+// The builder is invoked unconditionally — BuildMissedIndicesIfNeed
+// scans the snap dir and is a no-op when nothing needs building, so
+// repeated calls from the ChangeSet loop are safe.
+func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.Inventory) bool {
 	var tipHeader *snapshot.FileEntry
 	for _, e := range inv.BlockFiles() {
 		if !strings.HasSuffix(e.Name, "-headers.seg") {
@@ -844,16 +866,26 @@ func (p *Provider) tryFireBlockHeadersReady(inv *snapshot.Inventory) bool {
 		return false
 	}
 
-	// OpenSegments is idempotent — re-opening already-open snapshots is
-	// a cheap no-op. We re-call it on every Indexed advance of the
-	// tip header so the EL's snapshot view always reflects what's on
-	// disk, but only PUBLISH the event the first time.
+	if p.indexBuilder != nil {
+		if err := p.indexBuilder.BuildMissedIndices(ctx, tipHeader); err != nil {
+			p.logger.Warn("[storage] BuildMissedIndices failed — will retry on next inventory ChangeSet",
+				"file", tipHeader.Name, "err", err)
+			return false
+		}
+	}
+
 	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true, false); err != nil {
 		p.logger.Warn("[storage] OpenSegments(Headers) failed — Caplin will continue waiting",
 			"file", tipHeader.Name, "err", err)
 		return false
 	}
 	tip := p.BlockReader.FrozenBlocks()
+	if tip == 0 {
+		// .idx still not on disk for the tip header (e.g. the builder's
+		// scan was scheduled but a co-required .seg file from the same
+		// build batch hasn't landed yet). Wait for the next ChangeSet.
+		return false
+	}
 	p.logger.Info("[storage] tip header readable: OpenSegments(Headers) done, publishing BlockHeadersReady",
 		"file", tipHeader.Name, "tip_block", tip)
 	p.eventBus.Publish(flow.BlockHeadersReady{TipBlock: tip})
