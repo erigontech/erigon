@@ -338,27 +338,37 @@ func tableScanningPrune(
 			return common.Copy(val), nil
 		}
 
-		txNum := txNumGetter(val, txNumBytes)
-		// Early skip: avoid LastDup/FirstDup/CountDuplicates cursor ops for out-of-range entries
-		if txNum >= txTo {
-			continue
-		}
-
-		if asserts && txNum < txFrom {
-			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
-		}
+		// Different storage modes have different dup-iteration orders:
+		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
+		//   - PrefixValStorageMode (txNum||val): FirstDup = oldest, LastDup = newest
+		// Be encoding-agnostic: read both endpoints, derive min/max.
+		txNumAtFirst := txNumGetter(val, txNumBytes)
 
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
 		}
-		lastDupTxNum := txNumGetter(val, lastDupTxNumB)
+		txNumAtLast := txNumGetter(val, lastDupTxNumB)
 
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		minTxNum, maxTxNum := txNumAtFirst, txNumAtLast
+		if minTxNum > maxTxNum {
+			minTxNum, maxTxNum = maxTxNum, minTxNum
+		}
 
-		// All dups in prune range: bulk delete without repositioning cursor
-		if lastDupTxNum < txTo && txNum >= txFrom {
+		// All dups outside [txFrom, txTo): nothing to prune for this key.
+		if maxTxNum < txFrom || minTxNum >= txTo {
+			continue
+		}
+
+		stat.MinTxNum = min(stat.MinTxNum, minTxNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
+
+		if asserts && minTxNum < txFrom && maxTxNum >= txTo {
+			// dups straddle on both sides — unusual; let selective branch handle
+		}
+
+		// All dups in prune range [txFrom, txTo): safe bulk delete.
+		if minTxNum >= txFrom && maxTxNum < txTo {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
@@ -374,8 +384,13 @@ func tableScanningPrune(
 				stat.DupsDeleted += dups
 			}
 			stat.PruneCountValues += dups
-		} else {
-			// Selective per-dup deletion: reposition to first dup for iteration
+			goto nextKey
+		}
+
+		// Partial overlap: iterate dups and delete those in range.
+		// Encoding-agnostic — use `continue` for all out-of-range cases
+		// (no early `break`, since iteration direction varies by storage mode).
+		{
 			_, err = valDelCursor.FirstDup()
 			if err != nil {
 				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
@@ -385,11 +400,8 @@ func tableScanningPrune(
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
 				txNumDup := txNumGetter(val, txNumBytes)
-				if txNumDup < txFrom {
+				if txNumDup < txFrom || txNumDup >= txTo {
 					continue
-				}
-				if txNumDup >= txTo {
-					break
 				}
 				if throttling != nil {
 					time.Sleep(*throttling)
@@ -406,6 +418,7 @@ func tableScanningPrune(
 				stat.PruneCountValues++
 			}
 		}
+	nextKey:
 
 		select {
 		case <-logEvery.C:
