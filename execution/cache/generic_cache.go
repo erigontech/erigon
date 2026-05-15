@@ -35,6 +35,8 @@ type GenericCache[T any] struct {
 	mu          sync.RWMutex
 	hits        atomic.Uint64
 	misses      atomic.Uint64
+	inserts     atomic.Uint64
+	dropped     atomic.Uint64
 	sizeFunc    func(T) int // calculates size of value in bytes
 }
 
@@ -103,13 +105,18 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 		return
 	}
 
-	// New key
+	// New key. The cache currently has no eviction policy, so once full
+	// every subsequent new key is silently dropped until Clear/ClearWithHash/
+	// ValidateAndPrepare-mismatch resets the cache. dropped vs inserts makes
+	// this perf cliff observable.
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
+		c.dropped.Add(1)
 		return
 	}
 
 	c.data.Set(key, value)
 	c.currentSize.Add(entrySize)
+	c.inserts.Add(1)
 }
 
 // Delete removes the data for the given key.
@@ -192,6 +199,8 @@ func (c *GenericCache[T]) CapacityBytes() datasize.ByteSize {
 func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
+	inserts := c.inserts.Swap(0)
+	dropped := c.dropped.Swap(0)
 	total := hits + misses
 	var hitRate float64
 	if total > 0 {
@@ -201,6 +210,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
 	log.Debug(name+" cache stats",
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
+		"inserts", inserts, "dropped", dropped,
 		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
 	)
