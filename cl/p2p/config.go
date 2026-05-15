@@ -11,7 +11,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -68,7 +67,6 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 		libp2p.ListenAddrs(listen),
 		libp2p.UserAgent("erigon/caplin"),
 		libp2p.Transport(tcp.NewTCPTransport),
-		libp2p.Transport(libp2pquic.NewTransport),
 		libp2p.Muxer("/mplex/6.7.0", mplex.DefaultTransport),
 		libp2p.DefaultMuxers,
 		libp2p.Ping(false),

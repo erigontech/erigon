@@ -34,6 +34,8 @@ jobs:
       - name: Compute shared variables
         id: vars
         shell: bash
+        env:
+          INPUT_RUN_GETH: ${{ github.event.inputs.run_geth }}
         run: |
           set -euo pipefail
 
@@ -50,7 +52,7 @@ jobs:
               RUN_GETH="true"
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.run_geth }}" = "true" ]; then
+            if [ "$INPUT_RUN_GETH" = "true" ]; then
               RUN_GETH="true"
             fi
           fi
