@@ -350,8 +350,26 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		// After opening files: check for state/block snapshot misalignment.
-		if err := alignStateToBlockSnapshots(ctx, agg, cfg, s.LogPrefix(), logger); err != nil {
-			return fmt.Errorf("align state to block snapshots: %w", err)
+		//
+		// Bug U: alignStateToBlockSnapshots deletes state files it thinks
+		// are "ahead" of the block tip. With LifecycleDrivenByStorage, the
+		// storage component's bootstrap-from-preverified path synthesises
+		// a small set of state primary files (~14, one set per domain) at
+		// the latest registry step before any execution has run, and these
+		// are exactly what the V2 flow needs to bring up the EL. The
+		// legacy alignment heuristic — invoked AFTER our BlockHeadersReady
+		// has populated FrozenBlocks() with the headers tip — interprets
+		// the freshly-bootstrapped state as misaligned and removes it,
+		// leaving the publisher with no state files and no path forward.
+		//
+		// The storage component owns the snapshot lifecycle in this mode
+		// (inventory + lifecycle.Driver + validation chain); alignment is
+		// a legacy stage_snapshots concern that should not run in the
+		// storage-driven flow.
+		if !cfg.lifecycleDrivenByStorage {
+			if err := alignStateToBlockSnapshots(ctx, agg, cfg, s.LogPrefix(), logger); err != nil {
+				return fmt.Errorf("align state to block snapshots: %w", err)
+			}
 		}
 
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
