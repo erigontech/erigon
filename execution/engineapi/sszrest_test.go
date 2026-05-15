@@ -35,20 +35,20 @@ func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
 
 func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	latest := common.HexToHash("0x1234")
-	wire, err := payloadStatusToSSZ(&engine_types.PayloadStatus{
+	wire := &engine_types.PayloadStatus{
 		Status:          engine_types.AcceptedStatus,
 		LatestValidHash: &latest,
 		ValidationError: engine_types.NewStringifiedErrorFromString("no"),
-	})
-	require.NoError(t, err)
+	}
 	enc, err := wire.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	var out sszPayloadStatus
+	var out engine_types.PayloadStatus
 	require.NoError(t, out.DecodeSSZ(enc, 0))
-	require.Equal(t, uint8(3), out.Status)
-	require.Equal(t, []common.Hash{latest}, out.LatestValidHash.hashes())
-	require.Equal(t, []byte("no"), out.ValidationError.Bytes())
+	require.Equal(t, engine_types.AcceptedStatus, out.Status)
+	require.NotNil(t, out.LatestValidHash)
+	require.Equal(t, latest, *out.LatestValidHash)
+	require.Equal(t, "no", out.ValidationError.Error().Error())
 }
 
 func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
@@ -225,9 +225,9 @@ func TestSSZRESTEndpointVersionMapping(t *testing.T) {
 
 func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	req := newSSZNewPayloadRequest(clparams.GloasVersion)
-	req.Payload.Block.SlotNumber = 123
-	req.Payload.Block.BlockAccessList = solid.NewByteListSSZ(sszMaxBytesPerTransaction)
-	require.NoError(t, req.Payload.Block.BlockAccessList.SetBytes([]byte{0x01, 0x02, 0x03}))
+	slot := hexutil.Uint64(123)
+	req.Payload.SlotNumber = &slot
+	req.Payload.BlockAccessList = hexutil.Bytes{0x01, 0x02, 0x03}
 
 	enc, err := req.EncodeSSZ(nil)
 	require.NoError(t, err)
@@ -237,23 +237,24 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	out := newSSZNewPayloadRequest(wireVersion)
 	require.NoError(t, out.DecodeSSZ(enc, int(wireVersion)))
 
-	payload := sszToExecutionPayload(out.Payload)
+	payload := out.Payload
 	require.NotNil(t, payload.SlotNumber)
 	require.Equal(t, hexutil.Uint64(123), *payload.SlotNumber)
 	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, payload.BlockAccessList)
 }
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
-	attrs := &sszPayloadAttributes{
+	slotNumber := hexutil.Uint64(456)
+	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             1,
 		SuggestedFeeRecipient: common.HexToAddress("0x1234"),
-		Withdrawals:           &sszWithdrawalList{},
-		SlotNumber:            456,
-		version:               clparams.GloasVersion,
+		Withdrawals:           nil,
+		SlotNumber:            &slotNumber,
+		SSZVersion:            clparams.GloasVersion,
 	}
 	req := &sszForkchoiceRequest{
 		version:   clparams.GloasVersion,
-		AttrsList: solid.NewDynamicListSSZ[*sszPayloadAttributes](1),
+		AttrsList: solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1),
 	}
 	req.AttrsList.Append(attrs)
 

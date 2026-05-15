@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -171,7 +172,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	payload := sszToExecutionPayload(req.Payload)
+	payload := req.Payload
 	var status *engine_types.PayloadStatus
 	switch version {
 	case 1:
@@ -180,25 +181,20 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		status, err = e.NewPayloadV2(r.Context(), payload)
 	case 3:
 		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV3(r.Context(), payload, req.ExpectedBlobHashes.hashes(), &root)
+		status, err = e.NewPayloadV3(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root)
 	case 4:
 		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV4(r.Context(), payload, req.ExpectedBlobHashes.hashes(), &root, req.ExecutionRequests.bytes())
+		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, req.ExecutionRequests.bytes())
 	case 5:
 		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV5(r.Context(), payload, req.ExpectedBlobHashes.hashes(), &root, req.ExecutionRequests.bytes())
+		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, req.ExecutionRequests.bytes())
 	}
 	if err != nil {
 		writeEngineError(w, err)
 		return
 	}
-	sszStatus, err := payloadStatusToSSZ(status)
-	if err != nil {
-		writeSSZError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	e.logger.Info("[SSZ-REST] handled new payload", "path", r.URL.Path)
-	writeSSZ(w, sszStatus)
+	writeSSZ(w, status)
 }
 
 func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, version int, payloadID string) {
@@ -218,13 +214,9 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			writeEngineError(w, err)
 			return
 		}
-		p, err := executionPayloadToSSZ(resp, clparams.BellatrixVersion)
-		if err != nil {
-			writeSSZError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		resp.SSZVersion = clparams.BellatrixVersion
 		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
-		writeSSZ(w, p)
+		writeSSZ(w, resp)
 	default:
 		resp, err := callGetPayload(r.Context(), e, version, id)
 		if err != nil {
@@ -290,13 +282,13 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	var resp *engine_types.ForkChoiceUpdatedResponse
 	switch version {
 	case 1:
-		resp, err = e.ForkchoiceUpdatedV1(r.Context(), req.State.engine(), req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV1(r.Context(), &req.State, req.payloadAttributes())
 	case 2:
-		resp, err = e.ForkchoiceUpdatedV2(r.Context(), req.State.engine(), req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV2(r.Context(), &req.State, req.payloadAttributes())
 	case 3:
-		resp, err = e.ForkchoiceUpdatedV3(r.Context(), req.State.engine(), req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &req.State, req.payloadAttributes())
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), req.State.engine(), req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &req.State, req.payloadAttributes())
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -321,18 +313,18 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	hashes := &sszHashList{Limit: sszMaxGetBlobHashes}
+	hashes := solid.NewHashList(sszMaxGetBlobHashes)
 	if err := hashes.DecodeSSZ(body, 0); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(hashes.hashes()) > sszMaxGetBlobHashes {
+	if hashes.Length() > sszMaxGetBlobHashes {
 		writeSSZError(w, http.StatusRequestEntityTooLarge, "too many blob hashes")
 		return
 	}
 	switch version {
 	case 1:
-		resp, err := e.GetBlobsV1(r.Context(), hashes.hashes())
+		resp, err := e.GetBlobsV1(r.Context(), hashListValues(hashes))
 		if err != nil {
 			writeEngineError(w, err)
 			return
@@ -341,7 +333,7 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 		writeSSZ(w, newSSZGetBlobsV1Response(resp))
 		return
 	case 2:
-		resp, err := e.GetBlobsV2(r.Context(), hashes.hashes())
+		resp, err := e.GetBlobsV2(r.Context(), hashListValues(hashes))
 		if err != nil {
 			writeEngineError(w, err)
 			return
@@ -350,7 +342,7 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 		writeSSZ(w, newSSZGetBlobsV2Response(resp))
 		return
 	case 3:
-		resp, err := e.GetBlobsV3(r.Context(), hashes.hashes())
+		resp, err := e.GetBlobsV3(r.Context(), hashListValues(hashes))
 		if err != nil {
 			writeEngineError(w, err)
 			return
@@ -372,7 +364,7 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := e.GetClientVersionV1(r.Context(), ptr(req.ClientVersion.engine()))
+	resp, err := e.GetClientVersionV1(r.Context(), req.ClientVersion)
 	if err != nil {
 		writeEngineError(w, err)
 		return
