@@ -524,7 +524,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	require.NoError(t, err)
 
 	contractTx, err := types.SignTx(
-		types.NewContractCreation(1, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
+		types.NewContractCreation(1, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), changerBytecode),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
 	)
 	require.NoError(t, err)
@@ -678,7 +678,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	changerBytecode, err := hex.DecodeString(contracts.ChangerBin[2:])
 	require.NoError(t, err)
 	tx2, err := types.SignTx(
-		types.NewContractCreation(2, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
+		types.NewContractCreation(2, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), changerBytecode),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
 
@@ -1151,7 +1151,7 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 	rlpTxs := make([][]byte, 10)
 	for i := range rlpTxs {
 		tx, txErr := types.SignTx(
-			types.NewContractCreation(uint64(i), uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), deployCode),
+			types.NewContractCreation(uint64(i), uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), deployCode),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), privKey,
 		)
 		require.NoError(t, txErr)
@@ -1347,7 +1347,7 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 		gen.SetCoinbase(coinbaseAddr)
 
 		tx, txErr := types.SignTx(
-			types.NewContractCreation(nonce, uint256.NewInt(0), 200_000, uint256.NewInt(gasPrice), initCode),
+			types.NewContractCreation(nonce, uint256.NewInt(0), 300_000, uint256.NewInt(gasPrice), initCode),
 			*signer,
 			privKey,
 		)

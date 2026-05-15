@@ -210,7 +210,7 @@ func TestCreateGas(t *testing.T) {
 		startGas := mdgas.MdGas{
 			Regular: math.MaxUint64,
 		}
-		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
+		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
@@ -254,7 +254,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
 
 	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
-	_, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
+	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
 	require.NoError(t, err)
 	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
 	require.False(t, transferCalled, "Transfer should be skipped for zero-value system calls")

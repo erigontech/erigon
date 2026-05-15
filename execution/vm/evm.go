@@ -154,7 +154,6 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 // Cancelled returns true if Cancel has been called
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
-
 // handleFrameRevert handles the full error path for a call or create frame:
 // state revert, regular gas burning on exceptional halt, and EIP-8037
 // state-gas reservoir restoration for child frames.

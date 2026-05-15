@@ -146,13 +146,15 @@ func newAmsterdamEVM(ibs *state.IntraBlockState, blockGasLimit uint64) *vm.EVM {
 	return vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 }
 
-// TestEIP8037_GasPoolTracksOnlyRegularGas verifies that the gas pool per-tx
-// deduction equals blockRegularGasUsed — not max(regular, state).
+// TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
+// EIP-8037 two-dimensional gas pool decrements regular and state budgets
+// independently — neither is conflated with max(regular, state).
 //
-// Regression test for the bug where per-tx max(regular, state) gave
-// Σ max(r_i, s_i) ≥ max(Σ r_i, Σ s_i), overestimating block gas and
-// rejecting valid blocks from other clients (bal-devnet-3, block 193).
-func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
+// Regression test for the bug where per-tx deduction used
+// max(blockRegularGasUsed, blockStateGasUsed) against a single-dimension
+// pool, giving Σ max(r_i, s_i) ≥ max(Σ r_i, Σ s_i) and rejecting valid
+// blocks whose per-dimension sums fit (bal-devnet-3, block 193).
+func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	t.Parallel()
 
 	const blockGasLimit = 60_000_000
@@ -161,13 +163,13 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 
 	ibs := state.New(state.NewNoopReader())
-	gp := new(GasPool).AddGas(blockGasLimit)
+	gp := NewGasPool(blockGasLimit, 0)
 
-	// TX 1: Contract creation — state gas dominates (112 × cpsb >> regular gas).
-	// Initcode = STOP (0x00): creates account, deploys no code.
+	// TX 1: Contract creation — state gas dominates (intrinsic NEW_ACCOUNT
+	// state >> regular). Initcode = STOP (0x00): creates account, deploys no code.
 	evm1 := newAmsterdamEVM(ibs, blockGasLimit)
 	msg1 := types.NewMessage(
-		sender, accounts.NilAddress, 0, uint256.NewInt(0), 200_000,
+		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 		[]byte{0x00}, nil,
 		false, // checkNonce
@@ -186,9 +188,11 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 	t.Logf("TX1 (create): regular=%d, state=%d", r1, s1)
 	require.Greater(t, s1, r1, "contract creation must have state gas > regular gas")
 
-	// After TX1: pool deduction must equal r1, not max(r1, s1).
-	require.Equal(t, blockGasLimit-r1, gp.Gas(),
-		"pool after TX1 should deduct only regular gas")
+	// After TX1: each dimension drops by its own per-tx usage.
+	require.Equal(t, blockGasLimit-r1, gp.RegularGasAvailable(),
+		"regular pool must drop by blockRegularGasUsed only")
+	require.Equal(t, blockGasLimit-s1, gp.StateGasAvailable(),
+		"state pool must drop by blockStateGasUsed only")
 
 	// TX 2: 0-value transfer — regular gas only, no state gas.
 	evm2 := newAmsterdamEVM(ibs, blockGasLimit)
@@ -203,20 +207,17 @@ func TestEIP8037_GasPoolTracksOnlyRegularGas(t *testing.T) {
 	t.Logf("TX2 (transfer): regular=%d, state=%d", r2, s2)
 	require.Zero(t, s2, "0-value transfer must not produce state gas")
 
-	// Pool deduction over both TXs must equal Σ regular, not Σ max(regular, state).
+	// After both TXs: each dimension's remaining budget equals
+	// blockGasLimit − Σ (per-tx usage in that dimension), independently.
 	totalRegular := r1 + r2
 	totalState := s1 + s2
-	poolDeducted := blockGasLimit - gp.Gas()
+	require.Equal(t, blockGasLimit-totalRegular, gp.RegularGasAvailable(),
+		"regular pool deduction must equal Σ blockRegularGasUsed")
+	require.Equal(t, blockGasLimit-totalState, gp.StateGasAvailable(),
+		"state pool deduction must equal Σ blockStateGasUsed")
 
-	require.Equal(t, totalRegular, poolDeducted,
-		"total pool deduction must equal Σ regular_gas")
-
-	// Verify the old code's sum-of-maxes strictly overestimates.
-	sumOfMaxes := max(r1, s1) + max(r2, s2)
-	maxOfSums := max(totalRegular, totalState)
-	t.Logf("sum-of-maxes (old)=%d, max-of-sums (correct)=%d, pool-deducted=%d",
-		sumOfMaxes, maxOfSums, poolDeducted)
-
-	require.Greater(t, sumOfMaxes, maxOfSums,
-		"Σ max(r_i, s_i) must strictly exceed max(Σ r_i, Σ s_i) — the old code's overestimation")
+	// Neither dimension may be charged max(r, s): if regular were charged
+	// max(r1, s1) + max(r2, s2), it would overshoot totalRegular.
+	require.NotEqual(t, blockGasLimit-(max(r1, s1)+max(r2, s2)), gp.RegularGasAvailable(),
+		"regular pool must not be charged Σ max(r_i, s_i) — that is the pre-378d07cb bug")
 }
