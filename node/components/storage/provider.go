@@ -49,6 +49,8 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	snaptypelib "github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -864,15 +866,31 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 		return false
 	}
 
-	// OpenFolder before BuildMissedIndices: snapshots.BuildMissedIndices
-	// checks SegmentsReady() and returns "not all snapshot segments are
-	// available" if OpenFolder has never been called. OpenFolder is
-	// tolerant of missing .idx files (OpenIdxIfNeed silently returns nil
-	// on os.ErrNotExist), so calling it with only .seg files on disk
-	// just sets the ready flag and creates DirtySegments without indexes
-	// — RecalcVisibleSegments will skip them via !IsIndexed() until the
-	// builder produces the .idx files in the next step. Mirrors the
-	// legacy stage_snapshots sequence (OpenFolder → BuildMissedIndices).
+	// Two-step sequence required to expose headers to FrozenBlocks():
+	//
+	// 1. OpenFolder() to set SegmentsReady=true. BuildMissedIndices
+	//    checks SegmentsReady() and returns "not all snapshot segments
+	//    are available" if OpenFolder has never been called. OpenFolder
+	//    is tolerant of missing .idx (OpenIdxIfNeed silently returns
+	//    nil on os.ErrNotExist), so calling it with only .seg files on
+	//    disk just flips the ready flag.
+	//
+	// 2. After BuildMissedIndices produces the headers .idx, call
+	//    OpenSegments(Headers, allowGaps=true, alignMin=false). This
+	//    is the bug Y fix: OpenFolder uses s.alignMin (default true),
+	//    which calls RecalcVisibleSegments and then aligns the visible
+	//    set across ALL types to the minimum max-block among them. With
+	//    piece A landing block-header files in phase 1 alongside state
+	//    domains, bodies/transactions arrive later (phase 2). During
+	//    phase 1 they have 0 segments visible, so alignMin collapses
+	//    EVERY type's visible set to empty — including headers — and
+	//    FrozenBlocks() returns 0.
+	//
+	//    OpenSegments(Headers, true, false) opens only headers with
+	//    alignMin=false, so headers become visible independent of
+	//    body/tx state. This was the behaviour before the OpenFolder
+	//    change; OpenFolder is still needed for SegmentsReady but
+	//    we layer OpenSegments back on top to recover headers visibility.
 	if err := p.BlockReader.Snapshots().OpenFolder(); err != nil {
 		p.logger.Warn("[storage] OpenFolder failed — will retry on next inventory ChangeSet",
 			"file", tipHeader.Name, "err", err)
@@ -885,6 +903,12 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 				"file", tipHeader.Name, "err", err)
 			return false
 		}
+	}
+
+	if err := p.BlockReader.Snapshots().OpenSegments([]snaptypelib.Type{snaptype2.Headers}, true, false); err != nil {
+		p.logger.Warn("[storage] OpenSegments(Headers, alignMin=false) failed — will retry on next inventory ChangeSet",
+			"file", tipHeader.Name, "err", err)
+		return false
 	}
 
 	tip := p.BlockReader.FrozenBlocks()
