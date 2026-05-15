@@ -18,10 +18,13 @@ package cache
 
 import (
 	"bytes"
+	"strings"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -54,13 +57,34 @@ type StateCache struct {
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
+// Mode for the byte-budget DomainCaches (Account/Storage/Commitment) is
+// read once from STATE_CACHE_MODE (evict|noop, default evict). CodeCache
+// has its own LRU and is not gated by this knob.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentBytes datasize.ByteSize) *StateCache {
+	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, ModeEvictLRU)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, ModeEvictLRU)
+	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
+	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	//sc.caches[kv.CommitmentDomain] = newDomainCacheBytes(commitmentBytes, avgCommitmentEntryBytes, ModeEvictLRU)
+	//sc.caches[kv.CommitmentDomain] = newDomainCacheBytes(commitmentBytes, avgCommitmentEntryBytes, mode)
 	return sc
+}
+
+// stateCacheModeFromEnv reads STATE_CACHE_MODE once. Unset or unrecognised
+// returns ModeEvictLRU. Recognised values: "evict", "noop". Logged at
+// startup so operators can see the mode pick.
+func stateCacheModeFromEnv() Mode {
+	v := strings.ToLower(strings.TrimSpace(dbg.EnvString("STATE_CACHE_MODE", "")))
+	switch v {
+	case "", "evict":
+		return ModeEvictLRU
+	case "noop":
+		log.Info("[cache] STATE_CACHE_MODE=noop — Account/Storage caches will drop new keys when full (diagnostic baseline; not for production)")
+		return ModeNoOp
+	default:
+		log.Warn("[cache] unrecognised STATE_CACHE_MODE; defaulting to evict", "value", v)
+		return ModeEvictLRU
+	}
 }
 
 // newDomainCacheBytes constructs a DomainCache where the entry-count cap
