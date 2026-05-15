@@ -328,31 +328,49 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	// Each addr entry is 20 (addr) + 8 (uint64 hash) = 28 bytes
-	// Set addr capacity to 60 bytes - enough for 2 entries but not 3
-	c := NewCodeCache(1024*1024, 60) // 1MB code, 60 bytes addr
+	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
+	// LRU rather than no-op-when-full — fresh-address workloads must
+	// warm up (geth's lru.Cache pattern, mirroring core/state/database_code.go).
+	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
+	// a wider 16-bit space directly.
+	wideAddr := func(i int) []byte {
+		a := make([]byte, 20)
+		a[18] = byte(i >> 8)
+		a[19] = byte(i)
+		return a
+	}
+	wideCode := func(i int) []byte {
+		return []byte{0x60, byte(i >> 8), byte(i)}
+	}
 
-	// Fill to addr capacity
-	c.Put(makeAddr(1), makeCode(1))
-	c.Put(makeAddr(2), makeCode(2))
-	assert.Equal(t, 2, c.Len())
+	c := NewCodeCache(1024*1024, 1024*28) // 1MB code, ~1024 addr LRU entries
+	for i := 0; i < 1100; i++ {
+		c.Put(wideAddr(i), wideCode(i))
+	}
 
-	// Adding more should be no-op for addr (at capacity)
-	c.Put(makeAddr(3), makeCode(3))
-	assert.Equal(t, 2, c.Len()) // addr not added
+	// Len should be exactly the LRU cap (1024), not silently truncated to 0.
+	assert.Equal(t, 1024, c.Len())
 
-	// Code cache should have all 3 codes (code capacity not reached)
-	assert.Equal(t, 3, c.CodeLen())
+	// Oldest entries (addrs 0..75) must have been evicted.
+	_, ok := c.Get(wideAddr(0))
+	assert.False(t, ok, "oldest entry should be evicted by LRU")
+	_, ok = c.Get(wideAddr(50))
+	assert.False(t, ok, "second-oldest range should be evicted by LRU")
 
-	// Can't get addr3 since it wasn't added
-	_, ok := c.Get(makeAddr(3))
-	assert.False(t, ok)
+	// Most recent entry must be present.
+	v, ok := c.Get(wideAddr(1099))
+	assert.True(t, ok, "most recent entry should remain")
+	assert.Equal(t, wideCode(1099), v)
 
-	// But updating existing addr should work
-	c.Put(makeAddr(1), makeCode(4))
-	v, ok := c.Get(makeAddr(1))
+	// hashToCode stores all 1100 distinct codes (content-addressed,
+	// independent of addr LRU eviction).
+	assert.Equal(t, 1100, c.CodeLen())
+
+	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
+	c.Put(wideAddr(1099), wideCode(4242))
+	v, ok = c.Get(wideAddr(1099))
 	assert.True(t, ok)
-	assert.Equal(t, makeCode(4), v)
+	assert.Equal(t, wideCode(4242), v)
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {

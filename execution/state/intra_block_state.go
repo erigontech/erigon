@@ -734,7 +734,20 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if stateObject.data.CodeHash.IsEmpty() {
 			return 0, nil
 		}
-		return sdb.stateReader.ReadAccountCodeSize(addr)
+		// Geth pattern (core/state/state_object.go ~Code()): pay full code
+		// fetch once on first touch, populate stateObject.code so subsequent
+		// EXTCODESIZE / EXTCODEHASH / CALL on the same addr in this tx are
+		// in-struct slice-len calls (~50 ns), not full reader round-trips.
+		// On a 30M-gas EXTCODESIZE loop with N unique addrs, this collapses
+		// the per-addr cost from ~150k reader calls to 1 reader call.
+		code, err := sdb.stateReader.ReadAccountCode(addr)
+		if err != nil {
+			return 0, err
+		}
+		if stateObject != nil && code != nil {
+			stateObject.code = code
+		}
+		return len(code), nil
 	}
 
 	size, source, _, err := versionedRead(sdb, addr, CodeSizePath, accounts.NilKey, false, 0,
@@ -756,7 +769,18 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if dbg.KVReadLevelledMetrics {
 				readStart = time.Now()
 			}
-			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
+			// Geth pattern: load full code on first touch, populate
+			// stateObject.code so subsequent same-addr EXTCODESIZE /
+			// EXTCODEHASH / CALL within this tx hit the s.code branch
+			// above instead of re-entering the reader. With BAL prefetch
+			// the bytes are already in cache.StateCache, so this is
+			// effectively a hashmap probe + slice assignment.
+			code, codeErr := sdb.stateReader.ReadAccountCode(addr)
+			l := len(code)
+			if codeErr == nil && s != nil && code != nil {
+				s.code = code
+			}
+			err := codeErr
 			if dbg.KVReadLevelledMetrics {
 				sdb.codeReadDuration += time.Since(readStart)
 				sdb.codeReadCount++
