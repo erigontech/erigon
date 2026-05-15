@@ -31,13 +31,28 @@ package cache
 // bench can compare against the pre-policy behaviour without flipping
 // branches.
 //
-// LFU is a known follow-up. Pure LRU is scan-fragile: a flood of one-shot
-// keys (cold-storage bloat workloads; mainnet's long tail of single-touch
-// slots) evicts the genuinely-hot working set because every cold scan is
-// "more recent" than the hot entries. W-TinyLFU keeps a frequency sketch
-// so single-touch entries can't displace frequently-touched ones — which
-// is why reth uses it for state caches. A ModeEvictLFU would slot in
-// behind the same wrapper without touching call sites.
+// Pure LRU is scan-fragile in principle: a flood of one-shot keys (mainnet's
+// long tail of single-touch slots) can evict the genuinely-hot working set
+// because every cold scan is "more recent" than the hot entries. Two known
+// follow-up policies sit behind this seam:
+//
+//   - ModeEvictFixedCache (reth's choice). Reth's execution cache is
+//     `fixed-cache`: a lock-free direct-mapped / set-associative array
+//     with collision-evict semantics — no LRU list, no LFU sketch. Their
+//     PR #21128 (v1.11.0) quoted ~25% newPayload p50 / +33% gas/s vs the
+//     prior moka / quick-cache attempts; the win came from *removing*
+//     LRU/LFU bookkeeping, not adding LFU.
+//   - ModeEvictLFU. W-TinyLFU (Caffeine-style) admission policy keeps a
+//     small frequency sketch so single-touch entries can't displace
+//     frequently-touched ones. Helps mainnet steady-state in principle
+//     (+5-15pp on Zipfian-with-scan per Caffeine literature). Does NOT
+//     help the cycle-2 bloat fixtures — those are pure cold scans with
+//     no reuse, so admission policy has nothing to admit.
+//
+// See agentspecs/lfu-vs-lru-state-cache-decision-2026-05-15.md for the
+// full analysis (which lib to use if we ship LFU — otter, not ristretto)
+// and the decision criterion (24h mainnet replay hit-rate < 90% before
+// LFU is worth a new dep).
 type Mode uint8
 
 const (
