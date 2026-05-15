@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -635,6 +636,25 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			var txTasks []exec.Task
 			// Per-block committed state cache for parallel workers' GetCommittedState.
 			blockStateCache := state.NewBlockStateCache()
+
+			// Pattern B: seed the per-block cache from cache.StateCache hits
+			// the async BlockReadAheader already populated. Source order: the
+			// canonical MDBX BAL above (dbBAL) on sync paths, balcache on the
+			// bench/engine path where BAL only lives in memory. RAM-to-RAM,
+			// no MDBX, misses fall through to the lazy CachedReaderV3 path.
+			prewarmBAL := dbBAL
+			if len(prewarmBAL) == 0 {
+				if data, ok := balcache.CachedBlockAccessList(b.Hash()); ok && len(data) > 0 {
+					if decoded, decErr := types.DecodeBlockAccessListBytes(data); decErr == nil {
+						prewarmBAL = decoded
+					}
+				}
+			}
+			if len(prewarmBAL) > 0 {
+				if stateCache := te.doms.GetStateCache(); stateCache != nil {
+					state.PrewarmBlockStateCacheFromBAL(blockStateCache, prewarmBAL, stateCache)
+				}
+			}
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
