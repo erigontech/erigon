@@ -526,6 +526,7 @@ func (rw *Worker) CommitAndComputeRoot(ctx context.Context, rules *chain.Rules, 
 	if err := rw.ibs.CommitBlock(rules, stateWriter); err != nil {
 		return nil, err
 	}
+	rw.ibs.ClearDirty()
 	return rw.rs.Domains().ComputeCommitment(ctx, rw.chainTx, false, blockNum, txNum, "worker-poststate", nil)
 }
 

@@ -188,6 +188,14 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 			r.Bloom = types.CreateBloom(types.Receipts{r})
 			receipts = append(receipts, r)
 		}
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
 	}
 
 	for blockNum <= toBlock {
@@ -199,8 +207,8 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	return nil
 }
 
-// rcacheHasPostStateForPreByzantium probes a few pre-Byzantium blocks to
-// check whether RCache was built with PostState support.
+// rcacheHasPostStateForPreByzantium probes backward from the Byzantium
+// boundary to check whether RCache was built with PostState support.
 func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, fromBlock, byzantiumBlock uint64) bool {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -210,10 +218,12 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 
 	const maxProbes = 10
 	probed := 0
-	end := min(fromBlock+maxProbes*10, byzantiumBlock)
 
 	txNumsReader := blockReader.TxnumReader()
-	for blockNum := fromBlock; blockNum < end; blockNum++ {
+
+	start := byzantiumBlock - 1
+	blockNum := start
+	for blockNum >= fromBlock {
 		minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return false
@@ -221,6 +231,7 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 		// minTxNum is the system-begin tx; receipts start at minTxNum+1.
 		receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{TxNum: minTxNum + 1, DontCalcBloom: true})
 		if err != nil || !ok || receipt == nil {
+			blockNum--
 			continue
 		}
 		probed++
@@ -230,6 +241,7 @@ func rcacheHasPostStateForPreByzantium(ctx context.Context, db kv.TemporalRoDB, 
 		if probed >= maxProbes {
 			break
 		}
+		blockNum--
 	}
 	return false
 }

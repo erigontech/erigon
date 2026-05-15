@@ -2073,6 +2073,10 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 // Used by eth_simulateV1 to separate accounts dirtied by stateOverrides from those
 // dirtied by actual transaction execution, so CommitBlock does not apply EIP-161 to
 // override-only accounts.
+func (sdb *IntraBlockState) ClearDirty() {
+	clear(sdb.stateObjectsDirty)
+}
+
 func (sdb *IntraBlockState) ExtractAndClearDirty() map[accounts.Address]struct{} {
 	dirty := maps.Clone(sdb.stateObjectsDirty)
 	clear(sdb.stateObjectsDirty)
