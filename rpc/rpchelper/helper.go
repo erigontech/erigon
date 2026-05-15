@@ -239,7 +239,7 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 	return &cachedHistoryReaderV3{
 		cache:     asOfView,
 		reader:    state.NewHistoryReaderV3(tx, txNum),
-		composite: make([]byte, 20+32),
+		composite: make([]byte, 0, len(common.Address{})+len(common.Hash{})),
 	}, nil
 }
 
@@ -300,8 +300,7 @@ func (hr *cachedHistoryReaderV3) ReadAccountDataForDebug(address accounts.Addres
 func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	copy(hr.composite, addressValue[:])
-	copy(hr.composite[len(addressValue):], keyValue[:])
+	hr.composite = append(append(hr.composite[:0], addressValue[:]...), keyValue[:]...)
 	enc, ok, err := hr.cache.GetAsOf(hr.composite, hr.reader.GetTxNum())
 	if err != nil {
 		return uint256.Int{}, false, err
