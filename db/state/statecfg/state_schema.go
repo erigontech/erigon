@@ -76,7 +76,7 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 // AggregatorSqueezeCommitmentValues controls whether commitment aggregator should replace keys in values during merge once file range reaches threshold.
 // This can significantly reduce size of commitment values, but makes them non-human readable and requires additional processing during reads.
 // This is not needed for correctness, but can be used to save space if needed.
-const AggregatorSqueezeCommitmentValues = true
+const AggregatorSqueezeCommitmentValues = false
 
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
