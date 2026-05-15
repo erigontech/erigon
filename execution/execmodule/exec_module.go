@@ -279,6 +279,13 @@ func NewExecModule(
 		stopNode:                stopNode,
 	}
 
+	// Wire the process-global state cache into the read-ahead so its
+	// prefetches populate the same hashmap that SharedDomains.GetLatest
+	// probes on the EVM hot path. Reth's "same hashmap" pattern.
+	if readAheader != nil {
+		readAheader.SetStateCache(domainCache)
+	}
+
 	if stateCache != nil {
 		stateCache.execModule = em
 	}
