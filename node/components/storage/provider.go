@@ -996,6 +996,25 @@ func entryFromPreverifiedItem(item preverified.Item) *snapshot.FileEntry {
 	// unrecognised patterns; the entry still gets through with whatever
 	// fields we set above.
 	snapshot.PopulateFromName(entry)
+
+	// Block files (Domain=="" with a parsed FromBlock/ToBlock range)
+	// MUST also carry the range in FromStep/ToStep — the orchestrator's
+	// requestGapsFor coverage check uses FromStep/ToStep (see
+	// flow/orchestrator.go:coverageForRoleLocked + IsComplete). Without
+	// this copy, the entry's range is (0, 0), IsComplete(0, 0) returns
+	// true (vacuously covered), and the file is silently dropped before
+	// any DownloadRequested fires. This is why the bootstrap path used
+	// to download state files but not block .seg files — block entries
+	// were silently coverage-skipped, the publisher's chain.v2.toml
+	// emerged with zero block entries, and Caplin never saw a tip
+	// header on disk. The manifest_exchange/convert.go V2-to-peer
+	// translator handles this for peer-fed manifests via
+	// parseBlockFileRange; the bootstrap-side path needs the same
+	// shape.
+	if entry.Domain == "" && entry.FromStep == 0 && entry.ToStep == 0 && entry.ToBlock > 0 {
+		entry.FromStep = entry.FromBlock
+		entry.ToStep = entry.ToBlock
+	}
 	return entry
 }
 

@@ -244,3 +244,73 @@ func TestBuildBootstrapManifest_RespectsPruneMode(t *testing.T) {
 			"uninitialised prune.Mode must not silently filter; callers wire an initialised mode when they want filtering")
 	})
 }
+
+// TestEntryFromPreverifiedItem_BlockFilesCarryStepRange pins the
+// load-bearing invariant that block-file entries from the bootstrap
+// path expose their range in FromStep/ToStep (not just FromBlock/
+// ToBlock).
+//
+// Why: the flow orchestrator's requestGapsFor calls
+// coverageForRoleLocked + IsComplete using FromStep/ToStep. A
+// FromStep=ToStep=0 entry vacuously "covers" the empty range
+// [0, 0), the orchestrator drops the entry as already-covered, and
+// no DownloadRequested fires. Pre-fix, a fresh minimal-mode
+// publisher's bootstrap dispatched ~931 header DownloadRequested
+// events that never reached the downloader: chain.v2.toml emerged
+// with zero header / bodies / transactions entries, storage's
+// tip-header watcher had nothing to fire on, Caplin stayed blocked
+// on BlockHeadersReady for hours. The manifest_exchange/convert.go
+// V2-to-peer translator carries this convention explicitly via
+// parseBlockFileRange; the bootstrap path must match.
+func TestEntryFromPreverifiedItem_BlockFilesCarryStepRange(t *testing.T) {
+	t.Parallel()
+	const sampleHash = "0123456789abcdef0123456789abcdef01234567"
+
+	cases := []struct {
+		name             string
+		item             preverified.Item
+		wantFromStep     uint64
+		wantToStep       uint64
+		wantNonZeroRange bool
+	}{
+		{
+			name:             "headers seg",
+			item:             preverified.Item{Name: "v1.1-000000-000500-headers.seg", Hash: sampleHash},
+			wantFromStep:     0,
+			wantToStep:       500_000, // snaptype ParseFileName multiplies block range by 1000
+			wantNonZeroRange: true,
+		},
+		{
+			name:             "bodies seg",
+			item:             preverified.Item{Name: "v1.1-000500-001000-bodies.seg", Hash: sampleHash},
+			wantFromStep:     500_000,
+			wantToStep:       1_000_000,
+			wantNonZeroRange: true,
+		},
+		{
+			name:             "transactions seg",
+			item:             preverified.Item{Name: "v1.1-020000-020500-transactions.seg", Hash: sampleHash},
+			wantFromStep:     20_000_000,
+			wantToStep:       20_500_000,
+			wantNonZeroRange: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := entryFromPreverifiedItem(c.item)
+			require.NotNil(t, got)
+			require.Equal(t, snapshot.Domain(""), got.Domain,
+				"block files have empty Domain by design")
+			if c.wantNonZeroRange {
+				require.NotZero(t, got.ToStep,
+					"block file ToStep must be non-zero — IsComplete(0,0) returns true vacuously and drops the entry before DownloadRequested fires")
+			}
+			require.Equal(t, c.wantFromStep, got.FromStep, "FromStep")
+			require.Equal(t, c.wantToStep, got.ToStep, "ToStep")
+			// Block axis stays populated too (PopulateFromName does it).
+			require.Equal(t, c.wantFromStep, got.FromBlock, "FromBlock should match")
+			require.Equal(t, c.wantToStep, got.ToBlock, "ToBlock should match")
+		})
+	}
+}
