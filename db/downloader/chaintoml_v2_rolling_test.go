@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -331,4 +332,150 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 		require.NotEqual(t, [20]byte{}, e.TorrentHash,
 			"inventory entry %s should have its hash backfilled from disk", e.Name)
 	}
+}
+
+// TestRollingV2Publisher_SelfCheck_NilDefault pins the test-friendly
+// default: with no self-check configured, Publish proceeds as before.
+// Tests/harness that don't wire a self-check must not be affected.
+func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	require.NoError(t, err)
+
+	// selfCheck is nil — Publish proceeds normally.
+	hash, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
+	require.NoError(t, err, "with nil selfCheck, Publish must succeed unchanged")
+	require.NotEqual(t, metainfo.Hash{}, hash)
+
+	// File was written.
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+}
+
+// TestRollingV2Publisher_SelfCheck_PassPropagates pins that when the
+// self-check returns nil, the publish completes normally — file
+// written, history advanced.
+func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	require.NoError(t, err)
+
+	called := false
+	pub.SetSelfCheck(func(m *ChainTomlV2) error {
+		called = true
+		require.NotNil(t, m, "self-check receives the generated manifest")
+		return nil // pass
+	})
+
+	hash, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21), 0, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, metainfo.Hash{}, hash)
+	require.True(t, called, "self-check callback was invoked")
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+}
+
+// TestRollingV2Publisher_SelfCheck_FailLoud is the core invariant: a
+// self-check error aborts the publish completely. NO file is
+// written, NO torrent built, NO history advanced. Per direction
+// (docs/plans/20260515-three-layer-snapshot-distribution.md "fail
+// loud"): the error propagates to the caller, which logs it at Warn
+// and the node continues running — but this generation is skipped
+// cleanly without polluting on-disk state.
+func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	require.NoError(t, err)
+
+	sentinel := errors.New("retire bug: hash mismatch on v1.0-headers.seg")
+	pub.SetSelfCheck(func(m *ChainTomlV2) error {
+		return sentinel
+	})
+
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x22), 0, nil)
+	require.ErrorIs(t, err, sentinel,
+		"self-check error propagates unchanged so callers can discriminate via errors.Is")
+
+	// No file written — the failed generation must not appear on disk.
+	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)),
+		"chain.v2.0.toml must NOT exist after self-check failure — failed generations don't pollute disk")
+	require.Empty(t, pub.History(),
+		"history not advanced — next Publish() retries with seq=0, not seq=1")
+}
+
+// TestRollingV2Publisher_SelfCheck_RetryAfterFailure pins recovery
+// behaviour: if the first Publish fails self-check and the next one
+// passes, the next one writes seq=0 (the failed generation was
+// never on disk, so no seq was consumed).
+func TestRollingV2Publisher_SelfCheck_RetryAfterFailure(t *testing.T) {
+	t.Parallel()
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	require.NoError(t, err)
+
+	fail := errors.New("first attempt fails")
+	pub.SetSelfCheck(func(m *ChainTomlV2) error { return fail })
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x23), 0, nil)
+	require.ErrorIs(t, err, fail)
+
+	// Now retire fixed itself — clear the self-check, retry.
+	pub.SetSelfCheck(nil)
+	hash, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x23), 0, nil)
+	require.NoError(t, err)
+	require.NotEqual(t, metainfo.Hash{}, hash)
+
+	require.Equal(t, []uint64{0}, pub.History(),
+		"first successful publish uses seq=0 — the failed first attempt did not consume a seq")
+}
+
+// TestChainTomlV2ToItems_Flatten pins the flatten helper that
+// external wiring code uses to feed CheckOwnAdvertisement. Every
+// non-empty (name, hash) across Blocks + Meta + Salt + Caplin + all
+// Domains shows up in the result; empty-hash entries are skipped.
+func TestChainTomlV2ToItems_Flatten(t *testing.T) {
+	t.Parallel()
+
+	m := &ChainTomlV2{
+		Version: 2,
+		Blocks: map[string]string{
+			"v1.1-000000-001000-headers.seg": "01",
+			"v1.1-000000-001000-bodies.seg":  "02",
+			"empty.seg":                      "", // skipped
+		},
+		Meta:   map[string]string{"erigondb.toml": "ff"},
+		Salt:   map[string]string{"salt-state.txt": "aa"},
+		Caplin: []CaplinFileEntry{{Name: "caplin/x.seg", Hash: "c1"}, {Name: "caplin/empty.seg", Hash: ""}},
+		Domains: map[string]*DomainManifest{
+			"accounts": {Files: []DomainFileEntry{
+				{Name: "domain/v2.0-accounts.0-8192.kv", Hash: "d1"},
+				{Name: "domain/v2.0-accounts.0-8192.kvi", Hash: ""}, // skipped
+			}},
+			"commitment": {Files: []DomainFileEntry{
+				{Name: "domain/v2.0-commitment.0-8192.kv", Hash: "d2"},
+			}},
+		},
+	}
+
+	items := ChainTomlV2ToItems(m)
+	got := make(map[string]string, len(items))
+	for _, it := range items {
+		got[it.Name] = it.Hash
+	}
+
+	require.Equal(t, map[string]string{
+		"v1.1-000000-001000-headers.seg":  "01",
+		"v1.1-000000-001000-bodies.seg":   "02",
+		"erigondb.toml":                   "ff",
+		"salt-state.txt":                  "aa",
+		"caplin/x.seg":                    "c1",
+		"domain/v2.0-accounts.0-8192.kv":  "d1",
+		"domain/v2.0-commitment.0-8192.kv": "d2",
+	}, got, "every non-empty (name, hash) flattens to an item; empty-hash entries dropped")
+}
+
+// TestChainTomlV2ToItems_Nil pins defensive nil-input behaviour.
+func TestChainTomlV2ToItems_Nil(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, ChainTomlV2ToItems(nil))
 }

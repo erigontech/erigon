@@ -135,6 +135,16 @@ type Downloader struct {
 	// inside PublishChainToml doesn't leave the ENR pointing at V1.
 	lastV2InfoHash [20]byte
 
+	// manifestSelfCheck is the producer-side fail-loud callback wired
+	// by external setup code (which has access to both this package
+	// and snapshotsync — db/snapshotsync imports db/downloader, so the
+	// reverse import is a cycle we route around via this callback).
+	// nil disables the check (default; safe for tests). Production
+	// wires it via SetManifestSelfCheck so RollingV2Publisher.Publish
+	// can validate each generation against canonical before any file
+	// is written.
+	manifestSelfCheck ManifestSelfCheckFn
+
 	// onPeerWithChainTomlDiscovered is called whenever the legacy
 	// chain.toml discovery loop finds a peer advertising a chain-toml
 	// ENR entry. Production wiring (backend.go) plugs in a function
@@ -463,6 +473,18 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 	d.enrUpdater = fn
 }
 
+// SetManifestSelfCheck installs the producer-side self-check callback
+// used by RollingV2Publisher.Publish to validate each generation
+// before any file is written. Wired from outside this package (which
+// can't import snapshotsync due to a cycle), typically from
+// node-construction code that has access to both downloader and
+// snapshotsync.CheckOwnAdvertisement. Pass nil to disable (default).
+func (d *Downloader) SetManifestSelfCheck(fn ManifestSelfCheckFn) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.manifestSelfCheck = fn
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -622,6 +644,20 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	pub, err := NewRollingV2Publisher(d.snapDir(), d.torrentFS, d, 0)
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
+	}
+	// Wire the producer-side self-check (if configured externally).
+	// Per docs/plans/20260515-three-layer-snapshot-distribution.md
+	// "fail loud" requirement: the callback returns an error when
+	// this node's outgoing manifest diverges from canonical for any
+	// known-canonical file name. The error propagates through Publish;
+	// our caller at line ~545 logs it at Warn and the node continues
+	// running (publishing is skipped for this generation; the next
+	// inventory-change-triggered Publish retries).
+	d.lock.RLock()
+	selfCheck := d.manifestSelfCheck
+	d.lock.RUnlock()
+	if selfCheck != nil {
+		pub.SetSelfCheck(selfCheck)
 	}
 	hash, err := pub.Publish(context.Background(), inv, authoritativeBlocks, updater)
 	if err != nil {

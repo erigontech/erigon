@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/pelletier/go-toml/v2"
@@ -569,4 +571,57 @@ func (dm *DomainManifest) FilesAtTrust(minTrust snapshotinv.TrustLevel) []Domain
 		}
 	}
 	return result
+}
+
+// ChainTomlV2ToItems flattens a V2 manifest to a (Name, Hash) item
+// list — the format snapshotsync.CheckOwnAdvertisement and
+// snapshotsync.ValidateAdvertisement consume. Used by external
+// wiring code (which can import both downloader and snapshotsync) to
+// run producer-side self-checks via the ManifestSelfCheckFn callback
+// on RollingV2Publisher, sidestepping the import cycle that prevents
+// downloader from depending on snapshotsync directly.
+//
+// All file kinds are included: Blocks + Meta + Salt (flat maps),
+// Caplin (typed list), and Domains (kv + history + idx flattened to
+// individual (Name, Hash) pairs). Entries with empty hash are
+// skipped — they're not advertisable in any meaningful sense.
+//
+// Output is NOT sorted — callers that need determinism (e.g.,
+// hashing the flattened set for fingerprinting) should sort.
+func ChainTomlV2ToItems(m *ChainTomlV2) snapcfg.PreverifiedItems {
+	if m == nil {
+		return nil
+	}
+	var out snapcfg.PreverifiedItems
+	for name, hash := range m.Blocks {
+		if hash != "" {
+			out = append(out, preverified.Item{Name: name, Hash: hash})
+		}
+	}
+	for name, hash := range m.Meta {
+		if hash != "" {
+			out = append(out, preverified.Item{Name: name, Hash: hash})
+		}
+	}
+	for name, hash := range m.Salt {
+		if hash != "" {
+			out = append(out, preverified.Item{Name: name, Hash: hash})
+		}
+	}
+	for _, f := range m.Caplin {
+		if f.Hash != "" {
+			out = append(out, preverified.Item{Name: f.Name, Hash: f.Hash})
+		}
+	}
+	for _, dm := range m.Domains {
+		if dm == nil {
+			continue
+		}
+		for _, f := range dm.Files {
+			if f.Hash != "" {
+				out = append(out, preverified.Item{Name: f.Name, Hash: f.Hash})
+			}
+		}
+	}
+	return out
 }

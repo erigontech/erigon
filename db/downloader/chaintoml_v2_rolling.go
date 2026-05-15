@@ -125,7 +125,35 @@ type RollingV2Publisher struct {
 	mu               sync.Mutex
 	history          []uint64 // chronological, oldest first; capped at maxRetained
 	delegationSource DelegationSource
+
+	// selfCheck is invoked on every Publish() after the manifest has
+	// been generated but before any file is written. It receives the
+	// just-generated ChainTomlV2 and returns an error if the manifest
+	// fails the producer-side self-check against canonical
+	// (per docs/plans/20260515-three-layer-snapshot-distribution.md).
+	//
+	// Wired via a callback rather than a direct snapshotsync dependency
+	// to avoid an import cycle (db/snapshotsync already imports
+	// db/downloader). Production wires this to a closure that flattens
+	// ChainTomlV2 to PreverifiedItems and calls
+	// snapshotsync.CheckOwnAdvertisement; tests/harness leave it nil.
+	//
+	// nil means the check is skipped — fine for tests, but production
+	// MUST wire it via SetSelfCheck. The downloader's
+	// PublishLocalChainTomlV2 caller logs a Warn on a non-nil return,
+	// stops the publish for that generation, and lets the node continue
+	// running (per direction: "node stops publishing, can still run").
+	selfCheck ManifestSelfCheckFn
 }
+
+// ManifestSelfCheckFn is the type of the producer-side self-check
+// callback (see RollingV2Publisher.selfCheck). Receives the just-
+// generated manifest; returns an error to abort the publish for
+// this generation. The publisher does not write the file, does not
+// build the .torrent, does not update the ENR — the failure is
+// graceful: this generation is skipped, the node keeps running, the
+// next inventory-change-triggered publish will retry.
+type ManifestSelfCheckFn func(manifest *ChainTomlV2) error
 
 // DelegationSource yields the snapshotauth UCAN attestation bytes (canonical
 // CBOR) that should be paired with the next published V2 manifest. Returning
@@ -144,6 +172,18 @@ func (r *RollingV2Publisher) SetDelegationSource(src DelegationSource) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.delegationSource = src
+}
+
+// SetSelfCheck configures the producer-side fail-loud check called
+// on every Publish() before any file is written. Pass nil to clear
+// (no check; default for tests/harness). Production callers wire a
+// closure that flattens the manifest and runs
+// snapshotsync.CheckOwnAdvertisement against the current canonical
+// set.
+func (r *RollingV2Publisher) SetSelfCheck(fn ManifestSelfCheckFn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.selfCheck = fn
 }
 
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
@@ -262,6 +302,22 @@ func (r *RollingV2Publisher) Publish(
 
 	manifest := GenerateV2(inv)
 	manifest.UCANHash = ucanHashHex
+
+	// Producer self-check: fail loud if this manifest disagrees with
+	// canonical for any known-canonical name. The check happens BEFORE
+	// any file is written / built / seeded / advertised — on failure
+	// nothing about this generation makes it onto disk, into the
+	// torrent client, or into the ENR. Per direction
+	// (docs/plans/20260515-three-layer-snapshot-distribution.md): the
+	// node stops publishing this generation but keeps running; the
+	// caller logs at Warn and the next inventory-change-triggered
+	// Publish retries (in case the underlying retire bug is transient).
+	if r.selfCheck != nil {
+		if err := r.selfCheck(manifest); err != nil {
+			return metainfo.Hash{}, fmt.Errorf("publisher self-check: %w", err)
+		}
+	}
+
 	tomlBytes, err := MarshalV2(manifest)
 	if err != nil {
 		return metainfo.Hash{}, fmt.Errorf("marshal %s: %w", name, err)
