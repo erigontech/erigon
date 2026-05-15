@@ -99,30 +99,30 @@ type CodeCache struct {
 	// of L1 — Get-by-ethHash bypasses addr lookup entirely. Memory cost:
 	// duplicates code bytes vs L2 (worst case 2x byte storage); accepted
 	// for the per-key fast-path on many-addrs-one-code workloads.
-	ethHashToCode    *maphash.Map[[]byte] // keccak(code) → code, concurrent
-	ethHashCodeSize  atomic.Int64         // current size in bytes (ethHash layer)
+	ethHashToCode   *maphash.Map[[]byte] // keccak(code) → code, concurrent
+	ethHashCodeSize atomic.Int64         // current size in bytes (ethHash layer)
 
 	// Size-only layer: ethCodeHash → int (length in bytes). Answers
 	// EXTCODESIZE / EXTCODEHASH without loading the bytes. Geth has the
 	// equivalent at core/state/database_code.go (1 M-entry LRU). Tiny
 	// per-entry footprint (32B key + 8B value) so the same memory budget
 	// gives ~1000x the hit surface vs the bytes cache.
-	codeSizeByEthHash    *maphash.Map[int]
-	codeSizeEntries      atomic.Int64
-	codeSizeCapEntries   int64
+	codeSizeByEthHash  *maphash.Map[int]
+	codeSizeEntries    atomic.Int64
+	codeSizeCapEntries int64
 
 	blockHash common.Hash // hash of the last block processed
 	mu        sync.RWMutex
 
 	// Stats counters (atomic for concurrent access)
-	addrHits        atomic.Uint64
-	addrMisses      atomic.Uint64
-	codeHits        atomic.Uint64
-	codeMisses      atomic.Uint64
-	ethHashHits     atomic.Uint64
-	ethHashMisses   atomic.Uint64
-	codeSizeHits    atomic.Uint64
-	codeSizeMisses  atomic.Uint64
+	addrHits       atomic.Uint64
+	addrMisses     atomic.Uint64
+	codeHits       atomic.Uint64
+	codeMisses     atomic.Uint64
+	ethHashHits    atomic.Uint64
+	ethHashMisses  atomic.Uint64
+	codeSizeHits   atomic.Uint64
+	codeSizeMisses atomic.Uint64
 
 	addrCapacityB datasize.ByteSize // capacity in bytes
 	codeCapacityB datasize.ByteSize // capacity in bytes
