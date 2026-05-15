@@ -64,6 +64,16 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: "000d"},
 		preverified.Item{Name: "salt-state.txt", Hash: "000e"},
 		preverified.Item{Name: "erigondb.toml", Hash: "000f"},
+		// Bug X regression sentinel: mainnet preverified carries
+		// top-level beaconblocks/blobsidecars entries (no caplin/
+		// prefix). The earlier filter only checked HasPrefix("caplin/")
+		// so 501 blobsidecars + 1050 beaconblocks slipped through and
+		// the live publisher pulled 1.7 TB of CL history under
+		// minimal mode. Both top-level patterns must drop in every
+		// non-archive mode, mirroring SyncSnapshots' three-substring
+		// check at snapshotsync.go:398.
+		preverified.Item{Name: "v1.1-012090-012100-blobsidecars.seg", Hash: "0010"},
+		preverified.Item{Name: "v1.1-012090-012100-beaconblocks.seg", Hash: "0011"},
 	}
 
 	// Chain config: merge at block 15M (mainnet-ish). Pre-merge =
@@ -117,6 +127,10 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 			"idx/v1.0-logAddrIdx.0-1024.ef",
 			"accessor/v1.0-history.0-1024.vi",
 			"caplin/v1.1-000000-000010-beaconblocks.seg",
+			// Bug X: top-level CL data also drops under non-archive
+			// modes — substring match, not just caplin/ prefix.
+			"v1.1-012090-012100-blobsidecars.seg",
+			"v1.1-012090-012100-beaconblocks.seg",
 		}
 		for _, name := range mustDrop {
 			require.NotContains(t, gotNames, name,
@@ -147,6 +161,10 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		require.NotContains(t, gotNames, "history/v1.0-accountsHistory.0-1024.v")
 		require.NotContains(t, gotNames, "caplin/v1.1-000000-000010-beaconblocks.seg",
 			"every non-archive mode drops caplin/ — coupled to prune.History.Enabled()")
+		require.NotContains(t, gotNames, "v1.1-012090-012100-blobsidecars.seg",
+			"every non-archive mode drops top-level blobsidecars (bug X)")
+		require.NotContains(t, gotNames, "v1.1-012090-012100-beaconblocks.seg",
+			"every non-archive mode drops top-level beaconblocks (bug X)")
 		// Blocks mode has Blocks=KeepAllBlocksPruneMode, which is NOT
 		// DefaultBlocksPruneMode, so pre-merge tx filter is a no-op.
 		require.Contains(t, gotNames, "v1.0-000000-000500-transactions.seg")
@@ -193,6 +211,8 @@ func TestFilterIsSubsetOfArchive(t *testing.T) {
 		preverified.Item{Name: "v1.0-000000-000500-transactions.seg", Hash: sampleHash},
 		preverified.Item{Name: "v1.0-020000-020500-transactions.seg", Hash: sampleHash},
 		preverified.Item{Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Hash: sampleHash},
+		preverified.Item{Name: "v1.1-012090-012100-blobsidecars.seg", Hash: sampleHash},
+		preverified.Item{Name: "v1.1-012090-012100-beaconblocks.seg", Hash: sampleHash},
 		preverified.Item{Name: "salt-state.txt", Hash: sampleHash},
 		preverified.Item{Name: "erigondb.toml", Hash: sampleHash},
 	}

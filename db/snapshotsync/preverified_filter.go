@@ -92,26 +92,38 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		if pruneMode.History.Enabled() && isStateHistory(p.Name) {
 			continue
 		}
-		// Caplin archive (caplin/*.seg — beacon state snapshots,
-		// validator-balances dumps, historical beacon blocks, etc.)
-		// is dropped under the same prune-history gate. Rationale:
-		// minimal-mode publishers explicitly do not want to host a
-		// CL archive — that's an operator opt-in (--caplin.archive),
-		// and the inline SyncSnapshots filter at line 411 of
-		// snapshotsync.go uses the same `!caplinState && caplin/`
-		// pattern. Without this drop, a 7.0 TB partition running a
-		// --prune.mode=minimal publisher pulls ~150 GB of caplin/
-		// archive on top of the state/blocks set the operator
-		// actually wanted.
+		// CL data (caplin archive + beacon blocks + blob sidecars) is
+		// dropped under the prune-history gate. Three distinct file
+		// naming patterns all describe CL data; the inline SyncSnapshots
+		// filter at snapshotsync.go:398 uses the same three-substring
+		// check (caplin == NoCaplin drops all three):
 		//
-		// Coupling caplin/ to prune.History.Enabled() (rather than
-		// to a dedicated caplinArchive flag) is the bootstrap-side
+		//   1. "caplin/" prefix — beacon state snapshots, validator
+		//      balances dumps, ActiveValidatorIndicies, etc.
+		//   2. "beaconblocks" substring — historical beacon blocks
+		//      at the top level (v1.1-NNNNNN-NNNNNN-beaconblocks.seg).
+		//   3. "blobsidecars" substring — historical blob sidecars
+		//      at the top level (v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
+		//
+		// Bug X: an earlier version of this filter only matched the
+		// caplin/ prefix, allowing 501 blobsidecars + 1050 beaconblocks
+		// entries (mainnet preverified) through to the bootstrap
+		// manifest. The downloader pulled 1.7 TB of historical blob
+		// sidecars on top of the EL set — exactly what minimal-mode
+		// is supposed to avoid. Matching the inline filter's full
+		// three-substring contains check makes the bootstrap path
+		// honour `--caplin.blocks-archive=false` and
+		// `--caplin.blobs-archive=false` (their defaults) via the
+		// same prune-history-driven gate.
+		//
+		// Coupling CL data to prune.History.Enabled() (rather than
+		// to dedicated CL-archive flags) is the bootstrap-side
 		// shorthand: every non-archive prune mode is consistent
 		// with "don't host the CL archive." If a future operator
 		// wants archive-CL + minimal-EL, the inline SyncSnapshots
 		// path's caplinState flag remains the explicit knob; the
 		// bootstrap filter would need a parallel parameter then.
-		if pruneMode.History.Enabled() && strings.HasPrefix(p.Name, "caplin/") {
+		if pruneMode.History.Enabled() && isCLData(p.Name) {
 			continue
 		}
 		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, pruneMode, p) {
@@ -120,4 +132,16 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		out = append(out, p)
 	}
 	return out
+}
+
+// isCLData reports whether a preverified item name describes CL
+// (consensus-layer) data — beacon state snapshots, historical
+// beacon blocks, or blob sidecars. Mirrors the three-substring
+// pattern used by SyncSnapshots' inline filter at snapshotsync.go:398
+// for caplin == NoCaplin: the bootstrap manifest synthesised under
+// non-archive prune modes must drop the same set.
+func isCLData(name string) bool {
+	return strings.HasPrefix(name, "caplin/") ||
+		strings.Contains(name, "beaconblocks") ||
+		strings.Contains(name, "blobsidecars")
 }
