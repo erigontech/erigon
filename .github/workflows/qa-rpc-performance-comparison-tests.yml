@@ -373,7 +373,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest${{ matrix.exec_mode == 'parallel' && '-parallel' || '' }}-$method \
+              --test_name rpc-performance-test-latest${{ matrix.client == 'erigon' && matrix.exec_mode == 'parallel' && '-parallel' || '' }}-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
