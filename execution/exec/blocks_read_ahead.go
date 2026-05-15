@@ -14,8 +14,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -173,23 +173,20 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	var wg errgroup.Group
 
-	// If BAL exists in DB, use BAL warming (more complete)
+	// BAL is sourced from the in-memory balcache (populated by
+	// EngineServer.HandleNewPayload on receipt). The bal-cache architecture
+	// removes the BAL from chaindata entirely; cache miss is a clean signal
+	// that BAL prefetch is not available for this block — fall through to
+	// per-transaction warming.
 	var bal types.BlockAccessList
-	if header != nil && db != nil {
-		tx, err := db.BeginRo(ctx)
-		if err != nil {
-			log.Warn("[warmBody] failed to open tx for BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-		} else {
-			data, err := tx.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(header.Number.Uint64(), header.Hash()))
+	if header != nil {
+		if data, ok := balcache.CachedBlockAccessList(header.Hash()); ok && len(data) > 0 {
+			decoded, err := types.DecodeBlockAccessListBytes(data)
 			if err != nil {
-				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-			} else if len(data) > 0 {
-				bal, err = types.DecodeBlockAccessListBytes(data)
-				if err != nil {
-					log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-				}
+				log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
+			} else {
+				bal = decoded
 			}
-			tx.Rollback()
 		}
 	}
 
