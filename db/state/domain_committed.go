@@ -58,8 +58,8 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	sto := aggTx.d[kv.StorageDomain]
 	acc := aggTx.d[kv.AccountsDomain]
 
-	// Getters are resolved on first shortened-ref hit, per domain. Branches with only full
-	// keys (the common case once ReplaceKeysInValues is off) skip file resolution entirely.
+	// Getters are resolved on first referenced-key hit, per domain. Branches with only
+	// noref keys (the common case once ReplaceKeysInValues is off) skip file resolution entirely.
 	var storageGetter, accountGetter *seg.Reader
 	ensureStorageGetter := func() error {
 		if storageGetter != nil {
