@@ -128,6 +128,11 @@ func writeSSZ(w http.ResponseWriter, obj interface {
 	_, _ = w.Write(out)
 }
 
+func writeSSZBytes(w http.ResponseWriter, out []byte) {
+	w.Header().Set("Content-Type", sszRestContentType)
+	_, _ = w.Write(out)
+}
+
 func writeSSZError(w http.ResponseWriter, code int, msg string) {
 	http.Error(w, msg, code)
 }
@@ -167,12 +172,11 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := newSSZNewPayloadRequest(sv)
-	if err := req.DecodeSSZ(body, int(sv)); err != nil {
+	payload, blobHashes, parentRoot, executionRequests, err := decodeNewPayloadRequest(body, sv)
+	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	payload := req.Payload
 	var status *engine_types.PayloadStatus
 	switch version {
 	case 1:
@@ -180,14 +184,11 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 	case 2:
 		status, err = e.NewPayloadV2(r.Context(), payload)
 	case 3:
-		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV3(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root)
+		status, err = e.NewPayloadV3(r.Context(), payload, hashListValues(blobHashes), &parentRoot)
 	case 4:
-		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, transactionsBytes(req.ExecutionRequests))
+		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
 	case 5:
-		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, transactionsBytes(req.ExecutionRequests))
+		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -224,13 +225,13 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		sv, _ := sszGetPayloadVersion(version)
-		out, err := newSSZGetPayloadResponse(resp, sv)
+		out, err := encodeGetPayloadResponse(resp, sv)
 		if err != nil {
 			writeSSZError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
-		writeSSZ(w, out)
+		writeSSZBytes(w, out)
 	}
 }
 
@@ -274,33 +275,33 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := newSSZRESTMessage(sszMessageForkchoiceRequest, sv)
-	if err := req.DecodeSSZ(body, int(sv)); err != nil {
+	state, attrs, err := decodeForkchoiceRequest(body, sv)
+	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var resp *engine_types.ForkChoiceUpdatedResponse
 	switch version {
 	case 1:
-		resp, err = e.ForkchoiceUpdatedV1(r.Context(), &req.State, req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV1(r.Context(), &state, attrs)
 	case 2:
-		resp, err = e.ForkchoiceUpdatedV2(r.Context(), &req.State, req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV2(r.Context(), &state, attrs)
 	case 3:
-		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &req.State, req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &req.State, req.payloadAttributes())
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
 	}
 	if err != nil {
 		writeEngineError(w, err)
 		return
 	}
-	out, err := forkchoiceResponseToSSZ(resp)
+	out, err := encodeForkchoiceResponse(resp)
 	if err != nil {
 		writeSSZError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	e.logger.Info("[SSZ-REST] handled forkchoice", "path", r.URL.Path)
-	writeSSZ(w, out)
+	writeSSZBytes(w, out)
 }
 
 func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request, version int) {
@@ -330,7 +331,12 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		writeSSZ(w, newSSZGetBlobsV1Response(resp))
+		out, err := encodeGetBlobsV1Response(resp)
+		if err != nil {
+			writeSSZError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeSSZBytes(w, out)
 		return
 	case 2:
 		resp, err := e.GetBlobsV2(r.Context(), hashListValues(hashes))
@@ -339,7 +345,12 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		writeSSZ(w, newSSZGetBlobsV2Response(resp))
+		out, err := encodeGetBlobsV2Response(resp)
+		if err != nil {
+			writeSSZError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeSSZBytes(w, out)
 		return
 	case 3:
 		resp, err := e.GetBlobsV3(r.Context(), hashListValues(hashes))
@@ -348,7 +359,12 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		e.logger.Info("[SSZ-REST] handled get blobs", "path", r.URL.Path)
-		writeSSZ(w, newSSZGetBlobsV3Response(resp))
+		out, err := encodeGetBlobsV3Response(resp)
+		if err != nil {
+			writeSSZError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeSSZBytes(w, out)
 		return
 	}
 }
@@ -359,18 +375,23 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := newSSZRESTMessage(sszMessageClientVersionRequest, 0)
-	if err := req.DecodeSSZ(body, 0); err != nil {
+	clientVersion, err := decodeClientVersionRequest(body)
+	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp, err := e.GetClientVersionV1(r.Context(), req.ClientVersion)
+	resp, err := e.GetClientVersionV1(r.Context(), clientVersion)
 	if err != nil {
 		writeEngineError(w, err)
 		return
 	}
 	e.logger.Info("[SSZ-REST] handled client version", "path", r.URL.Path)
-	writeSSZ(w, newSSZClientVersionResponse(resp))
+	out, err := encodeClientVersionResponse(resp)
+	if err != nil {
+		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -381,14 +402,19 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := newSSZRESTMessage(sszMessageCapabilities, 0)
-	if err := req.DecodeSSZ(body, 0); err != nil {
+	capabilities, err := decodeCapabilities(body, 0)
+	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp := e.ExchangeCapabilities(req.capabilityNames())
+	resp := e.ExchangeCapabilities(capabilities)
 	e.logger.Info("[SSZ-REST] handled capabilities", "path", r.URL.Path)
-	writeSSZ(w, newSSZCapabilities(resp))
+	out, err := encodeCapabilities(resp)
+	if err != nil {
+		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
 }
 
 func hashesToCommon(in []common.Hash) []common.Hash { return in }
