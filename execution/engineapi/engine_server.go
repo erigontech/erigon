@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
@@ -927,6 +928,16 @@ func (e *EngineServer) HandleNewPayload(
 	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
+
+	// Cache the incoming BAL bytes so downstream consumers (read-ahead,
+	// validation, BAL-driven workers) can fetch from process memory without
+	// touching MDBX. The bal-cache architecture removes the BAL from MDBX
+	// on the NewPayload critical path entirely; mirrors the design pattern
+	// from mh/perf-bal-cache so the eventual refactor is a wiring move,
+	// not a redesign.
+	if len(blockAccessListBytes) > 0 {
+		balcache.CacheBlockAccessList(block.Hash(), blockAccessListBytes)
+	}
 
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
