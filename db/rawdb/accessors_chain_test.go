@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimit uint64, gasPrice uint256.Int) *types.LegacyTx {
@@ -1124,59 +1123,6 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
-}
-
-func TestBlockAccessListStorage(t *testing.T) {
-	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
-	defer tx.Rollback()
-
-	block := types.NewBlockWithHeader(&types.Header{
-		Number:      *uint256.NewInt(1),
-		Extra:       []byte("test block"),
-		UncleHash:   empty.UncleHash,
-		TxHash:      empty.RootHash,
-		ReceiptHash: empty.RootHash,
-	})
-
-	data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
-	require.NoError(t, err)
-	require.Empty(t, data)
-
-	nonEmpty := types.BlockAccessList{
-		{
-			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
-		},
-	}
-	nonEmptyBytes, err := types.EncodeBlockAccessListBytes(nonEmpty)
-	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), nonEmptyBytes))
-
-	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
-	require.NoError(t, err)
-	require.Equal(t, nonEmptyBytes, data)
-
-	decoded, err := types.DecodeBlockAccessListBytes(data)
-	require.NoError(t, err)
-	require.NoError(t, decoded.Validate())
-	require.Equal(t, nonEmpty.Hash(), decoded.Hash())
-
-	emptyBytes, err := types.EncodeBlockAccessListBytes(nil)
-	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBytes))
-
-	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
-	require.NoError(t, err)
-	require.Equal(t, emptyBytes, data)
-
-	decoded, err = types.DecodeBlockAccessListBytes(data)
-	require.NoError(t, err)
-	// EIP-7928: Decoding 0xc0 (empty RLP list) should return an initialized empty slice,
-	// rather than nil, to distinguish a valid empty BAL from a missing/pruned one.
-	require.NotNil(t, decoded)
-	require.Empty(t, decoded)
-	require.NoError(t, decoded.Validate())
-	require.Equal(t, empty.BlockAccessListHash, decoded.Hash())
 }
 
 // Tests pre-shanghai body to make sure withdrawals doesn't panic

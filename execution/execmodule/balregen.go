@@ -19,7 +19,8 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -27,13 +28,13 @@ import (
 	rawdbv3 "github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
@@ -199,6 +200,6 @@ func (s *chainReaderShim) CurrentSafeHeader() *types.Header                     
 func (s *chainReaderShim) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (s *chainReaderShim) GetHeaderByNumber(number uint64) *types.Header           { return nil }
 func (s *chainReaderShim) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (s *chainReaderShim) GetTd(hash common.Hash, number uint64) *big.Int          { return big.NewInt(0) }
+func (s *chainReaderShim) GetTd(hash common.Hash, number uint64) *uint256.Int      { return uint256.NewInt(0) }
 func (s *chainReaderShim) FrozenBlocks() uint64                                    { return 0 }
 func (s *chainReaderShim) FrozenBorBlocks(align bool) uint64                       { return 0 }
