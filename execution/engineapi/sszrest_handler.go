@@ -274,7 +274,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &forkchoiceRequest{version: sv}
+	req := newSSZRESTMessage(sszMessageForkchoiceRequest, sv)
 	if err := req.DecodeSSZ(body, int(sv)); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
@@ -359,7 +359,7 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &clientVersionRequest{}
+	req := newSSZRESTMessage(sszMessageClientVersionRequest, 0)
 	if err := req.DecodeSSZ(body, 0); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
@@ -381,12 +381,12 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &capabilities{}
+	req := newSSZRESTMessage(sszMessageCapabilities, 0)
 	if err := req.DecodeSSZ(body, 0); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp := e.ExchangeCapabilities(req.names())
+	resp := e.ExchangeCapabilities(req.capabilityNames())
 	e.logger.Info("[SSZ-REST] handled capabilities", "path", r.URL.Path)
 	writeSSZ(w, newSSZCapabilities(resp))
 }
