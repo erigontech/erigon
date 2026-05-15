@@ -184,10 +184,10 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		status, err = e.NewPayloadV3(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root)
 	case 4:
 		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, req.ExecutionRequests.bytes())
+		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, transactionsBytes(req.ExecutionRequests))
 	case 5:
 		root := req.ParentBeaconBlockRoot
-		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, req.ExecutionRequests.bytes())
+		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(req.ExpectedBlobHashes), &root, transactionsBytes(req.ExecutionRequests))
 	}
 	if err != nil {
 		writeEngineError(w, err)

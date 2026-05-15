@@ -29,10 +29,8 @@ import (
 const (
 	sszMaxBlobHashes          = 4096
 	sszMaxGetBlobHashes       = 128
-	sszMaxExecutionRequests   = 256
 	sszMaxCapabilityNameBytes = 64
 	sszMaxCapabilities        = 64
-	sszMaxBytesPerTransaction = 0x40000000
 	sszBlobBytes              = 0x20000
 	sszKZGBytes               = 48
 	sszCellsPerExtBlob        = 128
@@ -52,44 +50,15 @@ func hashListValues(l solid.HashListSSZ) []common.Hash {
 	return out
 }
 
-type sszByteListList struct {
-	List  *solid.ListSSZ[*solid.ByteListSSZ]
-	Limit int
-}
-
-func newSSZByteListList(limit int, items []hexutil.Bytes) *sszByteListList {
-	l := solid.NewDynamicListSSZ[*solid.ByteListSSZ](limit)
-	for _, item := range items {
-		b := solid.NewByteListSSZ(sszMaxBytesPerTransaction)
-		_ = b.SetBytes(item)
-		l.Append(b)
-	}
-	return &sszByteListList{List: l, Limit: limit}
-}
-func (l *sszByteListList) Static() bool { return false }
-func (l *sszByteListList) EncodeSSZ(dst []byte) ([]byte, error) {
-	if l.List == nil {
-		l.List = solid.NewDynamicListSSZ[*solid.ByteListSSZ](l.Limit)
-	}
-	return l.List.EncodeSSZ(dst)
-}
-func (l *sszByteListList) DecodeSSZ(buf []byte, version int) error {
-	l.List = solid.NewDynamicListSSZ[*solid.ByteListSSZ](l.Limit)
-	return l.List.DecodeSSZ(buf, version)
-}
-func (l *sszByteListList) EncodingSizeSSZ() int {
-	if l.List == nil {
-		return 0
-	}
-	return l.List.EncodingSizeSSZ()
-}
-func (l *sszByteListList) Clone() clonable.Clonable { return &sszByteListList{Limit: l.Limit} }
-func (l *sszByteListList) bytes() []hexutil.Bytes {
-	if l.List == nil {
+func transactionsBytes(txs *solid.TransactionsSSZ) []hexutil.Bytes {
+	if txs == nil {
 		return nil
 	}
-	out := make([]hexutil.Bytes, 0, l.List.Len())
-	l.List.Range(func(_ int, v *solid.ByteListSSZ, _ int) bool { out = append(out, v.Bytes()); return true })
+	out := make([]hexutil.Bytes, 0)
+	txs.ForEach(func(tx []byte, _ int, _ int) bool {
+		out = append(out, tx)
+		return true
+	})
 	return out
 }
 
@@ -174,12 +143,12 @@ type sszNewPayloadRequest struct {
 	Payload               *engine_types.ExecutionPayload
 	ExpectedBlobHashes    solid.HashListSSZ
 	ParentBeaconBlockRoot common.Hash
-	ExecutionRequests     *sszByteListList
+	ExecutionRequests     *solid.TransactionsSSZ
 	version               clparams.StateVersion
 }
 
 func newSSZNewPayloadRequest(version clparams.StateVersion) *sszNewPayloadRequest {
-	return &sszNewPayloadRequest{Payload: engine_types.NewExecutionPayloadSSZ(version), ExpectedBlobHashes: solid.NewHashList(sszMaxBlobHashes), ExecutionRequests: &sszByteListList{Limit: sszMaxExecutionRequests}, version: version}
+	return &sszNewPayloadRequest{Payload: engine_types.NewExecutionPayloadSSZ(version), ExpectedBlobHashes: solid.NewHashList(sszMaxBlobHashes), ExecutionRequests: &solid.TransactionsSSZ{}, version: version}
 }
 func (r *sszNewPayloadRequest) Static() bool { return false }
 func (r *sszNewPayloadRequest) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -196,7 +165,7 @@ func (r *sszNewPayloadRequest) DecodeSSZ(buf []byte, version int) error {
 	r.version = clparams.StateVersion(version)
 	r.Payload = engine_types.NewExecutionPayloadSSZ(r.version)
 	r.ExpectedBlobHashes = solid.NewHashList(sszMaxBlobHashes)
-	r.ExecutionRequests = &sszByteListList{Limit: sszMaxExecutionRequests}
+	r.ExecutionRequests = &solid.TransactionsSSZ{}
 	switch r.version {
 	case clparams.BellatrixVersion, clparams.CapellaVersion:
 		return ssz2.UnmarshalSSZ(buf, version, r.Payload)
@@ -301,8 +270,8 @@ func (r *sszClientVersionResponse) DecodeSSZ(buf []byte, version int) error {
 func (r *sszClientVersionResponse) EncodingSizeSSZ() int   { b, _ := r.EncodeSSZ(nil); return len(b) }
 func (*sszClientVersionResponse) Clone() clonable.Clonable { return &sszClientVersionResponse{} }
 
-func blockValueBytes(v *hexutil.Big) []byte {
-	out := make([]byte, 32)
+func blockValueHash(v *hexutil.Big) common.Hash {
+	var out common.Hash
 	if v == nil {
 		return out
 	}
@@ -322,30 +291,11 @@ func newBlobsBundleSSZ(b *engine_types.BlobsBundle, version clparams.StateVersio
 	return b
 }
 
-type sszBool struct{ Value bool }
-
-func (*sszBool) Static() bool         { return true }
-func (*sszBool) EncodingSizeSSZ() int { return 1 }
-func (b *sszBool) EncodeSSZ(dst []byte) ([]byte, error) {
-	if b.Value {
-		return append(dst, 1), nil
-	}
-	return append(dst, 0), nil
-}
-func (b *sszBool) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < 1 {
-		return errors.New("short bool")
-	}
-	b.Value = buf[0] != 0
-	return nil
-}
-func (*sszBool) Clone() clonable.Clonable { return &sszBool{} }
-
 type sszGetPayloadResponse struct {
 	Payload               *engine_types.ExecutionPayload
-	BlockValue            *sszFixedBytes
+	BlockValue            common.Hash
 	BlobsBundle           *engine_types.BlobsBundle
-	ShouldOverrideBuilder *sszBool
+	ShouldOverrideBuilder bool
 	ExecutionRequests     *cltypes.ExecutionRequests
 	version               clparams.StateVersion
 }
@@ -359,9 +309,9 @@ func newSSZGetPayloadResponse(resp *engine_types.GetPayloadResponse, version clp
 	}
 	return &sszGetPayloadResponse{
 		Payload:               payload,
-		BlockValue:            newSSZFixedBytes(32, blockValueBytes(resp.BlockValue)),
+		BlockValue:            blockValueHash(resp.BlockValue),
 		BlobsBundle:           newBlobsBundleSSZ(resp.BlobsBundle, version),
-		ShouldOverrideBuilder: &sszBool{Value: resp.ShouldOverrideBuilder},
+		ShouldOverrideBuilder: resp.ShouldOverrideBuilder,
 		ExecutionRequests:     executionRequests,
 		version:               version,
 	}, nil
@@ -370,27 +320,25 @@ func (r *sszGetPayloadResponse) Static() bool { return false }
 func (r *sszGetPayloadResponse) EncodeSSZ(dst []byte) ([]byte, error) {
 	switch r.version {
 	case clparams.CapellaVersion:
-		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue)
+		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue[:])
 	case clparams.DenebVersion:
-		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue, r.BlobsBundle, r.ShouldOverrideBuilder)
+		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue[:], r.BlobsBundle, r.ShouldOverrideBuilder)
 	default:
-		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue, r.BlobsBundle, r.ShouldOverrideBuilder, r.ExecutionRequests)
+		return ssz2.MarshalSSZ(dst, r.Payload, r.BlockValue[:], r.BlobsBundle, r.ShouldOverrideBuilder, r.ExecutionRequests)
 	}
 }
 func (r *sszGetPayloadResponse) DecodeSSZ(buf []byte, version int) error {
 	r.version = clparams.StateVersion(version)
 	r.Payload = engine_types.NewExecutionPayloadSSZ(r.version)
-	r.BlockValue = newSSZFixedBytes(32, nil)
 	r.BlobsBundle = engine_types.NewBlobsBundleSSZ(r.version)
-	r.ShouldOverrideBuilder = &sszBool{}
 	r.ExecutionRequests = cltypes.NewExecutionRequests(mainnetBeaconCfg)
 	switch r.version {
 	case clparams.CapellaVersion:
-		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue)
+		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue[:])
 	case clparams.DenebVersion:
-		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue, r.BlobsBundle, r.ShouldOverrideBuilder)
+		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue[:], r.BlobsBundle, &r.ShouldOverrideBuilder)
 	default:
-		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue, r.BlobsBundle, r.ShouldOverrideBuilder, r.ExecutionRequests)
+		return ssz2.UnmarshalSSZ(buf, version, r.Payload, r.BlockValue[:], r.BlobsBundle, &r.ShouldOverrideBuilder, r.ExecutionRequests)
 	}
 }
 func (r *sszGetPayloadResponse) EncodingSizeSSZ() int { out, _ := r.EncodeSSZ(nil); return len(out) }
@@ -423,50 +371,6 @@ func executionRequestsFromList(requests []hexutil.Bytes, version clparams.StateV
 		}
 	}
 	return out, nil
-}
-
-type sszFixedBytes struct {
-	Bytes []byte
-	Size  int
-}
-
-func newSSZFixedBytes(size int, in []byte) *sszFixedBytes {
-	out := &sszFixedBytes{Bytes: make([]byte, size), Size: size}
-	copy(out.Bytes, in)
-	return out
-}
-func (b *sszFixedBytes) Static() bool { return true }
-func (b *sszFixedBytes) EncodingSizeSSZ() int {
-	if b.Size == 0 {
-		return len(b.Bytes)
-	}
-	return b.Size
-}
-func (b *sszFixedBytes) EncodeSSZ(dst []byte) ([]byte, error) {
-	size := b.EncodingSizeSSZ()
-	if len(b.Bytes) != size {
-		return nil, fmt.Errorf("fixed bytes length %d, want %d", len(b.Bytes), size)
-	}
-	return append(dst, b.Bytes...), nil
-}
-func (b *sszFixedBytes) DecodeSSZ(buf []byte, _ int) error {
-	size := b.EncodingSizeSSZ()
-	if len(buf) < size {
-		return errors.New("short fixed bytes")
-	}
-	b.Bytes = common.Copy(buf[:size])
-	return nil
-}
-func (b *sszFixedBytes) HashSSZ() ([32]byte, error) {
-	var h common.Hash
-	copy(h[:], b.Bytes)
-	return h, nil
-}
-func (b *sszFixedBytes) Clone() clonable.Clonable {
-	if b == nil {
-		return &sszFixedBytes{}
-	}
-	return &sszFixedBytes{Size: b.Size}
 }
 
 type sszGetBlobsV1Response struct {
@@ -523,56 +427,26 @@ func (r *sszGetBlobsV2Response) DecodeSSZ(buf []byte, version int) error {
 func (r *sszGetBlobsV2Response) EncodingSizeSSZ() int   { b, _ := r.EncodeSSZ(nil); return len(b) }
 func (*sszGetBlobsV2Response) Clone() clonable.Clonable { return &sszGetBlobsV2Response{} }
 
-type sszNullableBlobAndProofV2 struct {
-	BlobAndProof *solid.ListSSZ[*engine_types.BlobAndProofV2]
-}
-
-func newSSZNullableBlobAndProofV2(blob *engine_types.BlobAndProofV2) *sszNullableBlobAndProofV2 {
-	l := solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](1)
-	if blob != nil {
-		l.Append(blob)
-	}
-	return &sszNullableBlobAndProofV2{BlobAndProof: l}
-}
-func (n *sszNullableBlobAndProofV2) Static() bool { return false }
-func (n *sszNullableBlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
-	if n.BlobAndProof == nil {
-		n.BlobAndProof = solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](1)
-	}
-	return ssz2.MarshalSSZ(dst, n.BlobAndProof)
-}
-func (n *sszNullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
-	n.BlobAndProof = solid.NewDynamicListSSZ[*engine_types.BlobAndProofV2](1)
-	return ssz2.UnmarshalSSZ(buf, version, n.BlobAndProof)
-}
-func (n *sszNullableBlobAndProofV2) EncodingSizeSSZ() int { b, _ := n.EncodeSSZ(nil); return len(b) }
-func (n *sszNullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
-	return [32]byte{}, nil
-}
-func (*sszNullableBlobAndProofV2) Clone() clonable.Clonable {
-	return &sszNullableBlobAndProofV2{}
-}
-
 type sszGetBlobsV3Response struct {
-	BlobsAndProofs *solid.ListSSZ[*sszNullableBlobAndProofV2]
+	BlobsAndProofs *solid.ListSSZ[*engine_types.NullableBlobAndProofV2]
 }
 
 func newSSZGetBlobsV3Response(blobs []*engine_types.BlobAndProofV2) *sszGetBlobsV3Response {
-	l := solid.NewDynamicListSSZ[*sszNullableBlobAndProofV2](sszMaxGetBlobHashes)
+	l := solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes)
 	for _, blob := range blobs {
-		l.Append(newSSZNullableBlobAndProofV2(blob))
+		l.Append(engine_types.NewNullableBlobAndProofV2(blob))
 	}
 	return &sszGetBlobsV3Response{BlobsAndProofs: l}
 }
 func (r *sszGetBlobsV3Response) Static() bool { return false }
 func (r *sszGetBlobsV3Response) EncodeSSZ(dst []byte) ([]byte, error) {
 	if r.BlobsAndProofs == nil {
-		r.BlobsAndProofs = solid.NewDynamicListSSZ[*sszNullableBlobAndProofV2](sszMaxGetBlobHashes)
+		r.BlobsAndProofs = solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes)
 	}
 	return ssz2.MarshalSSZ(dst, r.BlobsAndProofs)
 }
 func (r *sszGetBlobsV3Response) DecodeSSZ(buf []byte, version int) error {
-	r.BlobsAndProofs = solid.NewDynamicListSSZ[*sszNullableBlobAndProofV2](sszMaxGetBlobHashes)
+	r.BlobsAndProofs = solid.NewDynamicListSSZ[*engine_types.NullableBlobAndProofV2](sszMaxGetBlobHashes)
 	return ssz2.UnmarshalSSZ(buf, version, r.BlobsAndProofs)
 }
 func (r *sszGetBlobsV3Response) EncodingSizeSSZ() int   { b, _ := r.EncodeSSZ(nil); return len(b) }

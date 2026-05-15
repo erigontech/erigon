@@ -5,7 +5,6 @@ package engine_types
 
 import (
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -173,41 +172,20 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 	return p
 }
 
-type sszWithdrawalList struct {
-	List *solid.ListSSZ[*cltypes.Withdrawal]
-}
-
-func newSSZWithdrawalList(ws []*types.Withdrawal) *sszWithdrawalList {
+func newWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range ws {
 		l.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
 	}
-	return &sszWithdrawalList{List: l}
+	return l
 }
-func (l *sszWithdrawalList) Static() bool { return false }
-func (l *sszWithdrawalList) EncodeSSZ(dst []byte) ([]byte, error) {
-	if l.List == nil {
-		l.List = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
-	}
-	return l.List.EncodeSSZ(dst)
-}
-func (l *sszWithdrawalList) DecodeSSZ(buf []byte, version int) error {
-	l.List = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
-	return l.List.DecodeSSZ(buf, version)
-}
-func (l *sszWithdrawalList) EncodingSizeSSZ() int {
-	if l.List == nil {
-		return 0
-	}
-	return l.List.EncodingSizeSSZ()
-}
-func (*sszWithdrawalList) Clone() clonable.Clonable { return &sszWithdrawalList{} }
-func (l *sszWithdrawalList) withdrawals() []*types.Withdrawal {
-	if l.List == nil {
+
+func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdrawal {
+	if l == nil {
 		return nil
 	}
-	out := make([]*types.Withdrawal, 0, l.List.Len())
-	l.List.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
+	out := make([]*types.Withdrawal, 0, l.Len())
+	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
 		out = append(out, &types.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
 		return true
 	})
@@ -315,7 +293,7 @@ func (a *PayloadAttributes) Static() bool { return false }
 
 func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 	version := a.payloadAttributesSSZVersion()
-	withdrawals := newSSZWithdrawalList(a.Withdrawals)
+	withdrawals := newWithdrawalList(a.Withdrawals)
 	var root common.Hash
 	if a.ParentBeaconBlockRoot != nil {
 		root = *a.ParentBeaconBlockRoot
@@ -338,7 +316,7 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 	a.SSZVersion = clparams.StateVersion(version)
-	withdrawals := &sszWithdrawalList{}
+	withdrawals := newWithdrawalList(nil)
 	var timestamp uint64
 	var root common.Hash
 	var slot uint64
@@ -351,18 +329,18 @@ func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals); err != nil {
 			return err
 		}
-		a.Withdrawals = withdrawals.withdrawals()
+		a.Withdrawals = withdrawalsFromList(withdrawals)
 	case clparams.DenebVersion:
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:]); err != nil {
 			return err
 		}
-		a.Withdrawals = withdrawals.withdrawals()
+		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
 	default:
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot); err != nil {
 			return err
 		}
-		a.Withdrawals = withdrawals.withdrawals()
+		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
 		slotNumber := hexutil.Uint64(slot)
 		a.SlotNumber = &slotNumber
@@ -422,99 +400,23 @@ func (v *ClientVersionV1) HashSSZ() ([32]byte, error) {
 }
 func (*ClientVersionV1) Clone() clonable.Clonable { return &ClientVersionV1{} }
 
-type sszFixedBytes struct {
-	Bytes []byte
-	Size  int
-}
-
-func newSSZFixedBytes(size int, in []byte) *sszFixedBytes {
-	out := &sszFixedBytes{Bytes: make([]byte, size), Size: size}
-	copy(out.Bytes, in)
-	return out
-}
-func (b *sszFixedBytes) Static() bool { return true }
-func (b *sszFixedBytes) EncodingSizeSSZ() int {
-	if b.Size == 0 {
-		return len(b.Bytes)
-	}
-	return b.Size
-}
-func (b *sszFixedBytes) EncodeSSZ(dst []byte) ([]byte, error) {
-	size := b.EncodingSizeSSZ()
-	if len(b.Bytes) != size {
-		return nil, fmt.Errorf("fixed bytes length %d, want %d", len(b.Bytes), size)
-	}
-	return append(dst, b.Bytes...), nil
-}
-func (b *sszFixedBytes) DecodeSSZ(buf []byte, _ int) error {
-	size := b.EncodingSizeSSZ()
-	if len(buf) < size {
-		return errors.New("short fixed bytes")
-	}
-	b.Bytes = common.Copy(buf[:size])
-	return nil
-}
-func (b *sszFixedBytes) HashSSZ() ([32]byte, error) {
-	var h common.Hash
-	copy(h[:], b.Bytes)
-	return h, nil
-}
-func (b *sszFixedBytes) Clone() clonable.Clonable {
-	if b == nil {
-		return &sszFixedBytes{}
-	}
-	return &sszFixedBytes{Size: b.Size}
-}
-
-type sszKZGVector struct{ Bytes [sszKZGBytes]byte }
-
-func newSSZKZGVector(in []byte) *sszKZGVector {
-	var out sszKZGVector
-	copy(out.Bytes[:], in)
+func newKZGCommitment(in []byte) *cltypes.KZGCommitment {
+	var out cltypes.KZGCommitment
+	copy(out[:], in)
 	return &out
 }
-func (*sszKZGVector) Static() bool         { return true }
-func (*sszKZGVector) EncodingSizeSSZ() int { return sszKZGBytes }
-func (b *sszKZGVector) EncodeSSZ(dst []byte) ([]byte, error) {
-	return append(dst, b.Bytes[:]...), nil
-}
-func (b *sszKZGVector) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < sszKZGBytes {
-		return errors.New("short kzg vector")
-	}
-	copy(b.Bytes[:], buf[:sszKZGBytes])
-	return nil
-}
-func (b *sszKZGVector) HashSSZ() ([32]byte, error) {
-	var h common.Hash
-	copy(h[:], b.Bytes[:])
-	return h, nil
-}
-func (*sszKZGVector) Clone() clonable.Clonable { return &sszKZGVector{} }
 
-type sszBlobVector struct{ Bytes [sszBlobBytes]byte }
-
-func newSSZBlobVector(in []byte) *sszBlobVector {
-	var out sszBlobVector
-	copy(out.Bytes[:], in)
+func newKZGProof(in []byte) *cltypes.KZGProof {
+	var out cltypes.KZGProof
+	copy(out[:], in)
 	return &out
 }
-func (*sszBlobVector) Static() bool         { return true }
-func (*sszBlobVector) EncodingSizeSSZ() int { return sszBlobBytes }
-func (b *sszBlobVector) EncodeSSZ(dst []byte) ([]byte, error) {
-	return append(dst, b.Bytes[:]...), nil
+
+func newBlob(in []byte) *cltypes.Blob {
+	var out cltypes.Blob
+	copy(out[:], in)
+	return &out
 }
-func (b *sszBlobVector) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < sszBlobBytes {
-		return errors.New("short blob vector")
-	}
-	copy(b.Bytes[:], buf[:sszBlobBytes])
-	return nil
-}
-func (b *sszBlobVector) HashSSZ() ([32]byte, error) {
-	return common.Hash{}, nil
-}
-func (*sszBlobVector) Clone() clonable.Clonable { return &sszBlobVector{} }
 
 func NewBlobsBundleSSZ(version clparams.StateVersion) *BlobsBundle {
 	return &BlobsBundle{SSZVersion: version}
@@ -527,17 +429,17 @@ func (b *BlobsBundle) EncodeSSZ(dst []byte) ([]byte, error) {
 	if b.blobsBundleSSZVersion() >= clparams.FuluVersion {
 		proofsLimit = sszMaxCellProofs
 	}
-	commitments := solid.NewStaticListSSZ[*sszKZGVector](sszMaxBlobHashes, sszKZGBytes)
-	proofs := solid.NewStaticListSSZ[*sszKZGVector](proofsLimit, sszKZGBytes)
-	blobs := solid.NewStaticListSSZ[*sszBlobVector](sszMaxBlobHashes, sszBlobBytes)
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobHashes, sszKZGBytes)
+	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](proofsLimit, sszKZGBytes)
+	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobHashes, sszBlobBytes)
 	for _, commitment := range b.Commitments {
-		commitments.Append(newSSZKZGVector(commitment))
+		commitments.Append(newKZGCommitment(commitment))
 	}
 	for _, proof := range b.Proofs {
-		proofs.Append(newSSZKZGVector(proof))
+		proofs.Append(newKZGProof(proof))
 	}
 	for _, blob := range b.Blobs {
-		blobs.Append(newSSZBlobVector(blob))
+		blobs.Append(newBlob(blob))
 	}
 	return ssz2.MarshalSSZ(dst, commitments, proofs, blobs)
 }
@@ -548,15 +450,15 @@ func (b *BlobsBundle) DecodeSSZ(buf []byte, version int) error {
 	if b.SSZVersion >= clparams.FuluVersion {
 		proofsLimit = sszMaxCellProofs
 	}
-	commitments := solid.NewStaticListSSZ[*sszKZGVector](sszMaxBlobHashes, sszKZGBytes)
-	proofs := solid.NewStaticListSSZ[*sszKZGVector](proofsLimit, sszKZGBytes)
-	blobs := solid.NewStaticListSSZ[*sszBlobVector](sszMaxBlobHashes, sszBlobBytes)
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](sszMaxBlobHashes, sszKZGBytes)
+	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](proofsLimit, sszKZGBytes)
+	blobs := solid.NewStaticListSSZ[*cltypes.Blob](sszMaxBlobHashes, sszBlobBytes)
 	if err := ssz2.UnmarshalSSZ(buf, version, commitments, proofs, blobs); err != nil {
 		return err
 	}
-	b.Commitments = kzgVectorsBytes(commitments)
-	b.Proofs = kzgVectorsBytes(proofs)
-	b.Blobs = blobVectorsBytes(blobs)
+	b.Commitments = kzgCommitmentBytes(commitments)
+	b.Proofs = kzgProofBytes(proofs)
+	b.Blobs = blobBytes(blobs)
 	return nil
 }
 
@@ -572,19 +474,31 @@ func (b *BlobsBundle) blobsBundleSSZVersion() clparams.StateVersion {
 	return clparams.DenebVersion
 }
 
-func kzgVectorsBytes(list *solid.ListSSZ[*sszKZGVector]) []hexutil.Bytes {
+func kzgCommitmentBytes(list *solid.ListSSZ[*cltypes.KZGCommitment]) []hexutil.Bytes {
 	out := make([]hexutil.Bytes, 0, list.Len())
-	list.Range(func(_ int, v *sszKZGVector, _ int) bool {
-		out = append(out, common.Copy(v.Bytes[:]))
+	list.Range(func(_ int, v *cltypes.KZGCommitment, _ int) bool {
+		value := *v
+		out = append(out, common.Copy(value[:]))
 		return true
 	})
 	return out
 }
 
-func blobVectorsBytes(list *solid.ListSSZ[*sszBlobVector]) []hexutil.Bytes {
+func kzgProofBytes(list *solid.ListSSZ[*cltypes.KZGProof]) []hexutil.Bytes {
 	out := make([]hexutil.Bytes, 0, list.Len())
-	list.Range(func(_ int, v *sszBlobVector, _ int) bool {
-		out = append(out, common.Copy(v.Bytes[:]))
+	list.Range(func(_ int, v *cltypes.KZGProof, _ int) bool {
+		value := *v
+		out = append(out, common.Copy(value[:]))
+		return true
+	})
+	return out
+}
+
+func blobBytes(list *solid.ListSSZ[*cltypes.Blob]) []hexutil.Bytes {
+	out := make([]hexutil.Bytes, 0, list.Len())
+	list.Range(func(_ int, v *cltypes.Blob, _ int) bool {
+		value := *v
+		out = append(out, common.Copy(value[:]))
 		return true
 	})
 	return out
@@ -593,16 +507,16 @@ func blobVectorsBytes(list *solid.ListSSZ[*sszBlobVector]) []hexutil.Bytes {
 func (*BlobAndProofV1) Static() bool         { return true }
 func (*BlobAndProofV1) EncodingSizeSSZ() int { return sszBlobBytes + sszKZGBytes }
 func (b *BlobAndProofV1) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, newSSZFixedBytes(sszBlobBytes, b.Blob), newSSZFixedBytes(sszKZGBytes, b.Proof))
+	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), newKZGProof(b.Proof))
 }
 func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
-	blob := &sszFixedBytes{Size: sszBlobBytes}
-	proof := &sszFixedBytes{Size: sszKZGBytes}
+	blob := &cltypes.Blob{}
+	proof := &cltypes.KZGProof{}
 	if err := ssz2.UnmarshalSSZ(buf, version, blob, proof); err != nil {
 		return err
 	}
-	b.Blob = blob.Bytes
-	b.Proof = proof.Bytes
+	b.Blob = common.Copy(blob[:])
+	b.Proof = common.Copy(proof[:])
 	return nil
 }
 func (b *BlobAndProofV1) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
@@ -610,22 +524,60 @@ func (*BlobAndProofV1) Clone() clonable.Clonable     { return &BlobAndProofV1{} 
 
 func (*BlobAndProofV2) Static() bool { return false }
 func (b *BlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
-	proofs := solid.NewStaticListSSZ[*sszKZGVector](sszCellsPerExtBlob, sszKZGBytes)
+	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)
 	for _, proof := range b.CellProofs {
-		proofs.Append(newSSZKZGVector(proof))
+		proofs.Append(newKZGProof(proof))
 	}
-	return ssz2.MarshalSSZ(dst, newSSZFixedBytes(sszBlobBytes, b.Blob), proofs)
+	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), proofs)
 }
 func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
-	blob := &sszFixedBytes{Size: sszBlobBytes}
-	proofs := solid.NewStaticListSSZ[*sszKZGVector](sszCellsPerExtBlob, sszKZGBytes)
+	blob := &cltypes.Blob{}
+	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)
 	if err := ssz2.UnmarshalSSZ(buf, version, blob, proofs); err != nil {
 		return err
 	}
-	b.Blob = blob.Bytes
-	b.CellProofs = kzgVectorsBytes(proofs)
+	b.Blob = common.Copy(blob[:])
+	b.CellProofs = kzgProofBytes(proofs)
 	return nil
 }
 func (b *BlobAndProofV2) EncodingSizeSSZ() int       { out, _ := b.EncodeSSZ(nil); return len(out) }
 func (b *BlobAndProofV2) HashSSZ() ([32]byte, error) { return [32]byte{}, nil }
 func (*BlobAndProofV2) Clone() clonable.Clonable     { return &BlobAndProofV2{} }
+
+type NullableBlobAndProofV2 struct {
+	BlobAndProof *BlobAndProofV2
+}
+
+func NewNullableBlobAndProofV2(blob *BlobAndProofV2) *NullableBlobAndProofV2 {
+	return &NullableBlobAndProofV2{BlobAndProof: blob}
+}
+
+func (n *NullableBlobAndProofV2) Static() bool { return false }
+
+func (n *NullableBlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
+	blobAndProof := solid.NewDynamicListSSZ[*BlobAndProofV2](1)
+	if n != nil && n.BlobAndProof != nil {
+		blobAndProof.Append(n.BlobAndProof)
+	}
+	return ssz2.MarshalSSZ(dst, blobAndProof)
+}
+
+func (n *NullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
+	blobAndProof := solid.NewDynamicListSSZ[*BlobAndProofV2](1)
+	if err := ssz2.UnmarshalSSZ(buf, version, blobAndProof); err != nil {
+		return err
+	}
+	n.BlobAndProof = nil
+	if blobAndProof.Len() != 0 {
+		n.BlobAndProof = blobAndProof.Get(0)
+	}
+	return nil
+}
+
+func (n *NullableBlobAndProofV2) EncodingSizeSSZ() int { out, _ := n.EncodeSSZ(nil); return len(out) }
+func (n *NullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
+	return [32]byte{}, nil
+}
+func (*NullableBlobAndProofV2) Clone() clonable.Clonable {
+	return &NullableBlobAndProofV2{}
+}
