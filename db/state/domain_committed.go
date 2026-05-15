@@ -49,15 +49,27 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
 		return branch, nil // do not transform, return as is
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
 	acc := aggTx.d[kv.AccountsDomain]
-
+	storageItem, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	accountItem, err := acc.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
+	if err != nil {
+		logger.Crit("dereference key during commitment read", "failed", err.Error())
+		return nil, err
+	}
+	storageGetter := sto.dataReader(storageItem.decompressor)
+	accountGetter := acc.dataReader(accountItem.decompressor)
 	metricI := 0
 	for i, f := range aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
@@ -69,11 +81,6 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	// Getters resolve inline on first referenced-key hit, per domain. Branches with only
-	// noref keys (the common case once ReplaceKeysInValues is off or noref files are
-	// released) skip file resolution entirely.
-	var storageGetter, accountGetter *seg.Reader
-
 	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
@@ -81,14 +88,6 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 			}
 			if dbg.KVReadLevelledMetrics {
 				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-			}
-			if storageGetter == nil {
-				item, err := sto.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
-				if err != nil {
-					logger.Crit("dereference key during commitment read", "failed", err.Error())
-					return nil, err
-				}
-				storageGetter = sto.dataReader(item.decompressor)
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
@@ -107,14 +106,6 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 
 		if dbg.KVReadLevelledMetrics {
 			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
-		}
-		if accountGetter == nil {
-			item, err := acc.lookupVisibleFileByRange(fStartTxNum, fEndTxNum)
-			if err != nil {
-				logger.Crit("dereference key during commitment read", "failed", err.Error())
-				return nil, err
-			}
-			accountGetter = acc.dataReader(item.decompressor)
 		}
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
