@@ -382,7 +382,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
-	inputTotal := gas.Total()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -429,11 +428,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 		// EIP-8037: snapshot gasUsed and pending credit before callContext.put()
 		// clears them. Pending credit propagates only on success (revert drops it).
+		// gasUsed.Regular is derived uniformly by evm.call/evm.create's defer from
+		// the final leftOverGas (covers precompile/no-code paths and
+		// handleFrameRevert gas burn).
 		gasUsed.State = callContext.frameStateUsed
-		leftOverTotal := leftOver.Total()
-		if leftOverTotal <= inputTotal {
-			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
-		}
 		if err == nil {
 			gasUsed.PendingStateGasCredit = callContext.refundCreditPending
 		}

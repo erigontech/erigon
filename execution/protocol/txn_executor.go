@@ -620,43 +620,32 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			// state_gas_used, plus intrinsic NEW_ACCOUNT on CREATE tx) is
 			// issued from evm.{call,create} via AddStateRefund.
 			refundCounters := st.state.GetRefund()
-			st.gasRemaining.State += refundCounters.State
-			blockState := imdGas.State + gasUsed.State - refundCounters.State
-			// EIP-8037 block-regular: total gas charged across both dimensions
-			// is initialGas.Total − gasRemaining.Total; subtract the state
-			// dimension to get the regular contribution.
-			blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
-			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
-			st.blockStateGasUsed = blockState
-			// Receipt gasUsed: EIP-8037 formula tx.gas - gas_left - reservoir.
-			// Use Total()-level subtraction to avoid per-component uint64 underflow
-			// when gasRemaining.State > initialGas.State (reservoir grew via child reverts).
-			st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+			st.blockStateGasUsed = imdGas.State + gasUsed.State - refundCounters.State
+			st.blockRegularGasUsed = max(imdGas.Regular+gasUsed.Regular, intrinsicGasResult.FloorGasCost)
+			st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total() - refundCounters.State
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, refundCounters.Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
-			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
+			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
+			st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		blockState := imdGas.State + gasUsed.State
-		blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
-		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
-		st.blockStateGasUsed = blockState
-		st.txnGasUsedB4Refunds = st.initialGas.Total() - st.gasRemaining.Total()
+		st.blockStateGasUsed = imdGas.State + gasUsed.State
+		st.blockRegularGasUsed = max(imdGas.Regular+gasUsed.Regular, intrinsicGasResult.FloorGasCost)
+		st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
 		// Don't apply Prague floor or refunds — just record raw gas used.
-		st.txnGasUsedB4Refunds = st.initialGas.Regular - st.gasRemaining.Regular
+		st.txnGasUsedB4Refunds = imdGas.Regular + gasUsed.Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}

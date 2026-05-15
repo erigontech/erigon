@@ -212,6 +212,18 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	depth := evm.depth
 
+	// Derive gasUsed.Regular from the final leftOverGas at function exit,
+	// uniformly across Run / precompile / no-code paths and after any
+	// handleFrameRevert gas burn. gasUsed.State is set by Run's defer
+	// (frameStateUsed) and is 0 for precompile/no-code frames.
+	inputTotal := gas.Total()
+	defer func() {
+		leftOverTotal := leftOverGas.Total()
+		if leftOverTotal <= inputTotal {
+			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
+		}
+	}()
+
 	// EIP-8037: on top-level error refund the full execution state_gas_used
 	// to the reservoir via state_refund. On top-level success, any leftover
 	// inline refund credit that no frame absorbed flows to state_refund too.
@@ -452,6 +464,18 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			}
 		}()
 	}
+
+	// Derive gasUsed.Regular from the final leftOverGas at function exit,
+	// uniformly across all Create exit paths (Run, depth/balance/collision
+	// errors, post-handleFrameRevert gas burn). gasUsed.State is set by Run's
+	// defer for the initcode frame and stays 0 on early-exit paths.
+	inputTotal := gasRemaining.Total()
+	defer func() {
+		leftOverTotal := leftOverGas.Total()
+		if leftOverTotal <= inputTotal {
+			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
+		}
+	}()
 
 	depth := evm.depth
 
