@@ -28,7 +28,7 @@ func TestSSZRESTCapabilitiesCodecRoundTrip(t *testing.T) {
 	enc, err := in.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	var out sszCapabilities
+	var out capabilities
 	require.NoError(t, out.DecodeSSZ(enc, 0))
 	require.Equal(t, []string{"engine_newPayloadV1", "POST /engine/v1/payloads"}, out.names())
 }
@@ -75,11 +75,11 @@ func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 		{"newPayloadV5", clparams.GloasVersion, newSSZNewPayloadRequest(clparams.GloasVersion), func() interface{ DecodeSSZ([]byte, int) error } {
 			return newSSZNewPayloadRequest(clparams.GloasVersion)
 		}},
-		{"forkchoiceV1", clparams.BellatrixVersion, &sszForkchoiceRequest{version: clparams.BellatrixVersion}, func() interface{ DecodeSSZ([]byte, int) error } {
-			return &sszForkchoiceRequest{}
+		{"forkchoiceV1", clparams.BellatrixVersion, &forkchoiceRequest{version: clparams.BellatrixVersion}, func() interface{ DecodeSSZ([]byte, int) error } {
+			return &forkchoiceRequest{}
 		}},
-		{"forkchoiceV4", clparams.GloasVersion, &sszForkchoiceRequest{version: clparams.GloasVersion}, func() interface{ DecodeSSZ([]byte, int) error } {
-			return &sszForkchoiceRequest{}
+		{"forkchoiceV4", clparams.GloasVersion, &forkchoiceRequest{version: clparams.GloasVersion}, func() interface{ DecodeSSZ([]byte, int) error } {
+			return &forkchoiceRequest{}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,21 +112,21 @@ func TestSSZRESTGetBlobsCodecsRoundTrip(t *testing.T) {
 			name: "v1",
 			obj:  newSSZGetBlobsV1Response([]*engine_types.BlobAndProofV1{{Blob: blob, Proof: proof}, nil}),
 			empty: func() interface{ DecodeSSZ([]byte, int) error } {
-				return &sszGetBlobsV1Response{}
+				return &getBlobsV1Response{}
 			},
 		},
 		{
 			name: "v2",
 			obj:  newSSZGetBlobsV2Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil}),
 			empty: func() interface{ DecodeSSZ([]byte, int) error } {
-				return &sszGetBlobsV2Response{}
+				return &getBlobsV2Response{}
 			},
 		},
 		{
 			name: "v3",
 			obj:  newSSZGetBlobsV3Response([]*engine_types.BlobAndProofV2{{Blob: blob, CellProofs: proofs}, nil}),
 			empty: func() interface{ DecodeSSZ([]byte, int) error } {
-				return &sszGetBlobsV3Response{}
+				return &getBlobsV3Response{}
 			},
 		},
 	} {
@@ -149,7 +149,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
-	var resp sszCapabilities
+	var resp capabilities
 	require.NoError(t, resp.DecodeSSZ(rec.Body.Bytes(), 0))
 	require.Contains(t, resp.names(), "engine_newPayloadV1")
 	require.Contains(t, resp.names(), "POST /engine/v4/payloads")
@@ -252,7 +252,7 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 		SlotNumber:            &slotNumber,
 		SSZVersion:            clparams.GloasVersion,
 	}
-	req := &sszForkchoiceRequest{
+	req := &forkchoiceRequest{
 		version:   clparams.GloasVersion,
 		AttrsList: solid.NewDynamicListSSZ[*engine_types.PayloadAttributes](1),
 	}
@@ -263,7 +263,7 @@ func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
 
 	wireVersion, ok := sszForkchoiceVersion(4)
 	require.True(t, ok)
-	var out sszForkchoiceRequest
+	var out forkchoiceRequest
 	require.NoError(t, out.DecodeSSZ(enc, int(wireVersion)))
 	out.version = wireVersion
 

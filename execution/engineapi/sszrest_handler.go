@@ -274,7 +274,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &sszForkchoiceRequest{version: sv}
+	req := &forkchoiceRequest{version: sv}
 	if err := req.DecodeSSZ(body, int(sv)); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
@@ -359,7 +359,7 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &sszClientVersionRequest{}
+	req := &clientVersionRequest{}
 	if err := req.DecodeSSZ(body, 0); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
@@ -381,7 +381,7 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	req := &sszCapabilities{}
+	req := &capabilities{}
 	if err := req.DecodeSSZ(body, 0); err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
