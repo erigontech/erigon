@@ -90,11 +90,16 @@ type cachePopulatingGetter struct {
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	v, step, err := cpg.g.GetLatest(name, k)
-	if err == nil && len(v) > 0 && cpg.sc != nil {
+	if err == nil && cpg.sc != nil {
 		if name == kv.CodeDomain && len(cpg.codeHashHint) > 0 {
 			cpg.sc.PutCodeWithHash(k, v, cpg.codeHashHint)
 			cpg.codeHashHint = nil
 		} else {
+			// Cache including nil/empty results: a probe returning no
+			// bytes is a valid negative answer (missing account, empty
+			// storage slot, no code) and caching it lets repeated probes
+			// skip the file accessor stack. Mirrors revm's CacheAccount
+			// { account: None, status: LoadedNotExisting } pattern.
 			cpg.sc.Put(name, k, v)
 		}
 	}
