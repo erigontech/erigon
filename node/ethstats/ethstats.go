@@ -80,6 +80,9 @@ type Service struct {
 
 	blockReader services.FullBlockReader
 	txPool      txpoolproto.TxpoolClient
+	
+	ctx    context.Context    // Cancellable context for graceful shutdown
+	cancel context.CancelFunc // Cancel function for ctx
 }
 
 // connWrapper is a wrapper to prevent concurrent-write or concurrent-read on the
@@ -153,6 +156,14 @@ func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockRe
 
 // Start implements node.Lifecycle, starting up the monitoring and reporting daemon.
 func (s *Service) Start() error {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	
+	// Link quitCh with s.ctx: when quitCh closes, cancel s.ctx
+	go func() {
+		<-s.quitCh
+		s.cancel()
+	}()
+	
 	go s.loop()
 
 	log.Info("Stats daemon started")
@@ -161,6 +172,9 @@ func (s *Service) Start() error {
 
 // Stop implements node.Lifecycle, terminating the monitoring and reporting daemon.
 func (s *Service) Stop() error {
+	if s.cancel != nil {
+		s.cancel()
+	}
 	log.Info("Stats daemon stopped")
 	return nil
 }
@@ -384,7 +398,7 @@ func (s *Service) login(conn *connWrapper) error {
 	}
 	nodeName := "Erigon"
 	if len(s.servers) > 0 {
-		nodeInfo, err := s.servers[0].NodeInfo(context.TODO(), nil)
+		nodeInfo, err := s.servers[0].NodeInfo(s.ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -512,7 +526,7 @@ func (s uncleStats) MarshalJSON() ([]byte, error) {
 
 // reportBlock retrieves the current chain head and reports it to the stats server.
 func (s *Service) reportBlock(conn *connWrapper) error {
-	roTx, err := s.chaindb.BeginRo(context.Background())
+	roTx, err := s.chaindb.BeginRo(s.ctx)
 	if err != nil {
 		return err
 	}
@@ -579,7 +593,7 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 // reportHistory retrieves the most recent batch of blocks and reports it to the
 // stats server.
 func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
-	roTx, err := s.chaindb.BeginRo(context.Background())
+	roTx, err := s.chaindb.BeginRo(s.ctx)
 	if err != nil {
 		return err
 	}
@@ -593,7 +607,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	} else {
 		// No indexes requested, send back the top ones
 		headHash := rawdb.ReadHeadBlockHash(roTx)
-		headNumber, err := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
+		headNumber, err := s.blockReader.HeaderNumber(s.ctx, roTx, headHash)
 		if headNumber == nil || err != nil {
 			return err
 		}
@@ -606,7 +620,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	history := make([]*blockStats, len(indexes))
 	for i, number := range indexes {
 		// Retrieve the next block if it's known to us
-		block, err := s.blockReader.BlockByNumber(context.Background(), roTx, number)
+		block, err := s.blockReader.BlockByNumber(s.ctx, roTx, number)
 		if err != nil {
 			return err
 		}
@@ -648,7 +662,7 @@ type pendStats struct {
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
 	in := new(txpoolproto.StatusRequest)
-	status, err := s.txPool.Status(context.Background(), in)
+	status, err := s.txPool.Status(s.ctx, in)
 	if err != nil {
 		return err
 	}
@@ -680,7 +694,7 @@ type nodeStats struct {
 // reportStats retrieves various stats about the node at the networking and
 // mining layer and reports it to the stats server.
 func (s *Service) reportStats(conn *connWrapper) error {
-	roTx, err := s.chaindb.BeginRo(context.Background())
+	roTx, err := s.chaindb.BeginRo(s.ctx)
 	if err != nil {
 		return err
 	}
