@@ -49,9 +49,8 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
-	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
+	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
 
 		return branch, nil // do not transform, return as is
 	}
