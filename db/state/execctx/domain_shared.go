@@ -1067,34 +1067,50 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, addr []byte) []byte {
 	if len(addr) == 0 {
 		return nil
 	}
-	// Direct sd.mem / sd.stateCache / aggTx chain via tx.GetLatest avoids
-	// recursing back into sd.GetLatest's CodeDomain branch. tx here is
-	// the temporal tx the SD was given; tx.GetLatest hits the aggTx
-	// directly. The account is overwhelmingly cache-warm on this path
-	// because the EVM has just loaded it for the op that triggered the
-	// code read; if not, this read fills the AccountsDomain cache as a
-	// side-effect.
-	if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
+	// Nethermind-style addr → codeHash LRU. Skip the full AccountsDomain
+	// chain when the codeHash for this addr is already known. The zero
+	// hash sentinel means "no code or missing account" (negative cache).
+	if sd.stateCache != nil {
+		if h, ok := sd.stateCache.GetAddrCodeHash(addr); ok {
+			if h == ([32]byte{}) {
+				return nil
+			}
+			return h[:]
+		}
+	}
+
+	resolve := func() []byte {
+		if v, _, ok := sd.mem.GetLatest(kv.AccountsDomain, addr); ok {
+			return decodeAccountCodeHash(v)
+		}
+		if sd.parent != nil {
+			if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
+				return decodeAccountCodeHash(v)
+			}
+		}
+		if sd.stateCache != nil {
+			if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
+				return decodeAccountCodeHash(v)
+			}
+		}
+		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
+		if err != nil || len(v) == 0 {
+			return nil
+		}
 		return decodeAccountCodeHash(v)
 	}
-	if sd.parent != nil {
-		if v, _, ok := sd.parent.mem.GetLatest(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
-		}
-	}
+
+	h := resolve()
 	if sd.stateCache != nil {
-		if v, ok := sd.stateCache.Get(kv.AccountsDomain, addr); ok {
-			return decodeAccountCodeHash(v)
+		var fixed [32]byte
+		if len(h) == 32 {
+			copy(fixed[:], h)
 		}
+		// Always populate, including the zero-hash sentinel for misses —
+		// repeat lookups skip the whole resolve() chain.
+		sd.stateCache.PutAddrCodeHash(addr, fixed)
 	}
-	// Fall back to the aggTx directly to avoid a second recursion through
-	// SD.GetLatest. Skip on error; the caller's addr-keyed file read still
-	// runs and produces the correct result.
-	v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
-	if err != nil || len(v) == 0 {
-		return nil
-	}
-	return decodeAccountCodeHash(v)
+	return h
 }
 
 // decodeAccountCodeHash extracts the codeHash from an account's encoded
@@ -1235,9 +1251,16 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Update state cache when writing
+	// Update state cache when writing. For AccountsDomain, also invalidate
+	// the addr → codeHash LRU above SD because the codeHash may have
+	// changed (CREATE/CREATE2-replace; SELFDESTRUCT goes through DomainDel
+	// which has its own invalidation). The next codeHashForAddr lookup
+	// will repopulate from the freshly written account bytes.
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
+		if domain == kv.AccountsDomain {
+			sd.stateCache.DeleteAddrCodeHash(k)
+		}
 	}
 
 	// Serialize against the calculator's accumulator-swap window — see
@@ -1282,10 +1305,13 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
-		// Remove from state cache when account is deleted
+		// Remove from state cache when account is deleted (including the
+		// nethermind-style addr → codeHash mapping; SELFDESTRUCT and
+		// CREATE-replace both reset the codeHash).
 		if sd.stateCache != nil {
 			sd.stateCache.Delete(kv.AccountsDomain, k)
 			sd.stateCache.Delete(kv.CodeDomain, k)
+			sd.stateCache.DeleteAddrCodeHash(k)
 		}
 		// AccountsDomain — apply-side. Serialize against swap window.
 		sd.changesetMu.Lock()
