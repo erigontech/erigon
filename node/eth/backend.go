@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -478,6 +479,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if backend.components.Downloader != nil && backend.components.Downloader.Downloader != nil &&
 		backend.components.Storage != nil {
 		backend.components.Downloader.Downloader.SetInventory(backend.components.Storage.Inventory)
+
+		// Wire the producer-side self-check
+		// (docs/plans/20260515-three-layer-snapshot-distribution.md):
+		// every RollingV2Publisher.Publish flattens its outgoing
+		// ChainTomlV2 and runs snapshotsync.CheckOwnAdvertisement
+		// against the currently-loaded canonical chain.toml. Failure
+		// returns an error from Publish; the call site in
+		// db/downloader/downloader.go logs at Warn and the node
+		// continues running (this generation is skipped; next
+		// inventory-change publish retries). Lives here because
+		// db/snapshotsync imports db/downloader and the reverse
+		// would be a cycle.
+		chainName := config.Genesis.Config.ChainName
+		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
+			cfg, known := snapcfg.KnownCfg(chainName)
+			if !known || cfg == nil {
+				return nil // no canonical loaded → defensive no-op
+			}
+			return snapshotsync.CheckOwnAdvertisement(
+				downloader.ChainTomlV2ToItems(m),
+				[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
+			)
+		})
 	}
 
 	// Wire wait-on-miss into the read handles. Awaiter is satisfied
