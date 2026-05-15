@@ -252,149 +252,87 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 	return dt.lookupFullKey, true
 }
 
-// commitmentValTransform parses the value of the commitment record to extract references
-// to accounts and storage items, then looks them up in the new, merged files, and replaces them with
-// the updated references
+// commitmentValTransformDomain returns a per-value transform for merging commitment files.
+// For each branch value it expands any referenced keys back to full keys using the constituent
+// account/storage files, and emits full keys in the output. Re-encoding into shortened refs
+// (squeeze) is no longer performed here — squeeze runs separately. mergedAccount/mergedStorage
+// are kept in the signature for caller compatibility but are unused.
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
 	if !rng.needMerge {
 		panic(fmt.Sprintf("assert: commitmentValTransformDomain called with domain.needMerge=false (from=%d to=%d): caller must guard with values.needMerge", rng.from, rng.to))
 	}
-	var keyBuf [60]byte // 52b key and 8b for inverted step
-	var err error
-	shortened := make([]byte, 16)
+	_ = mergedAccount
+	_ = mergedStorage
 
-	hadToLookupStorage := mergedStorage == nil
-	if mergedStorage == nil {
-		if mergedStorage, err = storage.lookupVisibleFileByRange(rng.from, rng.to); err != nil {
-			// TODO may allow to merge, but storage keys will be stored as plainkeys
-			return nil, err
-		}
-	}
-
-	hadToLookupAccount := mergedAccount == nil
-	if mergedAccount == nil {
-		if mergedAccount, err = accounts.lookupVisibleFileByRange(rng.from, rng.to); err != nil {
-			return nil, err
-		}
-	}
-
-	dr := DomainRanges{values: rng}
+	// Constituent-file getters resolve on first referenced-key hit, per (from,to) range.
+	// Branches whose keys are already full (the common case once ReplaceKeysInValues is off
+	// or noref files are released) skip file resolution entirely.
 	accountFileMap := make(map[uint64]map[uint64]*seg.Reader)
-	if accountList, _, _ := accounts.staticFilesInRange(dr); accountList != nil {
-		for _, f := range accountList {
-			if _, ok := accountFileMap[f.startTxNum]; !ok {
-				accountFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
-			}
-			accountFileMap[f.startTxNum][f.endTxNum] = accounts.dataReader(f.decompressor)
-		}
-	}
 	storageFileMap := make(map[uint64]map[uint64]*seg.Reader)
-	if storageList, _, _ := storage.staticFilesInRange(dr); storageList != nil {
-		for _, f := range storageList {
-			if _, ok := storageFileMap[f.startTxNum]; !ok {
-				storageFileMap[f.startTxNum] = make(map[uint64]*seg.Reader)
-			}
-			storageFileMap[f.startTxNum][f.endTxNum] = storage.dataReader(f.decompressor)
-		}
-	}
-
-	ms := storage.dataReader(mergedStorage.decompressor)
-	ma := accounts.dataReader(mergedAccount.decompressor)
-	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
+		if len(valBuf) == 0 {
 			return valBuf, nil
-		}
-		if _, ok := storageFileMap[keyFromTxNum]; !ok {
-			storageFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
-		}
-		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
-		if !ok {
-			f, err := storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
-			if err != nil {
-				return nil, fmt.Errorf("storage file not found in visible files: %w", err)
-			}
-			sig = storage.dataReader(f.decompressor)
-			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
-		}
-
-		if _, ok := accountFileMap[keyFromTxNum]; !ok {
-			accountFileMap[keyFromTxNum] = make(map[uint64]*seg.Reader)
-		}
-		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
-		if !ok {
-			f, err := accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
-			if err != nil {
-				return nil, fmt.Errorf("account file not found in visible files: %w", err)
-			}
-			aig = accounts.dataReader(f.decompressor)
-			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
-			var found bool
-			auxBuf := keyBuf[:0]
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
-					// Non-optimised key originating from a database record
-					auxBuf = append(auxBuf[:0], key...)
-				} else {
-					// Optimised key referencing a state file record (file number and offset within the file)
-					auxBuf, found = storage.lookupByShortenedKey(key, sig)
-					if !found {
-						dt.d.logger.Crit("valTransform: lost storage full key",
-							"shortened", hex.EncodeToString(key),
-							"merging", rng.String("", dt.d.stepSize),
-							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
-						)
-						return nil, fmt.Errorf("lookup lost storage full key %x", key)
-					}
+					return nil, nil // already a full storage key, keep as is
 				}
-
-				shortenedKeyOffset, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
-				if !found {
-					if len(auxBuf) == length.Addr+length.Hash {
-						return auxBuf, nil // if plain key is lost, we can save original fullkey
-					}
-					// if shortened key lost, we can't continue
-					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
-						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
-
-					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
+				inner, ok := storageFileMap[keyFromTxNum]
+				if !ok {
+					inner = make(map[uint64]*seg.Reader)
+					storageFileMap[keyFromTxNum] = inner
 				}
-				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
-				return shortened, nil
-			}
-
-			if len(key) == length.Addr {
-				// Non-optimised key originating from a database record
-				auxBuf = append(auxBuf[:0], key...)
-			} else {
-				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
+				sig, ok := inner[keyEndTxNum]
+				if !ok {
+					f, err := storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+					if err != nil {
+						return nil, fmt.Errorf("storage file not found in visible files: %w", err)
+					}
+					sig = storage.dataReader(f.decompressor)
+					inner[keyEndTxNum] = sig
+				}
+				fullKey, found := storage.lookupByShortenedKey(key, sig)
 				if !found {
-					dt.d.logger.Crit("valTransform: lost account full key",
+					dt.d.logger.Crit("valTransform: lost storage full key",
 						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.stepSize),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
 					)
-					return nil, fmt.Errorf("lookup account full key: %x", key)
+					return nil, fmt.Errorf("lookup lost storage full key %x", key)
 				}
+				return fullKey, nil
 			}
 
-			shortenedKeyOffset, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
-			if !found {
-				if len(auxBuf) == length.Addr {
-					return auxBuf, nil // if plain key is lost, we can save original fullkey
-				}
-				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
-					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
-				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+			if len(key) == length.Addr {
+				return nil, nil // already a full account key, keep as is
 			}
-			shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
-			return shortened, nil
+			inner, ok := accountFileMap[keyFromTxNum]
+			if !ok {
+				inner = make(map[uint64]*seg.Reader)
+				accountFileMap[keyFromTxNum] = inner
+			}
+			aig, ok := inner[keyEndTxNum]
+			if !ok {
+				f, err := accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+				if err != nil {
+					return nil, fmt.Errorf("account file not found in visible files: %w", err)
+				}
+				aig = accounts.dataReader(f.decompressor)
+				inner[keyEndTxNum] = aig
+			}
+			fullKey, found := accounts.lookupByShortenedKey(key, aig)
+			if !found {
+				dt.d.logger.Crit("valTransform: lost account full key",
+					"shortened", hex.EncodeToString(key),
+					"merging", rng.String("", dt.d.stepSize),
+					"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
+				)
+				return nil, fmt.Errorf("lookup account full key: %x", key)
+			}
+			return fullKey, nil
 		}
 
 		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
