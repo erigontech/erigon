@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
@@ -27,10 +29,18 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/ethapi"
+	ethapi "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+type GraphQLCallResult struct {
+	Data    hexutil.Bytes
+	GasUsed uint64
+	Status  uint64
+}
 
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
@@ -40,17 +50,26 @@ type GraphQLAPI interface {
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
 	GetAccountStorage(ctx context.Context, address common.Address, slot string, blockNumber rpc.BlockNumber) (string, error)
 	GetBlockNumberForTx(ctx context.Context, hash common.Hash) (blockNum uint64, ok bool, err error)
+	SendRawTransaction(ctx context.Context, data hexutil.Bytes) (common.Hash, error)
+	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 }
 
 type GraphQLAPIImpl struct {
 	*BaseAPI
-	db kv.TemporalRoDB
+	db                  kv.TemporalRoDB
+	txPool              txpoolproto.TxpoolClient
+	allowUnprotectedTxs bool
+	eth                 EthAPI
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient, eth EthAPI, allowUnprotectedTxs bool) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
-		BaseAPI: base,
-		db:      db,
+		BaseAPI:             base,
+		db:                  db,
+		txPool:              txPool,
+		allowUnprotectedTxs: allowUnprotectedTxs,
+		eth:                 eth,
 	}
 }
 
@@ -343,4 +362,65 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	}
 
 	return response, err
+}
+
+func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
+	txn, err := types.DecodeWrappedTransaction(encodedTx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if !txn.Protected() && !api.allowUnprotectedTxs {
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+	}
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+
+	cc, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if txn.Protected() {
+		txnChainId := txn.GetChainID()
+		if cc.ChainID.Cmp(txnChainId.ToBig()) != 0 {
+			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", cc.ChainID, txnChainId)
+		}
+	}
+
+	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	if res.Imported[0] != txpoolproto.ImportResult_SUCCESS {
+		return txn.Hash(), fmt.Errorf("%s: %s", txpoolproto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
+	}
+
+	return txn.Hash(), nil
+}
+
+func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	data, err := api.eth.Call(ctx, args, &blockNrOrHash, nil, nil)
+	if err != nil {
+		var revertErr *ethapi.RevertError
+		if errors.As(err, &revertErr) {
+			var revertData []byte
+			if errStr, ok := revertErr.ErrorData().(string); ok {
+				revertData, _ = hexutil.Decode(errStr)
+			}
+			return &GraphQLCallResult{Data: revertData, Status: 0}, nil
+		}
+		return nil, err
+	}
+	return &GraphQLCallResult{Data: data, Status: 1}, nil
+}
+
+func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+	return api.eth.GetLogs(ctx, crit)
 }

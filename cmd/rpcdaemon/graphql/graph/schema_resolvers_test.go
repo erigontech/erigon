@@ -18,9 +18,13 @@ package graph
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // TestBlockResolver_Account_InvalidAddress verifies that a malformed address
@@ -86,6 +90,138 @@ func TestBlockResolver_TransactionAt(t *testing.T) {
 				t.Errorf("TransactionAt(%d) = %v, want %v", tt.index, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAddressesFromModel(t *testing.T) {
+	addrs, err := addressesFromModel(nil)
+	if err != nil || len(addrs) != 0 {
+		t.Fatal("expected empty slice for nil input")
+	}
+
+	addrs, err = addressesFromModel([]string{"0x1234567890123456789012345678901234567890"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(addrs) != 1 || addrs[0] != common.HexToAddress("0x1234567890123456789012345678901234567890") {
+		t.Fatal("unexpected address value")
+	}
+
+	_, err = addressesFromModel([]string{"not-an-address"})
+	if err == nil {
+		t.Fatal("expected error for invalid address")
+	}
+}
+
+func TestTopicsFromModel(t *testing.T) {
+	topics, err := topicsFromModel(nil)
+	if err != nil || len(topics) != 0 {
+		t.Fatal("expected empty for nil input")
+	}
+
+	validTopic := "0x" + strings.Repeat("ab", 32)
+	topics, err = topicsFromModel([][]string{{validTopic}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 1 || len(topics[0]) != 1 {
+		t.Fatal("unexpected topic shape")
+	}
+
+	_, err = topicsFromModel([][]string{{"not-hex"}})
+	if err == nil {
+		t.Fatal("expected error for invalid topic")
+	}
+}
+
+func TestDecodeOptionalAddress(t *testing.T) {
+	addr, err := decodeOptionalAddress(nil, "from")
+	if err != nil || addr != nil {
+		t.Fatal("expected nil, nil for nil input")
+	}
+
+	invalid := "not-an-address"
+	_, err = decodeOptionalAddress(&invalid, "from")
+	if err == nil {
+		t.Fatal("expected error for invalid address")
+	}
+
+	valid := "0x1234567890123456789012345678901234567890"
+	addr, err = decodeOptionalAddress(&valid, "from")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr == nil || *addr != common.HexToAddress(valid) {
+		t.Fatal("unexpected address value")
+	}
+}
+
+func TestDecodeOptionalBig(t *testing.T) {
+	b, err := decodeOptionalBig(nil, "gasPrice")
+	if err != nil || b != nil {
+		t.Fatal("expected nil, nil for nil input")
+	}
+
+	invalid := "not-hex"
+	_, err = decodeOptionalBig(&invalid, "gasPrice")
+	if err == nil {
+		t.Fatal("expected error for invalid hex")
+	}
+
+	valid := "0x1234"
+	b, err = decodeOptionalBig(&valid, "gasPrice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b == nil || b.ToInt().Uint64() != 0x1234 {
+		t.Fatal("unexpected big value")
+	}
+}
+
+func TestRpcLogsToModel(t *testing.T) {
+	result := rpcLogsToModel(nil)
+	if len(result) != 0 {
+		t.Fatal("expected empty for nil input")
+	}
+
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockHash := common.HexToHash("0x" + strings.Repeat("bb", 32))
+	txHash := common.HexToHash("0x" + strings.Repeat("cc", 32))
+	topic := common.HexToHash("0x" + strings.Repeat("dd", 32))
+
+	logs := types.RPCLogs{
+		{Log: types.Log{
+			Address:     addr,
+			Topics:      []common.Hash{topic},
+			Data:        hexutil.Bytes{0x01, 0x02},
+			BlockNumber: 42,
+			BlockHash:   blockHash,
+			TxHash:      txHash,
+			Index:       3,
+		}},
+	}
+	result = rpcLogsToModel(logs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(result))
+	}
+	ml := result[0]
+	if ml.Index != 3 {
+		t.Errorf("unexpected Index: %d", ml.Index)
+	}
+	if ml.Account == nil || ml.Account.Address != strings.ToLower(addr.Hex()) {
+		t.Errorf("unexpected Account.Address: %v", ml.Account)
+	}
+	if ml.Account.BlockNum != 42 {
+		t.Errorf("unexpected Account.BlockNum: %d", ml.Account.BlockNum)
+	}
+	if len(ml.Topics) != 1 || ml.Topics[0] != topic.Hex() {
+		t.Errorf("unexpected Topics: %v", ml.Topics)
+	}
+	if ml.Transaction == nil || ml.Transaction.Hash != txHash.Hex() {
+		t.Errorf("unexpected Transaction.Hash: %v", ml.Transaction)
+	}
+	if ml.Transaction.Block == nil || ml.Transaction.Block.Hash != blockHash.Hex() {
+		t.Errorf("unexpected Transaction.Block.Hash: %v", ml.Transaction.Block)
 	}
 }
 
