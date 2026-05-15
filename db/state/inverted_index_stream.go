@@ -43,7 +43,7 @@ type InvertedIdxStreamFiles struct {
 	hasNext bool
 	err     error
 
-	seq       *multiencseq.SequenceReader
+	seq       multiencseq.SequenceReader
 	accessors statecfg.Accessors
 	ii        *InvertedIndexRoTx
 }
