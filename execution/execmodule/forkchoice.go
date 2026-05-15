@@ -476,7 +476,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		PruneTimeout:    500 * time.Millisecond,
 		BeforeIteration: nil,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
+			// Release the old RO snapshot before the flush so MDBX can
+			// reclaim retired pages while the RwTx is writing.
+			roTx.Rollback()
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
@@ -489,8 +491,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err = commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
-			// Recreate RO tx + block overlay on the fresh committed state.
-			roTx.Rollback()
+			// In-loop PruneExecutionStage runs on the overlay (RO-backed
+			// MemoryMutation) and silently no-ops. Drain here on a real RW tx.
+			if _, pruneErr := e.runForkchoicePrune(initialCycle); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
+			}
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
