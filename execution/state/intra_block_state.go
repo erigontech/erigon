@@ -1429,6 +1429,16 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
+	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
+	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
+	// the account stays alive until end-of-tx, so a re-entry's GetState must
+	// still see the dirty values — and versionedRead consults versionedWrites
+	// before the stateObject, so a spurious StoragePath=0 here would make those
+	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
+	// The parallel commitment calculator gets the per-slot DELETE entries from
+	// normalizeWriteSet's SD cascade (sdStorageSlots = vm.StorageKeys ∪
+	// domainStorageKeys), so they don't need to be emitted here.
+
 	return true, nil
 }
 
@@ -2127,10 +2137,18 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
-		// EIP-6780: storage deletion for self-destructed accounts is deferred
-		// from the SELFDESTRUCT opcode to tx end so that intra-tx reads after
-		// SELFDESTRUCT still see real values. The parallel commitment
-		// calculator needs explicit per-slot DELETE entries — emit them here.
+		// EIP-7928 BAL: record the SD storage cascade into raw blockIO so the
+		// BAL builder (AsBlockAccessList → io.WriteSet) sees SSTORE-then-SD
+		// slots as net-zero (storageReads) rather than reporting the
+		// intermediate SSTORE value as a storageChanges entry. End-of-tx,
+		// after the SELFDESTRUCT-deferred-deletion point (EIP-6780), so
+		// intra-tx versionedReads still see the pre-SD values they need.
+		//
+		// The commitment-calculator side gets its own cascade from
+		// normalizeWriteSet's sdStorageSlots (vm.StorageKeys ∪ domainStorageKeys),
+		// which is wider — covers pre-block-committed storage that dirtyStorage
+		// misses. Post-EIP-6780 SD only deletes same-tx-created accounts, so
+		// dirtyStorage covers the full set for BAL purposes.
 		if sdb.versionMap != nil && stateObject.selfdestructed {
 			for key := range stateObject.dirtyStorage {
 				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})

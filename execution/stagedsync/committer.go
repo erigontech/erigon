@@ -420,10 +420,6 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
 
-	// Trim old version entries from sd.mem — only keeps the latest
-	// entry at or before this block's txNum. Reclaims memory from
-	// accumulated inMemHistoryReads entries during batch processing.
-
 	// Only publish on mismatch — success is silent.
 	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {
 		cc.publish(ctx, commitmentResult{
