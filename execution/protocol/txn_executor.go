@@ -84,7 +84,6 @@ type TxnExecutor struct {
 	gasPrice            *uint256.Int
 	feeCap              *uint256.Int
 	tipCap              *uint256.Int
-	initialGas          mdgas.MdGas
 	value               uint256.Int
 	data                []byte
 	state               *state.IntraBlockState
@@ -417,7 +416,6 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
 	}
-	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	// Execute the preparatory steps for txn execution which includes:
 	// - prepare accessList(post-berlin; eip-7702)
@@ -561,10 +559,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
 	}
-	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-		t.OnGasChange(st.initialGas.Total(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
+		t.OnGasChange(st.msg.Gas(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
 	}
 
 	var bailout bool
@@ -838,7 +835,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 
 func (st *TxnExecutor) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.initialGas.Total()-st.txnGasUsed), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
