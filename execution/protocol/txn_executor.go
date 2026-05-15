@@ -467,9 +467,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer func() {
 			if r := recover(); r != nil {
 				// Recover from dependency panic and retry the execution.
-				// No gas pool restore needed — buyGas no longer reserves;
-				// the pool is only consumed (ConsumeRegular/ConsumeState) after
-				// the tx completes successfully.
 				if r != state.ErrDependency {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
@@ -600,15 +597,15 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
 	)
 
-	var txnGasUsed mdgas.MdGasUsage
+	var gasUsed mdgas.MdGasUsage
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, txnGasUsed, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
+		ret, _, st.gasRemaining, gasUsed, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, nil, bailout)
 	} else {
-		ret, st.gasRemaining, txnGasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, gasUsed, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
 	if refunds && !gasBailout {
@@ -624,7 +621,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			// issued from evm.{call,create} via AddStateRefund.
 			refundCounters := st.state.GetRefund()
 			st.gasRemaining.State += refundCounters.State
-			blockState := imdGas.State + txnGasUsed.State - refundCounters.State
+			blockState := imdGas.State + gasUsed.State - refundCounters.State
 			// EIP-8037 block-regular: total gas charged across both dimensions
 			// is initialGas.Total − gasRemaining.Total; subtract the state
 			// dimension to get the regular contribution.
@@ -650,7 +647,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		blockState := imdGas.State + txnGasUsed.State
+		blockState := imdGas.State + gasUsed.State
 		blockRegular := (st.initialGas.Total() - st.gasRemaining.Total()) - blockState
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
