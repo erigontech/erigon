@@ -90,7 +90,8 @@ Information flows down the stack. Validation rules flow with it:
 | Step | What's validated | How |
 |---|---|---|
 | Layer 1 → Layer 2 | The accepted canonical set is well-formed | (deferred design) |
-| Layer 2 → Layer 3 (consumer) | An advertisement entry matches canonical | Entry's `(name, hash)` must appear in at least one accepted canonical version; non-matching entries are silently dropped on receipt |
+| Layer 3 authenticity (consumer-side) | Peer advertisement was produced by the ENR it claims to be from, and hasn't been tampered with in transit | secp256k1 signature in `chain.<peer_enr>.sig` (sidecar) verified against the public key in `peer_enr` over the bytes of `chain.<peer_enr>.toml`. Fail ⇒ drop entire file |
+| Layer 2 → Layer 3 (consumer-side) | An advertisement entry matches canonical | After authenticity check passes: entry's `(name, hash)` must appear in at least one accepted canonical version; non-matching entries are silently dropped |
 | Layer 2 → Layer 3 (producer self-check) | This node's outgoing advertisement is well-formed | Every entry in the node's own `chain.<self_enr>.toml` must match canonical at publish time; mismatch is a producer bug, fail loud |
 | Layer 3 → downloaded file | The downloaded bytes match what was advertised | BitTorrent piece hashing during download; final info-hash check on completion |
 
@@ -98,6 +99,67 @@ There is **no upward validation**. A canonical chain.toml is not
 revised based on peer advertisements; peer advertisements that
 disagree are dropped, not promoted. The asymmetry is deliberate —
 canonical is the trust anchor; everything else is constrained by it.
+
+## Threat model: man-in-the-middle publishers
+
+The swarm by design contains redistributor nodes — peer A's manifest
+is cached and re-served by peer B. This is a resilience feature: if
+A goes offline, B still has A's chain.<A_enr>.toml and serves it to
+other peers. But it means **every peer in the swarm is a potential
+MITM with respect to every other peer's manifest**. The threat is
+modification-in-transit, not impersonation (the ENR-keyed naming
+prevents the latter).
+
+| Scenario | Without signature | With signature |
+|---|---|---|
+| Peer B re-serves A's manifest unmodified | Works (no attack) | Works |
+| Peer B modifies A's manifest before re-serving (drops entries, swaps hashes, adds fake info-hashes pointing at malicious files) | **Silent corruption**: consumer trusts B's claim it's from A; downloads malicious info-hashes; only discovers bad content after a full piece-hash check or canonical-hash check, having already wasted bandwidth and disk | **Loud reject**: signature fails immediately on receipt; the entire file is dropped, B is identifiable as misbehaving |
+| Peer C produces its own manifest claiming to be A | Already impossible — ENR-keyed lookup wouldn't route a fetch for A's manifest to C | Signature fails (C doesn't hold A's private key); double protection |
+| Peer A offline, B has cached signed copy | Works | Works — signature is over content, no live key check needed |
+
+The canonical chain.toml does not need an analogous signature *today*
+because it comes via HTTPS from the upstream registry, and TLS
+handles the in-transit integrity. Once the swarm-agreement layer
+(Layer 1) moves away from a single trusted upstream — e.g., to
+quorum-signed canonicals — Layer 1 will need its own signature
+mechanism, distinct from Layer 3's per-node signatures.
+
+## Signature mechanism for chain.<enr>.toml
+
+**Scheme**: secp256k1 ECDSA over the SHA256 of `chain.<enr>.toml`
+content bytes. Same curve and key material as the ENR — no new key
+management.
+
+**Placement**: sidecar file `chain.<enr>.sig` next to the data file.
+Reasons:
+
+- Signing is over verbatim bytes — no canonicalization required for
+  field order, whitespace, comments, etc.
+- Matches the existing UCAN delegation sidecar pattern
+  (`chain.ucan.NNN.toml` paired with `chain.v2.NNN.toml`), so the
+  seeding/transport plumbing is well-trodden.
+- A signature scheme change later doesn't perturb the TOML schema.
+
+**Producer**: signs `chain.<self_enr>.toml` immediately after
+regeneration. Writes `chain.<self_enr>.sig` alongside. Both files
+are added as seedable to the BitTorrent layer.
+
+**Consumer**: on receipt of a peer's advertisement, fetches both
+`chain.<peer_enr>.toml` and `chain.<peer_enr>.sig` (the sidecar
+discovery follows the same mechanism as UCAN — name pattern). Verifies
+signature before any other check. Failure ⇒ both files discarded;
+peer logged with reason; per-peer cache miss.
+
+**Verification cost**: one secp256k1 verify per cached peer manifest.
+At ~100 connected peers each pushing a refresh weekly, that's ~100
+verifies per week — negligible.
+
+**Test invariants**:
+- Sign a synthetic chain.<enr>.toml + verify with matching pubkey → accept
+- Tamper with byte n of the data file + verify → reject
+- Sign with wrong key (not matching ENR) → reject
+- Missing sidecar → reject (no implicit "unsigned is OK" path)
+- Two valid signatures over the same file by same key → both accept (idempotent)
 
 ## What this means in practice
 
@@ -122,10 +184,19 @@ documentation.
   state.
 
 You will also see `chain.<peer_enr>.toml` files for each connected
-peer you've fetched a manifest from. These are cached on receipt and
-seeded back out so peers who lose connectivity to a specific node can
-still discover what that node serves. They're garbage-collected after
-a staleness threshold (default: 7 days since last refresh).
+peer you've fetched a manifest from, each paired with a
+`chain.<peer_enr>.sig` sidecar containing the peer's signature over
+its data file. These are cached on receipt — only after the signature
+verifies — and seeded back out so peers who lose connectivity to a
+specific node can still discover what that node serves. They're
+garbage-collected after a staleness threshold (default: 7 days since
+last refresh).
+
+Your own outgoing files are similarly paired: `chain.<your_enr>.toml`
+and `chain.<your_enr>.sig`. The signature uses the same secp256k1 key
+your node uses for discv5 and sentry handshakes — no separate key
+management. Operators don't interact with the signing process; it's
+automatic at every regeneration.
 
 **Your node will refuse to advertise entries it can't justify against
 canonical.** If your local retire produces a file with an info-hash
@@ -159,6 +230,16 @@ file with an info-hash that doesn't match canonical, your node
 silently drops that entry on receipt. You don't waste bandwidth
 fetching from them. The peer might still be useful for other files
 where their hashes do match; only the bad entries are filtered.
+
+**Tampered advertisements get rejected wholesale.** Before any
+per-entry filtering, your node checks the signature on each peer's
+`chain.<peer_enr>.toml` against the public key in their ENR. Failure
+means either the file was modified in transit (the seeder/MITM model:
+some redistributor peer changed it before re-serving) or the peer
+itself is buggy/malicious. Either way the whole file is rejected —
+not just the changed bits — because partial trust isn't meaningful
+once authenticity is broken. The peer's other manifests (if you've
+seen them) are unaffected; only this specific manifest gets dropped.
 
 **During merge transitions, multiple canonicals may be in play.** The
 swarm-agreement layer will signal when canonical chain.toml is in
@@ -229,6 +310,7 @@ identified by the manifest_exchange audit:
 | `chain.toml` fetched from R2/Github at startup | Functional | Treat as canonical Layer 2 input; no schema change |
 | `chain.v2.NNN.toml` produced by `RollingV2Publisher` | Functional | This IS Layer 3 producer output. Will alias / symlink as `chain.<self_enr>.toml` for the stable-name view |
 | Peer manifest received via `manifest_exchange.fetchAndPublish` | **Gap** | Transient — published as event, not cached to disk |
+| Signature on per-node advertisements | **Gap** | No `chain.<enr>.sig` sidecar produced or verified; MITM-publisher tampering would be silent |
 | `validateAdvertisement(adv, canonicals)` filter on receipt | **Gap** | Doesn't exist; peer entries trusted as-is today |
 | `ManifestTips(items, *chain.Config)` derivation helper | **Gap** | Tips are inferred ad-hoc; need single canonical helper |
 | Producer self-check at publish time | **Gap** | Publisher trusts its own retire blindly |
@@ -238,11 +320,13 @@ The corresponding work items, ordered:
 1. **`ManifestTips` helper** — single-source-of-truth derivation. Used by everything downstream. Doesn't commit to schema changes.
 2. **`HeldRanges` helper** — sparse-aware advertisement range enumeration. Used by consumer fetch planning.
 3. **`validateAdvertisement(adv, canonicals []ChainToml)`** — multi-canonical signature from day one (size 1 today, size ≥2 once merge support lands).
-4. **Canonical chain.toml test fixture** — captured under `testdata/snapshot-flow/`, with pinned tip values.
-5. **Producer self-check** — at `RollingV2Publisher.Publish` time, assert every entry in the outgoing manifest has a canonical match. Fail loud on mismatch.
-6. **Consumer-side disk cache** — `fetchAndPublish` writes validated advertisements to `datadir/snapshots/chain.<peer_enr>.toml` and registers them as seedable files. GC by staleness.
-7. **Caplin destination fix** — use canonical chain.toml's block-tip via `ManifestTips`, not EL's `FrozenBlocks()` which collapses to state-tip.
-8. **Bug Z** — minimal-mode bootstrap drops `transactions.seg` below `canonical.block_tip - 100K`, computed via `ManifestTips`.
+4. **`signAdvertisement(data []byte, privKey)`** and **`verifyAdvertisement(data []byte, sig []byte, peerPubKey)`** — secp256k1 over SHA256. Producer-side and consumer-side respectively.
+5. **Canonical chain.toml test fixture** — captured under `testdata/snapshot-flow/`, with pinned tip values.
+6. **Producer self-check** — at `RollingV2Publisher.Publish` time, assert every entry in the outgoing manifest has a canonical match. Fail loud on mismatch.
+7. **Producer signing** — at `RollingV2Publisher.Publish` time, also write `chain.<self_enr>.sig` next to the data file; add to seedables.
+8. **Consumer-side disk cache + signature verify** — `fetchAndPublish` fetches both data and sidecar via the manifest-exchange protocol, verifies signature using the peer's ENR public key, then runs `validateAdvertisement`, then writes both files to `datadir/snapshots/chain.<peer_enr>.{toml,sig}` and registers them as seedable. GC by staleness.
+9. **Caplin destination fix** — use canonical chain.toml's block-tip via `ManifestTips`, not EL's `FrozenBlocks()` which collapses to state-tip.
+10. **Bug Z** — minimal-mode bootstrap drops `transactions.seg` below `canonical.block_tip - 100K`, computed via `ManifestTips`.
 
 ## Deferred work (explicitly out of scope for current round)
 
