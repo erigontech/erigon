@@ -33,6 +33,14 @@ const (
 	DefaultStorageCacheBytes = 1 * datasize.GB
 	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
 	DefaultCommitmentCacheBytes = 128 * datasize.MB
+
+	// Per-domain avg entry size used to translate the byte budget into the
+	// entry-count cap the underlying sharded LRU is sized against. Account
+	// and storage are near-fixed: addr + record or addr+slot + value plus
+	// entry overhead. Commitment values are smaller branch nodes.
+	avgAccountEntryBytes    = 96 // 20 addr + ~50 account record + 24 overhead
+	avgStorageEntryBytes    = 88 // 52 addr+slot + ~12 value + 24 overhead
+	avgCommitmentEntryBytes = 80
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -48,11 +56,23 @@ type StateCache struct {
 // NewStateCache creates a new StateCache with the specified byte capacities.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentBytes datasize.ByteSize) *StateCache {
 	sc := &StateCache{}
-	sc.caches[kv.AccountsDomain] = NewDomainCache(accountBytes)
-	sc.caches[kv.StorageDomain] = NewDomainCache(storageBytes)
+	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, ModeEvictLRU)
+	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, ModeEvictLRU)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	//sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
+	//sc.caches[kv.CommitmentDomain] = newDomainCacheBytes(commitmentBytes, avgCommitmentEntryBytes, ModeEvictLRU)
 	return sc
+}
+
+// newDomainCacheBytes constructs a DomainCache where the entry-count cap
+// is derived from the byte budget using the supplied per-domain avg.
+func newDomainCacheBytes(capacityBytes datasize.ByteSize, avgBytes uint32, mode Mode) *DomainCache {
+	capacityEntries := uint32(uint64(capacityBytes) / uint64(avgBytes))
+	if capacityEntries == 0 {
+		capacityEntries = 1
+	}
+	return &DomainCache{
+		GenericCache: newGenericCacheEntries(capacityBytes, capacityEntries, func(v []byte) int { return len(v) }, mode),
+	}
 }
 
 // NewDefaultStateCache creates a new StateCache with default byte capacities.

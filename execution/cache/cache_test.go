@@ -104,30 +104,59 @@ func TestDomainCache_PutUpdateValue(t *testing.T) {
 	assert.Equal(t, value2, v)
 }
 
-func TestDomainCache_PutCapacityLimit(t *testing.T) {
-	// Each entry is 8 (overhead) + 3 (value) = 11 bytes
-	// Set capacity to 22 bytes - enough for 2 entries but not 3
-	c := NewDomainCache(22)
+func TestDomainCache_PutCapacityLimit_NoOpMode(t *testing.T) {
+	// ModeNoOp keeps the historical fill-and-freeze behaviour: once
+	// full, new keys are silently dropped. Counted via the dropped metric.
+	// Entry overhead is 20 (addr key) + 3 (value) + 24 = 47 bytes per entry.
+	// Two entries take 94 bytes; cap at 100 leaves no room for a third.
+	c := NewDomainCacheMode(100, ModeNoOp)
 
-	// Fill to capacity
 	c.Put(makeAddr(1), makeValue(1))
 	c.Put(makeAddr(2), makeValue(2))
 	assert.Equal(t, 2, c.Len())
 
-	// Try to add more - should be ignored (no-op when full)
 	c.Put(makeAddr(3), makeValue(3))
 	assert.Equal(t, 2, c.Len())
 
-	// New key should not exist
 	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 
-	// But updating existing key should still work
+	// Updating an existing key always succeeds in either mode.
 	newValue := []byte{100, 101, 102}
 	c.Put(makeAddr(1), newValue)
 	v, ok := c.Get(makeAddr(1))
 	assert.True(t, ok)
 	assert.Equal(t, newValue, v)
+}
+
+func TestDomainCache_PutEvictsWhenFull_EvictMode(t *testing.T) {
+	// ModeEvictLRU lets the per-shard LRU evict on insert when its
+	// entry-count cap is reached. Eviction is per-shard, not globally
+	// LRU (a known trade-off of freelru.ShardedLRU; see policy.go).
+	//
+	// Build with capacityEntries=2 so that a third insert forces an
+	// eviction event. Capacity-bytes is unused for the eviction
+	// decision and is only carried for telemetry.
+	c := &DomainCache{
+		GenericCache: newGenericCacheEntries[[]byte](1<<20, 2, func(v []byte) int { return len(v) }, ModeEvictLRU),
+	}
+
+	for i := 1; i <= 64; i++ {
+		c.Put(makeAddr(i), makeValue(i))
+	}
+	// The newest entry must still be findable.
+	v, ok := c.Get(makeAddr(64))
+	assert.True(t, ok, "newest key must be present after eviction")
+	assert.Equal(t, makeValue(64), v)
+
+	// At least some early entries must have been evicted by now.
+	missingCount := 0
+	for i := 1; i <= 32; i++ {
+		if _, ok := c.Get(makeAddr(i)); !ok {
+			missingCount++
+		}
+	}
+	assert.Positive(t, missingCount, "ModeEvictLRU should have evicted some early entries")
 }
 
 func TestDomainCache_Delete(t *testing.T) {
