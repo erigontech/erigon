@@ -23,8 +23,8 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
