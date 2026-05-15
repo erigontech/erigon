@@ -819,10 +819,17 @@ func (p *Provider) watchTipHeaderForOpenSegments(ctx context.Context, inv *snaps
 }
 
 // tryFireBlockHeadersReady inspects the inventory for the highest-range
-// *-headers.seg file. If it's at LifecycleIndexed or beyond, calls
-// OpenSegments(Headers) on the EL's BlockReader and publishes
-// flow.BlockHeadersReady. Returns true once the event has been fired
-// (signalling the watcher goroutine to exit).
+// *-headers.seg file. If it's at LifecycleDownloaded or beyond (i.e.
+// the .seg is on disk), calls OpenSegments(Headers) on the EL's
+// BlockReader and publishes flow.BlockHeadersReady. Returns true once
+// the event has been fired (signalling the watcher goroutine to exit).
+//
+// LifecycleDownloaded (not Indexed) is the gate: header .seg files do
+// not have an OnIndexing handler in the storage-driven lifecycle
+// (OnIndexing builds state-domain accessors, not block-file ones).
+// Headers stop at Downloaded permanently. OpenSegments(Headers) builds
+// the .idx accessor inline if missing, so Downloaded + readable-on-
+// disk is sufficient to make FrozenBlocks() return the right tip.
 func (p *Provider) tryFireBlockHeadersReady(inv *snapshot.Inventory) bool {
 	var tipHeader *snapshot.FileEntry
 	for _, e := range inv.BlockFiles() {
@@ -833,7 +840,7 @@ func (p *Provider) tryFireBlockHeadersReady(inv *snapshot.Inventory) bool {
 			tipHeader = e
 		}
 	}
-	if tipHeader == nil || tipHeader.State < snapshot.LifecycleIndexed {
+	if tipHeader == nil || tipHeader.State < snapshot.LifecycleDownloaded {
 		return false
 	}
 
