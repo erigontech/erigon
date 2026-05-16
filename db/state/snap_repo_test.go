@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -362,8 +361,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
-		//filesGetter: ,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *DirtyFiles {
 			return commitmentR.dirtyFiles
 		},
 		accessors: commitmentR.accessors,
