@@ -158,8 +158,8 @@ func (d *Domain) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Warn("[dbg] domainExistenceForceInMem", "path", fPath, "domainExistenceForceInMem", domainExistenceForceInMem)
 	if domainExistenceForceInMem {
-		log.Warn("[dbg] domainExistenceForceInMem", "path", fPath)
 		accessor.ForceExistenceFilterInRAM()
 	}
 	if domainExistenceForceWillNeed {
