@@ -315,9 +315,13 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.lessFalsePositives && idx.keyCount > 0 {
 		switch idx.dataStructureVersion {
 		case 1:
+			log.Warn("[dbg] ForceExistenceFilterInRAM1: ", "f", idx.fileName)
 			return idx.existenceV1.ForceInMem()
 		case 2:
+			log.Warn("[dbg] ForceExistenceFilterInRAM2: ", "f", idx.fileName)
 			return idx.existenceV2.ForceInMem()
+		default:
+			log.Warn("[dbg] ForceExistenceFilterInRAM3: ", "f", idx.fileName)
 		}
 	}
 	return 0
