@@ -559,21 +559,23 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				}
 			}
 
-			if err = commitRwTx.Commit(); err != nil {
-				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
-			}
-			// Aggregated steps still live in chaindata domain tables because
-			// the in-loop PruneExecutionStage runs on the overlay (RO-backed
-			// MemoryMutation) and silently no-ops. Reuse runForkchoicePrune
-			// here — it opens a real RW tx, applies the header/stepSize
-			// floors, uses the slot-derived timeout, and runs the full
-			// pipeline prune (pe.RunPrune) so every stage's prune fires
-			// correctly with initialCycle.
+			// Aggregated steps live in chaindata domain tables because the
+			// in-loop PruneExecutionStage runs on the overlay (RO-backed
+			// MemoryMutation) and silently no-ops. Run the same prune logic
+			// as runForkchoicePrune, but on the in-flight commitRwTx so the
+			// flush + prune land in a single commit (saves one commit per
+			// cycle).
 			pruneStart := time.Now()
-			pruneTimings, pruneErr := e.runForkchoicePrune(initialCycle)
+			pruneErr := e.runForkchoicePruneOnTx(commitRwTx, initialCycle)
 			pruneDur := time.Since(pruneStart)
+			UpdateForkChoicePruneDuration(pruneStart)
 			if pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
+			}
+			pruneTimings := []any{"prune", common.Round(pruneDur, 0), "initialCycle", initialCycle}
+
+			if err = commitRwTx.Commit(); err != nil {
+				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
 			// Re-open RO tx + block overlay on the fresh committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -951,23 +953,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
 	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
-		// check that the current header isn't less than a step, this
-		// is mainly to prevent noise in testing on short chains with
-		// no snapshots and no need for pruning
-		currentHeader := rawdb.ReadCurrentHeader(tx)
-		if currentHeader == nil {
-			return nil
-		}
-		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
-		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
-			return nil
-		}
-
-		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
-			return err
-		}
-		return nil
+		return e.runForkchoicePruneOnTx(tx, initialCycle)
 	}); err != nil {
 		return nil, err
 	}
@@ -976,6 +962,26 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		timings = append(timings, "initialCycle", initialCycle)
 	}
 	return timings, nil
+}
+
+// runForkchoicePruneOnTx runs the forkchoice prune on a caller-provided RwTx.
+// The caller is responsible for committing (or rolling back) the tx. Used by
+// the commit-cycle path to fold prune into the same tx as flush, saving one
+// extra commit per cycle.
+func (e *ExecModule) runForkchoicePruneOnTx(tx kv.TemporalRwTx, initialCycle bool) error {
+	// check that the current header isn't less than a step, this
+	// is mainly to prevent noise in testing on short chains with
+	// no snapshots and no need for pruning
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	if currentHeader == nil {
+		return nil
+	}
+	maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
+	if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
+		return nil
+	}
+	pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+	return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
 }
 
 func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {
