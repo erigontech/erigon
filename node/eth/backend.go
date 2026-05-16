@@ -589,6 +589,95 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return nil, fmt.Errorf("downloader BindBus: %w", err)
 			}
 			mx := &manifestexchange.Provider{}
+
+			// Consumer-side canonical validation + on-disk cache per
+			// docs/plans/20260515-three-layer-snapshot-distribution.md.
+			// The validator filters each received peer manifest to its
+			// canonical-matching subset before it reaches the
+			// orchestrator; the cache persists validated manifests as
+			// chain.<peer_id>.toml so the node survives restarts and
+			// can re-seed peers' manifests for peers that have gone
+			// offline.
+			mxChainName := config.Genesis.Config.ChainName
+			mx.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+				cfg, known := snapcfg.KnownCfg(mxChainName)
+				if !known || cfg == nil {
+					return adv // no canonical loaded → pass through (defensive)
+				}
+				validItems := snapshotsync.ValidateAdvertisement(
+					downloader.ChainTomlV2ToItems(adv),
+					[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
+				)
+				if len(validItems) == 0 {
+					return nil // every entry filtered → reject wholesale
+				}
+				// Reconstruct a ChainTomlV2 carrying only the validated
+				// (name, hash) entries. The orchestrator only needs the
+				// flat sets for fetch planning; the structured Coverage
+				// fields are recomputed downstream if needed.
+				out := &downloader.ChainTomlV2{
+					Version:  downloader.ChainTomlV2Version,
+					UCANHash: adv.UCANHash,
+				}
+				// Preserve the original section boundaries by checking
+				// each name against the original ChainTomlV2.
+				validSet := make(map[string]string, len(validItems))
+				for _, it := range validItems {
+					validSet[it.Name] = it.Hash
+				}
+				for name, h := range adv.Blocks {
+					if vh, ok := validSet[name]; ok && vh == h {
+						if out.Blocks == nil {
+							out.Blocks = map[string]string{}
+						}
+						out.Blocks[name] = h
+					}
+				}
+				for name, h := range adv.Meta {
+					if vh, ok := validSet[name]; ok && vh == h {
+						if out.Meta == nil {
+							out.Meta = map[string]string{}
+						}
+						out.Meta[name] = h
+					}
+				}
+				for name, h := range adv.Salt {
+					if vh, ok := validSet[name]; ok && vh == h {
+						if out.Salt == nil {
+							out.Salt = map[string]string{}
+						}
+						out.Salt[name] = h
+					}
+				}
+				for _, f := range adv.Caplin {
+					if vh, ok := validSet[f.Name]; ok && vh == f.Hash {
+						out.Caplin = append(out.Caplin, f)
+					}
+				}
+				for domain, dm := range adv.Domains {
+					if dm == nil {
+						continue
+					}
+					var keep []downloader.DomainFileEntry
+					for _, f := range dm.Files {
+						if vh, ok := validSet[f.Name]; ok && vh == f.Hash {
+							keep = append(keep, f)
+						}
+					}
+					if len(keep) > 0 {
+						if out.Domains == nil {
+							out.Domains = map[string]*downloader.DomainManifest{}
+						}
+						out.Domains[domain] = &downloader.DomainManifest{
+							Coverage: dm.Coverage,
+							Files:    keep,
+						}
+					}
+				}
+				return out
+			})
+			mx.SetCacheDir(filepath.Join(stack.Config().Dirs.Snap, "peer-manifests"))
+
 			if err := mx.BindBus(ctx, bus, backend.components.Downloader, logger); err != nil {
 				return nil, fmt.Errorf("manifest_exchange BindBus: %w", err)
 			}

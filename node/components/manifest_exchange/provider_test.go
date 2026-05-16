@@ -371,3 +371,115 @@ func TestConcurrentPeerConnectedDoesntDoubleFetch(t *testing.T) {
 	require.Equal(t, 1, e.fetcher.callCount(),
 		"second PeerConnected for same peer should not trigger a second fetch while first is in flight")
 }
+
+// TestCanonicalValidatorFilters pins the consumer-side canonical
+// filter wiring: a SetCanonicalValidator callback is invoked on the
+// received manifest, and its returned subset is what gets published.
+// Per docs/plans/20260515-three-layer-snapshot-distribution.md the
+// validator drops entries whose (name, hash) doesn't match canonical;
+// the rest pass through to the orchestrator.
+func TestCanonicalValidatorFilters(t *testing.T) {
+	e := newEnv(t)
+
+	// Wire a validator that drops everything except a single block
+	// entry — simulates "every entry except headers.seg disagrees
+	// with canonical".
+	e.p.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+		require.NotNil(t, adv)
+		return &downloader.ChainTomlV2{
+			Version: downloader.ChainTomlV2Version,
+			Blocks: map[string]string{
+				"v1.0-000000-000500-headers.seg": adv.Blocks["v1.0-000000-000500-headers.seg"],
+			},
+		}
+	})
+
+	seedDir := t.TempDir()
+	inv := makeInventory(t)
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	waitFor(t, func() bool { return e.receivedCount() == 1 },
+		2*time.Second, "PeerManifestReceived publish")
+
+	e.recvMu.Lock()
+	defer e.recvMu.Unlock()
+	got := e.received[0]
+	require.Equal(t, peer.ID().String(), got.PeerID)
+	// Validator dropped everything except the single block entry.
+	require.Len(t, got.Blocks, 1, "validator-returned subset is what's published")
+	require.Empty(t, got.Domains, "non-blocks entries dropped by validator")
+}
+
+// TestCanonicalValidatorRejectsFullyFiltered pins the "validator
+// drops every entry" case: a nil return means the peer has nothing
+// useful to offer relative to canonical; no PeerManifestReceived
+// publishes.
+func TestCanonicalValidatorRejectsFullyFiltered(t *testing.T) {
+	e := newEnv(t)
+
+	e.p.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+		return nil // entire manifest invalid against canonical
+	})
+
+	seedDir := t.TempDir()
+	inv := makeInventory(t)
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	e.bus.WaitAsync()
+	time.Sleep(20 * time.Millisecond)
+	require.Zero(t, e.receivedCount(),
+		"fully-filtered manifest must NOT publish (peer has nothing to offer)")
+}
+
+// TestCacheDirWritesPeerManifest pins that with a cache directory
+// configured, each received peer manifest's bytes are persisted as
+// chain.<peer_id>.toml. Lets the node survive restarts without
+// re-fetching every peer's manifest from scratch.
+func TestCacheDirWritesPeerManifest(t *testing.T) {
+	e := newEnv(t)
+	cacheDir := t.TempDir()
+	e.p.SetCacheDir(cacheDir)
+
+	seedDir := t.TempDir()
+	inv := makeInventory(t)
+	seedPath, hash := seedPeerManifest(t, seedDir, inv)
+	e.fetcher.register(hash, seedPath)
+
+	peer := makePeerNode(t, &enr.ChainToml{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         100,
+		InfoHash:            hash,
+	})
+	e.sentry.PublishPeerConnected(peer)
+
+	waitFor(t, func() bool { return e.receivedCount() == 1 },
+		2*time.Second, "PeerManifestReceived publish")
+
+	cached := filepath.Join(cacheDir, "chain."+peer.ID().String()+".toml")
+	require.FileExists(t, cached,
+		"validated peer manifest is persisted under chain.<peer_id>.toml")
+
+	// Verify cached content equals what the fetcher served.
+	cachedBytes, err := os.ReadFile(cached)
+	require.NoError(t, err)
+	origBytes, err := os.ReadFile(seedPath)
+	require.NoError(t, err)
+	require.Equal(t, origBytes, cachedBytes,
+		"cached manifest bytes match what the fetcher delivered (no transformation)")
+}

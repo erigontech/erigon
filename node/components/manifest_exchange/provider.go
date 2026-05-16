@@ -32,6 +32,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -88,6 +90,58 @@ type Provider struct {
 	// evaluation (blacklist expiry, UCAN time-window checks). Defaults
 	// to time.Now.
 	nowFn func() time.Time
+
+	// canonicalValidator is invoked on every received peer manifest
+	// before it's published to the orchestrator. Per the three-layer
+	// model (docs/plans/20260515-three-layer-snapshot-distribution.md)
+	// the consumer-side rule is "an advertisement entry survives iff
+	// its (name, hash) matches at least one accepted canonical
+	// version's entry for the same name." The callback (typically
+	// wraps snapshotsync.ValidateAdvertisement) returns the filtered
+	// subset; the Provider replaces the manifest's content with that
+	// subset before publishing. Nil disables the check (default).
+	canonicalValidator CanonicalValidatorFn
+
+	// cacheDir, if set, is the directory where Provider writes each
+	// validated peer manifest as chain.<peer_id>.toml on disk. Lets
+	// peers persist for re-seeding and lets the node survive restarts
+	// without re-fetching every peer's manifest from scratch.
+	// Empty string disables the cache (default).
+	cacheDir string
+}
+
+// CanonicalValidatorFn is invoked on each received peer manifest to
+// filter its entries against the current canonical set. Returns the
+// validated subset (entries whose (name, hash) appear in at least one
+// canonical version). Production wires this to a closure calling
+// snapshotsync.ValidateAdvertisement; tests/harness leave it nil.
+type CanonicalValidatorFn func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2
+
+// SetCanonicalValidator installs the consumer-side validation
+// callback called on every received peer manifest. The callback
+// returns the validated subset; non-matching entries are silently
+// dropped before the manifest is published to the orchestrator.
+// Pass nil to disable (default; not recommended in production).
+func (p *Provider) SetCanonicalValidator(fn CanonicalValidatorFn) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.canonicalValidator = fn
+}
+
+// SetCacheDir configures the on-disk cache directory for validated
+// peer manifests. Each peer's chain.toml is persisted as
+// chain.<peer_id>.toml inside this directory. Empty string disables
+// the cache. Call before BindBus or while unbound.
+func (p *Provider) SetCacheDir(dir string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cacheDir = dir
 }
 
 // SetTrust configures the UCAN verification gate. Call before BindBus
@@ -341,6 +395,8 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash 
 	cfg := p.trust
 	state := p.trustState
 	now := p.nowFn
+	validator := p.canonicalValidator
+	cacheDir := p.cacheDir
 	p.mu.Unlock()
 	if fetcher == nil || bus == nil {
 		return
@@ -365,7 +421,57 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash 
 		}
 	}
 
+	// Consumer-side canonical validation per the three-layer model
+	// (docs/plans/20260515-three-layer-snapshot-distribution.md).
+	// Drops entries whose (name, hash) doesn't match any accepted
+	// canonical version. The peer's other valid entries pass through;
+	// only mismatches are filtered.
+	if validator != nil {
+		manifest = validator(manifest)
+		if manifest == nil {
+			logger.Warn("[manifest_exchange] peer manifest fully filtered against canonical",
+				"peer", peerID)
+			return
+		}
+	}
+
+	// Disk cache of validated peer manifests. Lets the node survive
+	// restarts without re-fetching every peer's manifest, and lets us
+	// re-seed peers' manifests so peer A going offline doesn't mean
+	// peer A's content set disappears from the swarm.
+	if cacheDir != "" {
+		if err := writePeerManifestCache(cacheDir, peerID, data); err != nil {
+			// Log but continue — caching is best-effort; the bus
+			// publish is the load-bearing path.
+			logger.Warn("[manifest_exchange] cache peer manifest",
+				"peer", peerID, "err", err)
+		}
+	}
+
 	bus.Publish(v2ToPeerManifest(peerID, manifest))
+}
+
+// writePeerManifestCache atomically writes a peer's chain.toml bytes
+// to cacheDir/chain.<peer_id>.toml. Existing files are overwritten —
+// peers' manifests can be refreshed on every reconnect, and the disk
+// cache is best-effort recovery state, not authoritative storage.
+//
+// Atomic via write-temp-then-rename so a crash mid-write doesn't
+// leave partial content visible.
+func writePeerManifestCache(cacheDir, peerID string, data []byte) error {
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir cache dir: %w", err)
+	}
+	final := filepath.Join(cacheDir, "chain."+peerID+".toml")
+	tmp := final + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
 }
 
 // gateOnUCAN runs the manifest-side UCAN verification. Returns true iff
