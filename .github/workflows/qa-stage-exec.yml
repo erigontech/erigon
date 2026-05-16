@@ -59,11 +59,17 @@ jobs:
       # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
       # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
       ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+      # Workaround for stages.go:631 reading the unprefixed env name only
+      # (yperbasis Blocker 1 on #21017): without this, "serial" matrix
+      # entries silently run parallel because stageExec sees no unprefixed
+      # EXEC3_PARALLEL and flips dbg.Exec3Parallel back to true.
+      EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
       # Debug-only tracing for the parallel-exec from-0 failure at block
       # 46147. Address 0xA1E4380A… ends up with balance 0 in the parallel
       # view but should have ~1050 ETH; we want every write that touches it.
       ERIGON_TRACE_ACCOUNTS: '0xA1E4380A3B1f749673E270229993eE55F35663b4'
       ERIGON_TRACE_TRANSACTION_IO: 'true'
+      ERIGON_TRACE_DOMAIN_IO: 'true'
       ERIGON_TRACE_APPLY: 'true'
 
     steps:
