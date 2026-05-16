@@ -318,8 +318,8 @@ Folds in `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibl
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add function `buildWitnessTrie(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock uint64, expectedParentRoot common.Hash, siblingPaths [][]byte, accessed *accessedState) (encodedNodes []hexutil.Bytes, err error)`
-- [ ] inside the helper, in order:
+- [x] add function `buildWitnessTrie(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock uint64, expectedParentRoot common.Hash, siblingPaths [][]byte, accessed *accessedState) (encodedNodes []hexutil.Bytes, err error)` (actual receiver type used: `*commitmentdb.SharedDomainsCommitmentContext`, same as in [[Task 5]])
+- [x] inside the helper, in order:
   1. `sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)`
   2. `domains.SeekCommitment(ctx, tx)` (return error wrapped)
   3. `accessed.touchAll(sdCtx)`
@@ -329,13 +329,13 @@ Folds in `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibl
   7. `allNodes, err := witnessTrie.RLPEncode()`
   8. for each node: append `common.Copy(node)` to `encodedNodes` — **must preserve** the defensive copy; dropping it introduces a memory-reuse bug
   9. return `encodedNodes, nil`
-- [ ] preserve exact wording on the witness-root-mismatch error: `fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)`
-- [ ] add top-of-function comment documenting "// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior."
-- [ ] in `ExecutionWitness`: delete `resetToParentState` closure entirely, delete `touchAllKeys` closure entirely (no longer referenced), replace lines 810–843 with a single call assigning `result.State`
-- [ ] `git diff` the error strings to confirm preservation
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] preserve exact wording on the witness-root-mismatch error: `fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)`
+- [x] add top-of-function comment documenting "// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior."
+- [x] in `ExecutionWitness`: delete `resetToParentState` closure entirely, delete `touchAllKeys` closure entirely (no longer referenced), replace lines 810–843 with a single call assigning `result.State`
+- [x] `git diff` the error strings to confirm preservation
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 7: Verify acceptance criteria
 
