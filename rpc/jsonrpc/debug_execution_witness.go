@@ -480,13 +480,9 @@ type accessedState struct {
 	// SortedCodes is the JSON-RPC `codes` field: pre-state bytecodes only,
 	// deduplicated by hash and sorted by hash.
 	SortedCodes []hexutil.Bytes
-	// PreCode is every bytecode read from the parent-state reader (pre-block).
-	PreCode map[common.Address][]byte
-	// ModCode is bytecode written during execution (deployments, EIP-7702).
-	ModCode map[common.Address][]byte
 	// CodeReads is keyed by addrHash, fed to sdCtx.Witness for AccountNode codes.
 	CodeReads map[common.Hash]witnesstypes.CodeWithHash
-	// CodeAddrs is the union of PreCode and ModCode addresses, used for touchAll.
+	// CodeAddrs is the union of pre-state and modified-code addresses, used for touchAll.
 	CodeAddrs map[common.Address]struct{}
 }
 
@@ -562,8 +558,8 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 	slices.SortFunc(a.SortedKeys, func(x, y hexutil.Bytes) int { return bytes.Compare(x, y) })
 
-	a.PreCode = rs.GetPreStateCode()
-	a.ModCode = rs.GetModifiedCode()
+	preCode := rs.GetPreStateCode()
+	modCode := rs.GetModifiedCode()
 
 	// SortedCodes: dedup pre-state code by hash, sort by hash for determinism.
 	type codeWithHash struct {
@@ -572,7 +568,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 	var uniqueCodes []codeWithHash
 	codesSeen := make(map[common.Hash]struct{})
-	for _, code := range a.PreCode {
+	for _, code := range preCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			if _, dup := codesSeen[h]; !dup {
@@ -590,7 +586,7 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 
 	// CodeReads keyed by addrHash for sdCtx.Witness AccountNode population.
-	for addr, code := range a.PreCode {
+	for addr, code := range preCode {
 		if len(code) > 0 {
 			codeHash := crypto.Keccak256Hash(code)
 			addrHash := crypto.Keccak256Hash(addr.Bytes())
@@ -601,10 +597,10 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
-	for addr := range a.PreCode {
+	for addr := range preCode {
 		a.CodeAddrs[addr] = struct{}{}
 	}
-	for addr := range a.ModCode {
+	for addr := range modCode {
 		a.CodeAddrs[addr] = struct{}{}
 	}
 
