@@ -951,7 +951,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
 
-	ret, _, err := vmenv.Call(
+	ret, _, _, err := vmenv.Call(
 		systemAddr,
 		target,
 		nil,
