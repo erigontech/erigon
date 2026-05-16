@@ -685,10 +685,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// 1. Pre-existing contracts called during execution → preStateCode.
 	// 2. Contracts created in this block that are subsequently called via the stateObject
 	//    cache (bypassing ReadAccountCode) → land in modifiedCode but not preStateCode.
-	// 3. Pre-existing contracts accessed only via EXTCODEHASH/EXTCODESIZE: ReadAccountCode
-	//    is never invoked for those, so they are absent from preStateCode; load them here.
-	//    (Do not add these to codeReads — they must not appear as extra AccountCode nodes
-	//    in the witness trie, which would shift result.State relative to Geth.)
 	type codeWithHash struct {
 		code []byte
 		hash common.Hash
@@ -704,20 +700,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		addToResultCodes(code)
 	}
 	for _, code := range modifiedCode {
-		addToResultCodes(code)
-	}
-	// Load code for accounts accessed only via EXTCODEHASH/EXTCODESIZE.
-	for addr := range allAddresses {
-		if _, already := preStateCode[addr]; already {
-			continue
-		}
-		if _, modified := modifiedCode[addr]; modified {
-			continue
-		}
-		code, codeErr := stateReader.ReadAccountCode(accounts.InternAddress(addr))
-		if codeErr != nil || len(code) == 0 {
-			continue
-		}
 		addToResultCodes(code)
 	}
 
