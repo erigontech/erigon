@@ -223,12 +223,12 @@ Lowest-risk leaf — fully self-contained, just reads headers and RLP-encodes th
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add method `(api *DebugAPIImpl) collectAccessedHeaders(ctx context.Context, tx kv.TemporalTx, accessedBlockNums []uint64) ([]hexutil.Bytes, error)` containing logic from lines 845–867
-- [ ] dedupe via local `seenBlockNums map[uint64]struct{}` (same as current)
-- [ ] replace inline block in `ExecutionWitness` with a call assigning to `result.Headers`
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] add method `(api *DebugAPIImpl) collectAccessedHeaders(ctx context.Context, tx kv.TemporalTx, accessedBlockNums []uint64) ([]hexutil.Bytes, error)` containing logic from lines 845–867
+- [x] dedupe via local `seenBlockNums map[uint64]struct{}` (same as current)
+- [x] replace inline block in `ExecutionWitness` with a call assigning to `result.Headers`
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 2: Extract `verifyWitnessStateless`
 

@@ -842,27 +842,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Collect headers for BLOCKHASH opcode support
-	// Include headers from accessed block numbers
-	seenBlockNums := make(map[uint64]struct{})
-	for _, bn := range accessedBlockHashes {
-		if _, seen := seenBlockNums[bn]; seen {
-			continue
-		}
-		seenBlockNums[bn] = struct{}{}
-
-		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load header for accessed block number %d: %w", bn, err)
-		}
-		if blockHeader == nil {
-			return nil, fmt.Errorf("missing header for accessed block number %d", bn)
-		}
-
-		headerRLP, err := rlp.EncodeToBytes(blockHeader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode header for accessed block number %d: %w", bn, err)
-		}
-		result.Headers = append(result.Headers, headerRLP)
+	result.Headers, err = api.collectAccessedHeaders(ctx, tx, accessedBlockHashes)
+	if err != nil {
+		return nil, err
 	}
 
 	// Optionally verify the witness by re-executing the block statelessly.
@@ -887,6 +869,34 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	return result, nil
+}
+
+// collectAccessedHeaders RLP-encodes block headers for every block number reached
+// via the BLOCKHASH opcode during execution. Block numbers are deduplicated.
+func (api *DebugAPIImpl) collectAccessedHeaders(ctx context.Context, tx kv.TemporalTx, accessedBlockNums []uint64) ([]hexutil.Bytes, error) {
+	var headers []hexutil.Bytes
+	seenBlockNums := make(map[uint64]struct{})
+	for _, bn := range accessedBlockNums {
+		if _, seen := seenBlockNums[bn]; seen {
+			continue
+		}
+		seenBlockNums[bn] = struct{}{}
+
+		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load header for accessed block number %d: %w", bn, err)
+		}
+		if blockHeader == nil {
+			return nil, fmt.Errorf("missing header for accessed block number %d", bn)
+		}
+
+		headerRLP, err := rlp.EncodeToBytes(blockHeader)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode header for accessed block number %d: %w", bn, err)
+		}
+		headers = append(headers, headerRLP)
+	}
+	return headers, nil
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
