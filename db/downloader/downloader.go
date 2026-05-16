@@ -145,6 +145,15 @@ type Downloader struct {
 	// is written.
 	manifestSelfCheck ManifestSelfCheckFn
 
+	// manifestSigner is the producer-side signing callback. Same
+	// rationale as manifestSelfCheck (cycle avoidance via callback).
+	// Production wires a closure that calls
+	// snapshotsync.SignAdvertisement with the node's secp256k1 key;
+	// tests/harness leave it nil. RollingV2Publisher.Publish persists
+	// the returned signature as chain.v2.<seq>.sig alongside the
+	// data file and registers it as seedable.
+	manifestSigner ManifestSignerFn
+
 	// onPeerWithChainTomlDiscovered is called whenever the legacy
 	// chain.toml discovery loop finds a peer advertising a chain-toml
 	// ENR entry. Production wiring (backend.go) plugs in a function
@@ -485,6 +494,17 @@ func (d *Downloader) SetManifestSelfCheck(fn ManifestSelfCheckFn) {
 	d.manifestSelfCheck = fn
 }
 
+// SetManifestSigner installs the producer-side signing callback used
+// by RollingV2Publisher.Publish to sign each generation's bytes and
+// persist a chain.v2.<seq>.sig sidecar. Wired from outside this
+// package (which holds the node's secp256k1 key material), typically
+// at node startup. Pass nil to disable (default).
+func (d *Downloader) SetManifestSigner(fn ManifestSignerFn) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.manifestSigner = fn
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -645,19 +665,22 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
 	}
-	// Wire the producer-side self-check (if configured externally).
-	// Per docs/plans/20260515-three-layer-snapshot-distribution.md
-	// "fail loud" requirement: the callback returns an error when
-	// this node's outgoing manifest diverges from canonical for any
-	// known-canonical file name. The error propagates through Publish;
-	// our caller at line ~545 logs it at Warn and the node continues
-	// running (publishing is skipped for this generation; the next
-	// inventory-change-triggered Publish retries).
+	// Wire the producer-side self-check + signer (if configured
+	// externally). Per
+	// docs/plans/20260515-three-layer-snapshot-distribution.md the
+	// self-check fail-loud halts the publish (caller at ~line 545
+	// logs Warn; node continues running); the signer produces the
+	// chain.v2.<seq>.sig sidecar that protects against MITM
+	// redistributors.
 	d.lock.RLock()
 	selfCheck := d.manifestSelfCheck
+	signer := d.manifestSigner
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
+	}
+	if signer != nil {
+		pub.SetSigner(signer)
 	}
 	hash, err := pub.Publish(context.Background(), inv, authoritativeBlocks, updater)
 	if err != nil {

@@ -502,6 +502,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
 			)
 		})
+
+		// Wire the producer-side signer
+		// (docs/plans/20260515-three-layer-snapshot-distribution.md
+		// MITM-publisher defence): each chain.v2.<seq>.toml is paired
+		// with a chain.v2.<seq>.sig sidecar signed by the node's
+		// secp256k1 private key — the same key the ENR is keyed with,
+		// so consumers can verify the signature against the public key
+		// they already have from the peer's ENR. Without the
+		// signature, redistributor peers in the swarm could modify
+		// served manifests in transit; with it, any modification
+		// invalidates the .sig and the consumer rejects the file
+		// wholesale.
+		if stack.Config().P2P.PrivateKey != nil {
+			signKey := stack.Config().P2P.PrivateKey
+			backend.components.Downloader.Downloader.SetManifestSigner(func(data []byte) ([]byte, error) {
+				return snapshotsync.SignAdvertisement(data, signKey)
+			})
+		}
 	}
 
 	// Wire wait-on-miss into the read handles. Awaiter is satisfied

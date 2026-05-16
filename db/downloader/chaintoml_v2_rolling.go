@@ -80,6 +80,18 @@ func ChainUCANFileNameForSeq(seq uint64) string {
 	return fmt.Sprintf("%s.%d.bin", ChainUCANBaseName, seq)
 }
 
+// ChainV2SigFileNameForSeq formats the signature sidecar filename
+// paired with chain.v2.<seq>.toml. The signature is over the bytes
+// of the .toml file. Receivers fetch both files, verify the
+// signature against the peer's ENR public key, then process the
+// manifest. Per
+// docs/plans/20260515-three-layer-snapshot-distribution.md the
+// signature is the MITM-publisher defence — any redistributor that
+// modifies the .toml content invalidates the .sig.
+func ChainV2SigFileNameForSeq(seq uint64) string {
+	return fmt.Sprintf("%s.%d.sig", ChainTomlV2BaseName, seq)
+}
+
 // ParseChainTomlV2FileName extracts the generation seq from a filename
 // matching chain.v2.<seq>.toml. ok=false for any other shape.
 func ParseChainTomlV2FileName(name string) (seq uint64, ok bool) {
@@ -144,6 +156,21 @@ type RollingV2Publisher struct {
 	// stops the publish for that generation, and lets the node continue
 	// running (per direction: "node stops publishing, can still run").
 	selfCheck ManifestSelfCheckFn
+
+	// signer signs the bytes of each chain.v2.<seq>.toml file
+	// immediately after they're written. The returned signature is
+	// persisted as chain.v2.<seq>.sig in the same directory and
+	// registered as a seedable file. Per
+	// docs/plans/20260515-three-layer-snapshot-distribution.md, the
+	// signature is the MITM-publisher defence: redistributor peers can
+	// re-serve the .toml but cannot modify its bytes without
+	// invalidating the .sig.
+	//
+	// Wired via a callback — production supplies a closure that calls
+	// snapshotsync.SignAdvertisement with the node's ENR-matching
+	// secp256k1 private key. nil means signing is skipped (fine for
+	// tests; production wires this via SetSigner).
+	signer ManifestSignerFn
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -154,6 +181,21 @@ type RollingV2Publisher struct {
 // graceful: this generation is skipped, the node keeps running, the
 // next inventory-change-triggered publish will retry.
 type ManifestSelfCheckFn func(manifest *ChainTomlV2) error
+
+// ManifestSignerFn is the type of the producer-side signing
+// callback (see RollingV2Publisher.signer). Receives the bytes of
+// the just-written chain.v2.<seq>.toml file; returns the
+// signature bytes (64 bytes [R||S] from
+// snapshotsync.SignAdvertisement). Persistence as
+// chain.v2.<seq>.sig sidecar and torrent registration happen
+// inside Publish — the signer is content-only.
+//
+// Returning an error aborts the publish for this generation: the
+// .toml file is removed (don't seed unsigned content), no .sig is
+// written, no .torrent is built, history is not advanced. The
+// publish caller logs at Warn and the node continues running, same
+// as for self-check failure.
+type ManifestSignerFn func(data []byte) ([]byte, error)
 
 // DelegationSource yields the snapshotauth UCAN attestation bytes (canonical
 // CBOR) that should be paired with the next published V2 manifest. Returning
@@ -184,6 +226,17 @@ func (r *RollingV2Publisher) SetSelfCheck(fn ManifestSelfCheckFn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.selfCheck = fn
+}
+
+// SetSigner configures the producer-side signing callback called
+// on every Publish() after the .toml file is written. Pass nil to
+// clear (no signing; default for tests/harness). Production callers
+// wire a closure that calls snapshotsync.SignAdvertisement with the
+// node's ENR-matching secp256k1 private key.
+func (r *RollingV2Publisher) SetSigner(fn ManifestSignerFn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.signer = fn
 }
 
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
@@ -326,6 +379,41 @@ func (r *RollingV2Publisher) Publish(
 		return metainfo.Hash{}, fmt.Errorf("save %s: %w", name, err)
 	}
 
+	// Producer signing: sign the just-written .toml bytes and persist
+	// chain.v2.<seq>.sig alongside. Per
+	// docs/plans/20260515-three-layer-snapshot-distribution.md the
+	// signature is the MITM-publisher defence — redistributors can
+	// re-serve the .toml but cannot modify its bytes without
+	// invalidating the .sig. Failure here removes the .toml that was
+	// just written (don't seed unsigned content) and aborts the
+	// publish for this generation; the caller logs at Warn and the
+	// node continues running.
+	if r.signer != nil {
+		sigBytes, err := r.signer(tomlBytes)
+		if err != nil {
+			_ = os.Remove(path)
+			return metainfo.Hash{}, fmt.Errorf("publisher signing %s: %w", name, err)
+		}
+		sigName := ChainV2SigFileNameForSeq(nextSeq)
+		sigPath := filepath.Join(r.snapDir, sigName)
+		if err := saveChainTomlFile(sigPath, sigBytes); err != nil {
+			_ = os.Remove(path)
+			return metainfo.Hash{}, fmt.Errorf("save %s: %w", sigName, err)
+		}
+		if _, err := BuildTorrentIfNeed(ctx, sigName, r.snapDir, r.torrentFS); err != nil {
+			_ = os.Remove(path)
+			_ = os.Remove(sigPath)
+			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", sigName, err)
+		}
+		if r.downloader != nil {
+			if err := r.downloader.AddNewSeedableFile(ctx, sigName); err != nil {
+				_ = os.Remove(path)
+				_ = os.Remove(sigPath)
+				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", sigName, err)
+			}
+		}
+	}
+
 	if _, err := BuildTorrentIfNeed(ctx, name, r.snapDir, r.torrentFS); err != nil {
 		return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", name, err)
 	}
@@ -370,21 +458,26 @@ func (r *RollingV2Publisher) evictOldestLocked() {
 	}
 }
 
-// evictGenerationLocked removes the V2 + paired UCAN artefacts for a
-// single seq. UCAN files may not exist (delegation source unset for
-// that generation); RemoveFile on a missing path is a silent no-op.
-// Caller must hold r.mu.
+// evictGenerationLocked removes the V2 + paired UCAN + paired
+// signature artefacts for a single seq. UCAN/.sig files may not
+// exist (delegation source / signer unset for that generation);
+// RemoveFile on a missing path is a silent no-op. Caller must hold
+// r.mu.
 func (r *RollingV2Publisher) evictGenerationLocked(seq uint64) {
 	tomlName := ChainTomlV2FileNameForSeq(seq)
 	ucanName := ChainUCANFileNameForSeq(seq)
+	sigName := ChainV2SigFileNameForSeq(seq)
 	if r.downloader != nil {
 		r.downloader.DropTorrentByName(tomlName)
 		r.downloader.DropTorrentByName(ucanName)
+		r.downloader.DropTorrentByName(sigName)
 	}
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName+".torrent"))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName+".torrent"))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, sigName))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, sigName+".torrent"))
 }
 
 // Cleanup removes any chain.v2.<seq>.toml + chain.ucan.<seq>.bin file
