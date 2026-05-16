@@ -19,6 +19,7 @@ package execmodule_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
@@ -1302,6 +1303,123 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+// TestAssembleBlockGasPoolSnapshotRestoreBug exercises the per-tx gas pool
+// snapshot/restore in the block assembler's commitTx path. Under EIP-8037 the
+// pool tracks regular and state gas as separate dimensions, so a restore that
+// only captures the regular dimension and seeds both on restore wrongly
+// inflates the state pool, letting a follow-up tx exceed the block's
+// state-gas limit.
+//
+// The scenario relies on a tx whose intrinsic state gas (the part the txpool
+// can see when filtering) fits in the remaining pool but whose total state
+// gas (intrinsic + on-success code-deposit) does not: such a tx passes the
+// txpool's filter, reaches the assembler, and fails ConsumeState inside
+// ApplyTransaction. The bug then surfaces if a successor tx in the same
+// batch consumes the inflated state pool that the restore wrongly handed
+// back.
+//
+// Fresh senders (each at nonce 0) are required so a failed tx doesn't
+// nonce-block its successors within the batch.
+func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	// Initcode that deploys a 100-byte runtime (100 zero bytes) via CODECOPY.
+	// Per byte deployed: 1530 state gas (CPSB) + 200 regular gas. So each
+	// CREATE consumes ~153K state gas on top of the 183.6K intrinsic
+	// NEW_ACCOUNT charge — a total of ~337K state per tx.
+	const runtimeLen = 100
+	initHeader := []byte{
+		0x60, byte(runtimeLen), // PUSH1 length
+		0x60, 0x0c, //             PUSH1 12 (runtime offset in initcode)
+		0x60, 0x00, //             PUSH1 0  (memory destination)
+		0x39,                   // CODECOPY
+		0x60, byte(runtimeLen), // PUSH1 length
+		0x60, 0x00, //             PUSH1 0 (memory offset)
+		0xf3, //                   RETURN
+	}
+	deployCode := append(initHeader, make([]byte, runtimeLen)...)
+
+	// With a 1_000_000 block gas limit, two txs (~337K state each) leave
+	// the pool at ~326K; a third has 184K intrinsic state (fits in pool by
+	// txpool's filter) but needs 337K total (fails ConsumeState during
+	// execution). A fourth tx then succeeds against the wrongly inflated
+	// pool, pushing the block's total state gas past gas_limit.
+	const numSenders = 4
+	keys := make([]*ecdsa.PrivateKey, numSenders)
+	addrs := make([]common.Address, numSenders)
+	for i := range keys {
+		k, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = k
+		addrs[i] = crypto.PubkeyToAddress(k.PublicKey)
+	}
+
+	alloc := types.GenesisAlloc{}
+	for _, a := range addrs {
+		alloc[a] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 1_000_000,
+		Alloc:    alloc,
+	}
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(keys[0]),
+		execmoduletester.WithTxPool(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+
+	rlpTxs := make([][]byte, numSenders)
+	for i, k := range keys {
+		tx, err := types.SignTx(
+			types.NewContractCreation(0, uint256.NewInt(0), 400_000, uint256.NewInt(baseFee), deployCode),
+			signer, k,
+		)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+		rlpTxs[i] = buf.Bytes()
+	}
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range r.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	slotNumber := uint64(1)
+	parentBeaconBlockRoot := randomHash()
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            randomHash(),
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            &slotNumber,
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+
+	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
+	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
+		"gas_used (max of regular, state) must not exceed gas_limit")
+
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
 
 func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {

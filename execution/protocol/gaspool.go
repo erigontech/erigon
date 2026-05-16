@@ -45,6 +45,10 @@ func NewGasPool(gasLimit, blobGas uint64) *GasPool {
 	return &GasPool{regularGas: gasLimit, stateGas: gasLimit, blobGas: blobGas}
 }
 
+func NewBlockGasPool(regularGas, stateGas, blobGas uint64) *GasPool {
+	return &GasPool{regularGas: regularGas, stateGas: stateGas, blobGas: blobGas}
+}
+
 // Reset reinitialises the pool. Both gas dimensions return to gasLimit.
 func (gp *GasPool) Reset(gasLimit, blobGas uint64) {
 	if gp == nil {
