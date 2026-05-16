@@ -82,8 +82,19 @@ type leafTask struct {
 type parallelUpdate struct {
 	trie *prefixTrie
 
-	splitMap  *maphash.NonConcurrentMap[*splitPoint]
-	leafQueue []leafTask
+	splitMap *maphash.NonConcurrentMap[*splitPoint]
+	// splitPoints mirrors splitMap so callers can iterate the emitted
+	// split-points without poking inside the map (NonConcurrentMap has no
+	// Range). Populated by Prepare in the same DFS order as splitMap.
+	splitPoints []*splitPoint
+	leafQueue   []leafTask
+
+	// minSplitKeys overrides the global MinSplitKeys threshold for this
+	// instance. Zero means "use the global default". Callers (e.g.
+	// ParallelPatriciaHashed.Process or tests) set this before Prepare to
+	// influence split-point emission — raising it above the touched-key count
+	// suppresses all split-points so every leafTask runs without barriers.
+	minSplitKeys uint32
 
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
@@ -110,6 +121,7 @@ func (pu *parallelUpdate) Reset() {
 	if pu.splitMap != nil {
 		pu.splitMap.Clear()
 	}
+	pu.splitPoints = pu.splitPoints[:0]
 	pu.leafQueue = pu.leafQueue[:0]
 	pu.deferredMu.Lock()
 	pu.deferredCombined = pu.deferredCombined[:0]
@@ -121,6 +133,7 @@ func (pu *parallelUpdate) Reset() {
 func (pu *parallelUpdate) Close() {
 	pu.trie = nil
 	pu.splitMap = nil
+	pu.splitPoints = nil
 	pu.leafQueue = nil
 	pu.deferredMu.Lock()
 	pu.deferredCombined = nil
@@ -159,6 +172,7 @@ func (pu *parallelUpdate) Prepare(ctx PatriciaContext) error {
 		return errors.New("parallelUpdate.Prepare: trie not initialised")
 	}
 	pu.leafQueue = pu.leafQueue[:0]
+	pu.splitPoints = pu.splitPoints[:0]
 	if pu.splitMap == nil {
 		pu.splitMap = maphash.NewNonConcurrentMap[*splitPoint]()
 	} else {
@@ -207,7 +221,11 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		return nil
 	}
 
-	qualifiesAsSplit := fanout >= 2 && node.subtreeCount >= MinSplitKeys
+	threshold := pu.minSplitKeys
+	if threshold == 0 {
+		threshold = MinSplitKeys
+	}
+	qualifiesAsSplit := fanout >= 2 && node.subtreeCount >= threshold
 
 	// Root with fanout >= 1 but does not qualify as a split-point: we still
 	// must descend so each emerging leafTask gets a non-empty prefix that
@@ -229,6 +247,7 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		}
 		sp.arrived.Store(int32(fanout - 1))
 		pu.splitMap.Set(nodePrefix, sp)
+		pu.splitPoints = append(pu.splitPoints, sp)
 		return pu.recurseChildren(ctx, node, nodePrefix)
 	}
 

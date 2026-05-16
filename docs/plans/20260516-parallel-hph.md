@@ -391,8 +391,8 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Modify: `execution/commitment/parallel_patricia_hashed.go`
 - Modify: `execution/commitment/parallel_patricia_hashed_test.go`
 
-- [ ] implement warmup helper `(p *ParallelPatriciaHashed) warmupSplitAncestors(splitMap, warmuper)` — walks every splitPoint prefix and every ancestor; enqueues each ancestor branch path into the Warmuper
-- [ ] implement `Process(ctx, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)`:
+- [x] implement warmup helper `(p *ParallelPatriciaHashed) warmupSplitAncestors(splitMap, warmuper)` — walks every splitPoint prefix and every ancestor; enqueues each ancestor branch path into the Warmuper
+- [x] implement `Process(ctx, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)`:
   - validate `updates.mode == ModeParallel && updates.parallel != nil`
   - start Warmuper (existing)
   - call `updates.parallel.Prepare(ctx)` (Task 3)
@@ -402,13 +402,13 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
   - **for this task only**: after key iteration, just call `hph.fold()` until activeRows==0, capture deferred updates, return to pool — DO NOT implement barrier yet
   - on errgroup.Wait: merge all worker deferred slices via `ApplyDeferredBranchUpdates`
   - compute root hash from the single surviving worker's `hph.root` (only correct in the single-worker subset that Task 6's tests cover; multi-worker is invalid until Task 7)
-- [ ] add ETL helper to dispatch keys from one collector to multiple leafTasks: groups leafTasks by `prefix[0]`, scans `nibbles[i]` once, dispatches per-key to the matching leafTask based on prefix lookup (avoids quadratic per-leaf full scans)
-- [ ] **Task 6 explicit constraint**: tests run with `NumWorkers=1`, the entire update set falling into a single leafTask with **no splitPoints** (or `MinSplitKeys` artificially raised so none qualify). In this configuration the root IS correct because there is no barrier protocol to need. Multi-worker / multi-leaf configurations are NOT tested in Task 6 — they would race on `hph.root` since the barrier is not wired. Task 7 enables them.
-- [ ] add test helper `assertEquivalentRoot(t, ctx, updates)` that drives the same update set through both `HexPatriciaHashed` (ModeDirect) and `ParallelPatriciaHashed` (ModeParallel) and asserts byte-equal root hashes. Returns the root for further inspection. This helper is used by every subsequent end-to-end test (Tasks 6, 7, 9, 10).
-- [ ] write tests: ModeParallel + NumWorkers=1 + small update batch + no splits → call `assertEquivalentRoot`; assert workers ran, deferred updates applied, no panics. Equivalence is enforced from this task onward, narrowly scoped to the no-barrier subset for now.
-- [ ] add ⚠️ note in plan if any orchestration detail surprises
-- [ ] `go test ./execution/commitment/ -run TestParallelProcessSkeleton` passes
-- [ ] `make lint` clean
+- [x] add ETL helper to dispatch keys from one collector to multiple leafTasks: groups leafTasks by `prefix[0]`, scans `nibbles[i]` once, dispatches per-key to the matching leafTask based on prefix lookup (avoids quadratic per-leaf full scans)
+- [x] **Task 6 explicit constraint**: tests run with `NumWorkers=1`, the entire update set falling into a single leafTask with **no splitPoints** (or `MinSplitKeys` artificially raised so none qualify). In this configuration the root IS correct because there is no barrier protocol to need. Multi-worker / multi-leaf configurations are NOT tested in Task 6 — they would race on `hph.root` since the barrier is not wired. Task 7 enables them.
+- [x] add test helper `assertEquivalentRoot(t, ctx, updates)` that drives the same update set through both `HexPatriciaHashed` (ModeDirect) and `ParallelPatriciaHashed` (ModeParallel) and asserts byte-equal root hashes. Returns the root for further inspection. This helper is used by every subsequent end-to-end test (Tasks 6, 7, 9, 10).
+- [x] write tests: ModeParallel + NumWorkers=1 + small update batch + no splits → call `assertEquivalentRoot`; assert workers ran, deferred updates applied, no panics. Equivalence is enforced from this task onward, narrowly scoped to the no-barrier subset for now.
+- [x] add ⚠️ note in plan if any orchestration detail surprises — ⚠️ Process must reject multi-leafTask-per-nibble configurations until Task 7 wires the barrier; without it, multiple surviving workers would each produce an independent fold-to-root that cannot be merged. Implementation guards this explicitly. ⚠️ Added a `splitPoints []*splitPoint` slice to `parallelUpdate` (mirrors `splitMap`) so `warmupSplitAncestors` can iterate emitted split-points without needing a Range method on `maphash.NonConcurrentMap`. ⚠️ Promoted `minSplitKeys` from a const-only package value to a per-instance `parallelUpdate.minSplitKeys` field that `Process` populates from `ParallelPatriciaHashed.minSplitKeys` before calling `Prepare`. This is what lets tests raise the threshold to suppress split-point emission.
+- [x] `go test ./execution/commitment/ -run TestParallelProcessSkeleton` passes
+- [x] `make lint` clean
 
 ### Task 7: Worker fold-time barrier protocol
 
