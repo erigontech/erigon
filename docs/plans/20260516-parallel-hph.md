@@ -320,16 +320,16 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Create: `execution/commitment/parallel_update.go`
 - Create: `execution/commitment/parallel_update_test.go`
 
-- [ ] define `splitPoint` struct (prefix, touchedBitmap, dbBitmap, cells, arrived, branchBefore) in `parallel_update.go`
-- [ ] define `leafTask` struct (prefix, keyCount) — no `enclosingSP`; ancestor chain is discovered via `splitMap.Get` during fold
-- [ ] define `parallelUpdate` struct (trieRoot, arena, splitMap, leafQueue, deferredMu, deferredCombined)
-- [ ] implement `newParallelUpdate()` constructor wiring the maphash and arena
-- [ ] implement `(pu *parallelUpdate) Insert(hashedKey []byte)` — thin wrapper over prefix-trie Insert
-- [ ] implement `(pu *parallelUpdate) Reset()` (resets arena, clears map and queue) and `Close()`
-- [ ] implement `(pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate)` with mutex
-- [ ] write unit tests: construction, Insert delegation, Reset clears all state, appendDeferred concurrency (race detector)
-- [ ] `go test -race ./execution/commitment/ -run TestParallelUpdate` passes
-- [ ] `make lint` clean
+- [x] define `splitPoint` struct (prefix, touchedBitmap, dbBitmap, cells, arrived, branchBefore) in `parallel_update.go`
+- [x] define `leafTask` struct (prefix, keyCount) — no `enclosingSP`; ancestor chain is discovered via `splitMap.Get` during fold
+- [x] define `parallelUpdate` struct (trieRoot, arena, splitMap, leafQueue, deferredMu, deferredCombined)
+- [x] implement `newParallelUpdate()` constructor wiring the maphash and arena
+- [x] implement `(pu *parallelUpdate) Insert(hashedKey []byte)` — thin wrapper over prefix-trie Insert
+- [x] implement `(pu *parallelUpdate) Reset()` (resets arena, clears map and queue) and `Close()`
+- [x] implement `(pu *parallelUpdate) appendDeferred(updates []*DeferredBranchUpdate)` with mutex
+- [x] write unit tests: construction, Insert delegation, Reset clears all state, appendDeferred concurrency (race detector)
+- [x] `go test -race ./execution/commitment/ -run TestParallelUpdate` passes
+- [x] `make lint` clean
 
 ### Task 3: Prepare — DFS, split-point emission, untouched-cell pre-population
 
