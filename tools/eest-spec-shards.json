@@ -10,7 +10,7 @@
     "max-allowed-failures": 5253
   },
   {
-    "shard": "blocktests-stable",
+    "shard": "blocktests-stable-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
@@ -27,9 +27,15 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-stable",
+    "shard": "enginextests-stable-sequential",
     "workers": 8,
     "max-allowed-failures": 0
+  },
+  {
+    "shard": "enginextests-stable-parallel",
+    "workers": 8,
+    "max-allowed-failures": 19,
+    "exec3-parallel": true
   },
   {
     "shard": "enginextests-benchmark-1m",
