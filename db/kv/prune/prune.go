@@ -416,12 +416,6 @@ func tableScanningPrune(
 						break
 					}
 				}
-				if throttling != nil {
-					time.Sleep(*throttling)
-				}
-				if ctx.Err() != nil {
-					return common.Copy(val), nil
-				}
 
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
@@ -429,6 +423,14 @@ func tableScanningPrune(
 					return nil, err
 				}
 				stat.PruneCountValues++
+			}
+			// Check throttle/ctx only AFTER all in-range dups for this key are deleted,
+			// to keep per-key deletions atomic (no interrupt between newer/older dup).
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
+			if ctx.Err() != nil {
+				return common.Copy(val), nil
 			}
 		}
 	nextKey:
