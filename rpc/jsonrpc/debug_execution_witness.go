@@ -466,6 +466,151 @@ type witnessBlockInfo struct {
 	ParentNum         uint64
 }
 
+// accessedState bundles every piece of state that the recording reader observed
+// during block execution. ExecutionWitness uses it to drive both commitment
+// "touch" phases and to populate the keys/codes returned to the caller.
+type accessedState struct {
+	// SortedKeys is the JSON-RPC `keys` field: account addresses plus composite
+	// (address||storageKey) entries, deduplicated and sorted byte-wise.
+	SortedKeys []hexutil.Bytes
+	// Addresses is the deduplicated set of every account touched (read or written).
+	Addresses map[common.Address]struct{}
+	// Storage is the deduplicated set of storage slots touched per account.
+	Storage map[common.Address]map[common.Hash]struct{}
+	// SortedCodes is the JSON-RPC `codes` field: pre-state bytecodes only,
+	// deduplicated by hash and sorted by hash.
+	SortedCodes []hexutil.Bytes
+	// PreCode is every bytecode read from the parent-state reader (pre-block).
+	PreCode map[common.Address][]byte
+	// ModCode is bytecode written during execution (deployments, EIP-7702).
+	ModCode map[common.Address][]byte
+	// CodeReads is keyed by addrHash, fed to sdCtx.Witness for AccountNode codes.
+	CodeReads map[common.Hash]witnesstypes.CodeWithHash
+	// CodeAddrs is the union of PreCode and ModCode addresses, used for touchAll.
+	CodeAddrs map[common.Address]struct{}
+}
+
+// isEmpty reports whether any state was touched during execution.
+func (a *accessedState) isEmpty() bool {
+	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
+}
+
+// touchAll touches every accessed account, storage slot, and code address on the
+// commitment context. Used before each commitment phase.
+func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
+	for addr := range a.Addresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+		}
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+}
+
+// collectAccessedState snapshots the recording reader into an accessedState.
+// Determinism: SortedKeys and SortedCodes are byte-sorted on output, so
+// map-iteration order does not leak into the JSON response.
+func collectAccessedState(rs *RecordingState) *accessedState {
+	a := &accessedState{
+		Addresses: make(map[common.Address]struct{}),
+		Storage:   make(map[common.Address]map[common.Hash]struct{}),
+		CodeReads: make(map[common.Hash]witnesstypes.CodeWithHash),
+		CodeAddrs: make(map[common.Address]struct{}),
+	}
+
+	readAddresses, readStorageKeys := rs.GetAccessedKeys()
+	writeAddresses, writeStorageKeys := rs.GetModifiedKeys()
+
+	for _, addr := range readAddresses {
+		a.Addresses[addr] = struct{}{}
+	}
+	for _, addr := range writeAddresses {
+		a.Addresses[addr] = struct{}{}
+	}
+
+	for addr, keys := range readStorageKeys {
+		if a.Storage[addr] == nil {
+			a.Storage[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			a.Storage[addr][key] = struct{}{}
+		}
+	}
+	for addr, keys := range writeStorageKeys {
+		if a.Storage[addr] == nil {
+			a.Storage[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			a.Storage[addr][key] = struct{}{}
+		}
+	}
+
+	a.SortedKeys = make([]hexutil.Bytes, 0, len(a.Addresses))
+	for addr := range a.Addresses {
+		a.SortedKeys = append(a.SortedKeys, addr.Bytes())
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			compositeKey := append(addr.Bytes(), key.Bytes()...)
+			a.SortedKeys = append(a.SortedKeys, compositeKey)
+		}
+	}
+	slices.SortFunc(a.SortedKeys, func(x, y hexutil.Bytes) int { return bytes.Compare(x, y) })
+
+	a.PreCode = rs.GetPreStateCode()
+	a.ModCode = rs.GetModifiedCode()
+
+	// SortedCodes: dedup pre-state code by hash, sort by hash for determinism.
+	type codeWithHash struct {
+		code []byte
+		hash common.Hash
+	}
+	var uniqueCodes []codeWithHash
+	codesSeen := make(map[common.Hash]struct{})
+	for _, code := range a.PreCode {
+		if len(code) > 0 {
+			h := crypto.Keccak256Hash(code)
+			if _, dup := codesSeen[h]; !dup {
+				uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+				codesSeen[h] = struct{}{}
+			}
+		}
+	}
+	slices.SortFunc(uniqueCodes, func(x, y codeWithHash) int {
+		return bytes.Compare(x.hash[:], y.hash[:])
+	})
+	a.SortedCodes = make([]hexutil.Bytes, 0, len(uniqueCodes))
+	for _, c := range uniqueCodes {
+		a.SortedCodes = append(a.SortedCodes, c.code)
+	}
+
+	// CodeReads keyed by addrHash for sdCtx.Witness AccountNode population.
+	for addr, code := range a.PreCode {
+		if len(code) > 0 {
+			codeHash := crypto.Keccak256Hash(code)
+			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			a.CodeReads[addrHash] = witnesstypes.CodeWithHash{
+				Code:     code,
+				CodeHash: accounts.InternCodeHash(codeHash),
+			}
+		}
+	}
+
+	for addr := range a.PreCode {
+		a.CodeAddrs[addr] = struct{}{}
+	}
+	for addr := range a.ModCode {
+		a.CodeAddrs[addr] = struct{}{}
+	}
+
+	return a
+}
+
 // resolveWitnessBlock turns a BlockNumberOrHash into a resolved block plus the
 // txnum range used downstream for state reading and commitment work.
 func (api *DebugAPIImpl) resolveWitnessBlock(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash) (*witnessBlockInfo, error) {
@@ -623,111 +768,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
+	accessed := collectAccessedState(recordingState)
+
 	// Build the execution witness result
 	result := &ExecutionWitnessResult{
 		State: []hexutil.Bytes{},
-		Codes: []hexutil.Bytes{},
-		Keys:  []hexutil.Bytes{},
-	}
-
-	// Collect all accessed keys (reads) for the Keys field
-	readAddresses, readStorageKeys := recordingState.GetAccessedKeys()
-
-	// Collect all modified keys (writes) for the Keys field
-	writeAddresses, writeStorageKeys := recordingState.GetModifiedKeys()
-
-	// Merge read and write addresses into a deduplicated set
-	allAddresses := make(map[common.Address]struct{})
-	for _, addr := range readAddresses {
-		allAddresses[addr] = struct{}{}
-	}
-	for _, addr := range writeAddresses {
-		allAddresses[addr] = struct{}{}
-	}
-
-	// Merge read and write storage keys into a deduplicated set
-	allStorageKeys := make(map[common.Address]map[common.Hash]struct{})
-	for addr, keys := range readStorageKeys {
-		if allStorageKeys[addr] == nil {
-			allStorageKeys[addr] = make(map[common.Hash]struct{})
-		}
-		for _, key := range keys {
-			allStorageKeys[addr][key] = struct{}{}
-		}
-	}
-	for addr, keys := range writeStorageKeys {
-		if allStorageKeys[addr] == nil {
-			allStorageKeys[addr] = make(map[common.Hash]struct{})
-		}
-		for _, key := range keys {
-			allStorageKeys[addr][key] = struct{}{}
-		}
-	}
-
-	// Add account keys
-	for addr := range allAddresses {
-		result.Keys = append(result.Keys, addr.Bytes())
-	}
-
-	// Add storage keys
-	for addr, keys := range allStorageKeys {
-		for key := range keys {
-			// Storage keys are represented as composite keys (address + key)
-			compositeKey := append(addr.Bytes(), key.Bytes()...)
-			result.Keys = append(result.Keys, compositeKey)
-		}
-	}
-
-	slices.SortFunc(result.Keys, func(a, b hexutil.Bytes) int { return bytes.Compare(a, b) })
-
-	// Collect code from the recording state:
-	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
-	// - modifiedCode: code written during execution (new deployments, EIP-7702)
-	//
-	// Only pre-state code goes into result.Codes. Created/modified code (contract
-	// deployments, EIP-7702 delegations) is derived by the stateless verifier
-	// during re-execution and doesn't need to be shipped in the witness.
-	preStateCode := recordingState.GetPreStateCode()
-	modifiedCode := recordingState.GetModifiedCode()
-
-	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls.
-	// Collect unique codes with their hashes for deterministic sorting.
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-	var uniqueCodes []codeWithHash
-	codesSeen := make(map[common.Hash]struct{})
-	for _, code := range preStateCode {
-		if len(code) > 0 {
-			h := crypto.Keccak256Hash(code)
-			if _, dup := codesSeen[h]; !dup {
-				uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
-				codesSeen[h] = struct{}{}
-			}
-		}
-	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
-	for _, c := range uniqueCodes {
-		result.Codes = append(result.Codes, c.code)
-	}
-
-	// codeReads: pre-block-state code keyed by address hash, used by
-	// GenerateWitness to populate AccountNodes in the witness trie.
-	// Must contain the code that existed at the START of the block only,
-	// so that CodeHash matches the account in the parent-state commitment.
-	codeReads := make(map[common.Hash]witnesstypes.CodeWithHash)
-	for addr, code := range preStateCode {
-		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
-			addrHash := crypto.Keccak256Hash(addr.Bytes())
-			codeReads[addrHash] = witnesstypes.CodeWithHash{
-				Code:     code,
-				CodeHash: accounts.InternCodeHash(codeHash),
-			}
-		}
+		Codes: accessed.SortedCodes,
+		Keys:  accessed.SortedKeys,
 	}
 
 	// Build merkle proofs for all accessed accounts
@@ -759,35 +806,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, info.FirstTxNumInBlock)
 	}
 
-	// allCodeAddrs: union of addresses with pre-state or modified code.
-	// The commitment needs to know about both existing code (pre-state reads)
-	// and newly created/modified code (e.g. contract deployments, EIP-7702 delegations).
-	allCodeAddrs := make(map[common.Address]struct{})
-	for addr := range preStateCode {
-		allCodeAddrs[addr] = struct{}{}
-	}
-	for addr := range modifiedCode {
-		allCodeAddrs[addr] = struct{}{}
-	}
-
-	if len(allAddresses)+len(allStorageKeys)+len(allCodeAddrs) == 0 { // nothing touched, return empty witness
+	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
 	}
 
 	// Helper to touch all accessed/modified accounts, storage keys, and code keys
 	touchAllKeys := func() {
-		for addr := range allAddresses {
-			sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
-		}
-		for addr, keys := range allStorageKeys {
-			for key := range keys {
-				storageKey := string(append(addr.Bytes(), key.Bytes()...))
-				sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
-			}
-		}
-		for addr := range allCodeAddrs {
-			sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-		}
+		accessed.touchAll(sdCtx)
 	}
 
 	// Helper to reset commitment to parent block state and re-seek
@@ -848,7 +873,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_witness_construction")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
