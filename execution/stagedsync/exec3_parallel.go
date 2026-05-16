@@ -450,6 +450,26 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
 				case *blockResult:
+					// Apply loop is the canonical error-emission point for
+					// block-validity rejections (insufficient funds, gas
+					// overflow, finalize rejection, scheduler-exhausted
+					// incarnations). The worker plumbs the diagnosis through
+					// blockResult.Err via nextResult → processResults → the
+					// exec loop's sendResult — and the exec loop exits
+					// immediately after sending (see the matching guard in
+					// the exec loop). The calculator skips its compute for
+					// this block (see committer.go case *blockResult). So
+					// here, on the apply side: mark the block applied (so
+					// the channel-close completeness check doesn't
+					// double-report as silent miss), drop pending
+					// accumulator notifications (we never announce invalid
+					// blocks), and surface the worker's err. Single emission
+					// point — no errors.Join of competing diagnostics.
+					if applyResult.Err != nil {
+						appliedBlocks[applyResult.BlockNum] = struct{}{}
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+						return applyResult.Err
+					}
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
 					// (avoids data race with the executor goroutine).
@@ -844,6 +864,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
 								return err
 							}
+							// See main exec-loop path: invalid blockResult is
+							// the apply loop's signal — don't schedule next.
+							if blockResult.Err != nil {
+								return nil
+							}
 							pe.Lock()
 							delete(pe.blockExecutors, blockResult.BlockNum)
 							pe.Unlock()
@@ -922,6 +947,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					return err
 				}
 				pe.clearChangesetAccumulator()
+
+				// Block-validity rejection: the apply loop will consume
+				// blockResult and return its Err; the calculator skips the
+				// commitment compute (see committer.go case *blockResult).
+				// Exit the exec loop here so we don't schedule the next
+				// pending block on top of partial / now-discarded state —
+				// the apply loop's Err is the canonical signal, surfaced
+				// through errgroup to the caller. Leaving scheduling running
+				// would race with the apply loop's Err return: the
+				// commitment calculator could compute on partial state, the
+				// next block's executor could start against stale sd.mem,
+				// and errors.Join would weld competing diagnostics.
+				if blockResult.Err != nil {
+					return nil
+				}
 
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
@@ -2394,6 +2434,21 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 	}
 }
 
+// invalidBlockResult wraps a block-validity failure (insufficient funds, gas
+// overflow, finalize rejection, etc.) as a *blockResult carrying Err. Returning
+// this from the worker-result processing path lets the apply loop see that the
+// block completed (with a rejection) rather than treating the dangling
+// tx-results as a silent miss. The apply loop's case *blockResult fast-paths
+// Err != nil at the top: marks the block applied so the channel-close
+// completeness check doesn't double-report, and surfaces the error.
+func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
+	return &blockResult{
+		BlockNum:  be.blockNum,
+		BlockHash: be.blockHash,
+		Err:       err,
+	}
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2406,18 +2461,30 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
 			if execErr.OriginError != nil && be.skipCheck[tx] {
-				// If the transaction failed when we know it should not fail, this means the transaction itself is
-				// bad (e.g. wrong nonce), and we should exit the execution immediately
+				// Worker hit a legitimate VM rejection (insufficient funds, wrong
+				// nonce, low gas limit, …). Surface the diagnosis through a
+				// blockResult so the apply loop counts the block as completed-
+				// as-invalid; returning (nil, err) here would race with the
+				// channel-close completeness check at the top of the apply loop
+				// and produce a doubled ErrInvalidBlock error chain.
 				version := res.Version()
-				return nil, fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, version.TxIndex, version.TxNum, task.TxHash(), execErr.OriginError)
+				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, version.TxIndex, version.TxNum, task.TxHash(), execErr.OriginError)), nil
 			}
 
 			if res.Version().Incarnation > len(be.tasks) {
+				// Parallel scheduler exhausted retries for this tx. Surface
+				// through blockResult.Err for the same reason as the other
+				// block-validity bailouts above: (nil, err) would race with
+				// the apply loop's channel-close completeness check and
+				// produce a doubled error chain. The underlying scheduler
+				// behaviour (why this test ordering hits the incarnation
+				// limit) is a separate investigation — see
+				// TestDeleteRecreateSlotsAcrossManyBlocks under
+				// GOMAXPROCS=2 -race for a stress repro.
 				if execErr.OriginError != nil {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
-				} else {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))
+					return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))), nil
 				}
+				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))), nil
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "err", execErr)
@@ -2603,16 +2670,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if err := be.gasPool.ConsumeRegular(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
-					return nil, fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)
+					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
 				}
 				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
-					return nil, fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)
+					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
 				}
 
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
 					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return nil, fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)
+						return be.invalidBlockResult(fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)), nil
 					}
 					be.blobGasUsed += blobGasUsed
 				}
@@ -2931,7 +2998,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return nil, fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
 				}
 
 				// syscallIBS == ibs unconditionally now; no separate write
