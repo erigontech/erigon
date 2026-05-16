@@ -329,7 +329,24 @@ func tableScanningPrune(
 	if err != nil {
 		return nil, fmt.Errorf("cursor position %s: %w", filenameBase, err)
 	}
+	var keyCount uint64
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
+		keyCount++
+		// Sample the log ticker every 1000 keys instead of every key — the
+		// per-key check was cheap individually but added up over millions
+		// of keys per prune cycle.
+		if keyCount%1000 == 0 {
+			select {
+			case <-logEvery.C:
+				args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
+				if keysCursor != nil {
+					args = append(args, "pruned tx", stat.PruneCountTx)
+				}
+				args = append(args, "val status", stat.ValueProgress.String())
+				logger.Info("[snapshots] prune index", args...)
+			default:
+			}
+		}
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
@@ -382,7 +399,7 @@ func tableScanningPrune(
 			stat.PruneCountValues += dups
 			stat.MinTxNum = min(stat.MinTxNum, minTxNum)
 			stat.MaxTxNum = max(stat.MaxTxNum, maxTxNum)
-			goto nextKey
+			continue
 		}
 
 		// Partial overlap: iterate dups and delete those in range.
@@ -391,59 +408,45 @@ func tableScanningPrune(
 		// Order-aware early-break preserves the optimization from before the fix:
 		//   - firstIsOldest (PrefixVal): once we cross txTo, all remaining are newer.
 		//   - !firstIsOldest (StepValue): once we cross under txFrom, all are older.
-		{
-			_, err = valDelCursor.FirstDup()
-			if err != nil {
-				return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
-			}
-			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-				}
-				txNumDup := txNumGetter(val, txNumBytes)
-				if firstIsOldest {
-					if txNumDup < txFrom {
-						continue
-					}
-					if txNumDup >= txTo {
-						break
-					}
-				} else {
-					if txNumDup >= txTo {
-						continue
-					}
-					if txNumDup < txFrom {
-						break
-					}
-				}
-
-				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
-				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
-					return nil, err
-				}
-				stat.PruneCountValues++
-			}
-			// Check throttle/ctx only AFTER all in-range dups for this key are deleted,
-			// to keep per-key deletions atomic (no interrupt between newer/older dup).
-			if throttling != nil {
-				time.Sleep(*throttling)
-			}
-			if ctx.Err() != nil {
-				return common.Copy(val), nil
-			}
+		_, err = valDelCursor.FirstDup()
+		if err != nil {
+			return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
 		}
-	nextKey:
-
-		select {
-		case <-logEvery.C:
-			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
-			if keysCursor != nil {
-				args = append(args, "pruned tx", stat.PruneCountTx)
+		for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
-			args = append(args, "val status", stat.ValueProgress.String())
-			logger.Info("[snapshots] prune index", args...)
-		default:
+			txNumDup := txNumGetter(val, txNumBytes)
+			if firstIsOldest {
+				if txNumDup < txFrom {
+					continue
+				}
+				if txNumDup >= txTo {
+					break
+				}
+			} else {
+				if txNumDup >= txTo {
+					continue
+				}
+				if txNumDup < txFrom {
+					break
+				}
+			}
+
+			stat.MinTxNum = min(stat.MinTxNum, txNumDup)
+			stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
+			if err = valDelCursor.DeleteCurrent(); err != nil {
+				return nil, err
+			}
+			stat.PruneCountValues++
+		}
+		// Check throttle/ctx only AFTER all in-range dups for this key are deleted,
+		// to keep per-key deletions atomic (no interrupt between newer/older dup).
+		if throttling != nil {
+			time.Sleep(*throttling)
+		}
+		if ctx.Err() != nil {
+			return common.Copy(val), nil
 		}
 	}
 
