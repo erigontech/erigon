@@ -303,16 +303,16 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Create: `execution/commitment/prefix_trie.go`
 - Create: `execution/commitment/prefix_trie_test.go`
 
-- [ ] define `prefixNode` struct (ext, bitmap, children, subtreeCount) in `prefix_trie.go`
-- [ ] define `prefixSlab` type (`[16384]prefixNode`) and arena helpers (`newPrefixArena`, `allocNode`, `resetArena`)
-- [ ] implement `prefixTrie` wrapper with `Insert(hashedKey []byte)` — handles full-match descent, partial-extension split, fresh child append
-- [ ] implement `Walk(fn func(prefix []byte, node *prefixNode))` DFS used later by Prepare
-- [ ] add helpers: `popcount(node) int`, `childIndex(node, nib) (idx int, ok bool)`
-- [ ] write unit tests: empty trie, single insert, two inserts diverging at depth 0, divergence inside extension (partial split), divergence at end of extension (descend into existing child), duplicate insert (no growth), deep insert (~128 nibbles)
-- [ ] write tests for `subtreeCount` accumulation: after N inserts on shared prefix, root.subtreeCount == N; mixed-prefix counts propagate correctly
-- [ ] write test for arena reuse: insert, reset, insert again, no leaks (validate node count)
-- [ ] `go test ./execution/commitment/ -run TestPrefixTrie` passes
-- [ ] `make lint` clean
+- [x] define `prefixNode` struct (ext, bitmap, children, subtreeCount) in `prefix_trie.go`
+- [x] define `prefixSlab` type (`[16384]prefixNode`) and arena helpers (`newPrefixArena`, `allocNode`, `resetArena`)
+- [x] implement `prefixTrie` wrapper with `Insert(hashedKey []byte)` — handles full-match descent, partial-extension split, fresh child append
+- [x] implement `Walk(fn func(prefix []byte, node *prefixNode))` DFS used later by Prepare
+- [x] add helpers: `popcount(node) int`, `childIndex(node, nib) (idx int, ok bool)`
+- [x] write unit tests: empty trie, single insert, two inserts diverging at depth 0, divergence inside extension (partial split), divergence at end of extension (descend into existing child), duplicate insert (no growth), deep insert (~128 nibbles)
+- [x] write tests for `subtreeCount` accumulation: after N inserts on shared prefix, root.subtreeCount == N; mixed-prefix counts propagate correctly
+- [x] write test for arena reuse: insert, reset, insert again, no leaks (validate node count)
+- [x] `go test ./execution/commitment/ -run TestPrefixTrie` passes
+- [x] `make lint` clean
 
 ### Task 2: splitPoint + leafTask + parallelUpdate skeleton
 
