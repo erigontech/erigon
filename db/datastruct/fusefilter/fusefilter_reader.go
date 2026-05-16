@@ -155,6 +155,9 @@ func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
+	if r.m == nil || r.inner == nil {
+		return 0
+	}
 	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
 	copy(cpy, r.inner.Fingerprints)
 	r.inner.Fingerprints = cpy
