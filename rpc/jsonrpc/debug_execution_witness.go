@@ -414,6 +414,15 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
+// OnCodeAccess is called by IntraBlockState when code is returned from a stateObject
+// cache hit (bypassing ReadAccountCode). This ensures code accessed via CALL/EXTCODESIZE
+// on contracts whose bytecode is already in the stateObject cache is tracked.
+func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
+	if len(code) > 0 {
+		s.AccessedCode[address.Value()] = code
+	}
+}
+
 // GetAccessedCode returns all code seen during execution (overlay + inner reads)
 func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.AccessedCode))
@@ -675,16 +684,17 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	// Collect code from the recording state:
-	// - preStateCode: code from the inner reader (pre-block state), tracked via ReadAccountCode
-	// - modifiedCode: code written during execution (new deployments, EIP-7702)
+	// Collect code from the recording state.
+	// preStateCode: code read from the inner reader (pre-block state only).
+	// modifiedCode: code written during execution (new deployments, EIP-7702).
+	// accessedCode: all code seen via GetCode/GetCodeSize during execution, including
+	//               cache-hits that bypass ReadAccountCode (tracked via OnCodeAccess hook).
 	preStateCode := recordingState.GetPreStateCode()
 	modifiedCode := recordingState.GetModifiedCode()
+	accessedCode := recordingState.GetAccessedCode()
 
-	// result.Codes must include all code a stateless verifier needs:
-	// 1. Pre-existing contracts called during execution → preStateCode.
-	// 2. Contracts created in this block that are subsequently called via the stateObject
-	//    cache (bypassing ReadAccountCode) → land in modifiedCode but not preStateCode.
+	// result.Codes includes only code explicitly accessed during execution (matching Geth's
+	// witness.AddCode behavior: called on GetCode/GetCodeSize, not on deployment alone).
 	type codeWithHash struct {
 		code []byte
 		hash common.Hash
@@ -696,10 +706,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			allCodesByHash[h] = code
 		}
 	}
-	for _, code := range preStateCode {
-		addToResultCodes(code)
-	}
-	for _, code := range modifiedCode {
+	for _, code := range accessedCode {
 		addToResultCodes(code)
 	}
 

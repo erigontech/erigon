@@ -648,6 +648,13 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
 			}
+			if err == nil {
+				if hook, ok := sdb.stateReader.(interface {
+					OnCodeAccess(accounts.Address, []byte)
+				}); ok {
+					hook.OnCodeAccess(addr, code)
+				}
+			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -663,6 +670,11 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	// not in a previous tx sharing the same IBS (block generator reuses IBS).
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			if hook, ok := sdb.stateReader.(interface {
+				OnCodeAccess(accounts.Address, []byte)
+			}); ok {
+				hook.OnCodeAccess(addr, so.code)
+			}
 			return so.code, nil
 		}
 	}
@@ -685,7 +697,13 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
 		}
 	}
-
+	if err == nil {
+		if hook, ok := sdb.stateReader.(interface {
+			OnCodeAccess(accounts.Address, []byte)
+		}); ok {
+			hook.OnCodeAccess(addr, code)
+		}
+	}
 	return code, err
 }
 
@@ -700,6 +718,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			return 0, nil
 		}
 		if stateObject.code != nil {
+			if hook, ok := sdb.stateReader.(interface {
+				OnCodeAccess(accounts.Address, []byte)
+			}); ok {
+				hook.OnCodeAccess(addr, stateObject.code)
+			}
 			return len(stateObject.code), nil
 		}
 		if stateObject.data.CodeHash.IsEmpty() {
@@ -715,6 +738,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 				return 0, nil
 			}
 			if s.code != nil {
+				if hook, ok := sdb.stateReader.(interface {
+					OnCodeAccess(accounts.Address, []byte)
+				}); ok {
+					hook.OnCodeAccess(addr, s.code)
+				}
 				return len(s.code), nil
 			}
 			if s.data.CodeHash.IsEmpty() {
