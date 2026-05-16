@@ -57,6 +57,31 @@ type StageHistoryReconstructionCfg struct {
 	blobStorage              blob_storage.BlobStorage
 	forkchoiceStore          forkchoice.ForkChoiceStorage
 	blobDownloader           *network.BlobHistoryDownloader
+
+	// blockSnapshotTipFn, when non-nil, returns the canonical
+	// chain.toml's block-tip (highest block where headers + bodies +
+	// transactions are all advertised). Used to initialise
+	// destinationSlotForEL so Caplin's backward walk stops at the
+	// canonical block-tip rather than the EL's runtime FrozenBlocks(),
+	// which collapses to state-tip after OpenFolder calls and
+	// undershoots by the state-retire-lag (typically ~70K blocks ≈ 10
+	// days). Per
+	// docs/plans/20260515-three-layer-snapshot-distribution.md the
+	// canonical chain.toml is the authoritative source for what
+	// "exists in the chain"; EL FrozenBlocks() reflects local view
+	// state. nil means "fall back to FrozenBlocks() and the dynamic
+	// per-block update inside the callback" (existing behaviour;
+	// preserves tests).
+	blockSnapshotTipFn func() uint64
+}
+
+// SetBlockSnapshotTipFn installs a function that returns the
+// canonical block-tip (typically wired to
+// snapshotsync.DeriveManifestTips against snapcfg.KnownCfg).
+// Pass nil to clear (default behaviour: rely on EL FrozenBlocks
+// dynamic update).
+func (c *StageHistoryReconstructionCfg) SetBlockSnapshotTipFn(fn func() uint64) {
+	c.blockSnapshotTipFn = fn
 }
 
 const logIntervalTime = 30 * time.Second
@@ -110,6 +135,21 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	destinationSlotForEL := uint64(math.MaxUint64)
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+	}
+	// If a canonical block-tip provider is wired, prefer it over the
+	// Bellatrix default. Closes the "Caplin walks 2× the actual gap"
+	// gap observed live (~14 days instead of ~7 days at weekly
+	// publish cadence). FrozenBlocks() collapses to state-tip after
+	// alignMin-true OpenFolder calls; canonical block-tip is the
+	// authoritative source — same value for every node reading the
+	// same chain.toml. See
+	// docs/plans/20260515-three-layer-snapshot-distribution.md.
+	if cfg.blockSnapshotTipFn != nil {
+		if tip := cfg.blockSnapshotTipFn(); tip > 0 {
+			destinationSlotForEL = tip
+			logger.Info("Caplin destination from canonical chain.toml block-tip",
+				"slot", tip, "source", "canonical")
+		}
 	}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
@@ -174,7 +214,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
 			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
-			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
+			// When canonical block-tip is wired (cfg.blockSnapshotTipFn
+			// is non-nil), do NOT overwrite destinationSlotForEL with
+			// FrozenBlocks. FrozenBlocks collapses to state-tip after
+			// alignMin-true OpenFolder calls in stage_snapshots and
+			// would re-introduce the 2× overhead the canonical tip
+			// closes. Only fall back to the FrozenBlocks-derived
+			// destination when no canonical tip is wired.
+			if cfg.blockSnapshotTipFn == nil &&
+				cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}

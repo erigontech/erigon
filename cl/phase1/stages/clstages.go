@@ -66,6 +66,23 @@ type Cfg struct {
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
+
+	// blockSnapshotTipFn, when non-nil, returns the canonical
+	// chain.toml's block-tip. Passed through to
+	// StageHistoryReconstructionCfg.SetBlockSnapshotTipFn so the
+	// historical-blocks stage stops backward-walking at canonical
+	// rather than EL FrozenBlocks() (which collapses to state-tip).
+	// Wired by external setup code (typically caplin1/run.go) via
+	// SetBlockSnapshotTipFn — keeps the stages package free of
+	// snapcfg / snapshotsync dependencies.
+	blockSnapshotTipFn func() uint64
+}
+
+// SetBlockSnapshotTipFn wires the canonical block-tip provider for
+// downstream use by the history-download stage. Pass nil to clear
+// (default: rely on EL FrozenBlocks() dynamic update).
+func (c *Cfg) SetBlockSnapshotTipFn(fn func() uint64) {
+	c.blockSnapshotTipFn = fn
 }
 
 type Args struct {
@@ -289,7 +306,11 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), ctx, logger); err != nil {
+					hrCfg := StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader)
+					if cfg.blockSnapshotTipFn != nil {
+						hrCfg.SetBlockSnapshotTipFn(cfg.blockSnapshotTipFn)
+					}
+					if err := SpawnStageHistoryDownload(hrCfg, ctx, logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

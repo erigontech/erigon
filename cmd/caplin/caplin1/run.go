@@ -74,6 +74,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
@@ -587,6 +588,22 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
+
+	// Wire the canonical block-tip provider so the
+	// DownloadHistoricalBlocks stage stops backward-walking at the
+	// canonical chain.toml's block-tip rather than the EL's
+	// FrozenBlocks() — which collapses to state-tip after
+	// alignMin-true OpenFolder calls and causes Caplin to download
+	// ~2× the actual gap. See
+	// docs/plans/20260515-three-layer-snapshot-distribution.md.
+	stageCfg.SetBlockSnapshotTipFn(func() uint64 {
+		cfg, known := snapcfg.KnownCfg(beaconConfig.ConfigName)
+		if !known || cfg == nil {
+			return 0
+		}
+		return snapshotsync.DeriveManifestTips(cfg.Preverified.Items).BlockTip
+	})
+
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")
