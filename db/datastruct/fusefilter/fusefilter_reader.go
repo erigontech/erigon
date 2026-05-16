@@ -13,7 +13,6 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 	mm "github.com/erigontech/erigon/common/mmap"
 )
 
@@ -303,7 +302,6 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 // clone at the same byte offset. Avoids 256 separate allocations.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	if len(r.m) == 0 {
-		log.Warn("[dbg] ForceInMem exit1: ", "f", r.fileName)
 		return 0
 	}
 	var res datasize.ByteSize
