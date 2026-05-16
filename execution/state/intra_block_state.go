@@ -2008,6 +2008,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			return err
 		}
 
+		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
+		// only for contracts created in the SAME transaction), storage is
+		// wiped at end-of-tx, so any intra-tx SSTORE has a net effect of zero
+		// (the slot returns to its pre-tx value). Emit the per-slot zero
+		// writes here, per-tx, so the BAL records the cascade as a read
+		// rather than reporting the intermediate SSTORE value.
+		//
+		// Must run BEFORE so.newlyCreated = false below. The newlyCreated
+		// guard is required: a SELFDESTRUCT against a pre-existing contract
+		// is an EIP-6780 no-op (storage persists), and emitting zeros would
+		// drop legitimate SSTORE entries from the BAL for state that is
+		// observable on-chain after the tx.
+		if sdb.versionMap != nil && so.selfdestructed && so.newlyCreated {
+			for key := range so.dirtyStorage {
+				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
+			}
+		}
+
 		so.newlyCreated = false
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -2133,19 +2151,23 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
-		// EIP-7928 BAL: record the SD storage cascade into raw blockIO so the
-		// BAL builder (AsBlockAccessList → io.WriteSet) sees SSTORE-then-SD
-		// slots as net-zero (storageReads) rather than reporting the
-		// intermediate SSTORE value as a storageChanges entry. End-of-tx,
-		// after the SELFDESTRUCT-deferred-deletion point (EIP-6780), so
-		// intra-tx versionedReads still see the pre-SD values they need.
+		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
+		// only for contracts created in the SAME transaction), storage is
+		// wiped at end-of-tx, so any intra-tx SSTORE has a net effect of zero
+		// (the slot returns to its pre-tx value). Emit the per-slot zero
+		// writes here, per-tx, so the BAL records the cascade as a read
+		// rather than reporting the intermediate SSTORE value.
+		//
+		// The newlyCreated guard is required: a SELFDESTRUCT against a
+		// pre-existing contract is an EIP-6780 no-op (storage persists), and
+		// emitting zeros would drop legitimate SSTORE entries from the BAL
+		// for state that is observable on-chain after the tx.
 		//
 		// The commitment-calculator side gets its own cascade from
 		// normalizeWriteSet's sdStorageSlots (vm.StorageKeys ∪ domainStorageKeys),
 		// which is wider — covers pre-block-committed storage that dirtyStorage
-		// misses. Post-EIP-6780 SD only deletes same-tx-created accounts, so
-		// dirtyStorage covers the full set for BAL purposes.
-		if sdb.versionMap != nil && stateObject.selfdestructed {
+		// misses.
+		if sdb.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
 			for key := range stateObject.dirtyStorage {
 				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
 			}
