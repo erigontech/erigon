@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -24,12 +25,12 @@ import (
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -443,16 +444,27 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 	return result
 }
 
+// marshalWitnessHeader converts a block header to the JSON map format used in
+// debug_executionWitness responses, matching Geth's output (no "size" field).
+func marshalWitnessHeader(h *types.Header) map[string]any {
+	m := ethapi.RPCMarshalHeader(h)
+	delete(m, "size")
+	return m
+}
+
 // ExecutionWitnessResult is the response format for debug_executionWitness
 type ExecutionWitnessResult struct {
 	// State contains the list of RLP-encoded trie nodes in the witness trie
 	State []hexutil.Bytes `json:"state"`
 	// Codes is the list of accessed/created bytecodes during block execution
 	Codes []hexutil.Bytes `json:"codes"`
-	// Keys is the list of account and storage keys accessed/created during execution
-	Keys []hexutil.Bytes `json:"keys"`
-	// Headers is a list of RLP-encoded block headers needed for BLOCKHASH opcode support
-	Headers []hexutil.Bytes `json:"headers,omitempty"`
+	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
+	// Always includes the parent block header; also includes any blocks accessed via BLOCKHASH.
+	Headers []map[string]any `json:"headers,omitempty"`
+
+	// rawHeaders holds the typed headers for internal use (stateless re-execution).
+	// Not serialized to JSON.
+	rawHeaders []*types.Header
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -464,6 +476,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	if err != nil {
+		return nil, err
+	}
+	if !commitmentHistoryEnabled {
+		return nil, fmt.Errorf("debug_executionWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
+	}
 
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
@@ -601,13 +621,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	result := &ExecutionWitnessResult{
 		State: []hexutil.Bytes{},
 		Codes: []hexutil.Bytes{},
-		Keys:  []hexutil.Bytes{},
 	}
 
-	// Collect all accessed keys (reads) for the Keys field
+	// Collect all accessed keys (reads)
 	readAddresses, readStorageKeys := recordingState.GetAccessedKeys()
 
-	// Collect all modified keys (writes) for the Keys field
+	// Collect all modified keys (writes)
 	writeAddresses, writeStorageKeys := recordingState.GetModifiedKeys()
 
 	// Merge read and write addresses into a deduplicated set
@@ -637,22 +656,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			allStorageKeys[addr][key] = struct{}{}
 		}
 	}
-
-	// Add account keys
-	for addr := range allAddresses {
-		result.Keys = append(result.Keys, addr.Bytes())
-	}
-
-	// Add storage keys
-	for addr, keys := range allStorageKeys {
-		for key := range keys {
-			// Storage keys are represented as composite keys (address + key)
-			compositeKey := append(addr.Bytes(), key.Bytes()...)
-			result.Keys = append(result.Keys, compositeKey)
-		}
-	}
-
-	slices.SortFunc(result.Keys, func(a, b hexutil.Bytes) int { return bytes.Compare(a, b) })
 
 	// Collect code from the recording state:
 	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
@@ -784,8 +787,18 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// need withHistory=false to have branch updates written using PutBranch()
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
+	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
+	}
+	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
+	// parent block's committed state. Any other position means the history has been pruned
+	// for this block range.
+	if seekBlockNum != parentNum {
+		return nil, fmt.Errorf(
+			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
+				"commitment history may be pruned for this block range",
+			blockNum, seekBlockNum, parentNum)
 	}
 
 	touchAllKeys()
@@ -841,28 +854,34 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		result.State = append(result.State, common.Copy(node))
 	}
 
-	// Collect headers for BLOCKHASH opcode support
-	// Include headers from accessed block numbers
+	// Collect headers needed by a stateless verifier:
+	// - always include the parent block header (needed to anchor the pre-state root)
+	// - include any additional blocks accessed via the BLOCKHASH opcode
 	seenBlockNums := make(map[uint64]struct{})
-	for _, bn := range accessedBlockHashes {
+	addHeader := func(bn uint64) error {
 		if _, seen := seenBlockNums[bn]; seen {
-			continue
+			return nil
 		}
 		seenBlockNums[bn] = struct{}{}
-
-		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+		h, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load header for accessed block number %d: %w", bn, err)
+			return fmt.Errorf("failed to load header for block %d: %w", bn, err)
 		}
-		if blockHeader == nil {
-			return nil, fmt.Errorf("missing header for accessed block number %d", bn)
+		if h == nil {
+			return fmt.Errorf("missing header for block %d", bn)
 		}
+		result.rawHeaders = append(result.rawHeaders, h)
+		result.Headers = append(result.Headers, marshalWitnessHeader(h))
+		return nil
+	}
 
-		headerRLP, err := rlp.EncodeToBytes(blockHeader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encode header for accessed block number %d: %w", bn, err)
+	if err = addHeader(parentNum); err != nil {
+		return nil, err
+	}
+	for _, bn := range accessedBlockHashes {
+		if err = addHeader(bn); err != nil {
+			return nil, err
 		}
-		result.Headers = append(result.Headers, headerRLP)
 	}
 
 	// Optionally verify the witness by re-executing the block statelessly.
@@ -1601,14 +1620,10 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
 	})
 
-	// Build header lookup map from result.Headers for BLOCKHASH opcode
+	// Build header lookup map from result.rawHeaders for BLOCKHASH opcode
 	headerByNumber := make(map[uint64]*types.Header)
-	for _, headerRLP := range result.Headers {
-		var header types.Header
-		if err := rlp.DecodeBytes(headerRLP, &header); err != nil {
-			continue // Skip malformed headers
-		}
-		headerByNumber[header.Number.Uint64()] = &header
+	for _, h := range result.rawHeaders {
+		headerByNumber[h.Number.Uint64()] = h
 	}
 
 	// Create getHashFn that uses the headers from the witness

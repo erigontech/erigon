@@ -745,7 +745,7 @@ func TestGetRawTransaction(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
-	// Enable historical commitment to allow witness generation for historical blocks
+	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
@@ -756,9 +756,15 @@ func TestExecutionWitness(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	ctx := context.Background()
 
+	// Write the DB flag so that debug_executionWitness accepts the request.
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
 	// Get the latest block number
 	var latestBlockNum uint64
-	err := m.DB.View(ctx, func(tx kv.Tx) error {
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
 		latestBlockNum, _ = stages.GetStageProgress(tx, stages.Execution)
 		return nil
 	})
@@ -772,11 +778,10 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
 		require.NotNil(t, result.Codes, "Codes should not be nil")
 
-		t.Logf("Genesis: %d state nodes, %d codes, %d keys",
-			len(result.State), len(result.Codes), len(result.Keys))
+		t.Logf("Genesis: %d state nodes, %d codes",
+			len(result.State), len(result.Codes))
 	})
 
 	t.Run("by block number", func(t *testing.T) {
@@ -787,7 +792,6 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
 	})
 
 	t.Run("by block hash", func(t *testing.T) {
@@ -821,7 +825,6 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
-		require.NotNil(t, result.Keys, "Keys should not be nil")
 	})
 
 	t.Run("non-existent block", func(t *testing.T) {
