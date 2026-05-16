@@ -476,15 +476,17 @@ All tests in this task use `assertEquivalentRoot` (Task 6 helper) — the cardin
 - Modify: `execution/commitment/commitment.go` (or the caller — likely `commitmentdb/commitment_context.go` or stage_exec; locate during task)
 - Modify: relevant CLI flag registration if commitment mode is user-configurable
 
-- [ ] grep for `commitment.NewUpdates` and `commitment.InitializeTrieAndUpdates` call sites in the repo
-- [ ] decide minimal integration point: either (a) caller passes `ModeParallel` explicitly, or (b) a runtime flag `--commitment.parallel` selects it
-- [ ] add the feature flag (default OFF for v1) — favor approach (b) so rollback is a CLI toggle
-- [ ] update `InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string)` to accept the new variant and return a `ParallelPatriciaHashed` when requested
-- [ ] write an integration test exercising the flag path: configure flag=true, ensure `ParallelPatriciaHashed` is constructed and a basic commit succeeds; use `assertEquivalentRoot` to verify the flag's output matches sequential
-- [ ] write a negative integration test: flag=false (default) → sequential `HexPatriciaHashed` is constructed and used; ModeParallel codepath is NOT exercised
-- [ ] document the flag in a brief comment near the flag declaration
-- [ ] `make lint` clean
-- [ ] `make erigon integration` builds successfully
+- [x] grep for `commitment.NewUpdates` and `commitment.InitializeTrieAndUpdates` call sites in the repo
+- [x] decide minimal integration point: either (a) caller passes `ModeParallel` explicitly, or (b) a runtime flag `--commitment.parallel` selects it (chose (b) — `--experimental.parallel-commitment` flag flips a `statecfg.ExperimentalParallelCommitment` global that `NewSharedDomains` consults to select `VariantParallelHexPatricia`)
+- [x] add the feature flag (default OFF for v1) — favor approach (b) so rollback is a CLI toggle (`utils.ExperimentalParallelCommitmentFlag` in `cmd/utils/flags.go`, registered in `node/cli/default_flags.go`, wired from `node/eth/backend.go` and `cmd/integration/commands/flags.go`)
+- [x] update `InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string)` to accept the new variant and return a `ParallelPatriciaHashed` when requested (forces `ModeParallel` so the Updates buffer allocates `parallelUpdate` regardless of the caller's passed mode; the sequential and concurrent variants are unchanged)
+- [x] write an integration test exercising the flag path: configure flag=true, ensure `ParallelPatriciaHashed` is constructed and a basic commit succeeds; use `assertEquivalentRoot` to verify the flag's output matches sequential (`TestSharedDomains_ParallelFlagOn_UsesParallelTrie` and `TestSharedDomains_ParallelFlag_RootEquivalence`; the equivalence test runs a single-account commit through both flag-off and flag-on SharedDomains and asserts byte-equal roots)
+- [x] write a negative integration test: flag=false (default) → sequential `HexPatriciaHashed` is constructed and used; ModeParallel codepath is NOT exercised (`TestSharedDomains_ParallelFlagOff_UsesSequentialTrie`)
+- [x] document the flag in a brief comment near the flag declaration (added doc comment on `ExperimentalParallelCommitmentFlag` in `cmd/utils/flags.go` and on `statecfg.ExperimentalParallelCommitment`)
+- [x] `make lint` clean
+- [x] `make erigon integration` builds successfully
+- [x] ⚠️ `commitmentdb/commitment_context.go` extended in three more places besides the warmup-factory switch so a ParallelPatriciaHashed trie can be saved/restored exactly like the existing two variants: `LatestCommitmentState` now accepts `VariantParallelHexPatricia`; `encodeCommitmentState` adds a `*ParallelPatriciaHashed` case that encodes via `RootTrie()`; `restorePatriciaState` adds the symmetric decode case. Without these the first SeekCommitment on a parallel-flag run would fail with "state storing is only supported hex patricia trie" before any block executed.
+- [x] ⚠️ The integration test workload is intentionally narrow (one account, one leafTask, zero split-points). `ParallelPatriciaHashed.Process` currently rejects multi-bucket batches that produce no split-points ("multi-bucket merging requires a Task 10 root barrier"). A synthetic root split-point for the no-split multi-leafTask case is out of scope for this task — the cardinal correctness rule is upheld via the single-leafTask path and the broader unit-test suite (`TestParallelMixedAccountStorage`, `TestParallelBloatnetShape`, etc.) which lower MinSplitKeys via `SetMinSplitKeys` to force split-points. Production callers that hit this rejection will need a follow-up to either (a) auto-fall-back to sequential when `pu.splitPoints` is empty but `len(pu.leafQueue) > 1`, or (b) emit the synthetic root barrier. Tracked as a follow-up in this plan's Post-Completion section.
 
 ### Task 11: Verify acceptance criteria
 
@@ -524,3 +526,4 @@ All tests in this task use `assertEquivalentRoot` (Task 6 helper) — the cardin
 - splitPoint sync.Pool if allocation pressure is visible in profiles
 - parallelize GenerateWitness (deferred to v2; same algorithmic shape applies)
 - adaptive MinSplitKeys based on total touched-keys count
+- root barrier for multi-bucket-no-split workloads: Prepare today rejects `len(splitPoints)==0 && len(leafQueue)>1` because the M independent workers each fold to a divergent root. A real-world commit with N accounts spread across nibble buckets and fewer than MinSplitKeys keys per bucket trips this. Two viable fixes: (a) emit a synthetic root split-point whenever fanout at the trie root ≥ 2, so workers converge there even when subtreeCount < MinSplitKeys, or (b) auto-fall-back to sequential `HexPatriciaHashed.Process` in this case. (a) preserves parallel speed-up; (b) is simpler. Either way the rejection error message in `parallel_patricia_hashed.go` ("Task 10 root barrier") should be removed once a fix lands.

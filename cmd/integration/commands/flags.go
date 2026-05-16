@@ -156,6 +156,7 @@ func withDataDir(cmd *cobra.Command) {
 
 func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, utils.ExperimentalParallelCommitmentFlag.Value, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

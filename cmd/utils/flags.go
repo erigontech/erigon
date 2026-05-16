@@ -1102,6 +1102,14 @@ var (
 		Usage: "EXPERIMENTAL: enables concurrent trie for commitment",
 		Value: false,
 	}
+	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
+	// (ModeParallel) for commitment computation. Default off; flip to compare
+	// root hashes against a sequential sync before enabling broadly.
+	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.parallel-commitment",
+		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed)",
+		Value: false,
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1986,6 +1994,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.Bool(ExperimentalConcurrentCommitmentFlag.Name) {
 		cfg.ExperimentalConcurrentCommitment = true
+	}
+
+	if ctx.Bool(ExperimentalParallelCommitmentFlag.Name) {
+		cfg.ExperimentalParallelCommitment = true
 	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)

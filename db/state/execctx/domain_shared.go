@@ -125,7 +125,13 @@ type SharedDomains struct {
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	tv := commitment.VariantHexPatriciaTrie
-	if statecfg.ExperimentalConcurrentCommitment {
+	switch {
+	// ExperimentalParallelCommitment takes precedence over ExperimentalConcurrentCommitment
+	// — they are alternative concurrent paths and selecting both is a misconfiguration; we
+	// prefer the newer one because it parallelizes deeper into the trie.
+	case statecfg.ExperimentalParallelCommitment:
+		tv = commitment.VariantParallelHexPatricia
+	case statecfg.ExperimentalConcurrentCommitment:
 		tv = commitment.VariantConcurrentHexPatricia
 	}
 	return NewSharedDomainsWithTrieVariant(ctx, tx, logger, tv)

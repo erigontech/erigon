@@ -668,3 +668,46 @@ func TestUpdatesModeParallel_SetMode(t *testing.T) {
 	ut.SetMode(ModeParallel)
 	require.Same(t, prev, ut.parallel)
 }
+
+func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
+	t.Parallel()
+
+	trie, upd := InitializeTrieAndUpdates(VariantParallelHexPatricia, ModeDirect, t.TempDir())
+	defer upd.Close()
+	defer trie.Release()
+
+	require.IsType(t, (*ParallelPatriciaHashed)(nil), trie)
+	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
+	// InitializeTrieAndUpdates must force ModeParallel for the parallel variant,
+	// regardless of the mode argument — the Updates buffer must allocate the
+	// prefix-trie state Prepare reads.
+	require.Equal(t, ModeParallel, upd.Mode())
+	require.NotNil(t, upd.parallel)
+	require.True(t, upd.IsConcurrentCommitment())
+}
+
+func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
+	t.Parallel()
+
+	trie, upd := InitializeTrieAndUpdates(VariantHexPatriciaTrie, ModeDirect, t.TempDir())
+	defer upd.Close()
+	defer trie.Release()
+
+	require.IsType(t, (*HexPatriciaHashed)(nil), trie)
+	require.Equal(t, VariantHexPatriciaTrie, trie.Variant())
+	require.Equal(t, ModeDirect, upd.Mode())
+	require.Nil(t, upd.parallel)
+}
+
+func TestInitializeTrieAndUpdates_ConcurrentVariantUnchanged(t *testing.T) {
+	t.Parallel()
+
+	trie, upd := InitializeTrieAndUpdates(VariantConcurrentHexPatricia, ModeDirect, t.TempDir())
+	defer upd.Close()
+	defer trie.Release()
+
+	require.IsType(t, (*ConcurrentPatriciaHashed)(nil), trie)
+	require.Equal(t, VariantConcurrentHexPatricia, trie.Variant())
+	require.Equal(t, ModeDirect, upd.Mode())
+	require.Nil(t, upd.parallel)
+}

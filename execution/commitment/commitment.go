@@ -159,6 +159,14 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
+	case VariantParallelHexPatricia:
+		// ParallelPatriciaHashed requires ModeParallel — the Updates buffer
+		// must allocate the prefix-trie / parallelUpdate state that Prepare
+		// reads. Force ModeParallel here so callers cannot accidentally pair
+		// the parallel trie with ModeDirect/ModeUpdate.
+		trie := NewParallelPatriciaHashed(nil, length.Addr)
+		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		return trie, tree
 	case VariantBinPatriciaTrie:
 		//trie := NewBinPatriciaHashed(length.Addr, nil, tmpdir)
 		//fn := func(key []byte) []byte { return hexToBin(key) }
