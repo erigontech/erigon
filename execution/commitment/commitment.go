@@ -148,6 +148,7 @@ const (
 	// VariantBinPatriciaTrie - Experimental mode with binary key representation
 	VariantBinPatriciaTrie       TrieVariant = "bin-patricia-hashed"
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
+	VariantParallelHexPatricia   TrieVariant = "hex-parallel-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
@@ -1239,6 +1240,8 @@ func ParseTrieVariant(s string) TrieVariant {
 		trieVariant = VariantBinPatriciaTrie
 	case "hex-parallel":
 		trieVariant = VariantConcurrentHexPatricia
+	case "parallel":
+		trieVariant = VariantParallelHexPatricia
 	case "hex":
 		fallthrough
 	default:

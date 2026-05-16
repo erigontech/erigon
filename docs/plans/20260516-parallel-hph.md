@@ -376,14 +376,14 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Create: `execution/commitment/parallel_patricia_hashed.go`
 - Create: `execution/commitment/parallel_patricia_hashed_test.go`
 
-- [ ] define `ParallelPatriciaHashed` struct holding: `template *HexPatriciaHashed` (used **only** to expose ctx/cache/metrics/trace config — never written to by workers; never used as the live root state), `workerPool sync.Pool` (yields fresh `*HexPatriciaHashed`), config (NumWorkers, MinSplitKeys), trieCtxFactory, `rootHash atomic.Pointer[[]byte]` (set by the last-finisher of the topmost split-point)
-- [ ] implement `NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16) *ParallelPatriciaHashed`
-- [ ] implement plumbing: `Reset`, `Release`, `RootTrie() *HexPatriciaHashed` (returns `template`), `ResetContext(ctx)`, `SetTrace`, `SetTraceDomain`, `EnableWarmupCache`, `GetCapture`, `SetCapture`, `EnableCsvMetrics`, `Variant() TrieVariant` — return new `VariantParallelHexPatricia`
-- [ ] add `VariantParallelHexPatricia TrieVariant` const + ParseTrieVariant support
-- [ ] add `RootHash()` reading from `rootHash` atomic; if unset, fall back to `template.RootHash()` for the "no updates" path
-- [ ] write unit tests: construction, Reset clears state, ResetContext propagates, SetTrace propagates, Release safely no-ops if nothing held
-- [ ] `go test ./execution/commitment/ -run TestParallelPatriciaHashedSkeleton` passes
-- [ ] `make lint` clean
+- [x] define `ParallelPatriciaHashed` struct holding: `template *HexPatriciaHashed` (used **only** to expose ctx/cache/metrics/trace config — never written to by workers; never used as the live root state), `workerPool sync.Pool` (yields fresh `*HexPatriciaHashed`), config (NumWorkers, MinSplitKeys), trieCtxFactory, `rootHash atomic.Pointer[[]byte]` (set by the last-finisher of the topmost split-point)
+- [x] implement `NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16) *ParallelPatriciaHashed`
+- [x] implement plumbing: `Reset`, `Release`, `RootTrie() *HexPatriciaHashed` (returns `template`), `ResetContext(ctx)`, `SetTrace`, `SetTraceDomain`, `EnableWarmupCache`, `GetCapture`, `SetCapture`, `EnableCsvMetrics`, `Variant() TrieVariant` — return new `VariantParallelHexPatricia`
+- [x] add `VariantParallelHexPatricia TrieVariant` const + ParseTrieVariant support
+- [x] add `RootHash()` reading from `rootHash` atomic; if unset, fall back to `template.RootHash()` for the "no updates" path
+- [x] write unit tests: construction, Reset clears state, ResetContext propagates, SetTrace propagates, Release safely no-ops if nothing held
+- [x] `go test ./execution/commitment/ -run TestParallelPatriciaHashedSkeleton` passes
+- [x] `make lint` clean
 
 ### Task 6: ParallelPatriciaHashed.Process — orchestration without barrier
 
