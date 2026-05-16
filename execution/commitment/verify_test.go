@@ -495,20 +495,17 @@ func generateUpdate(shape randomBatchShape, isStorage bool, rnd *rand.Rand) Upda
 // during the equivalence harness — the path most likely to regress.
 const parallelEquivMinSplitKeys uint32 = 2
 
-// shapeRequiresStorageDeepBarrierFix reports whether a shape needs the Task 9
-// follow-up fix to depositRootIntoSplitPoint before it can run end-to-end
-// through the ModeParallel arm. Today only shapeStorageHeavySingle qualifies:
-// when a leafTask covers a single account's storage subtree, the worker folds
-// from trie-depth ~128 directly into a cell whose extension exceeds the
-// 64-nibble [64]byte capacity, which depositRootIntoSplitPoint then tries to
-// hash and panics. The other listed shapes (accounts-only, storage spread,
-// inserts+deletes, empty) keep the worker's compressed extension under the
-// 64-nibble cap and run cleanly through the barrier protocol.
-//
-// ⚠️ This is the depth/row indexing concern called out in the Task 7 plan
-// note. Task 9 (TestParallelSingleAccountManyStorage) is the place to fix it.
+// shapeRequiresStorageDeepBarrierFix reports whether a shape needs an
+// unfinished underlying fix before it can run end-to-end through the
+// ModeParallel arm. The original gap (shapeStorageHeavySingle's deep
+// extension overflow in depositRootIntoSplitPoint) is fixed by Task 9
+// via the snapshot-recovery path in foldDrainWithBarrier + the
+// terminator-slot rejection in Prepare. The predicate is retained so
+// future shape additions can opt out without re-introducing skip
+// scaffolding; today it returns false for every defined shape.
 func shapeRequiresStorageDeepBarrierFix(shape randomBatchShape) bool {
-	return shape == shapeStorageHeavySingle
+	_ = shape
+	return false
 }
 
 // TestVerifyParallel_AllShapes exercises one batch per named shape. Each
@@ -555,13 +552,11 @@ func TestVerifyParallel_RandomBatches(t *testing.T) {
 	}
 	rnd := rand.New(rand.NewSource(0xC0FFEE))
 	const totalBatches = 1100
-	// shapeStorageHeavySingle is omitted from the rotation pending the Task 9
-	// fix for depositRootIntoSplitPoint at depths beyond the 64-nibble
-	// account boundary (see shapeRequiresStorageDeepBarrierFix). The four
-	// remaining shapes still give ≥275 iterations each, well above the
-	// ≥1000-batch overall target.
+	// All five named shapes participate now that Task 9 unblocked
+	// shapeStorageHeavySingle (deep-extension fix + terminator-slot guard).
+	// Each shape gets ≥220 iterations.
 	shapes := []randomBatchShape{
-		shapeAccountsOnly, shapeStorageSpread,
+		shapeAccountsOnly, shapeStorageHeavySingle, shapeStorageSpread,
 		shapeInsertsAndDeletes, shapeEmpty,
 	}
 	for i := range totalBatches {

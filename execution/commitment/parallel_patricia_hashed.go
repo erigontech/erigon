@@ -528,10 +528,38 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 		p.workerPool.Put(hph)
 	}()
 
-	// Stage 1: fold the worker's grid down to the root cell. After this loop
-	// activeRows==0 and hph.root carries the cell representing the worker's
-	// entire leafTask subtree.
-	for hph.activeRows > 0 {
+	// Stage 1: fold the worker's grid down toward the first enclosing
+	// split-point's depth. Two outcomes:
+	//
+	//   - No enclosing split-point (Task 6 single-leafTask scope): fold all
+	//     the way to activeRows == 0; hph.root carries the worker's entire
+	//     subtree cell.
+	//
+	//   - Enclosing split-point at depth D = len(sp.prefix): fold while
+	//     depths[deepest] > D+1 so the worker's deepest active row settles
+	//     exactly at the split-point's child depth. The cell at
+	//     grid[deepest][childNibble] is the deposit target — folding past it
+	//     would incorrectly absorb the shared root branch into the worker's
+	//     hph.root and overwrite sibling workers' contributions during
+	//     deferred-update apply (the multi-phase failure mode this fix
+	//     addresses). Workers in phase 1 (empty DB) typically have rows only
+	//     at depths far below D+1 and naturally collapse to activeRows == 0,
+	//     so the existing hph.root deposit path still fires.
+	//
+	// snapshot* captures currentKey + depths[0] only when Stage 1 still has
+	// row 0 to fold and that fold would write extLen > 64 (deep storage
+	// subtree case). depositRootIntoSplitPoint uses the snapshot to
+	// reconstruct the trimmed extension when cell.extension was truncated by
+	// the fold's silent [64]byte clamp.
+	firstSP := findEnclosingSplitPoint(pu, leafTaskPrefix)
+	stopDepth := int16(0)
+	if firstSP != nil {
+		stopDepth = int16(len(firstSP.prefix)) + 1
+	}
+
+	var rowZeroSnapKey []byte
+	var rowZeroSnapDepth int16
+	for hph.activeRows > 1 && hph.depths[hph.activeRows-1] > stopDepth {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -539,14 +567,25 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 			return fmt.Errorf("worker[%x] stage-1 fold: %w", leafTaskPrefix[0], err)
 		}
 	}
+	if hph.activeRows == 1 && hph.depths[0] > stopDepth {
+		rowZeroSnapDepth = hph.depths[0]
+		rowZeroSnapKey = make([]byte, hph.currentKeyLen)
+		copy(rowZeroSnapKey, hph.currentKey[:hph.currentKeyLen])
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := hph.fold(); err != nil {
+			return fmt.Errorf("worker[%x] stage-1 final fold: %w", leafTaskPrefix[0], err)
+		}
+	}
 
-	// Stage 2: walk up the chain of enclosing split-points. Each iteration
-	// either exits (a sibling is still working) or — as the last-finisher —
-	// rebuilds the split-point's row, folds it into a new "root" cell at the
-	// split-point's depth, and looks for the next-deeper enclosing
-	// split-point. When no enclosing split-point remains the worker is the
-	// topmost finisher and publishes the root hash.
+	// Stage 2: walk up the chain of enclosing split-points. The first
+	// iteration's deposit may come from grid[activeRows-1][childNibble] when
+	// the worker stopped folding mid-stack (multi-phase path); subsequent
+	// iterations always deposit hph.root because rebuildWorkerFromSplitPoint
+	// drives activeRows back to 0.
 	currentPrefix := leafTaskPrefix
+	firstIteration := true
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -558,9 +597,14 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 		}
 
 		childNibble := int(currentPrefix[len(sp.prefix)])
-		if err := depositRootIntoSplitPoint(hph, sp, childNibble); err != nil {
+		if firstIteration && hph.activeRows > 0 && hph.depths[hph.activeRows-1] == int16(len(sp.prefix))+1 {
+			if err := depositGridCellIntoSplitPoint(hph, sp, childNibble); err != nil {
+				return fmt.Errorf("worker[%x] depositGridCellIntoSplitPoint(depth=%d, nib=%x): %w", leafTaskPrefix[0], len(sp.prefix), childNibble, err)
+			}
+		} else if err := depositRootIntoSplitPoint(hph, sp, childNibble, rowZeroSnapKey, rowZeroSnapDepth); err != nil {
 			return fmt.Errorf("worker[%x] depositRootIntoSplitPoint(depth=%d, nib=%x): %w", leafTaskPrefix[0], len(sp.prefix), childNibble, err)
 		}
+		firstIteration = false
 
 		remaining := sp.arrived.Add(-1)
 		if remaining > 0 {
@@ -570,6 +614,17 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 		// Last-finisher: rebuild grid[0] from sp.cells, fold once to produce
 		// the merged cell into hph.root, then continue the loop with the
 		// split-point's prefix as the new "current" position.
+		//
+		// rebuildWorkerFromSplitPoint's fold writes upCell.extLen =
+		// len(sp.prefix). For sp.prefix lengths <= 64 (covering all our
+		// currently-exercised split-point depths: root and account-boundary
+		// at depth 64) this fits cleanly in cell.extension[64]byte. We
+		// refresh the snapshot so the next iteration's depositRoot can
+		// recover if a deeper outer split-point ever requires a longer
+		// extension.
+		rowZeroSnapDepth = int16(len(sp.prefix)) + 1
+		rowZeroSnapKey = make([]byte, len(sp.prefix))
+		copy(rowZeroSnapKey, sp.prefix)
 		if err := rebuildWorkerFromSplitPoint(hph, sp); err != nil {
 			return fmt.Errorf("worker[%x] rebuildWorkerFromSplitPoint(depth=%d): %w", leafTaskPrefix[0], len(sp.prefix), err)
 		}
@@ -615,21 +670,73 @@ func findEnclosingSplitPoint(pu *parallelUpdate, leafTaskPrefix []byte) *splitPo
 // nibbles (the prefix path through the split-point plus the child nibble), so
 // they must be stripped before deposit.
 //
-// computeCellHash is called first to memoise the cell's hash, since
-// cellEncodeData does not carry the Balance / Storage / loaded-flag state
-// that the last-finisher's hashRow would otherwise need to recompute.
-func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int) error {
-	// The cell's hash is computed at the depth where it lives in the merged
-	// trie — that's len(sp.prefix)+1 (one nibble below the split-point).
+// Two paths cover the common cases and the deep-storage-overflow case:
+//
+//   - extLen ≤ 64 ("normal"): computeCellHash is called first to memoise the
+//     cell's hash, since cellEncodeData does not carry the Balance / Storage
+//     / loaded-flag state that the last-finisher's hashRow would otherwise
+//     need to recompute. Then the leading depositDepth nibbles are trimmed
+//     from extension and hashedExtension.
+//
+//   - extLen > 64 ("deep storage"): the fold that produced hph.root silently
+//     truncated cell.extension because the destination [64]byte cannot hold
+//     the full path. We avoid computeCellHash entirely (it would panic on
+//     cell.extension[:extLen]) and instead reconstruct the trimmed extension
+//     from snapKey/snapDepth, which captured the worker's currentKey before
+//     the final fold. After trimming, the residual extension fits within the
+//     [64]byte capacity for every split-point ≤ depth 65 (the worker's row 0
+//     depth minus depositDepth is bounded by 64 - 1 - depositDepth swing).
+//     The cell.hash is already the branch hash written by foldBranch via
+//     keccak2.Read, so the last-finisher's computeCellHash will correctly
+//     compute extensionHash(trimmed_extension, hash).
+//
+// snapKey / snapDepth may be empty / zero when the worker's leafTask had no
+// active rows to fold (single-touched-key paths) — that's safe because such
+// a worker cannot have produced extLen > 0 either.
+func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int, snapKey []byte, snapDepth int16) error {
 	depositDepth := int16(len(sp.prefix)) + 1
+
+	if hph.root.extLen > 64 {
+		c := hph.root // shallow copy
+		newExtLen := c.extLen - depositDepth
+		if newExtLen > 64 {
+			return fmt.Errorf("deposit extension would still overflow after trim: depositDepth=%d origExtLen=%d", depositDepth, c.extLen)
+		}
+		if int(depositDepth)+int(newExtLen) > len(snapKey) {
+			return fmt.Errorf("snapshot key too short for deep-extension recovery: have %d need %d (origExtLen=%d snapDepth=%d)", len(snapKey), int(depositDepth)+int(newExtLen), c.extLen, snapDepth)
+		}
+		if newExtLen > 0 {
+			copy(c.extension[:newExtLen], snapKey[depositDepth:depositDepth+newExtLen])
+		}
+		c.extLen = newExtLen
+		// hashedExtension is [128]byte so the copy did not truncate. Trim it
+		// in-place; for foldBranch's output it mirrors extension and the
+		// last-finisher does not consult it for pure-branch cells, so the
+		// exact contents do not affect correctness — only the length matters.
+		if c.hashedExtLen > depositDepth {
+			newLen := c.hashedExtLen - depositDepth
+			if newLen <= int16(len(c.hashedExtension)) && int(depositDepth)+int(newLen) <= len(c.hashedExtension) {
+				copy(c.hashedExtension[:newLen], c.hashedExtension[depositDepth:depositDepth+newLen])
+				c.hashedExtLen = newLen
+			} else {
+				c.hashedExtLen = 0
+			}
+		} else {
+			c.hashedExtLen = 0
+		}
+		sp.cells[childNibble] = cellEncodeDataFromCell(&c)
+		return nil
+	}
+
+	// Normal path: the cell's hash is computed at the depth where it lives in
+	// the merged trie — that's len(sp.prefix)+1 (one nibble below the split
+	// point).
 	if _, err := hph.computeCellHash(&hph.root, depositDepth, hph.hashAuxBuffer[:0]); err != nil {
 		return fmt.Errorf("computeCellHash(depth=%d): %w", depositDepth, err)
 	}
 
 	c := hph.root // shallow copy
 	trim := depositDepth
-	// Trim leading nibbles from both extension and hashedExtension. Both are
-	// nibble-indexed (extLen / hashedExtLen are nibble counts).
 	if c.extLen > 0 {
 		t := min(trim, c.extLen)
 		c.extLen -= t
@@ -642,6 +749,31 @@ func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibb
 	}
 
 	sp.cells[childNibble] = cellEncodeDataFromCell(&c)
+	return nil
+}
+
+// depositGridCellIntoSplitPoint deposits the grid cell at the deepest
+// active row directly into sp.cells[childNibble]. This is the multi-phase
+// path: Stage 1 stopped folding once the deepest row settled at the
+// split-point's child depth, and the row's grid cell at childNibble already
+// represents the worker's contribution to that slot. Depositing here avoids
+// folding up through (and corrupting) the shared parent branch.
+//
+// The cell may have been loaded from DB without setting cellLoadAccount /
+// cellLoadStorage flags, so its memoized stateHash may be empty. We call
+// computeCellHash to populate stateHash before extraction; the last-finisher
+// reads stateHash directly via the short-circuit path in computeCellHash.
+func depositGridCellIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int) error {
+	row := hph.activeRows - 1
+	if row < 0 {
+		return errors.New("depositGridCellIntoSplitPoint: no active rows")
+	}
+	depositDepth := int16(len(sp.prefix)) + 1
+	cellPtr := &hph.grid[row][childNibble]
+	if _, err := hph.computeCellHash(cellPtr, depositDepth, hph.hashAuxBuffer[:0]); err != nil {
+		return fmt.Errorf("computeCellHash(depth=%d, nib=%x): %w", depositDepth, childNibble, err)
+	}
+	sp.cells[childNibble] = cellEncodeDataFromCell(cellPtr)
 	return nil
 }
 
