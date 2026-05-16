@@ -166,14 +166,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	if statecfg.ExperimentalConcurrentCommitment {
 		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
 	}
-	return newSharedDomains(ctx, tx, logger, trieCfg)
+	return NewSharedDomainsWithTrieConfig(ctx, tx, logger, trieCfg)
 }
 
-func NewSharedDomainsWithTrieConfig(ctx context.Context, tx kv.TemporalTx, logger log.Logger, cfg commitment.TrieConfig) (*SharedDomains, error) {
-	return newSharedDomains(ctx, tx, logger, cfg)
-}
-
-func newSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, trieCfg commitment.TrieConfig) (*SharedDomains, error) {
+func NewSharedDomainsWithTrieConfig(ctx context.Context, tx kv.TemporalTx, logger log.Logger, trieCfg commitment.TrieConfig) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
