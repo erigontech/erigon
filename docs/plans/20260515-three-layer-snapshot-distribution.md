@@ -126,6 +126,17 @@ mechanism, distinct from Layer 3's per-node signatures.
 
 ## Signature mechanism for chain.<enr>.toml
 
+> **Note (2026-05-16)**: the standalone `.sig` sidecar described in
+> this section is **planned to be replaced** by a Content UCAN
+> carrying the manifest's hash as a capability claim. See
+> `20260516-two-ucan-shape.md` for the design rationale (keep the
+> permissions/delegation chain integrated rather than fragmenting
+> authentication across `.sig` + UCAN). The `.sig` implementation
+> currently in the codebase (commit `82fc20bd1b`) is interim — it
+> stays in place until the two-UCAN model is settled and tested.
+> Until then the description below documents what's actually built;
+> the two-UCAN doc documents where it's going.
+
 **Scheme**: secp256k1 ECDSA over the SHA256 of `chain.<enr>.toml`
 content bytes. Same curve and key material as the ENR — no new key
 management.
