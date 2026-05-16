@@ -337,19 +337,19 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Modify: `execution/commitment/parallel_update.go`
 - Modify: `execution/commitment/parallel_update_test.go`
 
-- [ ] define constants `MinSplitKeys = 32` and `PrefixTrieMaxDepth = 128`
-- [ ] implement `(pu *parallelUpdate) Prepare(ctx PatriciaContext) error` — DFS the trie, emit splitPoints where popcount(bitmap) >= 2 && subtreeCount >= MinSplitKeys, collapse other subtrees into leafTasks
-- [ ] for each emitted splitPoint, call `ctx.Branch(nibbles.HexToCompact(prefix))`, decode via existing `branchData.decodeCells()`, pre-populate `sp.cells[nib]` for each bit in dbBitmap
-- [ ] initialize `sp.arrived = popcount(touchedBitmap) - 1`
-- [ ] sort `leafQueue` by `keyCount` descending (big tasks first for better worker utilization)
-- [ ] write unit tests with a mock `PatriciaContext`:
+- [x] define constants `MinSplitKeys = 32` and `PrefixTrieMaxDepth = 128`
+- [x] implement `(pu *parallelUpdate) Prepare(ctx PatriciaContext) error` — DFS the trie, emit splitPoints where popcount(bitmap) >= 2 && subtreeCount >= MinSplitKeys, collapse other subtrees into leafTasks
+- [x] for each emitted splitPoint, call `ctx.Branch(nibbles.HexToCompact(prefix))`, decode via existing `branchData.decodeCells()`, pre-populate `sp.cells[nib]` for each bit in dbBitmap
+- [x] initialize `sp.arrived = popcount(touchedBitmap) - 1`
+- [x] sort `leafQueue` by `keyCount` descending (big tasks first for better worker utilization)
+- [x] write unit tests with a mock `PatriciaContext`:
   - small trie, no splits → single leafTask, empty splitMap
   - two-way fork at depth 1 with subtreeCount above threshold → one splitPoint, two leafTasks
   - fork below threshold → no splitPoint, one collapsed leafTask
   - deep storage-shape: account-prefix shared (60 nibbles), then storage diverges → splitPoint at storage-fork depth
   - untouched-nibble pre-population: mock ctx.Branch returns 5 nibbles, only 2 in touchedBitmap → sp.cells has all 5 populated, arrived = 1
-- [ ] `go test ./execution/commitment/ -run TestPrepare` passes
-- [ ] `make lint` clean
+- [x] `go test ./execution/commitment/ -run TestPrepare` passes
+- [x] `make lint` clean
 
 ### Task 4: Wire ModeParallel into Updates
 
