@@ -278,6 +278,7 @@ func assertEquivalentRootWorkers(
 
 	// Parallel side.
 	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
 	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
 	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
 	defer parTrie.Release()

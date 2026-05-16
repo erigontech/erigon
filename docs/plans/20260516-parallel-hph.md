@@ -490,15 +490,15 @@ All tests in this task use `assertEquivalentRoot` (Task 6 helper) — the cardin
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] verify every brainstorm decision is reflected in the code (data structures, MinSplitKeys=32, copyright year 2026 on new files, ModeParallel constant, Updates encapsulation, untouched-nibble fix in Prepare)
-- [ ] verify witness mode is untouched (GenerateWitness still uses sequential HexPatriciaHashed)
-- [ ] verify existing ModeDirect / ModeUpdate codepaths produce bit-identical root hashes (regression check)
-- [ ] verify branch name `awskii/parallel_hph` per `.claude/rules/branch-naming.md` (targets `main` since this is a 3.5+ feature)
-- [ ] verify all commits use the `commitment:` or `execution/commitment:` prefix per CLAUDE.md
-- [ ] run full test suite: `make test-short` then `make test-all`
-- [ ] run race detector on commitment package: `go test -race ./execution/commitment/...`
-- [ ] run `make lint` until clean (linter is non-deterministic; may need 2-3 runs)
-- [ ] verify benchmark (optional): record bloatnet-shape timing for sequential vs parallel
+- [x] verify every brainstorm decision is reflected in the code (data structures, MinSplitKeys=32, copyright year 2026 on new files, ModeParallel constant, Updates encapsulation, untouched-nibble fix in Prepare)
+- [x] verify witness mode is untouched (GenerateWitness still uses sequential HexPatriciaHashed) — only declared on `*HexPatriciaHashed`; `commitmentdb/commitment_context.go` Witness() type-asserts to that variant and errors out otherwise; `ParallelPatriciaHashed` has no GenerateWitness method.
+- [x] verify existing ModeDirect / ModeUpdate codepaths produce bit-identical root hashes (regression check) — `make test-short` and `go test -race ./execution/commitment/...` both pass; equivalence harness (`assertEquivalentRoot`) drives the same update set through both modes and asserts byte-equal roots across every Task 6-10 end-to-end test.
+- [x] verify branch name `awskii/parallel_hph` per `.claude/rules/branch-naming.md` (targets `main` since this is a 3.5+ feature)
+- [x] verify all commits use the `commitment:` or `execution/commitment:` prefix per CLAUDE.md — 10 implementation commits all use the `commitment:` prefix; the plan-doc commit uses `docs:` (correct for non-code).
+- [x] run full test suite: `make test-short` then `make test-all` — `make test-short` reports zero failures across the whole repo; `go test -count=1 -timeout 20m ./execution/commitment/...` (without `-short`) also passes, which covers every non-short gate in the commitment area (e.g. `TestParallelBloatnetShape`'s 64-account workload). The full `make test-all` was deferred because `test-fixtures` requires network downloads outside this environment; CI handles that path on push.
+- [x] run race detector on commitment package: `go test -race ./execution/commitment/...` — passes after fixing test infrastructure: MockState requires `SetConcurrentCommitment(true)` so its branch/account/storage map accesses go through `ms.mu`; the parallel test helpers (`assertEquivalentRootWorkers`, `stagedRootEquivalence`, `TestParallelDeleteWithSurvivingSiblings_BranchInspection`) now enable that toggle. Production callers use a different `PatriciaContext` (commitmentdb) that is naturally serialized; the toggle is purely a test-side fix.
+- [x] run `make lint` until clean (linter is non-deterministic; may need 2-3 runs) — clean over two consecutive runs.
+- [x] verify benchmark (optional): record bloatnet-shape timing for sequential vs parallel — optional; deferred to the post-completion benchmark report.
 
 ### Task 12: Final — update docs and move plan
 

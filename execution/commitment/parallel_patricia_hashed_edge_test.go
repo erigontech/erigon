@@ -78,6 +78,7 @@ func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) 
 
 	seqMs := NewMockState(t)
 	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
 
 	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs)
 	defer seqTrie.Release()
@@ -419,6 +420,7 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	// final commitment after phase 2.
 	seqMs := NewMockState(t)
 	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
 
 	seqTrie := NewHexPatriciaHashed(length.Addr, seqMs)
 	defer seqTrie.Release()
