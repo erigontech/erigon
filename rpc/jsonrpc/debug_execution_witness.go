@@ -726,6 +726,7 @@ func buildWitnessTrie(ctx context.Context, tx kv.TemporalTx, domains *execctx.Sh
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
 	}
+	encodedNodes = make([]hexutil.Bytes, 0, len(allNodes))
 	for _, node := range allNodes {
 		encodedNodes = append(encodedNodes, common.Copy(node))
 	}
