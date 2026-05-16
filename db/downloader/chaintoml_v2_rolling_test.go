@@ -464,12 +464,12 @@ func TestChainTomlV2ToItems_Flatten(t *testing.T) {
 	}
 
 	require.Equal(t, map[string]string{
-		"v1.1-000000-001000-headers.seg":  "01",
-		"v1.1-000000-001000-bodies.seg":   "02",
-		"erigondb.toml":                   "ff",
-		"salt-state.txt":                  "aa",
-		"caplin/x.seg":                    "c1",
-		"domain/v2.0-accounts.0-8192.kv":  "d1",
+		"v1.1-000000-001000-headers.seg":   "01",
+		"v1.1-000000-001000-bodies.seg":    "02",
+		"erigondb.toml":                    "ff",
+		"salt-state.txt":                   "aa",
+		"caplin/x.seg":                     "c1",
+		"domain/v2.0-accounts.0-8192.kv":   "d1",
 		"domain/v2.0-commitment.0-8192.kv": "d2",
 	}, got, "every non-empty (name, hash) flattens to an item; empty-hash entries dropped")
 }

@@ -33,6 +33,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+
+	dirutil "github.com/erigontech/erigon/common/dir"
 	"path/filepath"
 	"sync"
 	"time"
@@ -468,7 +470,7 @@ func writePeerManifestCache(cacheDir, peerID string, data []byte) error {
 		return fmt.Errorf("write tmp: %w", err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		_ = os.Remove(tmp)
+		_ = dirutil.RemoveFile(tmp)
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil

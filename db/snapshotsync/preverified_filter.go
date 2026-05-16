@@ -195,17 +195,17 @@ func isPrunableBlockFile(name string) bool {
 //
 // Four substring patterns now:
 //
-//   1. "caplin/" prefix — beacon state snapshots, validator
-//      balances dumps, ActiveValidatorIndicies, etc.
-//   2. "beaconblocks" substring — historical beacon blocks
-//      (top-level v1.1-NNNNNN-NNNNNN-beaconblocks.seg).
-//   3. "blobsidecars" substring — historical blob sidecars,
-//      the .seg data file (top-level
-//      v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
-//   4. "blocksidecars" substring — the BLOB sidecar accessor
-//      INDEX file (top-level v1.1-NNNNNN-NNNNNN-blocksidecars.idx).
-//      Counterintuitive name; the K-not-B spelling is the internal
-//      Index.Name for BlobSidecarSlot in CaplinIndexes.
+//  1. "caplin/" prefix — beacon state snapshots, validator
+//     balances dumps, ActiveValidatorIndicies, etc.
+//  2. "beaconblocks" substring — historical beacon blocks
+//     (top-level v1.1-NNNNNN-NNNNNN-beaconblocks.seg).
+//  3. "blobsidecars" substring — historical blob sidecars,
+//     the .seg data file (top-level
+//     v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
+//  4. "blocksidecars" substring — the BLOB sidecar accessor
+//     INDEX file (top-level v1.1-NNNNNN-NNNNNN-blocksidecars.idx).
+//     Counterintuitive name; the K-not-B spelling is the internal
+//     Index.Name for BlobSidecarSlot in CaplinIndexes.
 //
 // Bug AB (2026-05-16): an earlier version of this filter only
 // matched (1)+(2)+(3) — the .idx blocksidecars entries (565 in

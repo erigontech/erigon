@@ -46,13 +46,13 @@ import (
 //
 // To refresh the fixture intentionally (e.g., after an upstream
 // registry update we want to track):
-//   1. Capture a newer chain.toml from /erigon/tmp/.../preverified.toml
-//      or wherever the live upstream is reachable.
-//   2. Update the SHA256 sentinel below to the new file's hash.
-//   3. Update the pinned (BlockTip, StateTipStep) values to match
-//      what DeriveManifestTips returns for the new content.
-//   4. Commit both the new fixture file AND the test changes in the
-//      same commit so reviewers can verify the derivation.
+//  1. Capture a newer chain.toml from /erigon/tmp/.../preverified.toml
+//     or wherever the live upstream is reachable.
+//  2. Update the SHA256 sentinel below to the new file's hash.
+//  3. Update the pinned (BlockTip, StateTipStep) values to match
+//     what DeriveManifestTips returns for the new content.
+//  4. Commit both the new fixture file AND the test changes in the
+//     same commit so reviewers can verify the derivation.
 func TestDeriveManifestTips_MainnetFixture_2026_05_15(t *testing.T) {
 	t.Parallel()
 
@@ -86,8 +86,8 @@ func TestDeriveManifestTips_MainnetFixture_2026_05_15(t *testing.T) {
 	// was refreshed and the pins need updating to match.
 	tips := DeriveManifestTips(items)
 
-	const expectedBlockTip uint64 = 25_069_999     // highest block where headers+bodies+transactions all advertised
-	const expectedStateTip uint64 = 8984           // commitment.kv top step
+	const expectedBlockTip uint64 = 25_069_999 // highest block where headers+bodies+transactions all advertised
+	const expectedStateTip uint64 = 8984       // commitment.kv top step
 	require.Equal(t, expectedBlockTip, tips.BlockTip,
 		"BlockTip mismatch — helper algorithm changed, or fixture refreshed without updating pin")
 	require.Equal(t, expectedStateTip, tips.StateTipStep,

@@ -39,7 +39,7 @@ func TestHeldRanges_BlockKind_Contiguous(t *testing.T) {
 
 	got := HeldRanges(items, "headers")
 	require.Equal(t, []HeldRange{
-		{From: 0, To: 1_000_000},        // ParseFileName converts K-units → blocks
+		{From: 0, To: 1_000_000}, // ParseFileName converts K-units → blocks
 		{From: 1_000_000, To: 2_000_000},
 		{From: 2_000_000, To: 3_000_000},
 	}, got,

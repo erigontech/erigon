@@ -391,24 +391,24 @@ func (r *RollingV2Publisher) Publish(
 	if r.signer != nil {
 		sigBytes, err := r.signer(tomlBytes)
 		if err != nil {
-			_ = os.Remove(path)
+			_ = dir.RemoveFile(path)
 			return metainfo.Hash{}, fmt.Errorf("publisher signing %s: %w", name, err)
 		}
 		sigName := ChainV2SigFileNameForSeq(nextSeq)
 		sigPath := filepath.Join(r.snapDir, sigName)
 		if err := saveChainTomlFile(sigPath, sigBytes); err != nil {
-			_ = os.Remove(path)
+			_ = dir.RemoveFile(path)
 			return metainfo.Hash{}, fmt.Errorf("save %s: %w", sigName, err)
 		}
 		if _, err := BuildTorrentIfNeed(ctx, sigName, r.snapDir, r.torrentFS); err != nil {
-			_ = os.Remove(path)
-			_ = os.Remove(sigPath)
+			_ = dir.RemoveFile(path)
+			_ = dir.RemoveFile(sigPath)
 			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", sigName, err)
 		}
 		if r.downloader != nil {
 			if err := r.downloader.AddNewSeedableFile(ctx, sigName); err != nil {
-				_ = os.Remove(path)
-				_ = os.Remove(sigPath)
+				_ = dir.RemoveFile(path)
+				_ = dir.RemoveFile(sigPath)
 				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", sigName, err)
 			}
 		}
