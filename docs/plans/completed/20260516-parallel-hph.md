@@ -502,10 +502,10 @@ All tests in this task use `assertEquivalentRoot` (Task 6 helper) — the cardin
 
 ### Task 12: Final — update docs and move plan
 
-- [ ] update `execution/commitment/CLAUDE.md` (or `agents.md`) with one paragraph describing ModeParallel and when to use it
-- [ ] add `mkdir -p docs/plans/completed` if directory doesn't exist
-- [ ] move this plan to `docs/plans/completed/20260516-parallel-hph.md`
-- [ ] verify all checkboxes are `[x]`
+- [x] update `execution/commitment/CLAUDE.md` (or `agents.md`) with one paragraph describing ModeParallel and when to use it — added `execution/commitment/agents.md` covering trie variants, ModeParallel rationale, the `--experimental.parallel-commitment` flag, and a key-files index.
+- [x] add `mkdir -p docs/plans/completed` if directory doesn't exist — already present (12 prior completed plans).
+- [x] move this plan to `docs/plans/completed/20260516-parallel-hph.md`
+- [x] verify all checkboxes are `[x]`
 
 ## Post-Completion
 
