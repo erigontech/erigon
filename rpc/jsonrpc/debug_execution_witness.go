@@ -445,10 +445,26 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 }
 
 // marshalWitnessHeader converts a block header to the JSON map format used in
-// debug_executionWitness responses, matching Geth's output (no "size" field).
+// debug_executionWitness responses, matching Geth's output format.
 func marshalWitnessHeader(h *types.Header) map[string]any {
 	m := ethapi.RPCMarshalHeader(h)
 	delete(m, "size")
+
+	// Geth always emits these optional fields as null when absent.
+	for _, field := range []string{"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"} {
+		if _, ok := m[field]; !ok {
+			m[field] = nil
+		}
+	}
+
+	// Geth uses "balHash" instead of Erigon's "blockAccessListHash".
+	if v, ok := m["blockAccessListHash"]; ok {
+		m["balHash"] = v
+		delete(m, "blockAccessListHash")
+	} else {
+		m["balHash"] = nil
+	}
+
 	return m
 }
 
@@ -458,6 +474,8 @@ type ExecutionWitnessResult struct {
 	State []hexutil.Bytes `json:"state"`
 	// Codes is the list of accessed/created bytecodes during block execution
 	Codes []hexutil.Bytes `json:"codes"`
+	// Keys is always null (reserved for future use, included for Geth compatibility)
+	Keys []hexutil.Bytes `json:"keys"`
 	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
 	// Always includes the parent block header; also includes any blocks accessed via BLOCKHASH.
 	Headers []map[string]any `json:"headers,omitempty"`
@@ -658,31 +676,54 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Collect code from the recording state:
-	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
+	// - preStateCode: code from the inner reader (pre-block state), tracked via ReadAccountCode
 	// - modifiedCode: code written during execution (new deployments, EIP-7702)
-	//
-	// Only pre-state code goes into result.Codes. Created/modified code (contract
-	// deployments, EIP-7702 delegations) is derived by the stateless verifier
-	// during re-execution and doesn't need to be shipped in the witness.
 	preStateCode := recordingState.GetPreStateCode()
 	modifiedCode := recordingState.GetModifiedCode()
 
-	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls.
-	// Collect unique codes with their hashes for deterministic sorting.
+	// result.Codes must include all code a stateless verifier needs:
+	// 1. Pre-existing contracts called during execution → preStateCode.
+	// 2. Contracts created in this block that are subsequently called via the stateObject
+	//    cache (bypassing ReadAccountCode) → land in modifiedCode but not preStateCode.
+	// 3. Pre-existing contracts accessed only via EXTCODEHASH/EXTCODESIZE: ReadAccountCode
+	//    is never invoked for those, so they are absent from preStateCode; load them here.
+	//    (Do not add these to codeReads — they must not appear as extra AccountCode nodes
+	//    in the witness trie, which would shift result.State relative to Geth.)
 	type codeWithHash struct {
 		code []byte
 		hash common.Hash
 	}
-	var uniqueCodes []codeWithHash
-	codesSeen := make(map[common.Hash]struct{})
-	for _, code := range preStateCode {
+	allCodesByHash := make(map[common.Hash][]byte)
+	addToResultCodes := func(code []byte) {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
-			if _, dup := codesSeen[h]; !dup {
-				uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
-				codesSeen[h] = struct{}{}
-			}
+			allCodesByHash[h] = code
 		}
+	}
+	for _, code := range preStateCode {
+		addToResultCodes(code)
+	}
+	for _, code := range modifiedCode {
+		addToResultCodes(code)
+	}
+	// Load code for accounts accessed only via EXTCODEHASH/EXTCODESIZE.
+	for addr := range allAddresses {
+		if _, already := preStateCode[addr]; already {
+			continue
+		}
+		if _, modified := modifiedCode[addr]; modified {
+			continue
+		}
+		code, codeErr := stateReader.ReadAccountCode(accounts.InternAddress(addr))
+		if codeErr != nil || len(code) == 0 {
+			continue
+		}
+		addToResultCodes(code)
+	}
+
+	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
+	for h, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
 	}
 	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
 		return bytes.Compare(a.hash[:], b.hash[:])
