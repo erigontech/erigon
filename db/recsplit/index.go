@@ -301,7 +301,26 @@ func (idx *Index) init() (err error) {
 	validationPassed = true
 	return nil
 }
-
+func (idx *Index) ForceExistenceFilterWillNeed() {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		switch idx.dataStructureVersion {
+		case 1:
+			idx.existenceV1.MadvWillNeed()
+		case 2:
+			idx.existenceV2.MadvWillNeed()
+		}
+	}
+}
+func (idx *Index) ForceExistenceFilterNormal() {
+	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
+		switch idx.dataStructureVersion {
+		case 1:
+			idx.existenceV1.MadvNormal()
+		case 2:
+			idx.existenceV2.MadvNormal()
+		}
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if idx.lessFalsePositives && idx.keyCount > 0 {
 		switch idx.dataStructureVersion {
