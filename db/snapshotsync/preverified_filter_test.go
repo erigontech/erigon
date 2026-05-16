@@ -75,6 +75,13 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 		// check at snapshotsync.go:398.
 		preverified.Item{Name: "v1.1-012090-012100-blobsidecars.seg", Hash: "0010"},
 		preverified.Item{Name: "v1.1-012090-012100-beaconblocks.seg", Hash: "0011"},
+		// Bug AB regression sentinel: blob-sidecar accessor INDEX
+		// files use the substring "blocksidecars" (with K, not B —
+		// see snaptype/type.go:157 BlobSidecarSlot.Name). 565 of
+		// these slipped through the bug-X fix because that filter
+		// only matched "blobsidecars" (with B). They're CL data and
+		// must drop under non-archive modes too.
+		preverified.Item{Name: "v1.1-012090-012100-blocksidecars.idx", Hash: "0012"},
 	}
 
 	// Chain config: merge at block 15M (mainnet-ish). Pre-merge =
@@ -132,6 +139,9 @@ func TestFilterPreverifiedByPruneMode(t *testing.T) {
 			// modes — substring match, not just caplin/ prefix.
 			"v1.1-012090-012100-blobsidecars.seg",
 			"v1.1-012090-012100-beaconblocks.seg",
+			// Bug AB: blocksidecars.idx (BlobSidecarSlot accessor
+			// index, K-not-B internal naming) is CL data too.
+			"v1.1-012090-012100-blocksidecars.idx",
 		}
 		for _, name := range mustDrop {
 			require.NotContains(t, gotNames, name,

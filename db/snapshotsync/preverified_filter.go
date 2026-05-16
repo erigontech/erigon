@@ -188,12 +188,32 @@ func isPrunableBlockFile(name string) bool {
 
 // isCLData reports whether a preverified item name describes CL
 // (consensus-layer) data — beacon state snapshots, historical
-// beacon blocks, or blob sidecars. Mirrors the three-substring
-// pattern used by SyncSnapshots' inline filter at snapshotsync.go:398
-// for caplin == NoCaplin: the bootstrap manifest synthesised under
-// non-archive prune modes must drop the same set.
+// beacon blocks, blob sidecars (the .seg data file), or blob-sidecar
+// accessor indexes (the .idx file, whose internal type-name is
+// "blocksidecars" — yes, with K not B, per
+// snaptype/type.go:157 where BlobSidecarSlot.Name = "blocksidecars").
+//
+// Four substring patterns now:
+//
+//   1. "caplin/" prefix — beacon state snapshots, validator
+//      balances dumps, ActiveValidatorIndicies, etc.
+//   2. "beaconblocks" substring — historical beacon blocks
+//      (top-level v1.1-NNNNNN-NNNNNN-beaconblocks.seg).
+//   3. "blobsidecars" substring — historical blob sidecars,
+//      the .seg data file (top-level
+//      v1.1-NNNNNN-NNNNNN-blobsidecars.seg).
+//   4. "blocksidecars" substring — the BLOB sidecar accessor
+//      INDEX file (top-level v1.1-NNNNNN-NNNNNN-blocksidecars.idx).
+//      Counterintuitive name; the K-not-B spelling is the internal
+//      Index.Name for BlobSidecarSlot in CaplinIndexes.
+//
+// Bug AB (2026-05-16): an earlier version of this filter only
+// matched (1)+(2)+(3) — the .idx blocksidecars entries (565 in
+// mainnet preverified) slipped through and consumers downloaded
+// them under minimal mode despite their CL nature.
 func isCLData(name string) bool {
 	return strings.HasPrefix(name, "caplin/") ||
 		strings.Contains(name, "beaconblocks") ||
-		strings.Contains(name, "blobsidecars")
+		strings.Contains(name, "blobsidecars") ||
+		strings.Contains(name, "blocksidecars")
 }
