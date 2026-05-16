@@ -154,7 +154,7 @@ require (
 	github.com/Antonboom/testifylint v1.6.4 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/Djarvur/go-err113 v0.1.1 // indirect
-	github.com/Giulio2002/gevm v0.0.0-20260510200827-88a0ec5da13b
+	github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/MirrexOne/unqueryvet v1.5.3 // indirect

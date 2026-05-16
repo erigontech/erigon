@@ -49,6 +49,8 @@ github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e h1:RrlPQT2lA
 github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
 github.com/Giulio2002/gevm v0.0.0-20260510200827-88a0ec5da13b h1:zafQqixtqnN4mYzhxfxUDzUs+oHc32imtfI69mibNMA=
 github.com/Giulio2002/gevm v0.0.0-20260510200827-88a0ec5da13b/go.mod h1:2lMa5Fzyr09GVk4IY88/u5fuK5zYu2oNUn3e+kw+MiY=
+github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2 h1:EDX9aPfRkEGkz0Wl9FJX5NHhulPPSoO3yt7Y7U3JJH4=
+github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2/go.mod h1:2lMa5Fzyr09GVk4IY88/u5fuK5zYu2oNUn3e+kw+MiY=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=
