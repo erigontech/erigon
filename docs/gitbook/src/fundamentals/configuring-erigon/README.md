@@ -823,6 +823,7 @@ GLOBAL OPTIONS:
    --polygon.wit-protocol                                                                                                  Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains) (default: false)
    --gdbme                                                                                                                 restart erigon under gdb for debug purposes (default: false)
    --experimental.concurrent-commitment                                                                                    EXPERIMENTAL: enables concurrent trie for commitment (default: false)
+   --experimental.parallel-commitment                                                                                      EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed). Takes precedence over --experimental.concurrent-commitment if both are set. (default: false)
    --erigondb.override.stepsize value                                                                                      Override the number of transactions per step; may lead to a corrupted database if used incorrectly (default: 1562500)
    --erigondb.override.stepsinfrozenfile value                                                                             Override the number of steps in frozen snapshot files; may lead to a corrupted database if used incorrectly (default: 64)
    --pprof                                                                                                                 Enable the pprof HTTP server (default: false)

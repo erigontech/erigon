@@ -718,17 +718,6 @@ func TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit(t *testing.T) {
 	assert.Contains(t, err.Error(), "no split-points")
 }
 
-// TestParallelBarrier_ProduceCellEmpty: produceCellForBarrier guards against
-// being called on an empty trie state.
-func TestParallelBarrier_ProduceCellEmpty(t *testing.T) {
-	t.Parallel()
-	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
-	defer hph.Release()
-
-	_, _, err := produceCellForBarrier(hph)
-	require.Error(t, err, "produceCellForBarrier must reject activeRows==0")
-}
-
 // TestParallelBarrier_LoadSiblingsZeroes: loadSiblingsIntoGrid must zero
 // stale cells in the target row before populating from sp.cells; otherwise a
 // worker's earlier contribution at a different nibble would leak into the

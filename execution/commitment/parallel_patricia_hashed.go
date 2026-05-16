@@ -392,7 +392,6 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 	type workerSlot struct {
 		hph     *HexPatriciaHashed
 		cleanup func()
-		used    bool // false until at least one key is dispatched to this worker
 	}
 
 	workers := make([]*workerSlot, len(tasks))
@@ -444,7 +443,6 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 	// it claimed it.
 	if err := dispatchLeafKeys(ctx, collector, tasks, func(idx int, hk, pk []byte) error {
 		w := workers[idx]
-		w.used = true
 		if err := w.hph.followAndUpdate(hk, pk, nil); err != nil {
 			return fmt.Errorf("followAndUpdate (nibble=%x task[%d]): %w", nib, idx, err)
 		}
@@ -818,38 +816,6 @@ func rebuildWorkerFromSplitPoint(hph *HexPatriciaHashed, sp *splitPoint) error {
 	}
 	// After fold: activeRows=0, hph.root holds the merged sp.prefix subtree.
 	return nil
-}
-
-// produceCellForBarrier extracts the cell at the deepest active row that
-// represents the worker's contribution to the enclosing split-point. The
-// returned cellEncodeData carries the encoding-relevant fields plus a
-// memoized hash/stateHash, so the last-finisher's computeCellHash can
-// short-circuit without needing the full account/storage state that
-// cellEncodeData does not carry.
-//
-// The split-point's child nibble is read from currentKey[deepDepth-1]: the
-// worker's unfold-down path set it during its descent into the leafTask's
-// subtree, and fold-back preserves the byte at that offset even after
-// currentKeyLen shrinks.
-func produceCellForBarrier(hph *HexPatriciaHashed) (cellEncodeData, int, error) {
-	if hph.activeRows == 0 {
-		return cellEncodeData{}, -1, errors.New("produceCellForBarrier: no active rows")
-	}
-	deepest := hph.activeRows - 1
-	deepDepth := hph.depths[deepest]
-	if deepDepth == 0 {
-		return cellEncodeData{}, -1, errors.New("produceCellForBarrier: deepest row at depth 0")
-	}
-	childNibble := int(hph.currentKey[deepDepth-1])
-	cellPtr := &hph.grid[deepest][childNibble]
-	// Pre-compute the cell's hash so cellEncodeData captures it via stateHash
-	// (for leaves) or hashLen+hash (for branches). The last-finisher rebuilds
-	// the row from cellEncodeData only and cannot otherwise recompute leaf
-	// hashes — Balance / Storage / loaded-flag state isn't carried.
-	if _, err := hph.computeCellHash(cellPtr, deepDepth, hph.hashAuxBuffer[:0]); err != nil {
-		return cellEncodeData{}, -1, fmt.Errorf("produceCellForBarrier computeCellHash(depth=%d, nibble=%x): %w", deepDepth, childNibble, err)
-	}
-	return cellEncodeDataFromCell(cellPtr), childNibble, nil
 }
 
 // loadSiblingsIntoGrid is called by the last-finisher after all siblings have

@@ -1107,7 +1107,7 @@ var (
 	// root hashes against a sequential sync before enabling broadly.
 	ExperimentalParallelCommitmentFlag = cli.BoolFlag{
 		Name:  "experimental.parallel-commitment",
-		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed)",
+		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed). Takes precedence over --experimental.concurrent-commitment if both are set.",
 		Value: false,
 	}
 	GDBMeFlag = cli.BoolFlag{
