@@ -237,13 +237,13 @@ Env-gated, isolated.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add method `(api *DebugAPIImpl) verifyWitnessStateless(ctx context.Context, tx kv.TemporalTx, result *ExecutionWitnessResult, block *types.Block, fullEngine rules.Engine) error` containing logic from lines 869–888
-- [ ] keep the `ERIGON_WITNESS_NO_VERIFY` env check inside (so the helper is a no-op when disabled)
-- [ ] keep the `log.Debug("[debug_executionWitness] witness verified", ...)` call inside
-- [ ] replace inline block in `ExecutionWitness` with a single call
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] add method `(api *DebugAPIImpl) verifyWitnessStateless(ctx context.Context, tx kv.TemporalTx, result *ExecutionWitnessResult, block *types.Block, fullEngine rules.Engine) error` containing logic from lines 869–888
+- [x] keep the `ERIGON_WITNESS_NO_VERIFY` env check inside (so the helper is a no-op when disabled)
+- [x] keep the `log.Debug("[debug_executionWitness] witness verified", ...)` call inside
+- [x] replace inline block in `ExecutionWitness` with a single call
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 3: Add `witnessBlockInfo` + `resolveWitnessBlock`
 

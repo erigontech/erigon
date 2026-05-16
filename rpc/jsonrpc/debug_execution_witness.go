@@ -847,28 +847,38 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	// Optionally verify the witness by re-executing the block statelessly.
-	// Verification doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
-	if !dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
-		chainCfg, err := api.chainConfig(ctx, tx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get chain config: %w", err)
-		}
-
-		newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
-		if err != nil {
-			return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
-		}
-
-		expectedRoot := block.Root()
-		if newStateRoot != expectedRoot {
-			return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
-		}
-
-		log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+		return nil, err
 	}
 
 	return result, nil
+}
+
+// verifyWitnessStateless re-executes the block statelessly using the generated witness
+// to confirm the resulting state root matches the canonical block root. Verification
+// doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
+func (api *DebugAPIImpl) verifyWitnessStateless(ctx context.Context, tx kv.TemporalTx, result *ExecutionWitnessResult, block *types.Block, fullEngine rules.Engine) error {
+	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+		return nil
+	}
+
+	chainCfg, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain config: %w", err)
+	}
+
+	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	if err != nil {
+		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
+	}
+
+	expectedRoot := block.Root()
+	if newStateRoot != expectedRoot {
+		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
+	}
+
+	log.Debug("[debug_executionWitness] witness verified", "blockNum", block.NumberU64())
+	return nil
 }
 
 // collectAccessedHeaders RLP-encodes block headers for every block number reached
