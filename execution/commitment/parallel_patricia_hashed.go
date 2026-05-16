@@ -252,14 +252,22 @@ func (p *ParallelPatriciaHashed) Process(
 
 	// Warmup setup mirrors HexPatriciaHashed.Process: it is optional and the
 	// trie functions without it. The warmuper threads its own context internally.
+	// When the warmup cache is enabled, expose it on the template so every
+	// worker inherits it during runNibbleBucket — otherwise the warmuper's
+	// prefetches are wasted and workers re-read every branch from the DB.
 	var warmuper *Warmuper
 	if warmup.Enabled {
 		if warmup.CtxFactory == nil {
 			warmup.CtxFactory = p.trieCtxFactory
 		}
+		warmup.EnableWarmupCache = p.template.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
+		if warmup.EnableWarmupCache {
+			p.template.cache = warmuper.Cache()
+			defer func() { p.template.cache = nil }()
+		}
 	}
 
 	// Prepare: DFS the prefix trie to emit split-points and leaf tasks. We use
@@ -404,7 +412,7 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 				w.cleanup()
 			}
 			if w.hph != nil {
-				w.hph.Reset()
+				w.hph.resetForReuse()
 				p.workerPool.Put(w.hph)
 			}
 		}
@@ -421,7 +429,7 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 
 	for i := range tasks {
 		hph := p.workerPool.Get().(*HexPatriciaHashed)
-		hph.Reset()
+		hph.resetForReuse()
 
 		workerCtx, cleanup := p.trieCtxFactory()
 		hph.ResetContext(workerCtx)
@@ -432,6 +440,10 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 			hph.trace = p.template.trace
 			hph.traceDomain = p.template.traceDomain
 			hph.enableWarmupCache = p.template.enableWarmupCache
+			if p.template.cache != nil {
+				hph.cache = p.template.cache
+				hph.branchEncoder.SetCache(p.template.cache)
+			}
 		}
 
 		workers[i] = &workerSlot{hph: hph, cleanup: cleanup}
@@ -522,7 +534,7 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 		if len(deferred) > 0 {
 			pu.appendDeferred(deferred)
 		}
-		hph.Reset()
+		hph.resetForReuse()
 		p.workerPool.Put(hph)
 	}()
 
