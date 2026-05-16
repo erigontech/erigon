@@ -1009,6 +1009,18 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			a.dirtyFilesLock.Lock()
 			a.recalcVisibleFiles()
 			a.dirtyFilesLock.Unlock()
+
+			// Invalidate BranchCache: the just-dumped commitment file
+			// becomes visible above, but the cache still holds entries
+			// that came from earlier files (notably KeyCommitmentState
+			// with the older step). Next NewSharedDomains.SeekCommitment
+			// would hit the cache, return the stale step, and fail
+			// CheckDataAvailable when StepsInFiles has advanced past it.
+			// Rebuild bypasses sd.Flush (which is the normal cache-sync
+			// path) so the cache has no other way to notice.
+			if cd := a.d[kv.CommitmentDomain]; cd != nil && cd.branchCache != nil {
+				cd.branchCache.Clear()
+			}
 			rwTx.Rollback()
 
 			if shardTo+shardStepsSize > lastShard && shardStepsSize > 1 {
