@@ -416,39 +416,23 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Modify: `execution/commitment/parallel_patricia_hashed.go`
 - Modify: `execution/commitment/parallel_patricia_hashed_test.go`
 
-- [ ] implement helper `produceCellForBarrier(hph *HexPatriciaHashed) (cell, int, error)` — runs one fold step but captures the produced upCell instead of writing it back into the grid. Mirrors `foldMounted`'s "stop early" path but parametrized by depth rather than depth==1.
-- [ ] implement `loadSiblingsIntoGrid(hph *HexPatriciaHashed, sp *splitPoint)` — restores `currentKey`, `currentKeyLen`, `depths[row]`, `activeRows`, copies `sp.cells` into `hph.grid[row]`, sets `touchMap[row]`, computes `afterMap[row]`, sets `branchBefore[row]`
-- [ ] rewrite the worker's fold drain loop:
-  ```
-  for hph.activeRows > 0 {
-      if ctx.Err() != nil { return ctx.Err() }
-      foldedPrefix := hph.currentKey[:hph.depths[hph.activeRows-1]]
-      if sp, hit := updates.parallel.splitMap.Get(string(foldedPrefix)); hit {
-          cell, nib, err := produceCellForBarrier(hph)
-          if err != nil { return err }
-          sp.cells[nib] = cell
-          remaining := sp.arrived.Add(-1)
-          if remaining > 0 {
-              updates.parallel.appendDeferred(hph.branchEncoder.TakeDeferredUpdates())
-              hph.Reset()
-              p.workerPool.Put(hph)
-              return nil
-          }
-          loadSiblingsIntoGrid(hph, sp)
-          continue
-      }
-      if err := hph.fold(); err != nil { return err }
-  }
-  ```
-- [ ] handle the "topmost finisher" case: after barrier loop exits with activeRows==0, the surviving worker's `hph.root` holds the root cell. Stash the root hash atomically and let `Process` read it after errgroup completes.
-- [ ] write tests (all end-to-end tests below use `assertEquivalentRoot` from Task 6):
-  - two leafTasks converging at one splitPoint: `assertEquivalentRoot`; additionally assert exactly one worker becomes last-finisher and deferred updates from both workers are merged
-  - three leafTasks converging at two split-points (chain): `assertEquivalentRoot`; assert last-finisher of the topmost split sets `rootHash`
-  - four leafTasks converging at a wider splitPoint (fanout=4): `assertEquivalentRoot`
-  - asymmetric workload (one big leaf + many small leaves under the same splitPoint): `assertEquivalentRoot`; verify scheduling order doesn't change outcome
-  - barrier with race detector enabled: `go test -race` on every test above
-- [ ] `go test -race ./execution/commitment/ -run TestParallelBarrier` passes
-- [ ] `make lint` clean
+- [x] implement helper `produceCellForBarrier(hph *HexPatriciaHashed) (cell, int, error)` — runs one fold step but captures the produced upCell instead of writing it back into the grid. Mirrors `foldMounted`'s "stop early" path but parametrized by depth rather than depth==1. ⚠️ Implementation note: the plan's per-fold-step `splitMap.Get(currentKey[:depths[deepest]-1])` check does NOT work for empty-DB scenarios where the worker's HPH trie has rows only at depths the worker's own keys diverge, never at the split-point's child depth. Replaced with a different design (see below).
+- [x] implement `loadSiblingsIntoGrid(hph *HexPatriciaHashed, sp *splitPoint)` — restores `currentKey`, `currentKeyLen`, `depths[row]`, `activeRows`, copies `sp.cells` into `hph.grid[row]`, sets `touchMap[row]`, computes `afterMap[row]`, sets `branchBefore[row]`
+- [x] rewrite the worker's fold drain loop. Final design: a two-stage drain that mirrors the ConcurrentPatriciaHashed PoC pattern, extended to arbitrary-depth split-points and chains:
+  1. **Stage 1**: fold all the way to `activeRows==0`; `hph.root` now carries the worker's compressed leafTask subtree.
+  2. **Stage 2**: walk up the chain of enclosing split-points via `findEnclosingSplitPoint`. For each one: trim leading nibbles from `hph.root` (since they are encoded by the slot index), `computeCellHash` the cell so its memoized hash makes it through cellEncodeData, deposit into `sp.cells[childNibble]`, then `arrived.Add(-1)`. Non-last finishers exit; the last-finisher's `rebuildWorkerFromSplitPoint` zeroes the worker's state, reloads row 0 from `sp.cells`, and folds row 0 to merge the split-point into a new `hph.root`. The loop then continues with the next-enclosing prefix.
+  3. **Stage 3**: when no further split-point encloses the worker, publish the root hash via `p.rootHash.CompareAndSwap`. CAS detects orchestration bugs (multiple workers reaching root simultaneously).
+- [x] handle the "topmost finisher" case: when stage 2 walks off the end of the split-point chain, stage 3 publishes the root hash. ⚠️ The `arrived` counter is initialised to `fanout` (not `fanout-1` as in the plan's original code): with `fanout-1`, for fanout=2 both workers' `Add(-1)` would return `≤0` and both would become last-finishers, causing double root publication. Prepare and Prepare's tests were updated accordingly.
+- [x] write tests (all end-to-end tests below use `assertEquivalentRoot` from Task 6, now with an `assertEquivalentRootWorkers` variant for `NumWorkers > 1`):
+  - two leafTasks converging at one splitPoint: `TestParallelBarrier_TwoLeafTasksOneSplitPoint`
+  - three+ leafTasks converging at two split-points (chain): `TestParallelBarrier_ChainedSplitPoints`
+  - four leafTasks converging at a wider splitPoint (fanout=4): `TestParallelBarrier_FanoutFour`
+  - asymmetric workload: `TestParallelBarrier_AsymmetricWorkload`
+  - rejection of multi-bucket-no-split (deferred to Task 10): `TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit`
+  - barrier helpers in isolation: `TestParallelBarrier_ProduceCellEmpty`, `TestParallelBarrier_LoadSiblingsZeroes`, `TestParallelBarrier_LoadSiblingsRespectsDBSiblings`, `TestParallelBarrier_LoadSiblingsTouchedAndDeleted`
+  - barrier with race detector enabled: `go test -race ./execution/commitment/ -run TestParallel` passes
+- [x] `go test -race ./execution/commitment/ -run TestParallelBarrier` passes
+- [x] `make lint` clean
 
 ### Task 8: Fuzz harness — ModeParallel root-hash equivalence
 

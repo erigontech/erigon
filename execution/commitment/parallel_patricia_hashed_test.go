@@ -240,11 +240,28 @@ func TestParallelPatriciaHashedSkeletonRootHashAfterRelease(t *testing.T) {
 // end-to-end ModeParallel test. raiseMinSplitKeys, when > 0, raises the
 // split-point threshold on the parallel side so tests in Task 6 scope can
 // suppress split-point emission (the barrier protocol arrives in Task 7).
+//
+// Worker count defaults to 1. Use assertEquivalentRootWorkers when a test
+// needs multiple workers running concurrently (Task 7 barrier tests use this
+// for race detector coverage).
 func assertEquivalentRoot(
 	t *testing.T,
 	plainKeys [][]byte,
 	updates []Update,
 	raiseMinSplitKeys uint32,
+) []byte {
+	return assertEquivalentRootWorkers(t, plainKeys, updates, raiseMinSplitKeys, 1)
+}
+
+// assertEquivalentRootWorkers is the multi-worker variant of
+// assertEquivalentRoot. numWorkers <= 0 falls back to runtime.NumCPU on the
+// ParallelPatriciaHashed side.
+func assertEquivalentRootWorkers(
+	t *testing.T,
+	plainKeys [][]byte,
+	updates []Update,
+	raiseMinSplitKeys uint32,
+	numWorkers int,
 ) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -264,7 +281,7 @@ func assertEquivalentRoot(
 	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
 	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
 	defer parTrie.Release()
-	parTrie.SetNumWorkers(1)
+	parTrie.SetNumWorkers(numWorkers)
 	if raiseMinSplitKeys > 0 {
 		parTrie.SetMinSplitKeys(raiseMinSplitKeys)
 	}
@@ -285,7 +302,7 @@ func assertEquivalentRoot(
 	require.NoError(t, err)
 
 	require.Equal(t, seqRoot, parRoot,
-		"sequential and parallel root hashes must match (raiseMinSplitKeys=%d)", raiseMinSplitKeys)
+		"sequential and parallel root hashes must match (raiseMinSplitKeys=%d, numWorkers=%d)", raiseMinSplitKeys, numWorkers)
 	return seqRoot
 }
 
@@ -517,4 +534,309 @@ func TestParallelProcessSkeleton_WarmupAncestorsNoOp(t *testing.T) {
 		p.warmupSplitAncestors(nil, nil)
 		p.warmupSplitAncestors(newParallelUpdate(), nil)
 	})
+}
+
+// --- Task 7: fold-time barrier protocol tests -------------------------------
+//
+// Every test below drives a multi-leafTask update set through both modes via
+// assertEquivalentRoot. The split-point structure is inferred from the
+// key-distribution shape: enough touches across distinct top-level nibbles to
+// push subtreeCount past MinSplitKeys forces Prepare to emit a root
+// split-point with the corresponding fanout, which is exactly what the
+// barrier coordinates.
+
+// twoLeafTaskAddrs constructs N/2 addresses hashing to firstNibble + N/2
+// addresses hashing to secondNibble. Together they give the prefix trie's
+// root a fanout of exactly 2 and a subtreeCount equal to N, so the root
+// becomes a split-point with two children.
+func twoLeafTaskAddrs(t *testing.T, firstNibble, secondNibble int, perSide int) [][]byte {
+	t.Helper()
+	out := make([][]byte, 0, perSide*2)
+	for i := range perSide {
+		out = append(out, findAddressForNibble(firstNibble, i))
+	}
+	for i := range perSide {
+		out = append(out, findAddressForNibble(secondNibble, i))
+	}
+	return out
+}
+
+// TestParallelBarrier_TwoLeafTasksOneSplitPoint exercises the minimal barrier
+// scenario: a single root split-point with exactly two children. One worker
+// per nibble bucket: the first to arrive deposits and exits, the second
+// becomes the last-finisher, loads the deposited sibling cell, and folds the
+// merged grid all the way to root.
+//
+// Setup: 16 + 16 = 32 accounts (== MinSplitKeys); fanout=2 at root => one
+// split-point at empty prefix.
+func TestParallelBarrier_TwoLeafTasksOneSplitPoint(t *testing.T) {
+	t.Parallel()
+
+	const perSide = int(MinSplitKeys) / 2
+	addrs := twoLeafTaskAddrs(t, 0x3, 0x5, perSide)
+
+	ub := NewUpdateBuilder()
+	for i, addr := range addrs {
+		ub.Balance(addrHex(addr), uint64(1_000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 0, 2)
+	require.NotEmpty(t, root)
+}
+
+// TestParallelBarrier_FanoutFour: a single root split-point with four
+// children. Stresses the bitmap arithmetic when sp.touchedBitmap has multiple
+// bits set and only one of the four workers (the last to arrive) reloads the
+// shared grid.
+//
+// Setup: 8 accounts in each of four top-level nibbles. Total 32 ==
+// MinSplitKeys.
+func TestParallelBarrier_FanoutFour(t *testing.T) {
+	t.Parallel()
+
+	const perBucket = int(MinSplitKeys) / 4
+	buckets := []int{0x1, 0x4, 0x7, 0xC}
+
+	ub := NewUpdateBuilder()
+	for _, nib := range buckets {
+		for i := range perBucket {
+			addr := findAddressForNibble(nib, i)
+			ub.Balance(addrHex(addr), uint64(2_000+nib*100+i))
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 0, 4)
+	require.NotEmpty(t, root)
+}
+
+// TestParallelBarrier_AsymmetricWorkload: a single root split-point with
+// three children of varying sizes. Verifies that the scheduling order
+// (leafQueue is sorted descending by keyCount) does not change the resulting
+// root hash and that the largest worker — which finishes last because it has
+// the most work — can equally play either the depositor or the last-finisher
+// role depending on Go's goroutine scheduling.
+//
+// Setup: 24 + 4 + 4 = 32 accounts; root fanout=3.
+func TestParallelBarrier_AsymmetricWorkload(t *testing.T) {
+	t.Parallel()
+
+	ub := NewUpdateBuilder()
+	for i := range 24 {
+		addr := findAddressForNibble(0x2, i)
+		ub.Balance(addrHex(addr), uint64(3_000+i))
+	}
+	for i := range 4 {
+		addr := findAddressForNibble(0x6, i)
+		ub.Balance(addrHex(addr), uint64(5_000+i))
+	}
+	for i := range 4 {
+		addr := findAddressForNibble(0xB, i)
+		ub.Balance(addrHex(addr), uint64(7_000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 0, 3)
+	require.NotEmpty(t, root)
+}
+
+// TestParallelBarrier_ChainedSplitPoints: two split-points along the same
+// ancestor chain. With ≥32 accounts under one top-level nibble whose second
+// nibbles are distributed across enough distinct values, Prepare emits both
+// a root split-point AND a depth-1 split-point under that nibble. Workers
+// converge at the inner split-point first; the last-finisher there crosses
+// the inner barrier, folds upward, and deposits again at the root
+// split-point.
+//
+// Setup: 32 accounts in nibble 0x0 (whose second nibbles fan out widely) +
+// 16 accounts in nibble 0xF. Root: fanout=2, subtreeCount=48 (split-point).
+// Depth-1 under 0x0: fanout >= 2, subtreeCount=32 (split-point).
+func TestParallelBarrier_ChainedSplitPoints(t *testing.T) {
+	t.Parallel()
+
+	ub := NewUpdateBuilder()
+	for i := range int(MinSplitKeys) {
+		addr := findAddressForNibble(0x0, i)
+		ub.Balance(addrHex(addr), uint64(9_000+i))
+	}
+	for i := range int(MinSplitKeys / 2) {
+		addr := findAddressForNibble(0xF, i)
+		ub.Balance(addrHex(addr), uint64(11_000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := assertEquivalentRootWorkers(t, plainKeys, updates, 0, 8)
+	require.NotEmpty(t, root)
+}
+
+// TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit: when Prepare
+// emits multiple leafTasks but zero split-points, Process explicitly errors
+// rather than folding workers to inconsistent roots. This is the
+// counter-example to Task 7's correctness scope; the case is left for Task
+// 10 (synthetic root barrier).
+//
+// Setup: 4 + 4 accounts in two top-level nibbles (below MinSplitKeys); root
+// is not a split-point but produces two leafTasks. Process must reject.
+func TestParallelBarrier_ProcessRejectsMultiBucketWithoutSplit(t *testing.T) {
+	t.Parallel()
+
+	ub := NewUpdateBuilder()
+	for i := range 4 {
+		addr := findAddressForNibble(0x4, i)
+		ub.Balance(addrHex(addr), uint64(13_000+i))
+	}
+	for i := range 4 {
+		addr := findAddressForNibble(0x9, i)
+		ub.Balance(addrHex(addr), uint64(15_000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	ms := NewMockState(t)
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	parTrie := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
+	defer parTrie.Release()
+	parTrie.SetNumWorkers(2)
+	parTrie.ResetContext(ms)
+
+	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer parUpds.Close()
+	for i, k := range plainKeys {
+		i, k := i, k
+		ks := string(k)
+		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = KeyToHexNibbleHash(k)
+			c.update = &updates[i]
+		})
+	}
+
+	_, err := parTrie.Process(context.Background(), parUpds, "", nil, WarmupConfig{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no split-points")
+}
+
+// TestParallelBarrier_ProduceCellEmpty: produceCellForBarrier guards against
+// being called on an empty trie state.
+func TestParallelBarrier_ProduceCellEmpty(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	defer hph.Release()
+
+	_, _, err := produceCellForBarrier(hph)
+	require.Error(t, err, "produceCellForBarrier must reject activeRows==0")
+}
+
+// TestParallelBarrier_LoadSiblingsZeroes: loadSiblingsIntoGrid must zero
+// stale cells in the target row before populating from sp.cells; otherwise a
+// worker's earlier contribution at a different nibble would leak into the
+// rebuilt branch.
+func TestParallelBarrier_LoadSiblingsZeroes(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	defer hph.Release()
+
+	// Pre-populate the row with junk cells.
+	row := 0
+	for n := range 16 {
+		hph.grid[row][n].hashLen = 32
+		hph.grid[row][n].hash[0] = byte(0xDE)
+	}
+
+	sp := &splitPoint{
+		prefix:        []byte{0x0A},
+		touchedBitmap: uint16(1<<0x3 | 1<<0x5),
+	}
+	// Only nibble 3 and 5 carry payload; the other 14 must end up zeroed.
+	sp.cells[0x3].hashLen = 32
+	sp.cells[0x3].hash[0] = 0xAA
+	sp.cells[0x5].hashLen = 32
+	sp.cells[0x5].hash[0] = 0xBB
+
+	loadSiblingsIntoGrid(hph, sp, row)
+
+	for n := range 16 {
+		c := &hph.grid[row][n]
+		if n == 0x3 {
+			assert.Equal(t, int16(32), c.hashLen, "nibble 0x3 preserved")
+			assert.Equal(t, byte(0xAA), c.hash[0])
+			continue
+		}
+		if n == 0x5 {
+			assert.Equal(t, int16(32), c.hashLen, "nibble 0x5 preserved")
+			assert.Equal(t, byte(0xBB), c.hash[0])
+			continue
+		}
+		assert.Equal(t, int16(0), c.hashLen, "untouched nibble %x must be zeroed", n)
+		assert.Equal(t, byte(0), c.hash[0], "untouched nibble %x hash byte must be zeroed", n)
+	}
+	assert.Equal(t, uint16(1<<0x3|1<<0x5), hph.touchMap[row])
+	assert.Equal(t, uint16(1<<0x3|1<<0x5), hph.afterMap[row])
+}
+
+// TestParallelBarrier_LoadSiblingsRespectsDBSiblings populates a splitPoint
+// with both touched (worker-deposited) cells and untouched DB cells, then
+// verifies the reconstructed grid carries both sets — that's the
+// untouched-nibble fix in action.
+func TestParallelBarrier_LoadSiblingsRespectsDBSiblings(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	defer hph.Release()
+
+	sp := &splitPoint{
+		prefix:        []byte{0x0A},
+		touchedBitmap: uint16(1 << 0x3),
+		dbBitmap:      uint16(1<<0x5 | 1<<0xA),
+		branchBefore:  true,
+	}
+	sp.cells[0x3].hashLen = 32 // worker deposit
+	sp.cells[0x3].hash[0] = 0xAA
+	sp.cells[0x5].hashLen = 32 // DB sibling
+	sp.cells[0x5].hash[0] = 0xCC
+	sp.cells[0xA].hashLen = 32 // DB sibling
+	sp.cells[0xA].hash[0] = 0xDD
+
+	loadSiblingsIntoGrid(hph, sp, 0)
+
+	for _, want := range []struct {
+		nib  int
+		byte byte
+	}{{0x3, 0xAA}, {0x5, 0xCC}, {0xA, 0xDD}} {
+		assert.Equal(t, int16(32), hph.grid[0][want.nib].hashLen, "nibble %x must be populated", want.nib)
+		assert.Equal(t, want.byte, hph.grid[0][want.nib].hash[0])
+	}
+	assert.Equal(t, uint16(1<<0x3), hph.touchMap[0],
+		"touchMap reflects only touched bitmap; DB-only siblings are not 'touched'")
+	assert.Equal(t, uint16(1<<0x3|1<<0x5|1<<0xA), hph.afterMap[0],
+		"afterMap covers every nibble we just installed")
+	assert.True(t, hph.branchBefore[0], "branchBefore propagates from splitPoint")
+}
+
+// TestParallelBarrier_LoadSiblingsTouchedAndDeleted handles the
+// delete-into-splitPoint case: a touched nibble whose deposited cell is
+// empty (the worker deleted the only key in its subtree). The afterMap must
+// reflect the absence so the branch encoder emits a deletion at that slot.
+func TestParallelBarrier_LoadSiblingsTouchedAndDeleted(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t))
+	defer hph.Release()
+
+	sp := &splitPoint{
+		prefix:        []byte{0x0A},
+		touchedBitmap: uint16(1<<0x3 | 1<<0x5),
+		dbBitmap:      0,
+	}
+	// Nibble 0x3 = live; nibble 0x5 = touched-and-deleted (zero cellEncodeData).
+	sp.cells[0x3].hashLen = 32
+	sp.cells[0x3].hash[0] = 0xAA
+
+	loadSiblingsIntoGrid(hph, sp, 0)
+
+	assert.Equal(t, int16(32), hph.grid[0][0x3].hashLen, "live touched nibble survives")
+	assert.Equal(t, int16(0), hph.grid[0][0x5].hashLen, "deleted touched nibble must be zero")
+	assert.Equal(t, uint16(1<<0x3|1<<0x5), hph.touchMap[0],
+		"touchMap covers both touched nibbles even when one is deleted")
+	assert.Equal(t, uint16(1<<0x3), hph.afterMap[0],
+		"afterMap drops deleted touched nibbles")
 }

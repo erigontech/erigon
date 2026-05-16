@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"runtime"
 	"sort"
 	"sync"
@@ -209,12 +210,16 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 // Process is the entry point for parallel commitment computation. It expects
 // updates.mode == ModeParallel with a populated parallelUpdate.
 //
-// Task 6 scope: tests exercise NumWorkers=1 with no split-points (typically by
-// raising MinSplitKeys above the touched-key count). In that regime each
-// nibble bucket yields at most one leafTask, the single worker scans the
-// bucket end-to-end, folds to the root and publishes its hph.RootHash().
-// Multi-leafTask-per-bucket configurations are detected and rejected here
-// until Task 7 wires the barrier protocol.
+// Task 7 scope: the fold-time barrier protocol allows multiple leafTasks to
+// converge at shared split-points. Each worker folds its subtree, deposits a
+// cell at every ancestor split-point it crosses, and either exits (a sibling
+// still has work) or — as the last sibling to arrive — continues folding
+// upward through the merged grid. The topmost finisher computes the root
+// hash. Multi-bucket batches without any split-point are still rejected here:
+// when Prepare emits zero split-points but more than one leafTask, the
+// workers would fold to root independently and produce inconsistent answers.
+// That case is a Task 10 concern (synthetic root barrier or callerside
+// merging) and is detected explicitly.
 func (p *ParallelPatriciaHashed) Process(
 	ctx context.Context,
 	updates *Updates,
@@ -269,109 +274,69 @@ func (p *ParallelPatriciaHashed) Process(
 		return nil, fmt.Errorf("parallel commitment prepare: %w", err)
 	}
 
+	// Reject multi-bucket no-split configurations: without any split-point,
+	// independent workers would each fold to root with only their own bucket
+	// touched, producing M mutually-inconsistent root states. The barrier
+	// protocol relies on at least one shared split-point to merge them.
+	if len(pu.splitPoints) == 0 && len(pu.leafQueue) > 1 {
+		return nil, fmt.Errorf("ParallelPatriciaHashed: %d leafTasks emerged with no split-points; multi-bucket merging requires a Task 10 root barrier", len(pu.leafQueue))
+	}
+
 	if warmuper != nil {
 		p.warmupSplitAncestors(pu, warmuper)
 	}
 
-	// Group leafTasks by their root nibble so each nibble's ETL collector is
-	// scanned at most once. In Task 6 scope every group contains a single
-	// leafTask; the dispatcher tolerates multi-task groups but processing
-	// them requires the barrier (Task 7).
+	// Group leafTasks by their root nibble. The ETL collector for a nibble
+	// bucket can only be scanned once, so each bucket runs in a single
+	// orchestrator goroutine that scans once and dispatches the keys to the
+	// (potentially many) workers participating in that bucket.
 	tasksByNibble := groupLeafTasksByNibble(pu.leafQueue)
-
-	var (
-		rootMu    sync.Mutex
-		rootHphs  []*HexPatriciaHashed
-		rootCount int
-	)
+	for _, task := range pu.leafQueue {
+		if len(task.prefix) == 0 {
+			return nil, errors.New("ParallelPatriciaHashed: leafTask emitted without a routing prefix")
+		}
+	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(p.numWorkers)
 
-	// Iterate deterministically over nibbles so test failures are reproducible
-	// regardless of Go's map randomization.
+	// Iterate deterministically so failures reproduce regardless of map order.
 	for nib := range 16 {
 		tasks := tasksByNibble[byte(nib)]
 		if len(tasks) == 0 {
 			continue
 		}
-		if len(tasks) > 1 {
-			// Cancels in-flight workers and triggers errgroup return.
-			_ = g.Wait()
-			return nil, fmt.Errorf("ParallelPatriciaHashed: nibble %x has %d leafTasks; multi-task per nibble requires the Task 7 barrier protocol", nib, len(tasks))
-		}
-		task := tasks[0]
 		nib := byte(nib)
 		g.Go(func() error {
-			hph, err := p.runLeafTask(gctx, updates, nib, task, onProgress)
-			if err != nil {
-				return err
-			}
-			rootMu.Lock()
-			rootHphs = append(rootHphs, hph)
-			rootCount++
-			rootMu.Unlock()
-			return nil
+			return p.runNibbleBucket(gctx, updates, nib, tasks, onProgress)
 		})
 	}
 
 	if waitErr := g.Wait(); waitErr != nil {
-		// Return all surviving workers to the pool.
-		for _, h := range rootHphs {
-			h.Reset()
-			p.workerPool.Put(h)
-		}
 		return nil, waitErr
 	}
 
 	if err := p.applyDeferredUpdates(pu); err != nil {
-		for _, h := range rootHphs {
-			h.Reset()
-			p.workerPool.Put(h)
-		}
 		return nil, err
 	}
 
-	// Task 6 scope: there is exactly one surviving worker (since we reject
-	// multi-leafTask configurations above). Extract the root hash from it.
-	if len(rootHphs) == 0 {
-		rh, rerr := p.template.RootHash()
-		if rerr != nil {
-			return nil, rerr
+	// The topmost finisher publishes the root hash via rootHash. For Task 6
+	// scope (single leafTask, no split-points) the lone worker publishes too.
+	if rh := p.rootHash.Load(); rh != nil {
+		out := make([]byte, len(*rh))
+		copy(out, *rh)
+		if warmuper != nil {
+			warmuper.DrainPending()
 		}
-		return rh, nil
-	}
-	if len(rootHphs) > 1 {
-		// Defensive: with Task 6's single-leafTask constraint this branch
-		// should never trigger. If it does, the resulting "root" is the
-		// fold-product of one worker, not the merged trie.
-		for _, h := range rootHphs[1:] {
-			h.Reset()
-			p.workerPool.Put(h)
-		}
-		rootHphs = rootHphs[:1]
-		return nil, errors.New("ParallelPatriciaHashed: multiple leafTask workers survived; the barrier protocol (Task 7) is required to merge their roots")
+		_ = logPrefix
+		return out, nil
 	}
 
-	rootWorker := rootHphs[0]
-	defer func() {
-		rootWorker.Reset()
-		p.workerPool.Put(rootWorker)
-	}()
-
-	rh, rerr := rootWorker.RootHash()
-	if rerr != nil {
-		return nil, fmt.Errorf("parallel commitment root hash: %w", rerr)
-	}
-	rhCopy := make([]byte, len(rh))
-	copy(rhCopy, rh)
-	p.rootHash.Store(&rhCopy)
-
-	if warmuper != nil {
-		warmuper.DrainPending()
-	}
-	_ = logPrefix
-	return rh, nil
+	// No worker reached activeRows==0. This should be impossible: every batch
+	// has at least one leafTask (we returned early on empty Updates), and the
+	// barrier protocol guarantees the last-finisher of the topmost split-point
+	// folds to root.
+	return nil, errors.New("ParallelPatriciaHashed: no worker published the root hash")
 }
 
 // acquirePrepareContext returns a PatriciaContext to use during Prepare. The
@@ -388,73 +353,424 @@ func (p *ParallelPatriciaHashed) acquirePrepareContext() (PatriciaContext, func(
 	return p.trieCtxFactory()
 }
 
-// runLeafTask processes one leafTask end-to-end on a freshly-pooled worker
-// and returns the worker (still holding root state) for the caller to extract
-// its RootHash. The caller is responsible for resetting and re-pooling.
+// runNibbleBucket processes every leafTask under a single root nibble bucket.
+// The ETL collector backing the bucket can only be scanned once, so this
+// orchestrator owns the scan and dispatches each key to the matching worker.
+// After the scan completes, every worker drains its fold-back path through
+// the barrier protocol concurrently (via a sub-errgroup that shares the
+// outer worker-count budget through gctx cancellation).
 //
-// Lifecycle steps:
-//  1. acquire a worker hph from the pool and bind it to a per-worker context;
-//  2. scan the nibbles[nib] ETL collector exactly once, dispatching each key
-//     to the matching leafTask (single-task fast path in Task 6 scope);
-//  3. invoke followAndUpdate per key — the existing fold/unfold machinery
-//     handles trie navigation;
-//  4. fold to root (Task 6 has no barrier — workers fold all the way up);
-//  5. drain deferred branch updates into the shared accumulator.
-func (p *ParallelPatriciaHashed) runLeafTask(
+// Lifecycle per worker:
+//   - acquire hph from the pool, bind it to a per-worker PatriciaContext,
+//     enable deferred branch updates;
+//   - receive its share of the bucket's keys via followAndUpdate during the
+//     scan dispatch;
+//   - fold its grid through every ancestor split-point via foldDrainWithBarrier,
+//     either exiting at a barrier or — as the topmost finisher — publishing
+//     the root hash;
+//   - on return, the worker's deferred updates have been folded into
+//     pu.deferredCombined and the worker has been put back into the pool.
+//
+// Errors from either the dispatch or any worker's drain cancel the whole
+// bucket via gctx.
+func (p *ParallelPatriciaHashed) runNibbleBucket(
 	ctx context.Context,
 	updates *Updates,
 	nib byte,
-	task leafTask,
+	tasks []leafTask,
 	_ func(*CommitProgress),
-) (*HexPatriciaHashed, error) {
-	hph := p.workerPool.Get().(*HexPatriciaHashed)
-	hph.Reset()
-
-	workerCtx, cleanup := p.trieCtxFactory()
-	if cleanup != nil {
-		defer cleanup()
-	}
-	hph.ResetContext(workerCtx)
-	hph.branchEncoder.SetDeferUpdates(true)
-	hph.SetLeaveDeferredForCaller(true)
-
-	// Defensive copy: the trace/capture/warmup-cache settings on the template
-	// are propagated to the worker so per-batch debug flags are honoured.
-	if p.template != nil {
-		hph.trace = p.template.trace
-		hph.traceDomain = p.template.traceDomain
-		hph.enableWarmupCache = p.template.enableWarmupCache
+) (retErr error) {
+	if len(tasks) == 0 {
+		return nil
 	}
 
 	collector := updates.nibbles[nib]
 	if collector == nil {
-		// Worker is still safe to return — the caller will reset/repool it.
-		return nil, fmt.Errorf("ParallelPatriciaHashed: nibbles[%x] collector is nil", nib)
+		return fmt.Errorf("ParallelPatriciaHashed: nibbles[%x] collector is nil", nib)
 	}
 
-	tasks := []leafTask{task}
-	if err := dispatchLeafKeys(ctx, collector, tasks, func(_ int, hk, pk []byte) error {
-		if err := hph.followAndUpdate(hk, pk, nil); err != nil {
-			return fmt.Errorf("followAndUpdate: %w", err)
+	type workerSlot struct {
+		hph     *HexPatriciaHashed
+		cleanup func()
+		used    bool // false until at least one key is dispatched to this worker
+	}
+
+	workers := make([]*workerSlot, len(tasks))
+	cleanupAll := func() {
+		for _, w := range workers {
+			if w == nil {
+				continue
+			}
+			if w.cleanup != nil {
+				w.cleanup()
+			}
+			if w.hph != nil {
+				w.hph.Reset()
+				p.workerPool.Put(w.hph)
+			}
+		}
+	}
+	// Defensive cleanup on early-return paths. Successful runs hand each
+	// worker off to foldDrainWithBarrier which is responsible for returning
+	// them to the pool; we set workers[i].hph=nil before handoff so this
+	// loop becomes a no-op for handed-off slots.
+	defer func() {
+		if retErr != nil {
+			cleanupAll()
+		}
+	}()
+
+	for i := range tasks {
+		hph := p.workerPool.Get().(*HexPatriciaHashed)
+		hph.Reset()
+
+		workerCtx, cleanup := p.trieCtxFactory()
+		hph.ResetContext(workerCtx)
+		hph.branchEncoder.SetDeferUpdates(true)
+		hph.SetLeaveDeferredForCaller(true)
+
+		if p.template != nil {
+			hph.trace = p.template.trace
+			hph.traceDomain = p.template.traceDomain
+			hph.enableWarmupCache = p.template.enableWarmupCache
+		}
+
+		workers[i] = &workerSlot{hph: hph, cleanup: cleanup}
+	}
+
+	// Single scan of the bucket. dispatchLeafKeys silently skips keys with no
+	// matching prefix; this is a defensive guard since every key Touch-Plain-Key
+	// routed through Updates landed in the bucket because some leafTask under
+	// it claimed it.
+	if err := dispatchLeafKeys(ctx, collector, tasks, func(idx int, hk, pk []byte) error {
+		w := workers[idx]
+		w.used = true
+		if err := w.hph.followAndUpdate(hk, pk, nil); err != nil {
+			return fmt.Errorf("followAndUpdate (nibble=%x task[%d]): %w", nib, idx, err)
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return err
 	}
 
+	// All workers fold back concurrently. They synchronise via splitMap
+	// deposits; deadlock is impossible because sp.arrived's last decrement
+	// triggers the last-finisher path even if the other workers exited
+	// already.
+	sg, sgctx := errgroup.WithContext(ctx)
+	for i := range workers {
+		w := workers[i]
+		taskIdx := i
+		taskPrefix := tasks[i].prefix
+		// Hand off ownership: foldDrainWithBarrier resets and re-pools the
+		// worker, so we must not double-cleanup from this orchestrator.
+		hph := w.hph
+		w.hph = nil
+		sg.Go(func() error {
+			err := p.foldDrainWithBarrier(sgctx, hph, updates, taskPrefix)
+			if err != nil {
+				return fmt.Errorf("foldDrainWithBarrier (nibble=%x task[%d]): %w", nib, taskIdx, err)
+			}
+			return nil
+		})
+	}
+	if err := sg.Wait(); err != nil {
+		// On error, cleanup() handles the per-worker trieCtx releases. The
+		// hph instances have already been returned to the pool by
+		// foldDrainWithBarrier (or were nil'd above before the goroutine
+		// took ownership, so cleanupAll's hph!=nil check skips them).
+		return err
+	}
+	// Release per-worker context lifetimes now that all workers have folded.
+	for _, w := range workers {
+		if w != nil && w.cleanup != nil {
+			w.cleanup()
+			w.cleanup = nil
+		}
+	}
+	return nil
+}
+
+// foldDrainWithBarrier folds the worker's grid all the way to the root cell,
+// then deposits the resulting cell at the worker's enclosing split-point. The
+// worker either exits (a sibling is still pending) or — as the last sibling
+// to arrive — rebuilds the split-point's grid row from every deposit and
+// folds upward, repeating the process for each further-enclosing split-point
+// in the chain. The topmost finisher publishes the root hash.
+//
+// Design note: an earlier attempt tried to detect split-point crossings
+// during the fold loop itself (one fold step at a time, querying splitMap
+// against the current `currentKey[:depths[deepest]-1]`). That doesn't work
+// in this codebase: the HPH trie has no row at the split-point's child depth
+// for workers that touched only one sibling — the trie structure is dense by
+// trie-shape, not by split-point shape. We instead match the
+// ConcurrentPatriciaHashed PoC: fold fully, deposit the worker's compressed
+// root cell, and let the last-finisher synthesise the merged grid row from
+// the deposits. The PoC handles a single depth-1 split-point; here we extend
+// it to arbitrary-depth split-points and chains.
+//
+// The function always returns the worker to p.workerPool. Deferred branch
+// updates collected by the worker are appended to the shared accumulator
+// regardless of whether the worker exited at a barrier or at the root.
+func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
+	ctx context.Context,
+	hph *HexPatriciaHashed,
+	updates *Updates,
+	leafTaskPrefix []byte,
+) (retErr error) {
+	pu := updates.parallel
+	defer func() {
+		deferred := hph.TakeDeferredUpdates()
+		if len(deferred) > 0 {
+			pu.appendDeferred(deferred)
+		}
+		hph.Reset()
+		p.workerPool.Put(hph)
+	}()
+
+	// Stage 1: fold the worker's grid down to the root cell. After this loop
+	// activeRows==0 and hph.root carries the cell representing the worker's
+	// entire leafTask subtree.
 	for hph.activeRows > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		if err := hph.fold(); err != nil {
-			return nil, fmt.Errorf("worker[%x] final fold: %w", nib, err)
+			return fmt.Errorf("worker[%x] stage-1 fold: %w", leafTaskPrefix[0], err)
 		}
 	}
 
-	deferred := hph.TakeDeferredUpdates()
-	updates.parallel.appendDeferred(deferred)
+	// Stage 2: walk up the chain of enclosing split-points. Each iteration
+	// either exits (a sibling is still working) or — as the last-finisher —
+	// rebuilds the split-point's row, folds it into a new "root" cell at the
+	// split-point's depth, and looks for the next-deeper enclosing
+	// split-point. When no enclosing split-point remains the worker is the
+	// topmost finisher and publishes the root hash.
+	currentPrefix := leafTaskPrefix
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		sp := findEnclosingSplitPoint(pu, currentPrefix)
+		if sp == nil {
+			// Stage 3: no further enclosing split-point. Publish the root.
+			return p.publishRootFromWorker(hph)
+		}
 
-	return hph, nil
+		childNibble := int(currentPrefix[len(sp.prefix)])
+		if err := depositRootIntoSplitPoint(hph, sp, childNibble); err != nil {
+			return fmt.Errorf("worker[%x] depositRootIntoSplitPoint(depth=%d, nib=%x): %w", leafTaskPrefix[0], len(sp.prefix), childNibble, err)
+		}
+
+		remaining := sp.arrived.Add(-1)
+		if remaining > 0 {
+			// Sibling still pending: the last-finisher will pick up sp.cells.
+			return nil
+		}
+		// Last-finisher: rebuild grid[0] from sp.cells, fold once to produce
+		// the merged cell into hph.root, then continue the loop with the
+		// split-point's prefix as the new "current" position.
+		if err := rebuildWorkerFromSplitPoint(hph, sp); err != nil {
+			return fmt.Errorf("worker[%x] rebuildWorkerFromSplitPoint(depth=%d): %w", leafTaskPrefix[0], len(sp.prefix), err)
+		}
+		currentPrefix = sp.prefix
+	}
+}
+
+// publishRootFromWorker computes the worker's hph.RootHash and stores it
+// atomically into p.rootHash. CAS detects orchestration bugs that let
+// multiple workers reach this terminal state.
+func (p *ParallelPatriciaHashed) publishRootFromWorker(hph *HexPatriciaHashed) error {
+	rh, err := hph.RootHash()
+	if err != nil {
+		return fmt.Errorf("RootHash: %w", err)
+	}
+	rhCopy := make([]byte, len(rh))
+	copy(rhCopy, rh)
+	if !p.rootHash.CompareAndSwap(nil, &rhCopy) {
+		return errors.New("ParallelPatriciaHashed: another worker already published the root hash — split-point coverage is incomplete")
+	}
+	return nil
+}
+
+// findEnclosingSplitPoint returns the deepest split-point whose prefix is a
+// strict prefix of leafTaskPrefix. Returns nil if no enclosing split-point
+// exists (Task 6's "single-leafTask, no splits" path).
+func findEnclosingSplitPoint(pu *parallelUpdate, leafTaskPrefix []byte) *splitPoint {
+	// Walk the prefix from longest-to-shortest. Stop at length 0 (root
+	// split-point) inclusive.
+	for L := len(leafTaskPrefix) - 1; L >= 0; L-- {
+		if sp, hit := pu.splitMap.Get(leafTaskPrefix[:L]); hit {
+			return sp
+		}
+	}
+	return nil
+}
+
+// depositRootIntoSplitPoint copies hph.root (the worker's compressed leafTask
+// subtree cell) into sp.cells[childNibble], trimming the leading nibbles that
+// are implicit in the slot index. The extension nibbles at the start of
+// hph.root represent the path from depth 0 down to where the touched keys
+// begin; the split-point's child slot already encodes the first L+1 of those
+// nibbles (the prefix path through the split-point plus the child nibble), so
+// they must be stripped before deposit.
+//
+// computeCellHash is called first to memoise the cell's hash, since
+// cellEncodeData does not carry the Balance / Storage / loaded-flag state
+// that the last-finisher's hashRow would otherwise need to recompute.
+func depositRootIntoSplitPoint(hph *HexPatriciaHashed, sp *splitPoint, childNibble int) error {
+	// The cell's hash is computed at the depth where it lives in the merged
+	// trie — that's len(sp.prefix)+1 (one nibble below the split-point).
+	depositDepth := int16(len(sp.prefix)) + 1
+	if _, err := hph.computeCellHash(&hph.root, depositDepth, hph.hashAuxBuffer[:0]); err != nil {
+		return fmt.Errorf("computeCellHash(depth=%d): %w", depositDepth, err)
+	}
+
+	c := hph.root // shallow copy
+	trim := depositDepth
+	// Trim leading nibbles from both extension and hashedExtension. Both are
+	// nibble-indexed (extLen / hashedExtLen are nibble counts).
+	if c.extLen > 0 {
+		t := min(trim, c.extLen)
+		c.extLen -= t
+		copy(c.extension[:c.extLen], c.extension[t:t+c.extLen])
+	}
+	if c.hashedExtLen > 0 {
+		t := min(trim, c.hashedExtLen)
+		c.hashedExtLen -= t
+		copy(c.hashedExtension[:c.hashedExtLen], c.hashedExtension[t:t+c.hashedExtLen])
+	}
+
+	sp.cells[childNibble] = cellEncodeDataFromCell(&c)
+	return nil
+}
+
+// rebuildWorkerFromSplitPoint repurposes the worker's hph as the
+// last-finisher for sp. It zeroes grid[0], loads every deposited / DB cell
+// from sp.cells into row 0 at depth = len(sp.prefix)+1, then folds row 0 to
+// produce the merged cell into hph.root. After this call:
+//
+//   - hph.root holds the cell representing the entire sp.prefix subtree;
+//   - activeRows == 0;
+//   - the worker is ready to either deposit again at a further-enclosing
+//     split-point or publish the root hash.
+func rebuildWorkerFromSplitPoint(hph *HexPatriciaHashed, sp *splitPoint) error {
+	// Reset the worker's trie state so stale grid entries from the leafTask
+	// processing cannot leak in.
+	hph.Reset()
+
+	// Populate row 0 with the split-point's child cells. depth=len(sp.prefix)+1.
+	depth := int16(len(sp.prefix)) + 1
+	loadSiblingsIntoGrid(hph, sp, 0)
+	hph.depths[0] = depth
+	hph.activeRows = 1
+
+	// currentKey carries the path from root down to the row's parent. The
+	// path through the split-point is sp.prefix; the row's column selector
+	// (currentKey[depth-1]) is the implicit nibble at position depth-1, which
+	// is len(sp.prefix). foldBranch reads currentKey[upDepth:currentKeyLen]
+	// to compute extension nibbles, so we set currentKeyLen = depth-1 and
+	// fill currentKey[:depth-1] = sp.prefix. The byte at currentKey[depth-1]
+	// is filled by foldBranch's own logic when row==0 it doesn't matter, but
+	// to keep depthsToTxNum / extension construction sane we leave it zero.
+	if len(sp.prefix) > 0 {
+		copy(hph.currentKey[:len(sp.prefix)], sp.prefix)
+	}
+	hph.currentKeyLen = depth - 1
+
+	// rootTouched/rootPresent get set by foldBranch based on whether the
+	// merged branch carries any touchedBits. afterMap is what determines the
+	// updateKind. For row 0, the fold writes upCell into &hph.root.
+	if err := hph.fold(); err != nil {
+		return fmt.Errorf("fold row 0: %w", err)
+	}
+	// After fold: activeRows=0, hph.root holds the merged sp.prefix subtree.
+	return nil
+}
+
+// produceCellForBarrier extracts the cell at the deepest active row that
+// represents the worker's contribution to the enclosing split-point. The
+// returned cellEncodeData carries the encoding-relevant fields plus a
+// memoized hash/stateHash, so the last-finisher's computeCellHash can
+// short-circuit without needing the full account/storage state that
+// cellEncodeData does not carry.
+//
+// The split-point's child nibble is read from currentKey[deepDepth-1]: the
+// worker's unfold-down path set it during its descent into the leafTask's
+// subtree, and fold-back preserves the byte at that offset even after
+// currentKeyLen shrinks.
+func produceCellForBarrier(hph *HexPatriciaHashed) (cellEncodeData, int, error) {
+	if hph.activeRows == 0 {
+		return cellEncodeData{}, -1, errors.New("produceCellForBarrier: no active rows")
+	}
+	deepest := hph.activeRows - 1
+	deepDepth := hph.depths[deepest]
+	if deepDepth == 0 {
+		return cellEncodeData{}, -1, errors.New("produceCellForBarrier: deepest row at depth 0")
+	}
+	childNibble := int(hph.currentKey[deepDepth-1])
+	cellPtr := &hph.grid[deepest][childNibble]
+	// Pre-compute the cell's hash so cellEncodeData captures it via stateHash
+	// (for leaves) or hashLen+hash (for branches). The last-finisher rebuilds
+	// the row from cellEncodeData only and cannot otherwise recompute leaf
+	// hashes — Balance / Storage / loaded-flag state isn't carried.
+	if _, err := hph.computeCellHash(cellPtr, deepDepth, hph.hashAuxBuffer[:0]); err != nil {
+		return cellEncodeData{}, -1, fmt.Errorf("produceCellForBarrier computeCellHash(depth=%d, nibble=%x): %w", deepDepth, childNibble, err)
+	}
+	return cellEncodeDataFromCell(cellPtr), childNibble, nil
+}
+
+// loadSiblingsIntoGrid is called by the last-finisher after all siblings have
+// deposited at the split-point. It overwrites the deepest grid row with the
+// 16 child cells (workers' deposits + DB pre-population from Prepare) and
+// reconstructs the touchMap / afterMap / branchBefore state that hph.fold()
+// expects to find. The row's depth was already set by the worker's unfold
+// history; rows above the split-point retain the worker's state and are
+// guaranteed consistent because every leafTask under the split-point shares
+// the same ancestor path.
+func loadSiblingsIntoGrid(hph *HexPatriciaHashed, sp *splitPoint, row int) {
+	// Zero the row before reloading so stale slots from the worker's own
+	// processing (which only touched grid[row][childNibble]) cannot leak
+	// into the branch hash.
+	for n := range 16 {
+		hph.grid[row][n].reset()
+	}
+
+	afterMap := uint16(0)
+	for bm := sp.touchedBitmap | sp.dbBitmap; bm != 0; {
+		n := bits.TrailingZeros16(bm)
+		bm &^= uint16(1) << uint16(n)
+		src := &sp.cells[n]
+		if cellEncodeDataIsEmpty(src) {
+			// Touched-and-deleted slot: workers deposit an empty cell when a
+			// delete propagates upward. Mark it absent in afterMap so the
+			// branch encoder reflects the deletion.
+			continue
+		}
+		dst := &hph.grid[row][n]
+		dst.hashLen = src.hashLen
+		copy(dst.hash[:src.hashLen], src.hash[:src.hashLen])
+		dst.stateHashLen = src.stateHashLen
+		copy(dst.stateHash[:src.stateHashLen], src.stateHash[:src.stateHashLen])
+		dst.extLen = src.extLen
+		copy(dst.extension[:src.extLen], src.extension[:src.extLen])
+		dst.accountAddrLen = src.accountAddrLen
+		copy(dst.accountAddr[:src.accountAddrLen], src.accountAddr[:src.accountAddrLen])
+		dst.storageAddrLen = src.storageAddrLen
+		copy(dst.storageAddr[:src.storageAddrLen], src.storageAddr[:src.storageAddrLen])
+		afterMap |= uint16(1) << uint16(n)
+	}
+	hph.touchMap[row] = sp.touchedBitmap
+	hph.afterMap[row] = afterMap
+	hph.branchBefore[row] = sp.branchBefore
+}
+
+// cellEncodeDataIsEmpty reports whether a cellEncodeData carries no payload —
+// i.e. an empty slot (no DB cell, no worker deposit, or a touched-and-deleted
+// cell). Identical structurally to the zero cellEncodeData.
+func cellEncodeDataIsEmpty(c *cellEncodeData) bool {
+	return c.hashLen == 0 && c.stateHashLen == 0 && c.extLen == 0 &&
+		c.accountAddrLen == 0 && c.storageAddrLen == 0
 }
 
 // applyDeferredUpdates merges every worker's deferred branch updates and
@@ -516,12 +832,18 @@ func (p *ParallelPatriciaHashed) warmupSplitAncestors(pu *parallelUpdate, warmup
 
 // dispatchLeafKeys scans the given ETL collector exactly once and routes each
 // hashed key to the leafTask whose prefix is the longest match. fn receives
-// the leafTask index (into tasks) and the hashed/plain key pair.
+// the leafTask index (into tasks) and the hashed/plain key pair. Keys that
+// match none of the supplied tasks' prefixes are skipped silently: this lets
+// multiple workers share a nibble bucket, each invoking dispatchLeafKeys with
+// its own leafTask and filtering out keys owned by sibling workers.
 //
 // tasks may have any cardinality:
-//   - 1 task: every key matches; fn is called for every entry.
-//   - >1 tasks (Task 7 scope): the longest matching prefix wins. Tasks with
-//     disjoint prefixes are routed to distinct fn invocations.
+//   - 1 task with a broad prefix covering the bucket: every key matches; fn
+//     is called for every entry.
+//   - 1 task within a multi-task bucket: fn fires only on keys whose hashed
+//     prefix matches the task's; sibling tasks' keys are skipped.
+//   - >1 tasks: the longest matching prefix wins. Tasks with disjoint
+//     prefixes are routed to distinct fn invocations.
 //
 // fn must not retain hk or pk beyond the call — they are backed by the ETL
 // collector's reusable buffers.
@@ -563,7 +885,8 @@ func dispatchLeafKeys(
 			}
 		}
 		if matched < 0 {
-			return fmt.Errorf("dispatchLeafKeys: hashedKey %x matches no leafTask prefix", hk)
+			// Key belongs to a sibling worker's leafTask. Skip silently.
+			return nil
 		}
 		return fn(matched, hk, pk)
 	}, etl.TransformArgs{Quit: ctx.Done()})

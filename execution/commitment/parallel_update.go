@@ -245,7 +245,13 @@ func (pu *parallelUpdate) prepareDFS(ctx PatriciaContext, node *prefixNode, accP
 		if err := pu.loadDBBranch(ctx, sp); err != nil {
 			return err
 		}
-		sp.arrived.Store(int32(fanout - 1))
+		// arrived is initialised to the number of workers expected to deposit
+		// at this split-point. Each worker decrements it; the worker whose
+		// Add(-1) returns 0 is the unique last-finisher. Initialising to
+		// fanout (not fanout-1) is essential: with N-1 as the initial value,
+		// for N=2 both workers would satisfy `remaining <= 0` and continue
+		// folding past the barrier, producing two root publishers.
+		sp.arrived.Store(int32(fanout))
 		pu.splitMap.Set(nodePrefix, sp)
 		pu.splitPoints = append(pu.splitPoints, sp)
 		return pu.recurseChildren(ctx, node, nodePrefix)

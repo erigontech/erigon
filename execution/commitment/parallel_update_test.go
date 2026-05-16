@@ -357,7 +357,7 @@ func TestPrepareTwoWayForkAboveThreshold(t *testing.T) {
 	require.True(t, ok, "split-point must sit at the fork depth (prefix [0x0A])")
 	require.NotNil(t, sp)
 	assert.Equal(t, uint16(1<<0x0B|1<<0x0C), sp.touchedBitmap)
-	assert.Equal(t, int32(1), sp.arrived.Load(), "arrived must equal popcount(touched)-1")
+	assert.Equal(t, int32(2), sp.arrived.Load(), "arrived must equal popcount(touched); the worker whose Add(-1) returns 0 is the unique last-finisher")
 	assert.False(t, sp.branchBefore, "no DB branch was provided")
 	assert.Equal(t, uint16(0), sp.dbBitmap)
 
@@ -448,7 +448,7 @@ func TestPrepareDeepStorageShapeSplitsAtStorageFork(t *testing.T) {
 	require.True(t, ok, "split-point must sit exactly at the storage-fork prefix")
 	require.NotNil(t, sp)
 	assert.Equal(t, uint16(1<<0x01|1<<0x02), sp.touchedBitmap)
-	assert.Equal(t, int32(1), sp.arrived.Load())
+	assert.Equal(t, int32(2), sp.arrived.Load())
 
 	require.Len(t, pu.leafQueue, 2)
 }
@@ -488,8 +488,8 @@ func TestPrepareUntouchedNibblePrePopulation(t *testing.T) {
 	assert.Equal(t, expectedTouched, sp.touchedBitmap)
 	assert.Equal(t, expectedDB, sp.dbBitmap)
 	assert.True(t, sp.branchBefore)
-	assert.Equal(t, int32(1), sp.arrived.Load(),
-		"arrived must reflect touched fanout, not dbBitmap fanout")
+	assert.Equal(t, int32(2), sp.arrived.Load(),
+		"arrived must reflect touched fanout (count of workers depositing), not dbBitmap fanout")
 
 	for _, n := range dbNibbles {
 		var zero cellEncodeData
