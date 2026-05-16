@@ -291,8 +291,8 @@ Folds in `SetCustomHistoryStateReader`, `SeekCommitment` #2, `accessed.touchAll`
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add function `detectCollapseSiblings(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock, endTxNum, blockNum uint64, expectedBlockRoot common.Hash, accessed *accessedState) (siblingPaths [][]byte, err error)`
-- [ ] inside the helper, in order:
+- [x] add function `detectCollapseSiblings(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock, endTxNum, blockNum uint64, expectedBlockRoot common.Hash, accessed *accessedState) (siblingPaths [][]byte, err error)` (actual receiver type used: `*commitmentdb.SharedDomainsCommitmentContext`, same as in [[Task 4]])
+- [x] inside the helper, in order:
   1. construct `splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false)`
   2. `sdCtx.SetCustomHistoryStateReader(splitStateReader)`
   3. `domains.SeekCommitment(ctx, tx)` (return error wrapped)
@@ -302,14 +302,14 @@ Folds in `SetCustomHistoryStateReader`, `SeekCommitment` #2, `accessed.touchAll`
   7. verify `common.Hash(computedRootHash) == expectedBlockRoot`; return error on mismatch — **preserve exact wording** including the typo `computedRootHash(%x)!= expectedRootHash(%x)` (no space before `!=`) and the lowercase `[debug_executionWitness]` prefix
   8. `sdCtx.SetCollapseTracer(nil)`
   9. return `siblingPaths, nil`
-- [ ] preserve the `common.Copy(hashedKeyPath)` defensive copy inside the collapse tracer — do not omit
-- [ ] error string for `ComputeCommitment` failure: preserve exact `fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)` including the trailing `\n` and `%v` (not `%w`)
-- [ ] add top-of-function comment documenting "// Triggers SeekCommitment #2 (split reader). Preserves pre-refactor behavior."
-- [ ] replace lines 773–808 in `ExecutionWitness` with a single call assigning `collapseSiblingPaths`
-- [ ] `git diff` the error strings to confirm exact preservation (grep for `[debug_executionWitness]` before and after — should match byte-for-byte)
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] preserve the `common.Copy(hashedKeyPath)` defensive copy inside the collapse tracer — do not omit
+- [x] error string for `ComputeCommitment` failure: preserve exact `fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)` including the trailing `\n` and `%v` (not `%w`)
+- [x] add top-of-function comment documenting "// Triggers SeekCommitment #2 (split reader). Preserves pre-refactor behavior."
+- [x] replace lines 773–808 in `ExecutionWitness` with a single call assigning `collapseSiblingPaths`
+- [x] `git diff` the error strings to confirm exact preservation (grep for `[debug_executionWitness]` before and after — should match byte-for-byte)
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 6: Extract `buildWitnessTrie`
 
