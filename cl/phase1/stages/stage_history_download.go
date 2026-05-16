@@ -136,19 +136,20 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
-	// If a canonical block-tip provider is wired, prefer it over the
-	// Bellatrix default. Closes the "Caplin walks 2× the actual gap"
-	// gap observed live (~14 days instead of ~7 days at weekly
-	// publish cadence). FrozenBlocks() collapses to state-tip after
-	// alignMin-true OpenFolder calls; canonical block-tip is the
-	// authoritative source — same value for every node reading the
-	// same chain.toml. See
-	// docs/plans/20260515-three-layer-snapshot-distribution.md.
+	// Capture canonical block-tip (if wired) for the EL-payload
+	// comparison inside the callback. destinationSlotForEL stays in
+	// slot units (Bellatrix-epoch default); we use the canonical
+	// block-tip as a SEPARATE BLOCK-NUMBER bound against
+	// payload.BlockNumber. Mixing them — as the prior attempt did —
+	// triggered the stop condition on the first block because beacon
+	// slots and EL block numbers have different magnitudes (~14M vs
+	// ~25M for mainnet today).
+	var canonicalBlockTip uint64
 	if cfg.blockSnapshotTipFn != nil {
 		if tip := cfg.blockSnapshotTipFn(); tip > 0 {
-			destinationSlotForEL = tip
-			logger.Info("Caplin destination from canonical chain.toml block-tip",
-				"slot", tip, "source", "canonical")
+			canonicalBlockTip = tip
+			logger.Info("Caplin canonical-block-tip stop bound",
+				"block_tip", tip, "source", "canonical-chain.toml")
 		}
 	}
 	// Set up onNewBlock callback
@@ -188,6 +189,21 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 			payload := blk.Block.Body.ExecutionPayload
 			hasELBlock := frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
+			// Canonical block-tip bound (when wired): consider the
+			// block "in EL snapshots" if its payload number is below
+			// the canonical block-tip. FrozenBlocks() collapses to
+			// state-tip after alignMin-true OpenFolder calls (typically
+			// state_tip + 70K = block_tip), so without this gate Caplin
+			// would download those 70K extra blocks unnecessarily — the
+			// 2× overhead observed in the 2026-05-15 retest. With the
+			// gate, Caplin stops as soon as the beacon block's EL
+			// payload is below canonical block-tip, matching the actual
+			// gap chain.toml→live-tip rather than chain.toml-state→
+			// live-tip.
+			if !hasELBlock && canonicalBlockTip > 0 &&
+				canonicalBlockTip >= blk.Block.Body.ExecutionPayload.BlockNumber {
+				hasELBlock = true
+			}
 			if !hasELBlock {
 				hasELBlock, err = cfg.engine.HasBlock(ctx, payload.BlockHash)
 				if err != nil {
@@ -214,15 +230,17 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
 			frozenBlocksInEL := cfg.engine.FrozenBlocks(ctx)
 			isInElSnapshots = frozenBlocksInEL > blk.Block.Body.ExecutionPayload.BlockNumber
-			// When canonical block-tip is wired (cfg.blockSnapshotTipFn
-			// is non-nil), do NOT overwrite destinationSlotForEL with
-			// FrozenBlocks. FrozenBlocks collapses to state-tip after
-			// alignMin-true OpenFolder calls in stage_snapshots and
-			// would re-introduce the 2× overhead the canonical tip
-			// closes. Only fall back to the FrozenBlocks-derived
-			// destination when no canonical tip is wired.
-			if cfg.blockSnapshotTipFn == nil &&
-				cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
+			// Canonical block-tip bound: same gate as for hasELBlock
+			// above. When wired, also treat the payload as "in EL
+			// snapshots" once it's below canonical block-tip — gives
+			// the outer stop condition a meaningful early-exit aligned
+			// with the canonical chain.toml's content rather than the
+			// state-tip-collapsed FrozenBlocks view.
+			if !isInElSnapshots && canonicalBlockTip > 0 &&
+				canonicalBlockTip >= blk.Block.Body.ExecutionPayload.BlockNumber {
+				isInElSnapshots = true
+			}
+			if cfg.engine.HasGapInSnapshots(ctx) && frozenBlocksInEL > 0 {
 				destinationSlotForEL = frozenBlocksInEL - 1
 			}
 		}
