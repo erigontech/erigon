@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -87,6 +88,32 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		// prune.Mode (cmd/utils maps every --prune.mode value to one).
 		return items
 	}
+
+	// Bug Z: under modes that actively prune block data with a finite
+	// distance (e.g. MinimalMode with Distance(100_000)), drop block
+	// data below the prune horizon at bootstrap rather than downloading
+	// the full chain only to prune ~immediately. With mainnet block-
+	// tip ≈ 25M and minimal-mode horizon = block_tip - 100K, this
+	// drops ~500 GB of pre-horizon transactions.seg the publisher
+	// otherwise pulls and then prunes (the live behaviour observed
+	// 2026-05-15).
+	//
+	// Headers stay regardless — they're small (~10 GB total mainnet)
+	// and required for ancestor / fork-choice lookups across the
+	// chain. Bodies + transactions follow the prune horizon.
+	//
+	// PruneTo returns 0 for KeepAll (archive, blocks) and chain-
+	// specific (full) — meaning "no horizon, keep everything"; the
+	// loop becomes a no-op for those modes. Distance-based modes
+	// (minimal) get a real horizon.
+	var blockPruneHorizon uint64
+	if pruneMode.Blocks.Enabled() {
+		tips := DeriveManifestTips(items)
+		if tips.BlockTip > 0 {
+			blockPruneHorizon = pruneMode.Blocks.PruneTo(tips.BlockTip)
+		}
+	}
+
 	out := make(snapcfg.PreverifiedItems, 0, len(items))
 	for _, p := range items {
 		if pruneMode.History.Enabled() && isStateHistory(p.Name) {
@@ -129,9 +156,34 @@ func FilterPreverifiedByPruneMode(items snapcfg.PreverifiedItems, cc *chain.Conf
 		if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, pruneMode, p) {
 			continue
 		}
+		// Bug Z: block bodies + transactions below prune horizon are
+		// dropped. Headers stay (small, needed for chain continuity
+		// across the full range). Caplin data is already filtered
+		// above; this branch only runs on non-CL entries.
+		if blockPruneHorizon > 0 && isPrunableBlockFile(p.Name) {
+			info, isStateFile, ok := snaptype.ParseFileName("", p.Name)
+			if ok && !isStateFile && info.To > 0 && info.To <= blockPruneHorizon {
+				continue
+			}
+		}
 		out = append(out, p)
 	}
 	return out
+}
+
+// isPrunableBlockFile reports whether a file's content is subject to
+// block-distance pruning. Headers are NOT prunable — they're tiny
+// and the entire chain's headers must remain available for
+// ancestor / fork-choice lookups. Bodies and transactions ARE
+// prunable: minimal-mode publishers only keep the recent window
+// (Distance(100_000) blocks back from tip), so older entries can
+// be dropped at bootstrap rather than downloaded then pruned.
+func isPrunableBlockFile(name string) bool {
+	if isCLData(name) {
+		return false
+	}
+	return strings.Contains(name, "bodies") ||
+		strings.Contains(name, "transactions")
 }
 
 // isCLData reports whether a preverified item name describes CL

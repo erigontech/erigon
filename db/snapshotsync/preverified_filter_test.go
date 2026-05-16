@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -245,4 +246,104 @@ func TestFilterIsSubsetOfArchive(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFilterPreverifiedByPruneMode_BugZ pins the bug-Z behaviour:
+// under modes that prune block data with a finite distance (minimal),
+// transactions + bodies below the prune horizon (block_tip - 100K)
+// are dropped at bootstrap. Headers always kept regardless of mode.
+// Archive / full / blocks modes are unaffected — their Blocks.PruneTo
+// returns 0 (no horizon).
+func TestFilterPreverifiedByPruneMode_BugZ(t *testing.T) {
+	t.Parallel()
+
+	// Synthetic manifest with headers/bodies/transactions across a
+	// range simulating a chain at block_tip ≈ 25M (mainnet-ish).
+	// Headers/bodies/transactions all extend to the same range so
+	// DeriveManifestTips's min-of-maxes gives a clean block_tip.
+	items := snapcfg.PreverifiedItems{}
+	for _, segRange := range []struct{ from, to uint64 }{
+		{0, 1000}, {1000, 5000}, {5000, 10000}, {10000, 20000}, {20000, 24000},
+		{24000, 24500}, {24500, 24900}, {24900, 25000}, {25000, 25069},
+	} {
+		ranges := []string{
+			fmt.Sprintf("v1.1-%06d-%06d-headers.seg", segRange.from, segRange.to),
+			fmt.Sprintf("v1.1-%06d-%06d-bodies.seg", segRange.from, segRange.to),
+			fmt.Sprintf("v1.1-%06d-%06d-transactions.seg", segRange.from, segRange.to),
+		}
+		for _, name := range ranges {
+			items = append(items, preverified.Item{Name: name, Hash: "01"})
+		}
+	}
+	// Plus state-domain entries (always kept regardless of horizon).
+	items = append(items,
+		preverified.Item{Name: "domain/v2.0-accounts.0-8192.kv", Hash: "01"},
+		preverified.Item{Name: "domain/v2.0-commitment.0-8192.kv", Hash: "01"},
+	)
+
+	cc := &chain.Config{} // empty — MergeHeight unset, pre-merge tx filter is a no-op
+
+	t.Run("minimal mode drops bodies/transactions below tip-100K", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.MinimalMode)
+		gotNames := namesOf(got)
+
+		// block_tip = 25069*1000 - 1 = 25068999
+		// horizon  = 25068999 - 100_000 = 24968999
+		// Files with To*1000 <= 24968999 (i.e. range To <= 24968) drop.
+		// Concrete: bodies/transactions for ranges 000000-001000 (To=1000*1000=1M ≤ horizon),
+		// 001000-005000, 005000-010000, 010000-020000, 020000-024000, 024000-024500,
+		// 024500-024900 are all below horizon — DROPPED.
+		// Range 024900-025000 (To=25000*1000=25M > horizon=24.97M) is KEPT.
+		// Range 025000-025069 (To=25.069M > horizon) is KEPT.
+		require.NotContains(t, gotNames, "v1.1-000000-001000-bodies.seg",
+			"pre-horizon bodies dropped")
+		require.NotContains(t, gotNames, "v1.1-000000-001000-transactions.seg",
+			"pre-horizon transactions dropped")
+		require.NotContains(t, gotNames, "v1.1-020000-024000-transactions.seg",
+			"transactions just below horizon dropped")
+		require.Contains(t, gotNames, "v1.1-024900-025000-bodies.seg",
+			"post-horizon bodies kept")
+		require.Contains(t, gotNames, "v1.1-025000-025069-transactions.seg",
+			"post-horizon transactions kept (the recent window)")
+
+		// Headers always kept regardless of horizon — needed for
+		// ancestor/fork-choice across full chain.
+		require.Contains(t, gotNames, "v1.1-000000-001000-headers.seg",
+			"headers always kept under minimal mode (full chain needed for ancestor lookups)")
+		require.Contains(t, gotNames, "v1.1-025000-025069-headers.seg",
+			"recent headers kept")
+
+		// State-domain entries unaffected (different filter logic).
+		require.Contains(t, gotNames, "domain/v2.0-commitment.0-8192.kv",
+			"state-domain entries unaffected by block-prune logic")
+	})
+
+	t.Run("archive mode keeps everything", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.ArchiveMode)
+		gotNames := namesOf(got)
+		// All transactions kept, including pre-horizon.
+		require.Contains(t, gotNames, "v1.1-000000-001000-transactions.seg",
+			"archive keeps all transactions — no block pruning")
+		require.Contains(t, gotNames, "v1.1-020000-024000-bodies.seg",
+			"archive keeps all bodies — no block pruning")
+	})
+
+	t.Run("blocks mode keeps everything blocks-wise", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.BlocksMode)
+		gotNames := namesOf(got)
+		// BlocksMode = KeepAllBlocksPruneMode (Distance(MaxUint64-1))
+		// PruneTo returns 0 for that → blockPruneHorizon stays 0 → no drops.
+		require.Contains(t, gotNames, "v1.1-000000-001000-transactions.seg",
+			"blocks mode keeps all transactions (Blocks=KeepAll)")
+	})
+
+	t.Run("full mode keeps everything (Blocks=DefaultBlocksPruneMode)", func(t *testing.T) {
+		got := FilterPreverifiedByPruneMode(items, cc, prune.FullMode)
+		gotNames := namesOf(got)
+		// FullMode.Blocks = DefaultBlocksPruneMode (Distance(MaxUint64))
+		// → Enabled() = false → blockPruneHorizon stays 0 → no drops
+		// based on block-distance. (pre-merge tx filter is separate.)
+		require.Contains(t, gotNames, "v1.1-025000-025069-transactions.seg",
+			"full mode block-distance pruning is no-op")
+	})
 }
