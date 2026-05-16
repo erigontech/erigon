@@ -578,31 +578,56 @@ func (p *Provider) Initialize(deps Deps) error {
 	// content shape, Tier 3 format integrity) plug in via separate
 	// flag-gated chains, not yet wired.
 	//
-	// Files already on disk at startup are entered as Advertisable
-	// directly during bootstrap (see below) — they bypass the batch
-	// path because previous runs validated them.
+	// Bootstrap files entry state depends on LifecycleDrivenByStorage:
+	//   - flag OFF (legacy): files enter at LifecycleAdvertisable —
+	//     no driver means no async validation path; back-compat with
+	//     callers that don't run the validator chain at all.
+	//   - flag ON (storage-driven): files enter at LifecycleIndexed
+	//     so the lifecycle driver's OnValidation handler runs the
+	//     cryptographic validator chain on them (HeaderChain, TxRoot,
+	//     CommitmentDomain, ReceiptRoot). Catches the publisher-side
+	//     gap-f class: commitment files inherited from preverified
+	//     (or merged in place) whose internal KeyCommitmentState
+	//     record encodes a (blockNum, txNum) pair the current
+	//     txnum_index can't reconcile. Without this gate those files
+	//     reached Advertisable on the assumption "visible-in-aggregator
+	//     implies fully validated" — true for files this node retired
+	//     under a working validator chain, NOT true for files we just
+	//     downloaded from upstream / inherited across schema or chain
+	//     shifts.
+	//
 	// Bootstrap Inventory with files already on disk so the lifecycle
 	// driver doesn't start blind. Both AllSnapshots (block) and the
-	// Aggregator (state) expose visible-file enumeration; we mirror
-	// each as LifecycleAdvertisable since visibility implies the file
-	// is local AND indexed AND validated by recalcVisibleFiles's gate.
-	// Runs whenever Inventory is set, regardless of LifecycleDrivenByStorage,
-	// because non-driver consumers (manifest exchange, snapshot-flow) also
+	// Aggregator (state) expose visible-file enumeration. Runs whenever
+	// Inventory is set, regardless of LifecycleDrivenByStorage, because
+	// non-driver consumers (manifest exchange, snapshot-flow) also
 	// benefit from a populated registry.
 	if deps.Inventory != nil {
+		bootstrapInLifecycle := config.Snapshot.LifecycleDrivenByStorage
 		addBootstrapFile := func(name string) {
 			entry := &snapshot.FileEntry{
-				Name:         filepath.Base(name),
-				Local:        true,
-				Advertisable: true,
+				Name:  filepath.Base(name),
+				Local: true,
+				// Advertisable depends on whether the lifecycle
+				// driver is running. When it's on, files enter at
+				// Indexed (the driver picks them up + validates);
+				// when it's off, files enter at Advertisable
+				// directly (no driver to advance them).
+				Advertisable: !bootstrapInLifecycle,
 			}
 			// Populate step + domain + kind so cross-component
 			// queries (per-step grouping, IsMinimum sort) work.
-			// Bootstrap files are already Advertisable so they
-			// don't go through the lifecycle, but their metadata
-			// is read by other consumers.
 			snapshot.PopulateFromName(entry)
 			_ = deps.Inventory.AddFile(entry)
+			if bootstrapInLifecycle {
+				// AddFile with (Local=true, Advertisable=false)
+				// lands at LifecycleDownloaded. Advance to
+				// LifecycleIndexed: the file is on disk AND
+				// indexed (visibility in aggregator/AllSnapshots
+				// implies indexes built). The driver's next
+				// sweep dispatches OnValidation on it.
+				deps.Inventory.AdvanceTo(entry.Name, snapshot.LifecycleIndexed)
+			}
 		}
 		if p.AllSnapshots != nil {
 			for _, name := range p.AllSnapshots.Files() {
@@ -615,35 +640,56 @@ func (p *Provider) Initialize(deps Deps) error {
 			}
 		}
 
-		// Populate the (step, block) binding from the latest bootstrap
-		// commitment file. Bootstrap files start at LifecycleAdvertisable
-		// directly (back-compat: visible-in-aggregator implies fully
-		// validated by previous runs), so they bypass the lifecycle's
-		// per-step batch validation — meaning CommitmentDomainValidator
-		// never fires on them and no bindings get registered. Without a
-		// binding, the block-step wait gate in BuildOnBatchValidation
-		// blocks ALL block files indefinitely (they wait for a binding
-		// that's never going to materialise via the lifecycle path).
+		// Pre-register a (step, block) binding from the latest
+		// bootstrap commitment file so the block-step wait gate
+		// in BuildOnBatchValidation has something to anchor against
+		// before the lifecycle driver's first async sweep completes.
 		//
-		// We register a binding for the latest commitment file
-		// directly. BlockToStep returns the smallest covering boundary,
-		// so a single binding for the latest commitment step covers
-		// every block range below it. Block files arriving via
-		// discoverNewFiles can then validate immediately once their
-		// step-siblings are present.
+		// Under LifecycleDrivenByStorage=true, bootstrap commitment
+		// files now enter at LifecycleIndexed and go through the
+		// driver's OnValidation handler — which also registers
+		// bindings on success. The seed call here is the fast-path
+		// equivalent: it registers one binding synchronously so
+		// block files don't have to wait for the first sweep.
 		//
-		// Subsequent commitment files produced by post-tip retire go
-		// through the lifecycle normally (not via bootstrap) and
-		// CommitmentDomainValidator registers their bindings as part of
-		// the per-step batch validation — incrementally raising the
-		// high-water mark.
+		// Under LifecycleDrivenByStorage=false (legacy), bootstrap
+		// files go straight to Advertisable without any validator
+		// running — the seed call is the ONLY thing registering a
+		// binding for them. Failure to seed (e.g. partial-block tip
+		// pause without a matching block .seg) means block files
+		// stay un-bound until a future retire produces a commitment
+		// that does seed; not blocking, just degraded.
+		//
+		// BlockToStep returns the smallest covering boundary, so a
+		// single binding for the latest commitment step covers every
+		// block range below it.
 		if p.ChainDB != nil && p.BlockReader != nil {
-			seedLatestCommitmentBinding(ctx, deps.Inventory,
-				CommitmentDomainValidator{
-					DB:          p.ChainDB,
-					BlockReader: p.BlockReader,
-					Inventory:   deps.Inventory,
-				}, logger)
+			// Bootstrap anchor extraction: walk EVERY commitment file
+			// in the inventory and run Phase A (ExtractCommitmentRecord)
+			// to populate (step, block) bindings + Anchors on each.
+			// Phase A only reads the file's KeyCommitmentState record
+			// — no header, no body, no segment open required — so it
+			// runs cleanly at startup before EL execution has opened
+			// segments and regardless of prune mode (bodies < prune
+			// horizon are intentionally absent under minimal mode).
+			//
+			// Why all files, not just the latest: the V2 manifest the
+			// publisher will generate carries per-file ProofRoot /
+			// AtBlock / AtTxNum anchors (see chaintoml_v2.go
+			// DomainFileEntry) precisely so consumers can verify
+			// without needing all files. To populate those anchors at
+			// publish time, the inventory must hold them — which
+			// requires running Phase A on every bootstrap commitment
+			// file. The lifecycle driver then runs Phase B (header
+			// check) + Phase C (body cross-check, may skip under
+			// minimal mode) asynchronously while execution proceeds.
+			//
+			// EL execution and historical anchor extraction work in
+			// opposite directions: execution moves forward from the
+			// snapshot tip, anchor extraction works on every preverified
+			// commitment file independently — they don't contend.
+			extractBootstrapCommitmentAnchors(ctx, deps.Inventory,
+				p.ChainDB, p.BlockReader, logger)
 		}
 	}
 
@@ -678,6 +724,14 @@ func (p *Provider) Initialize(deps Deps) error {
 					Inventory:   deps.Inventory,
 					Logger:      logger,
 					PausedCache: p.pausedCommitmentCache,
+					// PruneMode lets the validator classify
+					// integrity.ErrAnchorBodyMissing: under minimal mode
+					// the body for an anchor below
+					// (BlockTip - 100K) is intentionally absent, so
+					// Phase C (txnum-range cross-check) is skipped with
+					// a logged warning. Phase A (file-internal record)
+					// + Phase B (header.Root cross-check) still run.
+					PruneMode: p.bootstrapPruneMode,
 				},
 				ReceiptRootValidator{
 					DB:          p.ChainDB,

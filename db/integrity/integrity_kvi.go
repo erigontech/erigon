@@ -44,6 +44,66 @@ import (
 // ErrIntegrity is useful to differentiate integrity errors from program errors.
 var ErrIntegrity = errors.New("integrity error")
 
+// Specific commitment-validation error classes. All wrap ErrIntegrity so
+// `errors.Is(err, ErrIntegrity)` keeps working for the integrity tool's
+// existing classifier. Callers (publisher / consumer validators) MUST
+// branch on these explicitly — different classes warrant different
+// handling (pause vs skip vs hard-fail vs quarantine).
+//
+// The validator strategy assumes three phases gated by what's loaded:
+//
+//	Phase A: read the file's KeyCommitmentState record. Always works
+//	         (the file is on disk). Failures here → ErrCommitmentRecordInvalid.
+//
+//	Phase B: cross-check ProofRoot against header.Root for AtBlock.
+//	         Always works under all prune modes — headers are kept
+//	         back to zero (see db/snapshotsync/preverified_filter.go).
+//	         Failures here → ErrCommitmentHeaderMismatch (real corruption)
+//	         or ErrAnchorHeaderMissing (header not yet loaded).
+//
+//	Phase C: cross-check recorded TxNum against the block's txnum
+//	         range. Requires the body for AtBlock — under minimal
+//	         mode bodies < prune horizon are intentionally absent.
+//	         Failures here → ErrCommitmentTxNumRange (real mismatch)
+//	         or ErrAnchorBodyMissing (body unavailable).
+//
+// Callers map ErrAnchorBodyMissing to either skip-validate (file's
+// anchor is in the pruned range — Phase C can never run) or pause
+// (anchor is post-horizon, body is still downloading).
+var (
+	// ErrCommitmentRecordInvalid: the file's KeyCommitmentState record
+	// couldn't be decoded, has empty rootHash, has txNum=0, or has
+	// txNum outside the file's [startTxNum, endTxNum) range. Real
+	// file corruption — quarantine.
+	ErrCommitmentRecordInvalid = fmt.Errorf("%w: commitment record invalid", ErrIntegrity)
+
+	// ErrAnchorHeaderMissing: header for the recorded AtBlock isn't
+	// in the local BlockReader yet. Transient (the EL hasn't opened
+	// the segment containing it) — caller should pause and retry.
+	// Shouldn't happen at steady-state under any prune mode since
+	// headers are kept for the full chain.
+	ErrAnchorHeaderMissing = fmt.Errorf("%w: anchor header missing", ErrIntegrity)
+
+	// ErrAnchorBodyMissing: body for the recorded AtBlock isn't
+	// available. Under minimal mode (or any --prune.mode that prunes
+	// bodies below a horizon) this is INTENTIONAL for blocks below
+	// the horizon — callers should detect via prune.Mode + AtBlock
+	// and skip Phase C with a logged warning. Above the horizon this
+	// is transient — caller should pause.
+	ErrAnchorBodyMissing = fmt.Errorf("%w: anchor body missing", ErrIntegrity)
+
+	// ErrCommitmentHeaderMismatch: the file's ProofRoot doesn't
+	// match the chain header's stateRoot for AtBlock. Real
+	// corruption (or the file is from a fork) — quarantine.
+	ErrCommitmentHeaderMismatch = fmt.Errorf("%w: ProofRoot != header.Root", ErrIntegrity)
+
+	// ErrCommitmentTxNumRange: the recorded TxNum lies outside the
+	// recorded AtBlock's [minTxNum, maxTxNum]. Means the (blockNum,
+	// txNum) pair the file claims is internally inconsistent against
+	// the canonical txnum index. Quarantine.
+	ErrCommitmentTxNumRange = fmt.Errorf("%w: txNum outside AtBlock's txnum range", ErrIntegrity)
+)
+
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
 // parallelizing the lookup work inside each file.
 func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkType Check, sc SamplerCfg, cache *IntegrityCache, failFast bool, logger log.Logger) error {

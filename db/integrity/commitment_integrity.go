@@ -144,20 +144,29 @@ func (info CommitmentRootInfo) PartialBlock() bool {
 	return commitment.IsPartialBlock(info.TxNum, info.BlockMaxTxNum)
 }
 
-// LoadCommitmentRoot reads KeyCommitmentState for the txnum range
-// [startTxNum, endTxNum), decodes (rootHash, blockNum, txNum), and
-// runs the basic-consistency invariants (range containment, txNum
-// not zero, root not empty, txNum lies within the block's
-// [min, max] range, recorded blockNum is the containing block).
+// ExtractCommitmentRecord runs Phase A: reads KeyCommitmentState for
+// the txnum range [startTxNum, endTxNum), decodes (rootHash, blockNum,
+// txNum), and validates the file-internal invariants (range containment,
+// txNum != 0, rootHash != empty, txNum inside [start, end)).
 //
-// Does NOT compare against header.Root — callers handle that
-// themselves so they can branch on PartialBlock() (skip / pause /
-// verify). Used by both the integrity tool (`erigon seg integrity`)
-// and the publisher-side commitment validator.
-func LoadCommitmentRoot(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, startTxNum, endTxNum uint64) (CommitmentRootInfo, error) {
+// Does NOT touch headers or bodies. Always works as long as the .kv
+// file is on disk — suitable for bootstrap-time anchor extraction
+// before the EL has opened header segments and before bodies have
+// finished downloading.
+//
+// Returns an info struct populated with RootHash / BlockNum / TxNum.
+// BlockMinTxNum / BlockMaxTxNum are NOT set (those are Phase C — see
+// LoadCommitmentRoot). Caller must use PartialBlock() with care: it
+// returns true unconditionally for an info with BlockMaxTxNum=0; the
+// publisher-side bootstrap path should use the manifest's
+// IsPartialBlock flag instead.
+//
+// Failures here are ErrCommitmentRecordInvalid (file format / record
+// content invariants). Genuine corruption — caller should quarantine.
+func ExtractCommitmentRecord(ctx context.Context, tx kv.TemporalTx, startTxNum, endTxNum uint64) (CommitmentRootInfo, error) {
 	var info CommitmentRootInfo
 	if endTxNum == 0 {
-		return info, fmt.Errorf("%w: endTxNum is zero", ErrIntegrity)
+		return info, fmt.Errorf("%w: endTxNum is zero", ErrCommitmentRecordInvalid)
 	}
 	maxTxNum := endTxNum - 1
 	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
@@ -165,56 +174,99 @@ func LoadCommitmentRoot(ctx context.Context, tx kv.TemporalTx, br services.FullB
 		return info, err
 	}
 	if !ok {
-		return info, fmt.Errorf("%w: commitment root not found", ErrIntegrity)
+		return info, fmt.Errorf("%w: commitment root not found", ErrCommitmentRecordInvalid)
 	}
 	// Containment, not strict equality: merged commitment files
 	// keep only the LATEST state, so the file's data range narrows
 	// while the merged-name range stays wide.
 	if start < startTxNum {
-		return info, fmt.Errorf("%w: commitment file startTxNum %d below step start %d", ErrIntegrity, start, startTxNum)
+		return info, fmt.Errorf("%w: commitment file startTxNum %d below step start %d", ErrCommitmentRecordInvalid, start, startTxNum)
 	}
 	if end > endTxNum {
-		return info, fmt.Errorf("%w: commitment file endTxNum %d past step end %d", ErrIntegrity, end, endTxNum)
+		return info, fmt.Errorf("%w: commitment file endTxNum %d past step end %d", ErrCommitmentRecordInvalid, end, endTxNum)
 	}
 	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 	if err != nil {
-		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
+		return info, fmt.Errorf("%w: state-root decode: %w", ErrCommitmentRecordInvalid, err)
 	}
 	if txNum >= end {
-		return info, fmt.Errorf("%w: commitment root txNum is gte fileEnd: %d >= %d", ErrIntegrity, txNum, end)
+		return info, fmt.Errorf("%w: txNum %d gte fileEnd %d", ErrCommitmentRecordInvalid, txNum, end)
 	}
 	if txNum < start {
-		return info, fmt.Errorf("%w: commitment root txNum is lt fileStart: %d < %d", ErrIntegrity, txNum, start)
-	}
-	txNumReader := br.TxnumReader()
-	blockMinTxNum, err := txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return info, err
-	}
-	blockMaxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return info, err
-	}
-	if txNum > blockMaxTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum gt blockMaxTxNum for block %d: %d > %d", ErrIntegrity, blockNum, txNum, blockMaxTxNum)
-	}
-	if txNum < blockMinTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum is lt blockMinTxNum for block %d: %d < %d", ErrIntegrity, blockNum, txNum, blockMinTxNum)
+		return info, fmt.Errorf("%w: txNum %d lt fileStart %d", ErrCommitmentRecordInvalid, txNum, start)
 	}
 	if txNum == 0 {
-		return info, fmt.Errorf("%w: commitment root txNum should not be zero", ErrIntegrity)
+		return info, fmt.Errorf("%w: txNum is zero", ErrCommitmentRecordInvalid)
 	}
 	rootHash := common.Hash(rootHashBytes)
 	if rootHash == (common.Hash{}) {
-		return info, fmt.Errorf("%w: commitment root is empty", ErrIntegrity)
+		return info, fmt.Errorf("%w: rootHash is empty", ErrCommitmentRecordInvalid)
 	}
-	info.RootHash, info.BlockNum, info.TxNum, info.BlockMinTxNum, info.BlockMaxTxNum = rootHash, blockNum, txNum, blockMinTxNum, blockMaxTxNum
+	info.RootHash, info.BlockNum, info.TxNum = rootHash, blockNum, txNum
 	return info, nil
 }
 
-// VerifyCommitmentMatchesHeader checks that info.RootHash equals the
-// canonical block-header stateRoot for info.BlockNum. Caller is
-// responsible for skipping this on partial-block commitments
+// LoadCommitmentRoot runs Phase A (file-internal record) AND Phase C
+// (txnum-range cross-check against the recorded AtBlock's body).
+//
+// Phase C requires the body for info.BlockNum to be loaded. Under
+// minimal mode bodies < prune horizon are intentionally absent — in
+// that case this returns ErrAnchorBodyMissing with info populated from
+// Phase A so the caller can still run Phase B (header check) or skip-
+// validate based on prune mode.
+//
+// Does NOT compare against header.Root (Phase B) — callers do that
+// via VerifyCommitmentMatchesHeader so they can branch on
+// PartialBlock() (mid-block state has no consensus header anchor).
+func LoadCommitmentRoot(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, startTxNum, endTxNum uint64) (CommitmentRootInfo, error) {
+	info, err := ExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
+	if err != nil {
+		return info, err
+	}
+	// Phase C: body lookup. CanonicalBodyForStorage returns nil cleanly
+	// when the bodies.seg covering blockNum isn't on disk — that's the
+	// case we need to detect distinctly. Falling through to
+	// TxnumReader.Min/Max here would invoke MinWithCursor's
+	// "fall back to chain-tip txnum" branch and produce a misleading
+	// "txNum < blockMinTxNum" error against the chain-tip value, not
+	// against the actual block's range.
+	body, err := br.CanonicalBodyForStorage(ctx, tx, info.BlockNum)
+	if err != nil {
+		return info, fmt.Errorf("body lookup for anchor block %d: %w", info.BlockNum, err)
+	}
+	if body == nil {
+		return info, fmt.Errorf("%w: anchor block %d", ErrAnchorBodyMissing, info.BlockNum)
+	}
+	txNumReader := br.TxnumReader()
+	blockMinTxNum, err := txNumReader.Min(ctx, tx, info.BlockNum)
+	if err != nil {
+		return info, err
+	}
+	blockMaxTxNum, err := txNumReader.Max(ctx, tx, info.BlockNum)
+	if err != nil {
+		return info, err
+	}
+	if info.TxNum > blockMaxTxNum {
+		return info, fmt.Errorf("%w: block %d txNum %d > blockMaxTxNum %d", ErrCommitmentTxNumRange, info.BlockNum, info.TxNum, blockMaxTxNum)
+	}
+	if info.TxNum < blockMinTxNum {
+		return info, fmt.Errorf("%w: block %d txNum %d < blockMinTxNum %d", ErrCommitmentTxNumRange, info.BlockNum, info.TxNum, blockMinTxNum)
+	}
+	info.BlockMinTxNum, info.BlockMaxTxNum = blockMinTxNum, blockMaxTxNum
+	return info, nil
+}
+
+// VerifyCommitmentMatchesHeader runs Phase B: checks info.RootHash
+// equals the canonical block-header stateRoot for info.BlockNum.
+//
+// Phase B is dependency-light — under all prune modes headers are
+// kept back to zero (see db/snapshotsync/preverified_filter.go's
+// "Headers stay regardless" rule), so this works whether or not the
+// matching body for AtBlock is loaded. If the header isn't loaded
+// yet (transient, EL hasn't opened the segment), returns
+// ErrAnchorHeaderMissing — caller should pause and retry.
+//
+// Caller is responsible for skipping this on partial-block commitments
 // (info.PartialBlock()): mid-block state has no consensus header
 // anchor and would always mismatch.
 func VerifyCommitmentMatchesHeader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, info CommitmentRootInfo) error {
@@ -223,10 +275,10 @@ func VerifyCommitmentMatchesHeader(ctx context.Context, tx kv.TemporalTx, br ser
 		return err
 	}
 	if h == nil {
-		return fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, info.BlockNum)
+		return fmt.Errorf("%w: block %d", ErrAnchorHeaderMissing, info.BlockNum)
 	}
 	if h.Root != info.RootHash {
-		return fmt.Errorf("%w: commitment root does not match header root for block %d: %s != %s", ErrIntegrity, info.BlockNum, h.Root, info.RootHash)
+		return fmt.Errorf("%w: block %d header.Root=%s ProofRoot=%s", ErrCommitmentHeaderMismatch, info.BlockNum, h.Root, info.RootHash)
 	}
 	return nil
 }

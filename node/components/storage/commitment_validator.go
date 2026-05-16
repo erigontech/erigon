@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -86,6 +88,27 @@ type CommitmentDomainValidator struct {
 	// validation. Nil → cache disabled (behaviour unchanged from
 	// before this field existed).
 	PausedCache *PausedCommitmentCache
+
+	// PruneMode classifies how to handle integrity.ErrAnchorBodyMissing
+	// from LoadCommitmentRoot (Phase C — the txnum-range cross-check
+	// against bodies.seg for the recorded AtBlock).
+	//
+	// Under archive mode + post-horizon under any pruning mode, bodies
+	// are present and Phase C runs. ErrAnchorBodyMissing in those cases
+	// is transient (bodies still downloading) — return ErrPause so the
+	// lifecycle retries on the next sweep.
+	//
+	// Under any mode that prunes blocks with a finite distance
+	// (minimal), bodies below blockTip - distance are INTENTIONALLY
+	// absent — Phase C can never run for files anchored there. Phase A
+	// (file-internal record) + Phase B (header.Root cross-check) still
+	// run and remain authoritative; Phase C is skipped with a logged
+	// warning rather than treated as a failure.
+	//
+	// Initialised=false (zero value) → treat ErrAnchorBodyMissing as
+	// always-transient (ErrPause). Validators constructed by tools or
+	// by tests that don't care about pruning leave this zero-valued.
+	PruneMode prune.Mode
 }
 
 // PausedCommitmentCache memoizes the read+decode+invariants result of
@@ -138,6 +161,39 @@ func (c *PausedCommitmentCache) Forget(name string) {
 // Name implements validation.StepValidator.
 func (CommitmentDomainValidator) Name() string { return "commitment_domain_state_at_end" }
 
+// pruneModeExpectsBodyAbsent reports whether the configured prune mode
+// would have INTENTIONALLY pruned the body for blockNum. Used to
+// classify integrity.ErrAnchorBodyMissing from LoadCommitmentRoot:
+//
+//   - true  → body pruned by design (anchor below the prune horizon).
+//     Phase C is unrunnable for the lifetime of this file;
+//     callers should skip Phase C and log, not pause.
+//   - false → body should be available. Absence is transient (segment
+//     still downloading); callers should pause and retry.
+//
+// Mirrors the horizon logic from
+// db/snapshotsync/preverified_filter.go's bug-Z block-prune filter
+// (PruneTo(BlockTip) gives the lowest block kept) so this validator
+// classifies blocks the same way the bootstrap-time filter did.
+//
+// Falls back to false (i.e., body should be available) for tools/tests
+// that construct the validator without an initialised prune.Mode.
+// Returns false under archive mode where Blocks.Enabled() is false.
+func (v CommitmentDomainValidator) pruneModeExpectsBodyAbsent(blockNum uint64) bool {
+	if !v.PruneMode.Initialised || !v.PruneMode.Blocks.Enabled() {
+		return false
+	}
+	if v.BlockReader == nil {
+		return false
+	}
+	tip := v.BlockReader.FrozenBlocks()
+	if tip == 0 {
+		return false
+	}
+	horizon := v.PruneMode.Blocks.PruneTo(tip)
+	return blockNum < horizon
+}
+
 // ValidateStep implements validation.StepValidator. Short-circuits
 // for non-commitment-domain groups (introspects files[0] for the
 // domain — within a group all files share the relevant axis).
@@ -183,15 +239,59 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		stepSize := tx.Debug().StepSize()
 		endTxNum := toStep * stepSize
 		startTxNum := fromStep * stepSize
-		var err error
-		info, err = integrity.LoadCommitmentRoot(ctx, tx, v.BlockReader, startTxNum, endTxNum)
-		if err != nil {
-			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
+		var loadErr error
+		info, loadErr = integrity.LoadCommitmentRoot(ctx, tx, v.BlockReader, startTxNum, endTxNum)
+		switch {
+		case loadErr == nil:
+			// Phase A + Phase C both ran.
+		case errors.Is(loadErr, integrity.ErrAnchorBodyMissing):
+			// Phase A succeeded; Phase C couldn't run because the
+			// anchor block's body is absent. Decide based on prune
+			// mode whether this is INTENTIONAL (body below the
+			// prune horizon) or TRANSIENT (body should be there but
+			// hasn't loaded yet).
+			//
+			// Phase A's info (RootHash, BlockNum, TxNum) is populated
+			// even on this error path — Phase B below uses it.
+			// Phase C's info (BlockMinTxNum, BlockMaxTxNum) stays
+			// zero; downstream consumers handle that correctly:
+			// PartialBlock() returns false when BlockMaxTxNum=0
+			// (txNum < 0 is unsignedly false), which is the right
+			// default for historical files (always block-aligned by
+			// retire-time convention).
+			if !v.pruneModeExpectsBodyAbsent(info.BlockNum) {
+				// Post-horizon: body should be available. Treat as
+				// transient and retry on the next sweep.
+				return fmt.Errorf("commitment step [%d, %d): %w; pausing: %w",
+					fromStep, toStep, loadErr, validation.ErrPause)
+			}
+			// Pre-horizon: body is INTENTIONALLY absent under this
+			// prune mode. Phase C cannot run for this file — Phase B
+			// below still cross-checks ProofRoot against header.Root
+			// (headers are kept back to zero), so the cryptographic
+			// chain isn't broken; we just lose the txnum-range
+			// invariant check.
+			if v.Logger != nil {
+				v.Logger.Info("[storage] commitment Phase C skipped (anchor body pruned)",
+					"file", files[0].Name,
+					"atBlock", info.BlockNum, "atTxNum", info.TxNum,
+					"step", fmt.Sprintf("[%d, %d)", fromStep, toStep))
+			}
+		default:
+			// Phase A failure (ErrCommitmentRecordInvalid) or other
+			// real Phase C failure (ErrCommitmentTxNumRange) — propagate.
+			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, loadErr)
 		}
 	}
 
 	if !info.PartialBlock() {
 		if err := integrity.VerifyCommitmentMatchesHeader(ctx, tx, v.BlockReader, info); err != nil {
+			// ErrAnchorHeaderMissing is transient — header segment not
+			// yet opened by EL. Pause and retry rather than quarantine.
+			if errors.Is(err, integrity.ErrAnchorHeaderMissing) {
+				return fmt.Errorf("commitment step [%d, %d): %w; pausing: %w",
+					fromStep, toStep, err, validation.ErrPause)
+			}
 			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
 		}
 	} else if !blockSegAdvertisableForBlock(v.Inventory, info.BlockNum) {
@@ -261,6 +361,100 @@ func blockSegAdvertisableForBlock(inv *snapshot.Inventory, blockNum uint64) bool
 		}
 	}
 	return false
+}
+
+// extractBootstrapCommitmentAnchors walks every commitment-domain
+// file in the inventory and runs Phase A (ExtractCommitmentRecord) to
+// populate the inventory's (step, block) bindings and per-file
+// Anchors. Phase A reads only the file's KeyCommitmentState record —
+// no header lookup, no body lookup, no segment open required — so it
+// works at fresh startup before EL has opened its header segments AND
+// under any prune mode (bodies below the prune horizon are
+// intentionally absent under minimal mode; Phase A doesn't need them).
+//
+// This is "the more bootstrap work the initial publisher needs" so
+// the V2 manifest the publisher subsequently generates can carry
+// per-file ProofRoot / AtBlock / AtTxNum anchors for every commitment
+// file, not just the tip. Consumers receiving that manifest verify
+// each entry's ProofRoot against their own header.Root (Phase B,
+// always works since headers are kept back to zero) — no per-file
+// bodies needed on the consumer side either.
+//
+// Runs synchronously but does only file reads — does NOT block
+// execution start. EL execution proceeds forward from the snapshot
+// tip while this populates anchors historically; the two run
+// independently (anchors are per-file, execution is per-block).
+//
+// On per-file Phase A failure (genuine record corruption), logs at
+// Warn with the file name + error and continues with the next file.
+// Files that fail here will also fail later in the lifecycle driver's
+// OnValidation pass — the redundancy is intentional, so the operator
+// gets one consolidated bootstrap-time log AND the per-file failure
+// is also tracked for quarantine.
+func extractBootstrapCommitmentAnchors(ctx context.Context, inv *snapshot.Inventory, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) {
+	if inv == nil || db == nil {
+		return
+	}
+	commitmentFiles := inv.AllDomainFiles(snapshot.DomainCommitment)
+	if len(commitmentFiles) == 0 {
+		if logger != nil {
+			logger.Debug("[storage] no bootstrap commitment files; block-files will wait until lifecycle produces one")
+		}
+		return
+	}
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("[storage] bootstrap anchor extraction: begin tx", "err", err)
+		}
+		return
+	}
+	defer tx.Rollback()
+	stepSize := tx.Debug().StepSize()
+
+	var extracted, failed int
+	for _, entry := range commitmentFiles {
+		if entry == nil || entry.ToStep == 0 {
+			continue
+		}
+		// Skip if anchors already set (e.g. an earlier pass through
+		// this loop, or the lifecycle path beat us to it). Re-running
+		// Phase A would re-derive the same values — idempotent — but
+		// the skip is cheap and avoids duplicate log lines.
+		if !entry.Anchors.IsZero() {
+			continue
+		}
+		startTxNum := entry.FromStep * stepSize
+		endTxNum := entry.ToStep * stepSize
+		info, err := integrity.ExtractCommitmentRecord(ctx, tx, startTxNum, endTxNum)
+		if err != nil {
+			failed++
+			if logger != nil {
+				logger.Warn("[storage] bootstrap anchor extraction failed",
+					"file", entry.Name,
+					"step", fmt.Sprintf("[%d, %d)", entry.FromStep, entry.ToStep),
+					"err", err)
+			}
+			continue
+		}
+		inv.RegisterStepBlockBoundary(entry.ToStep, info.BlockNum)
+		// Phase A doesn't know PartialBlock (needs body for txnum range)
+		// — leave IsPartialBlock=false. Historical bootstrap files are
+		// block-aligned by retire convention; partial-block files only
+		// appear at the tip and the lifecycle path runs full validation
+		// on those (including PartialBlock detection via Phase C).
+		inv.SetAnchors(entry.Name, snapshot.Anchors{
+			Root:    info.RootHash,
+			AtBlock: info.BlockNum,
+			AtTxNum: info.TxNum,
+		})
+		extracted++
+	}
+	_ = br // reserved for future Phase B (header check) at bootstrap if we want it inline; currently the lifecycle driver runs Phase B asynchronously
+	if logger != nil {
+		logger.Info("[storage] bootstrap commitment anchors extracted",
+			"extracted", extracted, "failed", failed, "totalFiles", len(commitmentFiles))
+	}
 }
 
 // seedLatestCommitmentBinding finds the highest commitment-domain
