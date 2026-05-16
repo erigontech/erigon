@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -34,14 +35,56 @@ import (
 // work to integrity.ReceiptRootIntegrityRange so this validator and
 // `erigon seg integrity` share the same logic. Pre-Byzantium blocks
 // are skipped (PostState encoding doesn't reproduce).
+//
+// Body / txnum dependency: receipt-root verification calls into
+// CheckRCacheRootAtBlkRange which itself uses
+// TxnumReader.Min/Max(blockNum). Under minimal mode the body for the
+// previous block (needed to compute the current block's minTxNum) can
+// be absent below the prune horizon — Min then falls back to the
+// chain-tip txnum and the verification compares against a bogus range.
+//
+// PruneMode lets the validator detect this case explicitly: if the
+// step's block range is entirely below the prune horizon under a
+// pruning prune.Mode, Phase C (per-block receipt-root cross-check) is
+// skipped with a logged warning rather than producing 5 spurious
+// failures and quarantining the file. Mirrors
+// CommitmentDomainValidator.pruneModeExpectsBodyAbsent — same shape,
+// same justification, same architectural rule: validators wait for
+// their dependencies and tell the operator clearly when those
+// dependencies are intentionally absent.
+//
+// Initialised=false (zero value) → behaviour unchanged (validator runs
+// regardless of prune mode). Tools / tests that don't set PruneMode
+// keep the old contract.
 type ReceiptRootValidator struct {
 	DB          kv.TemporalRoDB
 	BlockReader services.FullBlockReader
 	ChainConfig *chain.Config
+	Logger      log.Logger
+	PruneMode   prune.Mode
 }
 
 // Name implements validation.StepValidator.
 func (ReceiptRootValidator) Name() string { return "receipts_root_per_block" }
+
+// pruneModeExpectsBodyAbsentForBlock reports whether the configured
+// prune mode would have INTENTIONALLY pruned the body for blockNum.
+// Mirrors CommitmentDomainValidator.pruneModeExpectsBodyAbsent. See
+// that method's doc for the architectural rule.
+func (v ReceiptRootValidator) pruneModeExpectsBodyAbsentForBlock(blockNum uint64) bool {
+	if !v.PruneMode.Initialised || !v.PruneMode.Blocks.Enabled() {
+		return false
+	}
+	if v.BlockReader == nil {
+		return false
+	}
+	tip := v.BlockReader.FrozenBlocks()
+	if tip == 0 {
+		return false
+	}
+	horizon := v.PruneMode.Blocks.PruneTo(tip)
+	return blockNum < horizon
+}
 
 // ValidateStep implements validation.StepValidator.
 func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapshot.FileEntry) error {
@@ -104,11 +147,42 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		return nil
 	}
 
+	// Prune-horizon gate: CheckRCacheRootAtBlkRange uses
+	// TxnumReader.Min/Max per block, which falls back to the chain-tip
+	// txnum when the previous block's body is pruned (returning a
+	// bogus range that produces a spurious receipt-root mismatch).
+	// If toBlock is below the prune horizon, the bodies needed to
+	// resolve every per-block txnum range are intentionally absent
+	// under this prune mode — skip Phase C with a logged warning
+	// instead of producing 5 failures and quarantining.
+	//
+	// Step-boundary case (toBlock < horizon AND fromBlock < horizon):
+	// entire range pre-pruned, skip cleanly.
+	// Crossing case (fromBlock < horizon < toBlock): the boundary
+	// block's body could still cause Min to fall back; we conservatively
+	// skip the whole step for now. A future refinement could split the
+	// range and validate only the post-horizon portion, but the
+	// receipt-root invariant covers blocks individually so skipping
+	// the whole step doesn't weaken anything we wouldn't lose anyway
+	// — it just defers the post-horizon verification.
+	if v.pruneModeExpectsBodyAbsentForBlock(toBlock) {
+		if v.Logger != nil {
+			v.Logger.Info("[storage] receipt Phase C skipped (anchor body pruned)",
+				"step", fmt.Sprintf("[%d, %d)", fromStep, toStep),
+				"blocks", fmt.Sprintf("[%d, %d]", fromBlock, toBlock))
+		}
+		return nil
+	}
+
 	sc, err := integrity.NewSamplerCfg(0, 1.0) // verify every block in the step's coverage
 	if err != nil {
 		return fmt.Errorf("sampler cfg: %w", err)
 	}
-	if err := integrity.CheckRCacheRootAtBlkRange(ctx, sc, v.DB, v.BlockReader, v.ChainConfig, fromBlock, toBlock, true /* failFast */, log.Root()); err != nil {
+	logger := v.Logger
+	if logger == nil {
+		logger = log.Root()
+	}
+	if err := integrity.CheckRCacheRootAtBlkRange(ctx, sc, v.DB, v.BlockReader, v.ChainConfig, fromBlock, toBlock, true /* failFast */, logger); err != nil {
 		return fmt.Errorf("receipt step [%d, %d) blocks [%d, %d]: %w", fromStep, toStep, fromBlock, toBlock, err)
 	}
 	return nil

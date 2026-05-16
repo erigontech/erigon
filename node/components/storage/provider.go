@@ -737,6 +737,15 @@ func (p *Provider) Initialize(deps Deps) error {
 					DB:          p.ChainDB,
 					BlockReader: p.BlockReader,
 					ChainConfig: p.ChainConfig,
+					Logger:      logger,
+					// Same prune-mode treatment as
+					// CommitmentDomainValidator: skip Phase C cleanly
+					// when AtBlock body is intentionally absent under
+					// minimal mode, rather than letting
+					// CheckRCacheRootAtBlkRange's
+					// TxnumReader.Min/Max fall back to the chain tip
+					// and produce 5 spurious failures + quarantine.
+					PruneMode: p.bootstrapPruneMode,
 				},
 			)
 		}

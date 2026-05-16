@@ -40,6 +40,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -121,6 +122,49 @@ func ExecV3(ctx context.Context,
 	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
+	}
+
+	// State-vs-headers consistency check at exec startup. Reads two
+	// different views of "where commitment state is":
+	//
+	//   - SeekCommitment (above): the SharedDomains-visible latest
+	//     commitment-state record. Includes any in-process buffered
+	//     writes (sd overlay) plus committed MDBX + .kv files.
+	//
+	//   - LatestBlockNumWithCommitment: the same record read directly
+	//     via tx.GetLatest (committed view only). At a quiescent
+	//     startup this should agree with SeekCommitment, but the two
+	//     paths can diverge if (a) a prior session wrote commitment
+	//     state past the frozen-block tip without unwinding, or (b)
+	//     bootstrap files declare state past where the consumer's
+	//     headers reach.
+	//
+	// The "too far unwind" error class is precisely what happens when
+	// the consumer's commitment state is past its frozen-headers tip
+	// — the unwind protection refuses to roll back past committed
+	// state. Logging the three values at exec entry gives operators
+	// a clear cause when the next block to execute is BELOW the
+	// recorded state.
+	committedLatestBlock, latestBlockErr := commitmentdb.LatestBlockNumWithCommitment(applyTx)
+	frozenTip := cfg.blockReader.FrozenBlocks()
+	logger.Info("[execution] entry state view",
+		"seekCommitment.block", blockNum,
+		"seekCommitment.txNum", initialTxNum,
+		"latestCommittedBlock", committedLatestBlock,
+		"latestCommittedBlock.err", latestBlockErr,
+		"blockReader.frozenBlocks", frozenTip,
+		"maxBlockNum", maxBlockNum)
+	if latestBlockErr == nil && committedLatestBlock > frozenTip && frozenTip > 0 {
+		logger.Warn("[execution] state-tip is past frozen-headers tip — exec will operate against state that headers don't cover; if exec fails with 'nonce too low', the failing block was already absorbed into state by a prior session and the headers we have don't match",
+			"latestCommittedBlock", committedLatestBlock,
+			"frozenBlocks", frozenTip,
+			"gap", committedLatestBlock-frozenTip)
+	}
+	if latestBlockErr == nil && blockNum > 0 && committedLatestBlock > blockNum {
+		logger.Warn("[execution] SeekCommitment and LatestBlockNumWithCommitment disagree — exec will start at SeekCommitment's block but unwind protection uses LatestBlockNumWithCommitment; an unwind from exec failure may report a misleadingly-high minAllowed",
+			"seekCommitment.block", blockNum,
+			"latestCommittedBlock", committedLatestBlock,
+			"gap", committedLatestBlock-blockNum)
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
