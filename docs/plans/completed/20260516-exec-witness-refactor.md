@@ -352,8 +352,8 @@ Folds in `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibl
 
 ### Task 8: Move plan to completed
 
-- [ ] `mkdir -p docs/plans/completed`
-- [ ] `git mv docs/plans/20260516-exec-witness-refactor.md docs/plans/completed/`
+- [x] `mkdir -p docs/plans/completed`
+- [x] `git mv docs/plans/20260516-exec-witness-refactor.md docs/plans/completed/`
 
 ## Post-Completion
 
