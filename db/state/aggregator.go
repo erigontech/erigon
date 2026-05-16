@@ -1460,7 +1460,18 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		defer logEvery.Stop()
 	}
 	aggStat := newAggregatorPruneStat()
-	for id, d := range at.d {
+	// Prune commitment first — on heavy-state chains (bloatnet) it's the
+	// largest domain and benefits most from getting the full timeout budget
+	// before other domains consume it.
+	pruneOrder := make([]int, 0, len(at.d))
+	pruneOrder = append(pruneOrder, int(kv.CommitmentDomain))
+	for id := range at.d {
+		if kv.Domain(id) != kv.CommitmentDomain {
+			pruneOrder = append(pruneOrder, id)
+		}
+	}
+	for _, id := range pruneOrder {
+		d := at.d[id]
 		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
 		//	if true { //d.d.Name != kv.CommitmentDomain {
 		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
