@@ -185,7 +185,10 @@ if (( total == 0 )); then
 fi
 if (( failed > max )); then
 	echo "ERROR: $failed failures exceed max-allowed $max" >&2
-	jq -r '.[] | select(.pass == false) | "  FAIL " + .name' "$result_file" >&2
+	# Emit the cmd/evm `error` field per failing test, not just the name,
+	# so transient CI flakes are diagnosable from the job log alone (the
+	# raw JSON output is dropped after this script exits).
+	jq -r '.[] | select(.pass == false) | "  FAIL " + .name + "\n        error: " + (.error // "<no error message>")' "$result_file" >&2
 	exit 1
 fi
 exit 0
