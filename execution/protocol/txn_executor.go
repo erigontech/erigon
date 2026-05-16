@@ -723,11 +723,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
 	var stateIgasRefund uint64
-	var newAccountRefund, authBaseRefund uint64
-	if st.evm.ChainRules().IsAmsterdam {
-		newAccountRefund = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
-		authBaseRefund = params.StateBytesAuthBase * st.evm.Context.CostPerStateByte
-	}
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if auths != nil {
 		if !st.evm.ChainRules().IsPrague {
@@ -804,10 +799,10 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 			}
 			if st.evm.ChainRules().IsAmsterdam {
 				if exists {
-					stateIgasRefund += newAccountRefund
+					stateIgasRefund += params.StateGasNewAccount
 				}
 				if hasDelegation || auth.Address == (common.Address{}) {
-					stateIgasRefund += authBaseRefund
+					stateIgasRefund += params.StateGasAuthBase
 				}
 			} else if exists {
 				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
@@ -851,7 +846,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		AuthorizationsLen:  uint64(len(auths)),
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		CostPerStateByte:   st.evm.Context.CostPerStateByte,
 		IsContractCreation: contractCreation,
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,

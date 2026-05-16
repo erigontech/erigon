@@ -479,7 +479,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
 		}
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
-			gasUsed.PendingStateGasCredit = gasUsed.State + uint64(params.StateBytesNewAccount)*evm.Context.CostPerStateByte
+			gasUsed.PendingStateGasCredit = gasUsed.State + params.StateGasNewAccount
 		}
 	}()
 
@@ -599,7 +599,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		stateGasOk := true
 		var stateGas uint64
 		if evm.chainRules.IsAmsterdam {
-			stateGas = uint64(len(ret)) * evm.Context.CostPerStateByte
+			stateGas = uint64(len(ret)) * params.CostPerStateByte
 			gasRemaining, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 

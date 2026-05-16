@@ -1027,8 +1027,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		// EIP-8037: charge state gas for account creation after the static-context
 		// check so that it is not consumed on early failures where no state is
 		// created (per execution-specs#2608).
-		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
-		if !scope.useMdGas(stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+		if !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
 		}
 	}
@@ -1071,7 +1070,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 			// the parent charged at entry. The reservoir was already restored
 			// to the parent via restoreChildGas (handleFrameRevert at depth>0
 			// added childUsed.State back to gas.State).
-			scope.creditStateGasRefund(uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte)
+			scope.creditStateGasRefund(params.StateGasNewAccount)
 		} else {
 			// EIP-8037: child success — fold child's state-gas usage into our
 			// frame and absorb any unapplied refund credit (SSTORE 0→x→0 inside

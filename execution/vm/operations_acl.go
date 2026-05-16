@@ -74,7 +74,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
-					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: params.StateBytesPerStorageSet * evm.Context.CostPerStateByte}, nil
+					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: params.StateGasPerStorageSet}, nil
 				} else {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
 				}
@@ -104,7 +104,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 					// charges can consume the credit instead of spilling to
 					// gas_left. The unapplied remainder propagates to the
 					// caller on successful return.
-					callContext.creditStateGasRefund(params.StateBytesPerStorageSet * evm.Context.CostPerStateByte)
+					callContext.creditStateGasRefund(params.StateGasPerStorageSet)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
@@ -296,7 +296,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
-				gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
+				gas.State = params.StateGasNewAccount
 			} else {
 				gas.Regular += params.CreateBySelfdestructGas
 			}

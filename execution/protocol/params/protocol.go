@@ -221,6 +221,14 @@ const (
 	StateBytesPerStorageSet = 64  // bytes per new storage slot
 	StateBytesAuthBase      = 23  // bytes per authorization base cost
 	SystemMaxSstoresPerCall = 16  // upper bound on new SSTOREs per system call (matches MAX_WITHDRAWAL_REQUESTS_PER_BLOCK)
+	CostPerStateByte        = 1530
+
+	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
+	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
+	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
+	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 )
 
 // EIP-7702: Set EOA account code

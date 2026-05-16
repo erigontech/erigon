@@ -277,7 +277,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	if evm.ChainRules().IsAmsterdam {
 		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
 		// so system calls keep their pre-EIP-8037 execution margin.
-		mdGas.State = params.StateBytesPerStorageSet * blockContext.CostPerStateByte * params.SystemMaxSstoresPerCall
+		mdGas.State = params.StateGasSystemMaxSstores
 	}
 	ret, _, _, err := evm.Call(
 		msg.From(),

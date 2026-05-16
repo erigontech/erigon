@@ -134,18 +134,6 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 	})
 }
 
-// newAmsterdamEVM creates an EVM with Amsterdam (EIP-8037) rules enabled,
-// including CostPerStateByte derived from the block gas limit.
-func newAmsterdamEVM(ibs *state.IntraBlockState, blockGasLimit uint64) *vm.EVM {
-	blockCtx := evmtypes.BlockContext{
-		CanTransfer:      CanTransfer,
-		Transfer:         misc.Transfer,
-		GasLimit:         blockGasLimit,
-		CostPerStateByte: misc.CostPerStateByte(blockGasLimit),
-	}
-	return vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
-}
-
 // TestEIP8037_GasPoolTracksRegularAndStateIndependently verifies that the
 // EIP-8037 two-dimensional gas pool decrements regular and state budgets
 // independently — neither is conflated with max(regular, state).
@@ -164,10 +152,15 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 
 	ibs := state.New(state.NewNoopReader())
 	gp := NewGasPool(blockGasLimit, 0)
+	blockCtx := evmtypes.BlockContext{
+		CanTransfer: CanTransfer,
+		Transfer:    misc.Transfer,
+		GasLimit:    blockGasLimit,
+	}
 
 	// TX 1: Contract creation — state gas dominates (intrinsic NEW_ACCOUNT
 	// state >> regular). Initcode = STOP (0x00): creates account, deploys no code.
-	evm1 := newAmsterdamEVM(ibs, blockGasLimit)
+	evm1 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 	msg1 := types.NewMessage(
 		sender, accounts.NilAddress, 0, uint256.NewInt(0), 300_000,
 		uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
@@ -195,7 +188,7 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 		"state pool must drop by blockStateGasUsed only")
 
 	// TX 2: 0-value transfer — regular gas only, no state gas.
-	evm2 := newAmsterdamEVM(ibs, blockGasLimit)
+	evm2 := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{NoBaseFee: true})
 	msg2 := newSimpleTransferMsg(sender, recipient, 100_000, true)
 	st2 := NewTxnExecutor(evm2, msg2, gp)
 	result2, err := st2.Execute(true, false)
