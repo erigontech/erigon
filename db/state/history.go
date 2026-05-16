@@ -1055,6 +1055,12 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	// History writes (values + the embedded II keys/idx) are discarded at
+	// the writer level when HistoryDisabled — there is nothing in the DB
+	// for this domain's history tables. Skip the cursor opens + table scan.
+	if ht.h.HistoryDisabled {
+		return nil, nil
+	}
 	if !forced {
 		if ht.files.EndTxNum() > 0 {
 			txTo = min(txTo, ht.files.EndTxNum())
