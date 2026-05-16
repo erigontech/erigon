@@ -161,9 +161,7 @@ type IntraBlockState struct {
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
-	// The refund counter, also used by state transitioning. Regular-gas only —
-	// EIP-8037 state-gas refunds are propagated via Call/Create return values
-	// (MdGasUsage), not journaled.
+	// The refund counter, also used by state transitioning.
 	refund uint64
 
 	txIndex  int
