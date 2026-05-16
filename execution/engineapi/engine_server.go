@@ -143,6 +143,7 @@ func (e *EngineServer) Start(
 ) error {
 	e.filters = filters
 	e.events = events
+	cli.AuthenticatedEngineRESTHandler = e.SSZRESTHandler()
 
 	var eg errgroup.Group
 	if !e.internalCL {
@@ -343,7 +344,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var blockAccessList types.BlockAccessList
 	var blockAccessListBytes []byte
 	var err error
-	if version >= clparams.GloasVersion {
+	if version >= clparams.GloasVersion && !s.config.IsEIPDisabled(7928) {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}

@@ -2014,8 +2014,31 @@ func (result *execResult) finalizeTxSimple(
 
 	// Build versionMap writes: TxOut (no coinbase/burnt since worker skipped
 	// fee credit) plus the fee-adjusted balance writes.
-	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
-	copy(allWrites, result.TxOut)
+	//
+	// When sender == coinbase (or sender == burntAddr) the worker's TxOut
+	// already contains a (sender, BalancePath) entry with the *pre-fee*
+	// balance, and we're about to append a second (coinbase, BalancePath)
+	// entry with the *post-fee* balance. Both entries have identical
+	// (Address, Path, Key) — they only differ on Val. Downstream consumers
+	// either pass this slice through ibs.ApplyVersionedWrites — which calls
+	// sort.Slice (unstable) — or feed it into a MergeVersionedWrites loop
+	// where the LAST iterator-visited entry wins. With two equal-key entries
+	// the unstable sort orders them arbitrarily, so MergeVersionedWrites
+	// flips between picking pre-fee and post-fee per run, and the validator
+	// BAL coinbase balance lands pre-fee (missing the priority tip).
+	//
+	// Drop the worker's TxOut (sender, BalancePath) entry when sender ==
+	// coinbase/burntAddr: the fee-adjusted append below is the authoritative
+	// post-fee value, and the post-apply IBS reconstruction at the end of
+	// this function applies BalancePath via SetBalance which is idempotent
+	// w.r.t. the worker's pre-fee write anyway.
+	allWrites := make(state.VersionedWrites, 0, len(result.TxOut)+2)
+	for _, w := range result.TxOut {
+		if w.Path == state.BalancePath && (w.Address == result.Coinbase || (hasBurnt && w.Address == burntAddr)) {
+			continue
+		}
+		allWrites = append(allWrites, w)
+	}
 	// Mirror the CollectorWrites emission above: emit the coinbase
 	// versionMap write either when balance actually changed OR when
 	// EIP-161 empty-removal will turn the empty coinbase into a delete.
