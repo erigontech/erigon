@@ -21,14 +21,18 @@ make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (E
 make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARALLEL=true
 make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
 make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
-make eest-spec-enginextests-benchmark-1m     # engine-x benchmark fixtures @ 1M gas target
+make eest-spec-enginextests-benchmark-1m-sequential
+                                             # engine-x benchmark fixtures @ 1M gas target
                                              # (with per-test --time stats);
-                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too
-make eest-spec-blocktests-stable-race-cancun # race-detector variant, sharded per fork:
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too,
+                                             # each with a "-sequential" / "-parallel" pair
+make eest-spec-blocktests-stable-race-cancun-sequential
+                                             # race-detector variant, sharded per fork:
                                              # -pre-cancun/-cancun/-prague/-osaka, plus
-                                             # eest-spec-blocktests-devnet-race-amsterdam
-                                             # each also has a "-parallel" sibling
-                                             # (e.g. ...-race-cancun-parallel)
+                                             # eest-spec-blocktests-devnet-race-amsterdam.
+                                             # Each stable-race sub-shard has a
+                                             # "-sequential" / "-parallel" pair
+                                             # (e.g. ...-race-cancun-{sequential,parallel})
 ```
 
 The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-spec-shards.json` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.

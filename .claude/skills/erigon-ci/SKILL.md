@@ -22,7 +22,7 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 | unit | `erigon-test-unit` | `make test-short` | ~5 min | Pre-push gate |
 | all | `erigon-test-all` | `GOGC=80 make test-all` | ~30 min | Before PR review |
 | race | `erigon-test-race` | `make test-all-race` | ~60 min | Concurrency changes |
-| eest-spec | *(inline)* | `make eest-spec-<suite>-<fixtures>` | varies | EEST state/blockchain/engine-x changes |
+| eest-spec | *(inline)* | `make eest-spec-<suite>-<fixtures>[-{sequential,parallel}]` | varies | EEST state/blockchain/engine-x changes (most shards split into `-sequential` / `-parallel` pairs that pin `ERIGON_EXEC3_PARALLEL`; see `tools/eest-spec-shards.json`) |
 | caplin spec | *(inline)* | `cd cl/spectest && make tests && make mainnet` | ~15 min | CL/consensus changes |
 | hive | `erigon-test-hive` | `make test-hive` | ~20 min | EL/CL interop changes |
 | rpc | `erigon-test-rpc` | *(requires synced DB)* | ~10 min | RPC API changes |

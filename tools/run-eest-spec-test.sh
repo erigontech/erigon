@@ -10,13 +10,13 @@
 #   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
 #   enginextests-stable-sequential             engine-x tests vs. eest_stable
-#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
 #                                              race-detector variant of
 #                                              blocktests-stable-sequential, split by
 #                                              fork via the --run regex so

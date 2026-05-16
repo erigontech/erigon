@@ -38,7 +38,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-1m",
+    "shard": "enginextests-benchmark-1m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -49,7 +49,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-5m",
+    "shard": "enginextests-benchmark-5m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -60,7 +60,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-10m",
+    "shard": "enginextests-benchmark-10m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -71,7 +71,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-30m",
+    "shard": "enginextests-benchmark-30m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -82,7 +82,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-60m",
+    "shard": "enginextests-benchmark-60m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -93,7 +93,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-100m",
+    "shard": "enginextests-benchmark-100m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -104,7 +104,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-150m",
+    "shard": "enginextests-benchmark-150m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -115,22 +115,22 @@
     "exec3-parallel": true
   },
   {
-    "shard": "blocktests-stable-race-pre-cancun",
+    "shard": "blocktests-stable-race-pre-cancun-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-cancun",
+    "shard": "blocktests-stable-race-cancun-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-prague",
+    "shard": "blocktests-stable-race-prague-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-osaka",
+    "shard": "blocktests-stable-race-osaka-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
