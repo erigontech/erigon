@@ -272,9 +272,14 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
 	}
-	ret, _, err := evm.Call(
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// so system calls keep their pre-EIP-8037 execution margin.
+		mdGas.State = params.StateGasSystemMaxSstores
+	}
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),

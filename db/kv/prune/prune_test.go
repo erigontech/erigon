@@ -32,6 +32,7 @@ import (
 )
 
 const testTxLookupTable = "TestTxLookup"
+const testDupSortTable = "TestDupSort"
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
@@ -39,6 +40,15 @@ func openTestDB(tb testing.TB) kv.RwDB {
 		InMem(tb, tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testTxLookupTable: {}}
+		}).MustOpen()
+}
+
+func openTestDupSortDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
+	return mdbx2.New(dbcfg.ChainDB, log.New()).
+		InMem(tb, tb.TempDir()).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{testDupSortTable: {Flags: kv.DupSort}}
 		}).MustOpen()
 }
 
@@ -233,6 +243,256 @@ func TestTableScanningPrune_CtxCancelOnOutOfRange(t *testing.T) {
 		"interrupted scan must save cursor position for resume")
 	require.EqualValues(t, 0, stat.PruneCountValues,
 		"no entries should be deleted — all are out of range")
+}
+
+// --- DupSort domain prune tests (mirrors commitmentvals: StepValueStorageMode) ---
+
+// encodeStepVal builds the value bytes a domain writes for a (step,value) pair:
+//
+//	value = ^step (BE u64) || actualValue
+//
+// This is the layout for non-largeValues domains like commitmentvals (see
+// domain.go:addValue and StepValueStorageMode decoder).
+func encodeStepVal(step uint64, val []byte) []byte {
+	buf := make([]byte, 8+len(val))
+	binary.BigEndian.PutUint64(buf[:8], ^step)
+	copy(buf[8:], val)
+	return buf
+}
+
+// userKey returns a 20-byte address-shaped key for test determinism.
+func userKey(i uint64) []byte {
+	k := make([]byte, 20)
+	binary.BigEndian.PutUint64(k[12:], i)
+	return k
+}
+
+func openDupSortPseudoCursor(tb testing.TB, tx kv.RwTx) kv.PseudoDupSortRwCursor {
+	tb.Helper()
+	raw, err := tx.RwCursorDupSort(testDupSortTable) //nolint:gocritic // caller owns the returned cursor and calls Close() on it
+	require.NoError(tb, err)
+	c, ok := raw.(kv.PseudoDupSortRwCursor)
+	require.True(tb, ok)
+	return c
+}
+
+func countDupSortTable(tb testing.TB, tx kv.Tx) (keys, dups int) {
+	tb.Helper()
+	c, err := tx.Cursor(testDupSortTable)
+	require.NoError(tb, err)
+	defer c.Close()
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		require.NoError(tb, err)
+		dups++
+	}
+	c2, err := tx.CursorDupSort(testDupSortTable)
+	require.NoError(tb, err)
+	defer c2.Close()
+	for k, _, err := c2.First(); k != nil; k, _, err = c2.NextNoDup() {
+		require.NoError(tb, err)
+		keys++
+	}
+	return keys, dups
+}
+
+// TestDupSortPrune_SingleDupAllInRange: every user-key has exactly one dup,
+// every step is < txTo. After one scan, table must be empty.
+// This is the simplest case: no cursor-state shenanigans from AllDups delete.
+func TestDupSortPrune_SingleDupAllInRange(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 50
+	const stepSize uint64 = 16
+	// 50 user keys; each gets a single dup at step=1 (txNum in [16,32)).
+	for i := uint64(0); i < N; i++ {
+		require.NoError(t, tx.Put(testDupSortTable, userKey(i), encodeStepVal(1, []byte{byte(i)})))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	// txTo = 64 → prune steps 0,1,2,3.
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, 64, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, N, stat.PruneCountValues, "all N entries deleted")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, 0, keys, "no keys remain")
+	require.Equal(t, 0, dups, "no dups remain")
+}
+
+// TestDupSortPrune_MultipleDupsAllInRange: every user-key has 3 dups at
+// different steps, ALL in range. Exercises the bulk-AllDups delete path
+// followed by NextNoDup — the suspected production bug site.
+func TestDupSortPrune_MultipleDupsAllInRange(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 50
+	const stepSize uint64 = 16
+	// Three dups per key, at steps 1,2,3 (txNums 16,32,48 — all < txTo=64).
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(1, []byte{0xa})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0xb})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(3, []byte{0xc})))
+	}
+
+	keysBefore, dupsBefore := countDupSortTable(t, tx)
+	require.Equal(t, N, keysBefore)
+	require.Equal(t, 3*N, dupsBefore)
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, 64, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 3*N, stat.PruneCountValues, "all 3N dups deleted")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, 0, keys, "no keys remain after scan claimed Done")
+	require.Equal(t, 0, dups, "no dups remain after scan claimed Done")
+}
+
+// TestDupSortPrune_MixedDupsPartialRange: each user-key has dups at multiple
+// steps, some in range and some beyond. Exercises the selective-deletion path
+// (line ~378 in prune.go).
+func TestDupSortPrune_MixedDupsPartialRange(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 30
+	const stepSize uint64 = 16
+	// Two dups per key:
+	//   - step 1 (txNum 16) — in range
+	//   - step 5 (txNum 80) — out of range when txTo=64
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(1, []byte{0xa})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(5, []byte{0xe})))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, 64, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, N, stat.PruneCountValues, "exactly N step-1 dups deleted")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, N, keys, "all keys still present (step-5 dup remains)")
+	require.Equal(t, N, dups, "exactly N dups remain (step-5)")
+}
+
+// TestDupSortPrune_ProductionLike mirrors the commitmentvals residue pattern.
+// Build a table where some keys are only present in OLD steps, others have
+// their newest write in the ACTIVE (out-of-range) step. Prune with txTo at the
+// active-step boundary. Every dup whose txNum < txTo must be gone.
+func TestDupSortPrune_ProductionLike(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const stepSize uint64 = 16
+	const activeStep uint64 = 10 // tip
+	// txTo = start of activeStep — everything in steps [0, activeStep) prunable.
+	txTo := activeStep * stepSize
+
+	// Group A: 20 keys with dups only at old step 2 — should be fully deleted.
+	for i := uint64(0); i < 20; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0x1})))
+	}
+	// Group B: 20 keys (offset by 100) with dups at steps 2 AND activeStep (out of range).
+	// Step-2 dups must still be deleted; step-activeStep dups must remain.
+	for i := uint64(100); i < 120; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0x1})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(activeStep, []byte{0xa})))
+	}
+	// Group C: 20 keys (offset 200) with dups across many old steps (5,6,7,8) AND activeStep.
+	// All old-step dups must be deleted; activeStep dup must remain.
+	for i := uint64(200); i < 220; i++ {
+		k := userKey(i)
+		for s := uint64(5); s <= 8; s++ {
+			require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(s, []byte{byte(s)})))
+		}
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(activeStep, []byte{0xa})))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	_, err = prune.TableScanningPrune(
+		t.Context(), "test", "dup",
+		0, txTo, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+
+	// Verify table state: walk each remaining row and check its step.
+	c, err := tx.CursorDupSort(testDupSortTable)
+	require.NoError(t, err)
+	defer c.Close()
+	type remaining struct{ keyIdx, step uint64 }
+	got := make([]remaining, 0)
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		idx := binary.BigEndian.Uint64(k[12:])
+		step := ^binary.BigEndian.Uint64(v[:8])
+		got = append(got, remaining{idx, step})
+	}
+	// Allowed survivors: Group B (idx 100..119) and Group C (idx 200..219) at activeStep only.
+	for _, r := range got {
+		if r.step*stepSize >= txTo {
+			continue // out of range → allowed
+		}
+		t.Errorf("BUG: in-range row survived: key=%d step=%d (txTo=%d)", r.keyIdx, r.step, txTo)
+	}
+	t.Logf("survivors=%d", len(got))
 }
 
 func BenchmarkTableScanningPrune(b *testing.B) {
