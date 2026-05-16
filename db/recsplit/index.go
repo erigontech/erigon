@@ -302,33 +302,46 @@ func (idx *Index) init() (err error) {
 	return nil
 }
 func (idx *Index) ForceExistenceFilterWillNeed() {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		switch idx.dataStructureVersion {
-		case 1:
-			idx.existenceV1.MadvWillNeed()
-		case 2:
-			idx.existenceV2.MadvWillNeed()
-		}
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
 	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvWillNeed()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvWillNeed()
+		return
+	}
+	return
 }
+
 func (idx *Index) ForceExistenceFilterNormal() {
-	if idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0 {
-		switch idx.dataStructureVersion {
-		case 1:
-			idx.existenceV1.MadvNormal()
-		case 2:
-			idx.existenceV2.MadvNormal()
-		}
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
 	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvNormal()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvNormal()
+		return
+	}
+	return
 }
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
-	if idx.lessFalsePositives && idx.keyCount > 0 {
-		switch idx.dataStructureVersion {
-		case 1:
-			return idx.existenceV1.ForceInMem()
-		case 2:
-			return idx.existenceV2.ForceInMem()
-		}
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return 0
+	}
+	if idx.dataStructureVersion == 1 {
+		return idx.existenceV1.ForceInMem()
+	}
+	if idx.dataStructureVersion >= 2 {
+		return idx.existenceV2.ForceInMem()
 	}
 	return 0
 }
