@@ -35,6 +35,17 @@ type FullMdGas struct {
 	Blob uint64
 }
 
+// MdGasUsage extends MdGas with EIP-8037 inline state-gas refund credit that
+// hasn't yet been applied to any frame's reservoir. The credit walks up the
+// call stack via this field (propagated by Run/Call/Create return values) until
+// an ancestor with positive frame state usage absorbs it, or TxnExecutor reads
+// it directly from the top-level Call/Create return on success. Revert paths
+// drop it.
+type MdGasUsage struct {
+	MdGas
+	PendingStateGasCredit uint64
+}
+
 func NewFullMdGas(regular, state, blob uint64) FullMdGas {
 	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
 }

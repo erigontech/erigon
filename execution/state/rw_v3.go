@@ -1249,6 +1249,19 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 	return nil, false
 }
 
+// GetCurrentCode returns the latest code (including intra-block writes).
+// Returns (nil, false) if no intra-block code write has occurred — callers
+// should fall back to the underlying domain reader for the committed value.
+func (c *BlockStateCache) GetCurrentCode(addr accounts.Address) ([]byte, bool) {
+	c.mu.RLock()
+	if code, ok := c.currentCode[addr]; ok {
+		c.mu.RUnlock()
+		return code, true
+	}
+	c.mu.RUnlock()
+	return nil, false
+}
+
 // Flush replays writeLog against SharedDomains in write order. Each
 // entry is stamped with the txNum at which the write was originally
 // made, so the AccountsDomain / StorageDomain / CodeDomain history is
@@ -1376,6 +1389,24 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return &result, nil
 	}
 	return nil, nil
+}
+
+func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if r.blockCache != nil && r.readCurrent {
+		if code, ok := r.blockCache.GetCurrentCode(address); ok {
+			return code, nil
+		}
+	}
+	return r.ReaderV3.ReadAccountCode(address)
+}
+
+func (r *CachedReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	if r.blockCache != nil && r.readCurrent {
+		if code, ok := r.blockCache.GetCurrentCode(address); ok {
+			return len(code), nil
+		}
+	}
+	return r.ReaderV3.ReadAccountCodeSize(address)
 }
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
