@@ -202,8 +202,20 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// via its own Updates buffer (TouchUpdates from VersionedWrites).
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
+	// Parallel exec needs in-mem history reads enabled for the calculator
+	// goroutine. Capture the caller's setting first and restore it on exit
+	// — the previous defer-to-false (b72aa7b4f7 #20805) hardcoded the
+	// post-exec value to false regardless of what the caller had set,
+	// which broke post-exec callers (engine API forkchoice_updated's
+	// GetAsOf, post-batch trie-root computation, RPC reads) with
+	// "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled"
+	// or with partial-state reads. Repro: EEST
+	// test_gas_limit_below_minimum[gas_limit_5000] in parallel mode; same
+	// root cause likely behind mainnet from-0 parallel wrong-trie-root at
+	// block 131578.
+	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
-	defer pe.rs.Domains().SetInMemHistoryReads(false)
+	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
 
 	// Disable trie warmup — the Warmuper uses sdCtx.updates which the
 	// calculator replaces via SetUpdates before ComputeCommitment.
