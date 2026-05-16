@@ -523,3 +523,148 @@ func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	require.Equal(t, int8(len("value")), got.StorageLen)
 	require.Equal(t, []byte("value"), got.Storage[:got.StorageLen])
 }
+
+func TestModeString(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "disabled", ModeDisabled.String())
+	require.Equal(t, "direct", ModeDirect.String())
+	require.Equal(t, "update", ModeUpdate.String())
+	require.Equal(t, "parallel", ModeParallel.String())
+	require.Equal(t, "unknown", Mode(99).String())
+}
+
+func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+
+	require.Equal(t, ModeParallel, ut.mode)
+	require.NotNil(t, ut.parallel, "parallel field must be allocated")
+	require.NotNil(t, ut.parallel.trie, "parallel trie must be allocated")
+	require.NotNil(t, ut.parallel.splitMap, "parallel splitMap must be allocated")
+	require.NotNil(t, ut.keys, "keys dedup map must be allocated")
+	require.True(t, ut.sortPerNibble, "ModeParallel must force sortPerNibble=true")
+	for i := 0; i < len(ut.nibbles); i++ {
+		require.NotNilf(t, ut.nibbles[i], "nibbles[%d] must be allocated", i)
+	}
+	require.Nil(t, ut.tree)
+	require.Nil(t, ut.treeIdx)
+	require.Nil(t, ut.etl, "ModeParallel uses per-nibble collectors, not the all-in-one etl")
+	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, uint64(0), ut.Size())
+}
+
+func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+
+	// Distinct plain keys → distinct hashed keys → trie should accumulate them.
+	keys := [][]byte{
+		common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"),
+		common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"),
+		common.FromHex("2452345febefe553bba1d92398a69fbc9f01593b"),
+		common.FromHex("ffffffffffff8a69fbc9f01593bbc51b58862366"),
+	}
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+	}
+
+	require.Equal(t, uint64(len(keys)), ut.Size())
+	require.NotNil(t, ut.parallel.trie.root)
+	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
+		"every touched key must show up in the prefix trie")
+
+	// Duplicate insert must dedup.
+	ut.TouchPlainKey(string(keys[0]), []byte("v2"), ut.TouchStorage)
+	require.Equal(t, uint64(len(keys)), ut.Size())
+	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
+		"duplicate TouchPlainKey must not double-count in the trie")
+}
+
+func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+
+	hk1 := KeyToHexNibbleHash(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+	hk2 := KeyToHexNibbleHash(common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"))
+
+	ut.TouchHashedKey(hk1)
+	ut.TouchHashedKey(hk2)
+	ut.TouchHashedKey(hk1) // dedup
+
+	require.Equal(t, uint64(2), ut.Size())
+	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+}
+
+func TestUpdatesModeParallel_Reset(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+
+	keys := [][]byte{
+		common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"),
+		common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366"),
+	}
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+	}
+	require.Equal(t, uint64(2), ut.Size())
+	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+
+	ut.Reset()
+
+	require.Equal(t, uint64(0), ut.Size())
+	require.NotNil(t, ut.parallel, "Reset must not release parallel field")
+	require.NotNil(t, ut.parallel.trie)
+	require.NotNil(t, ut.parallel.trie.root, "trie root must be re-allocated after Reset")
+	require.EqualValues(t, 0, ut.parallel.trie.root.subtreeCount, "trie counts cleared after Reset")
+	require.EqualValues(t, 0, ut.parallel.trie.root.bitmap, "trie bitmap cleared after Reset")
+	for i := 0; i < len(ut.nibbles); i++ {
+		require.NotNilf(t, ut.nibbles[i], "nibbles[%d] must remain allocated after Reset", i)
+	}
+
+	// Round-trip: touches after Reset must work.
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+	}
+	require.Equal(t, uint64(2), ut.Size())
+	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+}
+
+func TestUpdatesModeParallel_Close(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+
+	ut.TouchPlainKey(string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f")), []byte("v"), ut.TouchStorage)
+
+	ut.Close()
+	require.Nil(t, ut.parallel, "Close must release parallel field")
+}
+
+func TestUpdatesModeParallel_SetMode(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	require.Nil(t, ut.parallel)
+
+	// Transition into ModeParallel allocates the parallel state.
+	ut.SetMode(ModeParallel)
+	require.Equal(t, ModeParallel, ut.mode)
+	require.NotNil(t, ut.parallel)
+	require.True(t, ut.sortPerNibble)
+	require.Equal(t, uint64(0), ut.Size())
+
+	// A subsequent SetMode(ModeParallel) must not re-allocate or wipe pre-existing state.
+	prev := ut.parallel
+	ut.SetMode(ModeParallel)
+	require.Same(t, prev, ut.parallel)
+}

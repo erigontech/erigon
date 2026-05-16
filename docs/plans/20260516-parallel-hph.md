@@ -357,18 +357,18 @@ Follow-up optimization (out of scope): per-leaf chunk files persisted during Pre
 - Modify: `execution/commitment/commitment.go`
 - Modify: `execution/commitment/commitment_test.go` (or add new test file if absent)
 
-- [ ] add `ModeParallel Mode = 3` constant; extend `(m Mode) String()` to return "parallel"
-- [ ] add `parallel *parallelUpdate` field to `Updates` struct
-- [ ] update `NewUpdates(m, tmpdir, hasher)`: if `m == ModeParallel`, allocate `t.parallel = newParallelUpdate()`, allocate `t.keys` (for dedup), and call `t.initCollector()` with sortPerNibble=true semantics (reuse existing 16-nibble collector init)
-- [ ] update `SetMode(m)`: handle transition into/out of ModeParallel symmetrically
-- [ ] update `IsConcurrentCommitment()`: return `t.mode == ModeParallel` — ModeParallel forces `sortPerNibble=true` internally, so the mode is the single source of truth. The existing `sortPerNibble` boolean stays in place for the legacy `ConcurrentPatriciaHashed` PoC but is no longer consulted by `IsConcurrentCommitment`.
-- [ ] add new case in `TouchPlainKey`: dedup, hash, route to `t.nibbles[hashedKey[0]].Collect`, then `t.parallel.Insert(hashedKey)`
-- [ ] update `Close()`: if `t.parallel != nil`, call `t.parallel.Close()`
-- [ ] update `Reset()`: reset `t.parallel` if non-nil
-- [ ] update `Size()`: in ModeParallel, return `uint64(len(t.keys))`
-- [ ] write tests: `NewUpdates(ModeParallel, ...)` allocates parallel field; TouchPlainKey routes correctly (call Insert, check trie state); Close releases everything; Reset clears state; round-trip Set/Reset
-- [ ] `go test ./execution/commitment/ -run TestUpdatesModeParallel` passes
-- [ ] `make lint` clean
+- [x] add `ModeParallel Mode = 3` constant; extend `(m Mode) String()` to return "parallel"
+- [x] add `parallel *parallelUpdate` field to `Updates` struct
+- [x] update `NewUpdates(m, tmpdir, hasher)`: if `m == ModeParallel`, allocate `t.parallel = newParallelUpdate()`, allocate `t.keys` (for dedup), and call `t.initCollector()` with sortPerNibble=true semantics (reuse existing 16-nibble collector init)
+- [x] update `SetMode(m)`: handle transition into/out of ModeParallel symmetrically
+- [x] update `IsConcurrentCommitment()`: return `t.mode == ModeParallel || t.sortPerNibble`. ModeParallel forces `sortPerNibble=true` internally so the mode is the primary source of truth; the disjunction preserves legacy `ConcurrentPatriciaHashed` PoC callers that toggle `sortPerNibble` via `SetConcurrentCommitment` (otherwise `commitmentdb/commitment_context.go:405` would route those callers to the wrong context factory).
+- [x] add new case in `TouchPlainKey`: dedup, hash, route to `t.nibbles[hashedKey[0]].Collect`, then `t.parallel.Insert(hashedKey)` (also applied symmetrically to `TouchPlainKeyDirect` and `TouchHashedKey`)
+- [x] update `Close()`: if `t.parallel != nil`, call `t.parallel.Close()`
+- [x] update `Reset()`: reset `t.parallel` if non-nil
+- [x] update `Size()`: in ModeParallel, return `uint64(len(t.keys))`
+- [x] write tests: `NewUpdates(ModeParallel, ...)` allocates parallel field; TouchPlainKey routes correctly (call Insert, check trie state); Close releases everything; Reset clears state; round-trip Set/Reset
+- [x] `go test ./execution/commitment/ -run TestUpdatesModeParallel` passes
+- [x] `make lint` clean
 
 ### Task 5: ParallelPatriciaHashed skeleton (no Process yet)
 

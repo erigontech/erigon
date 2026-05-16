@@ -1403,6 +1403,7 @@ const (
 	ModeDisabled Mode = 0
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
+	ModeParallel Mode = 3
 )
 
 func (m Mode) String() string {
@@ -1413,6 +1414,8 @@ func (m Mode) String() string {
 		return "direct"
 	case ModeUpdate:
 		return "update"
+	case ModeParallel:
+		return "parallel"
 	default:
 		return "unknown"
 	}
@@ -1436,6 +1439,11 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+
+	// parallel is allocated in ModeParallel; tracks the path-compressed prefix
+	// trie of touched hashed keys and serves as the freeze-time source for
+	// split-point emission. Nil in any other mode.
+	parallel *parallelUpdate
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 	byteArena []byte      // grow-only byte arena for HashSort key copies
@@ -1477,9 +1485,11 @@ func (t *Updates) SetConcurrentCommitment(b bool) {
 	t.initCollector()
 }
 
-// SetConcurrentCommitment returns true if updates are sorted per nibble
+// IsConcurrentCommitment reports whether the current configuration allows
+// concurrent commitment processing. ModeParallel implies concurrent; legacy
+// ModeDirect callers opt in by setting sortPerNibble via SetConcurrentCommitment.
 func (t *Updates) IsConcurrentCommitment() bool {
-	return t.sortPerNibble
+	return t.mode == ModeParallel || t.sortPerNibble
 }
 
 type keyHasher func(key []byte) []byte
@@ -1498,24 +1508,44 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		tmpdir: tmpdir,
 		mode:   m,
 	}
-	if t.mode == ModeDirect {
+	switch t.mode {
+	case ModeDirect:
 		t.keys = make(map[string]struct{})
 		t.initCollector()
-	} else if t.mode == ModeUpdate {
+	case ModeUpdate:
 		t.tree = btree.NewG(64, keyUpdateLessFn)
 		t.treeIdx = make(map[string]*KeyUpdate)
+	case ModeParallel:
+		t.keys = make(map[string]struct{})
+		t.sortPerNibble = true
+		t.parallel = newParallelUpdate()
+		t.initCollector()
 	}
 	return t
 }
 
 func (t *Updates) SetMode(m Mode) {
 	t.mode = m
-	if t.mode == ModeDirect && t.keys == nil {
-		t.keys = make(map[string]struct{})
+	switch t.mode {
+	case ModeDirect:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+			t.initCollector()
+		}
+	case ModeUpdate:
+		if t.tree == nil {
+			t.tree = btree.NewG(64, keyUpdateLessFn)
+			t.treeIdx = make(map[string]*KeyUpdate)
+		}
+	case ModeParallel:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		}
+		t.sortPerNibble = true
+		if t.parallel == nil {
+			t.parallel = newParallelUpdate()
+		}
 		t.initCollector()
-	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG(64, keyUpdateLessFn)
-		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	t.Reset()
 }
@@ -1563,7 +1593,7 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
-	case ModeDirect:
+	case ModeDirect, ModeParallel:
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
@@ -1603,6 +1633,17 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			if err != nil {
 				log.Warn("failed to collect updated key", "key", key, "err", err)
 			}
+			t.keys[key] = struct{}{}
+		}
+	case ModeParallel:
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := common.ToBytesZeroCopy(key)
+			hashedKey := t.hasher(keyBytes)
+
+			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes); err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+			t.parallel.Insert(hashedKey)
 			t.keys[key] = struct{}{}
 		}
 	default:
@@ -1671,6 +1712,17 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			}
 			t.keys[key] = struct{}{}
 		}
+	case ModeParallel:
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := common.ToBytesZeroCopy(key)
+			hashedKey := t.hasher(keyBytes)
+
+			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes); err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+			t.parallel.Insert(hashedKey)
+			t.keys[key] = struct{}{}
+		}
 	default:
 	}
 }
@@ -1694,6 +1746,18 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 			if err != nil {
 				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
 			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeParallel:
+		if len(hashedKey) == 0 {
+			return
+		}
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			if err := t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{}); err != nil {
+				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
+			}
+			t.parallel.Insert(hashedKey)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
@@ -1775,6 +1839,10 @@ func (t *Updates) Close() {
 				t.nibbles[i].Close()
 			}
 		}
+	}
+	if t.parallel != nil {
+		t.parallel.Close()
+		t.parallel = nil
 	}
 }
 
@@ -1949,6 +2017,16 @@ func (t *Updates) Reset() {
 	case ModeUpdate:
 		t.tree.Clear(true)
 		clear(t.treeIdx)
+	case ModeParallel:
+		if t.keys == nil {
+			t.keys = make(map[string]struct{})
+		} else {
+			clear(t.keys)
+		}
+		if t.parallel != nil {
+			t.parallel.Reset()
+		}
+		t.initCollector()
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
