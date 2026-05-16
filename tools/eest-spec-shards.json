@@ -17,13 +17,13 @@
   {
     "shard": "blocktests-stable-parallel",
     "workers": 12,
-    "max-allowed-failures": 20,
+    "max-allowed-failures": 2,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-devnet",
     "workers": 12,
-    "max-allowed-failures": 25,
+    "max-allowed-failures": 5,
     "exec3-parallel": true
   },
   {
@@ -34,7 +34,7 @@
   {
     "shard": "enginextests-stable-parallel",
     "workers": 8,
-    "max-allowed-failures": 19,
+    "max-allowed-failures": 11,
     "exec3-parallel": true
   },
   {
@@ -137,31 +137,31 @@
   {
     "shard": "blocktests-stable-race-pre-cancun-parallel",
     "workers": 12,
-    "max-allowed-failures": 259,
+    "max-allowed-failures": 2,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-cancun-parallel",
     "workers": 12,
-    "max-allowed-failures": 140,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-prague-parallel",
     "workers": 12,
-    "max-allowed-failures": 136,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-osaka-parallel",
     "workers": 12,
-    "max-allowed-failures": 136,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-devnet-race-amsterdam",
     "workers": 12,
-    "max-allowed-failures": 60,
+    "max-allowed-failures": 3,
     "exec3-parallel": true
   }
 ]

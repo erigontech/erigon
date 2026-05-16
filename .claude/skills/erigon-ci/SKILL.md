@@ -30,6 +30,8 @@ Each test group has its own dedicated skill for drill-down on failures. Use thos
 
 `make test-all` no longer covers the EEST spec tests or the `cl/spectest` consensus spec test — run those via their dedicated targets above when relevant.
 
+**Pitfall:** prefer `make eest-spec-<shard>` over `bash tools/run-eest-spec-test.sh <shard>`. The make target lists `evm` / `evm.race` as a prereq so stale binaries get rebuilt; the script invoked directly does not, and a stale binary against current fixtures will inflate failures or hide regressions.
+
 ### Lint (run first — non-deterministic, may need multiple runs)
 ```bash
 make lint

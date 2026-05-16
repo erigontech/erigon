@@ -125,6 +125,8 @@ The most important tests when implementing a new EIP for the EL are the EEST spe
 
 The shard list / failure budgets / `exec3-parallel` flags are defined in `tools/eest-spec-shards.json` (single source of truth shared with the CI workflow and the local runner script). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into non-race vs race targets.
 
+**Pitfall: stale `evm` / `evm.race` binary.** When iterating on an EIP implementation, always invoke shards via `make eest-spec-<shard>` rather than `bash tools/run-eest-spec-test.sh <shard>` — the make target lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a fresh binary is built before each run. The script invoked directly **bypasses** that rebuild, so the runners exercise whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures — silently inflating failures (e.g. devnet shards "regressing" by thousands of tests) or hiding regressions when comparing budgets before/after a change.
+
 For an EIP on a hardfork under development, the **`-devnet`** shards are the primary signal; the `-stable` shards (and `-benchmark-*` shards, where applicable) are regression checks against prior hardforks.
 
 ### Where the test fixtures come from

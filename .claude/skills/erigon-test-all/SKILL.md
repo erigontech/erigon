@@ -37,6 +37,8 @@ make eest-spec-blocktests-stable-race-cancun-sequential
 
 The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-spec-shards.json` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
 
+**Pitfall: stale `evm` / `evm.race` binary.** Always invoke shards via `make eest-spec-<shard>` — the Makefile lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt automatically. Calling `bash tools/run-eest-spec-test.sh <shard>` directly **bypasses** the rebuild and silently exercises whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures, inflating failures or hiding regressions. After pulling code, switching branches, or any time you suspect the binary is older than HEAD: `rm -f build/bin/evm build/bin/evm.race && make evm evm.race` before re-running.
+
 Two side prerequisites still apply for tests `make test-all` does run:
 
 ```bash
