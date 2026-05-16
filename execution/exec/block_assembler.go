@@ -182,15 +182,20 @@ func (ba *BlockAssembler) AddTransactions(
 	// based on position in the block's transaction list).
 	txnIdx := len(ba.Txns)
 	header := ba.AssembledBlock.Header
-	// EIP-8037: initialize the pool from cumulative regular gas, not the
-	// bottleneck (max of regular, state) stored in header.GasUsed. This
-	// gives compute-heavy transactions access to the full regular gas
-	// budget even when state gas dominates the bottleneck. State gas is
-	// enforced in applyTransaction before FinalizeTx.
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - ba.gasUsed.BlockRegular)
+	// EIP-8037: regular and state gas pools deplete independently. The
+	// builder calls AddTransactions repeatedly with batches from the txpool,
+	// so each call must initialise both dimensions from their own cumulative
+	// usage. Seeding both from BlockRegular only would over-inflate the
+	// state pool whenever state gas has run ahead of regular gas.
+	blobBudget := uint64(0)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
+		blobBudget = ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
 	}
+	gasPool := protocol.NewBlockGasPool(
+		header.GasLimit-ba.gasUsed.BlockRegular,
+		header.GasLimit-ba.gasUsed.BlockState,
+		blobBudget,
+	)
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs

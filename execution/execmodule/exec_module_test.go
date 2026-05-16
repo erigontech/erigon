@@ -1422,6 +1422,138 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
 }
 
+// TestAssembleBlockGasPoolMultiBatchInitBug exercises the block assembler's
+// per-batch gas-pool initialisation. The block builder calls AddTransactions
+// repeatedly with batches of up to 50 txs from the txpool. Each call must
+// build the pool with the *per-dimension* remaining budget; seeding both
+// dimensions from the regular-only cumulative gas wrongly inflates the state
+// pool when state gas has run ahead of regular gas after the previous batch,
+// letting a tx in the next batch consume state past gas_limit.
+//
+// The scenario: 50 contract creations in batch 1 push cumulative state gas
+// near the block gas limit while keeping cumulative regular gas low (CREATE
+// has ~184K intrinsic state vs ~30K intrinsic regular per tx). The 51st tx
+// has small intrinsic state (so the txpool's state-aware filter admits it
+// into batch 2) but a large code-deposit state on execution. With the pool
+// init seeded from regular gas only, batch 2 starts with a state pool that
+// matches the regular dimension — i.e. far more than the real remaining
+// state budget — and the 51st tx is wrongly accepted.
+func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	// 50 zero-deposit CREATE txs (initcode returns nothing) at higher gas
+	// price for batch 1, plus 1 large-deposit CREATE at lower gas price so
+	// the txpool orders it into batch 2.
+	const numBatch1 = 50
+	const numTotal = numBatch1 + 1
+	keys := make([]*ecdsa.PrivateKey, numTotal)
+	addrs := make([]common.Address, numTotal)
+	for i := range keys {
+		k, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		keys[i] = k
+		addrs[i] = crypto.PubkeyToAddress(k.PublicKey)
+	}
+
+	alloc := types.GenesisAlloc{}
+	for _, a := range addrs {
+		alloc[a] = types.GenesisAccount{Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)}
+	}
+	// 10M block limit fits ~54 CREATEs by intrinsic state (184K each ≈ 9.2M
+	// for 50). Leaves ~800K of state headroom for batch 2, which the trigger
+	// tx's ~1.2M total state exceeds.
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 10_000_000,
+		Alloc:    alloc,
+	}
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(keys[0]),
+		execmoduletester.WithTxPool(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	highPrice := uint256.NewInt(baseFee * 2) // higher tip → batch 1
+	lowPrice := uint256.NewInt(baseFee)      // baseFee only → batch 2
+
+	// Batch 1 initcode: PUSH1 0, PUSH1 0, RETURN → zero-byte runtime, no
+	// code-deposit state. Per-tx state is just the 184K intrinsic.
+	batch1Init := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
+
+	// Batch 2 initcode deploys a ~660-byte runtime via CODECOPY. Per-byte
+	// deposit cost: 1530 state + 200 regular. ~660 bytes → ~1M state on top
+	// of the 184K intrinsic.
+	const triggerRuntimeLen = 660
+	triggerInit := []byte{
+		0x61, byte(triggerRuntimeLen >> 8), byte(triggerRuntimeLen & 0xff), // PUSH2 length
+		0x60, 0x0d, //             PUSH1 13 (runtime offset)
+		0x60, 0x00, //             PUSH1 0  (memory dest)
+		0x39,                                                               //                   CODECOPY
+		0x61, byte(triggerRuntimeLen >> 8), byte(triggerRuntimeLen & 0xff), // PUSH2 length
+		0x60, 0x00, //             PUSH1 0  (memory offset)
+		0xf3, //                   RETURN
+	}
+	triggerInit = append(triggerInit, make([]byte, triggerRuntimeLen)...)
+
+	rlpTxs := make([][]byte, numTotal)
+	for i := range numBatch1 {
+		tx, txErr := types.SignTx(
+			types.NewContractCreation(0, uint256.NewInt(0), 250_000, highPrice, batch1Init),
+			signer, keys[i],
+		)
+		require.NoError(t, txErr)
+		var buf bytes.Buffer
+		require.NoError(t, tx.EncodeRLP(&buf))
+		rlpTxs[i] = buf.Bytes()
+	}
+	triggerTx, err := types.SignTx(
+		types.NewContractCreation(0, uint256.NewInt(0), 2_000_000, lowPrice, triggerInit),
+		signer, keys[numBatch1],
+	)
+	require.NoError(t, err)
+	var triggerBuf bytes.Buffer
+	require.NoError(t, triggerTx.EncodeRLP(&triggerBuf))
+	rlpTxs[numBatch1] = triggerBuf.Bytes()
+
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range r.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	slotNumber := uint64(1)
+	parentBeaconBlockRoot := randomHash()
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            randomHash(),
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            &slotNumber,
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+
+	require.Greater(t, len(block.Transactions()), 0, "block should contain at least one tx")
+	require.LessOrEqual(t, block.GasUsed(), block.GasLimit(),
+		"gas_used (max of regular, state) must not exceed gas_limit")
+
+	require.NoError(t, insertValidateAndUfc1By1(ctx, exec, []*types.Block{block}))
+}
+
 func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	// Regression test for https://github.com/erigontech/erigon/issues/19951
 	//
