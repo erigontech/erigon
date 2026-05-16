@@ -455,16 +455,20 @@ type ExecutionWitnessResult struct {
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 }
 
-// ExecutionWitness implements debug_executionWitness.
-// It executes a block using a historical state reader, records all state accesses
-// (accounts, storage, code), and builds merkle proofs for the accessed keys.
-func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
+// witnessBlockInfo bundles the block + txnum range resolved for ExecutionWitness.
+// BlockNum is a stored field (rather than Block.NumberU64()) because downstream
+// call sites reference it repeatedly.
+type witnessBlockInfo struct {
+	Block             *types.Block
+	BlockNum          uint64
+	FirstTxNumInBlock uint64
+	EndTxNum          uint64
+	ParentNum         uint64
+}
 
+// resolveWitnessBlock turns a BlockNumberOrHash into a resolved block plus the
+// txnum range used downstream for state reading and commitment work.
+func (api *DebugAPIImpl) resolveWitnessBlock(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash) (*witnessBlockInfo, error) {
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -477,13 +481,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if block == nil {
 		return nil, fmt.Errorf("block %d not found", blockNum)
 	}
-
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	engine := api.engine()
 
 	// Get first txnum of blockNum — this is the exact txnum of the parent block's
 	// final state (before any system txns in this block have been applied).
@@ -503,15 +500,44 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		firstTxNumInBlock = endTxNum
 	}
 
-	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader
 	var parentNum uint64
-	if blockNum == 0 {
-		parentNum = 0
-	} else {
+	if blockNum != 0 {
 		parentNum = blockNum - 1
 	}
-	stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+
+	return &witnessBlockInfo{
+		Block:             block,
+		BlockNum:          blockNum,
+		FirstTxNumInBlock: firstTxNumInBlock,
+		EndTxNum:          endTxNum,
+		ParentNum:         parentNum,
+	}, nil
+}
+
+// ExecutionWitness implements debug_executionWitness.
+// It executes a block using a historical state reader, records all state accesses
+// (accounts, storage, code), and builds merkle proofs for the accessed keys.
+func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	info, err := api.resolveWitnessBlock(ctx, tx, blockNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	engine := api.engine()
+
+	// Create a state reader at the parent block state using the exact txnum
+	stateReader := state.NewHistoryReaderV3(tx, info.FirstTxNumInBlock)
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -524,12 +550,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	ibs := state.New(recordingState)
 
 	// Get header for block context
-	header := block.Header()
+	header := info.Block.Header()
 
 	// Create EVM block context
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
 	blockRules := blockCtx.Rules(chainConfig)
-	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+	signer := types.MakeSigner(chainConfig, info.BlockNum, header.Time)
 
 	// Track accessed block hashes for BLOCKHASH opcode
 	var accessedBlockHashes []uint64
@@ -556,7 +582,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Execute all transactions in the block
-	for txIndex, txn := range block.Transactions() {
+	for txIndex, txn := range info.Block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -566,7 +592,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		ibs.SetTxContext(blockNum, txIndex)
+		ibs.SetTxContext(info.BlockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
@@ -589,7 +615,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	allLogs := ibs.Logs()
 	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, info.Block.Uncles(), receipts, info.Block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
@@ -718,19 +744,19 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	var expectedParentRoot common.Hash
 
 	// Get the parent header for state root verification
-	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, info.ParentNum)
 	if err != nil {
 		return nil, err
 	}
 	if parentHeader == nil {
-		return nil, fmt.Errorf("parent header %d not found", parentNum)
+		return nil, fmt.Errorf("parent header %d not found", info.ParentNum)
 	}
 	expectedParentRoot = parentHeader.Root
 	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if firstTxNumInBlock < commitmentStartingTxNum {
-		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
+	if info.FirstTxNumInBlock < commitmentStartingTxNum {
+		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, info.FirstTxNumInBlock)
 	}
 
 	// allCodeAddrs: union of addresses with pre-state or modified code.
@@ -766,7 +792,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Helper to reset commitment to parent block state and re-seek
 	resetToParentState := func() (txNum uint64, blockNum uint64, err error) {
-		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+		sdCtx.SetHistoryStateReader(tx, info.FirstTxNumInBlock)
 		return domains.SeekCommitment(ctx, tx)
 	}
 
@@ -782,7 +808,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Set up split reader: branch data from parent state, plain state from end of block
 	// need withHistory=false to have branch updates written using PutBranch()
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, info.FirstTxNumInBlock, info.EndTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
@@ -795,13 +821,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, info.BlockNum, info.FirstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
 		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
 
-	if common.Hash(computedRootHash) != block.Root() {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
+	if common.Hash(computedRootHash) != info.Block.Root() {
+		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, info.Block.Root())
 	}
 
 	sdCtx.SetCollapseTracer(nil)
@@ -847,7 +873,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+	if err := api.verifyWitnessStateless(ctx, tx, result, info.Block, fullEngine); err != nil {
 		return nil, err
 	}
 

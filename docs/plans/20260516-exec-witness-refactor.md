@@ -252,13 +252,13 @@ Folds block-resolution + txnum-range + parentNum into one helper.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] declare struct `witnessBlockInfo { Block *types.Block; BlockNum, FirstTxNumInBlock, EndTxNum, ParentNum uint64 }` near the top of the file (next to `ExecutionWitnessResult`). `BlockNum` is a stored field (not a method) because `ExecutionWitness` references it in many places (logging, `MakeSigner`, `detectCollapseSiblings` argument)
-- [ ] add method `(api *DebugAPIImpl) resolveWitnessBlock(ctx, tx, blockNrOrHash) (*witnessBlockInfo, error)` containing logic from lines 468–513 (excluding stateReader construction, which is part of "build exec env" and stays inline)
-- [ ] inside `resolveWitnessBlock`: call `rpchelper.GetBlockNumber`, then `api.blockWithSenders`, nil-check, `api._txNumReader.Min/Max`, compute `endTxNum`, `parentNum`, handle the `blockNum == 0` cases for both `firstTxNumInBlock = endTxNum` and `parentNum = 0`; populate `BlockNum` with the resolved `blockNum`
-- [ ] replace inline block in `ExecutionWitness`; downstream references switch from local `blockNum` to `info.BlockNum`, local `block` to `info.Block`, etc.
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] declare struct `witnessBlockInfo { Block *types.Block; BlockNum, FirstTxNumInBlock, EndTxNum, ParentNum uint64 }` near the top of the file (next to `ExecutionWitnessResult`). `BlockNum` is a stored field (not a method) because `ExecutionWitness` references it in many places (logging, `MakeSigner`, `detectCollapseSiblings` argument)
+- [x] add method `(api *DebugAPIImpl) resolveWitnessBlock(ctx, tx, blockNrOrHash) (*witnessBlockInfo, error)` containing logic from lines 468–513 (excluding stateReader construction, which is part of "build exec env" and stays inline)
+- [x] inside `resolveWitnessBlock`: call `rpchelper.GetBlockNumber`, then `api.blockWithSenders`, nil-check, `api._txNumReader.Min/Max`, compute `endTxNum`, `parentNum`, handle the `blockNum == 0` cases for both `firstTxNumInBlock = endTxNum` and `parentNum = 0`; populate `BlockNum` with the resolved `blockNum`
+- [x] replace inline block in `ExecutionWitness`; downstream references switch from local `blockNum` to `info.BlockNum`, local `block` to `info.Block`, etc.
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 4: Add `accessedState` + `collectAccessedState`
 
