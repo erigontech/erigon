@@ -546,9 +546,18 @@ func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][
 	// now hold stale bytes vs the post-unwind canonical state. Drop
 	// those specifically — the rest of the cache (including pinned
 	// branches whose keys weren't in the changeset) stays warm.
+	//
+	// changeset keys carry an 8-byte BE step suffix (see stage_execute.go
+	// trace logs which strip [:len(key)-8]); the BranchCache stores raw
+	// prefixes (no step suffix). Strip the suffix here or the Invalidate
+	// is a no-op and the cache retains stale entries for unwound keys.
 	if sd.branchCache != nil && changeset != nil {
 		for _, diff := range changeset[kv.CommitmentDomain] {
-			sd.branchCache.Invalidate([]byte(diff.Key))
+			k := diff.Key
+			if len(k) >= 8 {
+				k = k[:len(k)-8]
+			}
+			sd.branchCache.Invalidate([]byte(k))
 		}
 	}
 }
@@ -824,18 +833,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		return nil
 	}
 	return sd.mem.Flush(ctx, tx)
-}
-
-// ClearBranchCache empties the aggregator-scope commitment BranchCache.
-// Use after operations that mutate commitment state outside the normal
-// sd.Flush callback path — notably SetHead unwind, which truncates
-// commitment domain history but does not re-write all the keys whose
-// cached values are now stale. Without this call, the next FCU sees
-// the pre-unwind KeyCommitmentState and trips ErrBehindCommitment.
-func (sd *SharedDomains) ClearBranchCache() {
-	if sd.branchCache != nil {
-		sd.branchCache.Clear()
-	}
 }
 
 // TemporalDomain satisfaction
