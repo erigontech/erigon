@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const maxSSZBufferSize = 128 << 20 // 128 MB
-
 func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
 }
@@ -77,9 +75,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	}
 
 	length := binary.BigEndian.Uint64(lengthBytes)
-	if length > maxSSZBufferSize {
-		return nil, fmt.Errorf("corrupt beacon state file: length %d exceeds max %d, root: %x", length, maxSSZBufferSize, blockRoot)
-	}
 	if length > uint64(cap(f.sszBuffer)) {
 		f.sszBuffer = make([]byte, length)
 	} else {
@@ -94,13 +89,6 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 
 	if err = bs.DecodeSSZ(f.sszBuffer, int(v[0])); err != nil {
 		return nil, fmt.Errorf("failed to decode beacon state: %w, root: %x, len: %d, decLen: %d, bs: %+v", err, blockRoot, n, len(f.sszBuffer), bs)
-	}
-
-	// Re-initialize caches after SSZ decode. state.New() called InitBeaconState()
-	// on an empty state; after DecodeSSZ populates real data, caches like
-	// publicKeyIndicies are stale (empty). Reinitialize them from the decoded data.
-	if err = bs.InitBeaconState(); err != nil {
-		return nil, fmt.Errorf("failed to reinitialize caches after SSZ decode: %w, root: %x", err, blockRoot)
 	}
 
 	// Try to read the persisted previousStateRoot (appended after SSZ data).
@@ -236,9 +224,6 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	}
 
 	envelopeLength := binary.BigEndian.Uint64(lengthBytes)
-	if envelopeLength > maxSSZBufferSize {
-		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, maxSSZBufferSize, blockRoot)
-	}
 	if envelopeLength > uint64(cap(f.sszBuffer)) {
 		f.sszBuffer = make([]byte, envelopeLength)
 	} else {
