@@ -229,12 +229,12 @@ On an 8-core or 4-core machine the matrix is correspondingly smaller (dedup).
 **Files:**
 - (none — verification only)
 
-- [ ] run smoke bench: `go test -run=^$ -bench=Benchmark_Commitment_DirectVsParallel -benchtime=1x ./execution/commitment/` from worktree root
-- [ ] verify all sub-benches in the matrix execute without error and report non-zero ns/op
-- [ ] verify ModeDirect sub-benches produce a successful root hash (no error)
-- [ ] verify each ModeParallel sub-bench at every worker count produces a successful root hash (no error). If any worker count trips multi-bucket-no-split rejection, ⚠️ note it in the plan and consider lowering `MinSplitKeys` for the 100K corpus or skipping that sub-bench.
-- [ ] run package tests: `go test ./execution/commitment/...` — confirm new file does not break existing tests
-- [ ] run `make lint` from worktree root; iterate until clean (linter is non-deterministic)
+- [x] run smoke bench: `go test -run=^$ -bench=Benchmark_Commitment_DirectVsParallel -benchtime=1x ./execution/commitment/` from worktree root
+- [x] verify all sub-benches in the matrix execute without error and report non-zero ns/op
+- [x] verify ModeDirect sub-benches produce a successful root hash (no error)
+- [x] verify each ModeParallel sub-bench at every worker count produces a successful root hash (no error). If any worker count trips multi-bucket-no-split rejection, ⚠️ note it in the plan and consider lowering `MinSplitKeys` for the 100K corpus or skipping that sub-bench.
+- [x] run package tests: `go test ./execution/commitment/...` — confirm new file does not break existing tests
+- [x] run `make lint` from worktree root; iterate until clean (linter is non-deterministic)
 
 ### Task 3: Capture sample output and commit
 
