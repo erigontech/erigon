@@ -239,30 +239,30 @@ func simpleTransferScenario() *testFinalizeScenario {
 	// TxIn: reads from execution. No coinbase reads (coinbase not touched
 	// during calcFees=false execution).
 	txIn := state.ReadSet{}
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, Val: *senderBal})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
-	txIn.Set(state.VersionedRead{Address: recipient, Path: state.AddressPath, Val: fMakeAccount(recipientBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: recipient, Path: state.BalancePath, Val: *recipientBal})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, ValAcc: fMakeAccount(senderBal.Uint64(), 0)})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, ValU256: *senderBal})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, ValU64: uint64(0)})
+	txIn.Set(state.VersionedRead{Address: recipient, Path: state.AddressPath, ValAcc: fMakeAccount(recipientBal.Uint64(), 0)})
+	txIn.Set(state.VersionedRead{Address: recipient, Path: state.BalancePath, ValU256: *recipientBal})
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: sender, Path: state.BalancePath, ValU256: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: recipient, Path: state.BalancePath, ValU256: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
 	}
 
 	// CollectorWrites: LightCollector output from MakeWriteSet.
 	// No coinbase (not touched during execution).
 	collectorWrites := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal},
-		{Address: recipient, Path: state.NoncePath, Val: uint64(0)},
-		{Address: recipient, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: recipient, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
+		{Address: sender, Path: state.BalancePath, ValU256: *newSenderBal},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: sender, Path: state.IncarnationPath, ValU64: uint64(1)},
+		{Address: sender, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
+		{Address: recipient, Path: state.BalancePath, ValU256: *newRecipientBal},
+		{Address: recipient, Path: state.NoncePath, ValU64: uint64(0)},
+		{Address: recipient, Path: state.IncarnationPath, ValU64: uint64(1)},
+		{Address: recipient, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
 	}
 
 	return &testFinalizeScenario{
@@ -324,7 +324,7 @@ func TestFinalizeTx_SimpleTransfer(t *testing.T) {
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
-	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+	coinbaseBalance := coinbaseWrite.ValU256
 	assert.Equal(t, s.feeTipped, coinbaseBalance, "coinbase should receive the tip")
 }
 
@@ -339,7 +339,7 @@ func TestFinalizeTx_London(t *testing.T) {
 
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 	require.NotNil(t, burntWrite, "should have burnt contract balance write")
-	burntBalance := burntWrite.Val.(uint256.Int)
+	burntBalance := burntWrite.ValU256
 	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
 	assert.Equal(t, *expected, burntBalance, "burnt contract should receive base fee")
 }
@@ -367,29 +367,29 @@ func coinbaseIsRecipientScenario() *testFinalizeScenario {
 	config := &chain.Config{ChainID: big.NewInt(1)}
 
 	txIn := state.ReadSet{}
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, Val: *senderBal})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, ValAcc: fMakeAccount(senderBal.Uint64(), 0)})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, ValU256: *senderBal})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, ValU64: uint64(0)})
 	// Coinbase IS touched during execution (as transfer recipient).
-	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.AddressPath, Val: fMakeAccount(coinbaseBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.BalancePath, Val: *coinbaseBal})
+	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.AddressPath, ValAcc: fMakeAccount(coinbaseBal.Uint64(), 0)})
+	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.BalancePath, ValU256: *coinbaseBal})
 
 	// TxOut: coinbase has transfer amount but NOT tip (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: sender, Path: state.BalancePath, ValU256: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: coinbase, Path: state.BalancePath, ValU256: *newCoinbaseBal, Reason: tracing.BalanceChangeTransfer},
 	}
 
 	collectorWrites := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal},
-		{Address: coinbase, Path: state.NoncePath, Val: uint64(0)},
-		{Address: coinbase, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: coinbase, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
+		{Address: sender, Path: state.BalancePath, ValU256: *newSenderBal},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: sender, Path: state.IncarnationPath, ValU64: uint64(1)},
+		{Address: sender, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
+		{Address: coinbase, Path: state.BalancePath, ValU256: *newCoinbaseBal},
+		{Address: coinbase, Path: state.NoncePath, ValU64: uint64(0)},
+		{Address: coinbase, Path: state.IncarnationPath, ValU64: uint64(1)},
+		{Address: coinbase, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
 	}
 
 	return &testFinalizeScenario{
@@ -430,20 +430,20 @@ func selfTransferScenario() *testFinalizeScenario {
 	tip := uint256.NewInt(21_000)
 
 	txIn := state.ReadSet{}
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, Val: *senderBal})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, ValAcc: fMakeAccount(senderBal.Uint64(), 0)})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, ValU256: *senderBal})
+	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, ValU64: uint64(0)})
 
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal, Reason: tracing.BalanceChangeTransfer},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
+		{Address: sender, Path: state.BalancePath, ValU256: *senderBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
 	}
 
 	collectorWrites := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
+		{Address: sender, Path: state.BalancePath, ValU256: *senderBal},
+		{Address: sender, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: sender, Path: state.IncarnationPath, ValU64: uint64(1)},
+		{Address: sender, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
 	}
 
 	return &testFinalizeScenario{
@@ -496,7 +496,7 @@ func TestFinalizeTx_AllScenarios(t *testing.T) {
 			// Coinbase must receive the tip.
 			coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 			require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
-			coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+			coinbaseBalance := coinbaseWrite.ValU256
 
 			expectedCoinbase := new(uint256.Int).Set(&s.feeTipped)
 			if acc, ok := s.accts[s.coinbase]; ok {
@@ -513,7 +513,7 @@ func TestFinalizeTx_AllScenarios(t *testing.T) {
 			if s.rules.IsLondon && s.burntAddr != accounts.NilAddress {
 				burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 				require.NotNil(t, burntWrite, "should have burnt contract balance write")
-				burntBalance := burntWrite.Val.(uint256.Int)
+				burntBalance := burntWrite.ValU256
 				expectedBurnt := new(uint256.Int).Add(&s.accts[s.burntAddr].Balance, &s.feeBurnt)
 				assert.Equal(t, *expectedBurnt, burntBalance,
 					"burnt contract should receive base fee")
@@ -543,7 +543,7 @@ func hasCoinbaseDelta(s *testFinalizeScenario) bool {
 func adjustForTransferDelta(s *testFinalizeScenario, base *uint256.Int) *uint256.Int {
 	for _, w := range s.txOut {
 		if w.Address == s.coinbase && w.Path == state.BalancePath {
-			execBal := w.Val.(uint256.Int)
+			execBal := w.ValU256
 			origBal := s.accts[s.coinbase].Balance
 			delta := new(uint256.Int).Sub(&execBal, &origBal)
 			return new(uint256.Int).Add(base, delta)
@@ -571,7 +571,7 @@ func buildWriteMap(writes state.VersionedWrites) map[string]string {
 }
 
 func fmtWriteVal(w *state.VersionedWrite) string {
-	switch v := w.Val.(type) {
+	switch v := w.Val().(type) {
 	case uint256.Int:
 		return v.Hex()
 	case uint64:
@@ -595,9 +595,8 @@ func extractBalanceReads(reads state.ReadSet) map[accounts.Address]string {
 	}
 	reads.Scan(func(vr *state.VersionedRead) bool {
 		if vr.Path == state.BalancePath {
-			if val, ok := vr.Val.(uint256.Int); ok {
-				m[vr.Address] = val.Hex()
-			}
+			val := vr.ValU256
+			m[vr.Address] = val.Hex()
 		}
 		return true
 	})
@@ -659,7 +658,7 @@ func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
 
-	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+	coinbaseBalance := coinbaseWrite.ValU256
 	expected := new(uint256.Int).Add(priorBalance, &s.feeTipped)
 	assert.Equal(t, *expected, coinbaseBalance,
 		"coinbase should be priorBalance + FeeTipped (no delta, no double-count)")
@@ -698,7 +697,7 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 	require.NotNil(t, burntWrite, "finalize should produce burnt contract BalancePath write")
 
-	burntBalance := burntWrite.Val.(uint256.Int)
+	burntBalance := burntWrite.ValU256
 	// Burnt contract gets existing balance (500000) + FeeBurnt
 	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
 	assert.Equal(t, *expected, burntBalance,
@@ -718,7 +717,7 @@ func TestFinalizeTxSimple_NoCoinbaseInVersionMap(t *testing.T) {
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
 
-	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+	coinbaseBalance := coinbaseWrite.ValU256
 	assert.Equal(t, s.feeTipped, coinbaseBalance,
 		"coinbase should be 0 + FeeTipped when no prior balance in versionMap")
 }
@@ -760,7 +759,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Verify accumulated balance.
 		coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 		require.NotNil(t, coinbaseWrite, "TX %d: should have coinbase write", txIdx)
-		bal := coinbaseWrite.Val.(uint256.Int)
+		bal := coinbaseWrite.ValU256
 		expectedBal := new(uint256.Int).Mul(tipPerTx, uint256.NewInt(uint64(txIdx)))
 		assert.Equal(t, *expectedBal, bal,
 			"TX %d: coinbase should have accumulated %d tips", txIdx, txIdx)
@@ -793,18 +792,18 @@ func TestResolveStorageWrites_IBSvsSimple(t *testing.T) {
 	// (val50 not needed — it's only in the worker's stale originStorage)
 	// TX 0 writes: slotA=100, slotB=200 (unchanged), slotC=300 (new)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val200, Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotC, Val: val300, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val200, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotC, ValU256: val300, Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes: slotA=100 (same as TX 0 wrote — no-op relative to origin),
 	//              slotB=200 (unchanged from pre-block — no-op),
 	//              slotC=300 (same as TX 0 wrote — no-op relative to origin)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100, Version: state.Version{TxIndex: 1, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val200, Version: state.Version{TxIndex: 1, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotC, Val: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val200, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotC, ValU256: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}, true, "")
 
 	// --- Serial IBS path ---
@@ -826,10 +825,10 @@ func TestResolveStorageWrites_IBSvsSimple(t *testing.T) {
 	// slotB: dirty == origin → skipped by CollectorWrites.
 	collectorWrites := state.VersionedWrites{
 		// slotA: worker thought it changed (origin=50, dirty=100)
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100},
 		// slotB: NOT in CollectorWrites — worker correctly saw no change
 		// slotC: worker thought it changed (origin=0, dirty=300)
-		{Address: addr, Path: state.StoragePath, Key: slotC, Val: val300},
+		{Address: addr, Path: state.StoragePath, Key: slotC, ValU256: val300},
 	}
 
 	resolved := resolveStorageWrites(collectorWrites, vm, 1, 0, nil)
@@ -843,7 +842,7 @@ func TestResolveStorageWrites_IBSvsSimple(t *testing.T) {
 		if w.Path == state.StoragePath {
 			storageCount++
 			t.Errorf("unexpected storage write: addr=%x slot=%x val=%v (should be filtered as no-op)",
-				w.Address, w.Key, w.Val)
+				w.Address, w.Key, w.Val())
 		}
 	}
 
@@ -868,24 +867,24 @@ func TestResolveStorageWrites_StaleIncarnationNoOp(t *testing.T) {
 
 	// TX 0 writes slotA=100
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 incarnation 0: writes slotA=200, slotB=300
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val200, Version: state.Version{TxIndex: 1, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val200, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 incarnation 1 (re-execution): only writes slotA=100 (same as origin from TX 0)
 	// slotB is NOT written in incarnation 1 — stale entry from incarnation 0 remains
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100, Version: state.Version{TxIndex: 1, Incarnation: 1}},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100, Version: state.Version{TxIndex: 1, Incarnation: 1}},
 	}, true, "")
 
 	// CollectorWrites from incarnation 1 — only slotA
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100},
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100},
 	}
 
 	// incarnation=1 is the validated incarnation
@@ -920,22 +919,22 @@ func TestResolveStorageWrites_NoOpFilter(t *testing.T) {
 
 	// TX 0 writes slot1=100, slot2=200
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val200, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100, Version: state.Version{TxIndex: 0, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot2, ValU256: val200, Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes slot1=100 (same as TX 0 — no-op), slot2=300 (changed), slot3=300 (new)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100, Version: state.Version{TxIndex: 1, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slot3, Val: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot2, ValU256: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot3, ValU256: val300, Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}, true, "")
 
 	// CollectorWrites from TX 1's worker — includes all 3 slots
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100},
-		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val300},
-		{Address: addr, Path: state.StoragePath, Key: slot3, Val: val300},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100},
+		{Address: addr, Path: state.StoragePath, Key: slot2, ValU256: val300},
+		{Address: addr, Path: state.StoragePath, Key: slot3, ValU256: val300},
 	}
 
 	// resolveStorageWrites for TX 1
@@ -970,18 +969,18 @@ func TestResolveStorageWrites_StaleIncarnation(t *testing.T) {
 
 	// TX 5, incarnation 0: writes slot1=100 and slot2=200
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100, Version: state.Version{TxIndex: 5, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val200, Version: state.Version{TxIndex: 5, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100, Version: state.Version{TxIndex: 5, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot2, ValU256: val200, Version: state.Version{TxIndex: 5, Incarnation: 0}},
 	}, true, "")
 
 	// TX 5, incarnation 1: only writes slot1=100 (slot2 not written in re-execution)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100, Version: state.Version{TxIndex: 5, Incarnation: 1}},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100, Version: state.Version{TxIndex: 5, Incarnation: 1}},
 	}, true, "")
 
 	// CollectorWrites from incarnation 1 — only has slot1
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100},
 	}
 
 	// Resolve with incarnation=1 (the validated incarnation)
@@ -1007,13 +1006,13 @@ func TestResolveStorageWrites_SpeculativeExtra(t *testing.T) {
 
 	// Only slot1 was flushed to versionMap for TX 3
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100, Version: state.Version{TxIndex: 3, Incarnation: 0}},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100, Version: state.Version{TxIndex: 3, Incarnation: 0}},
 	}, true, "")
 
 	// CollectorWrites has both slot1 and slot2 (slot2 from speculative code path)
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot1, Val: val100},
-		{Address: addr, Path: state.StoragePath, Key: slot2, Val: val200},
+		{Address: addr, Path: state.StoragePath, Key: slot1, ValU256: val100},
+		{Address: addr, Path: state.StoragePath, Key: slot2, ValU256: val200},
 	}
 
 	resolved := resolveStorageWrites(collectorWrites, vm, 3, 0, nil)
@@ -1040,13 +1039,13 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 
 	// TX 0 writes slotA=100
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1068,13 +1067,13 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 
 	// TX 0 writes slotA=100
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes slotA=200 (changed from TX 0's 100)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val200,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val200,
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1084,7 +1083,7 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "changed storage write should be kept")
 	if storageCount > 0 {
-		v := result[0].Val.(uint256.Int)
+		v := result[0].ValU256
 		assert.Equal(t, val200, v, "should have resolved value 200")
 	}
 }
@@ -1099,7 +1098,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 
 	// TX 0 writes slotA=100 (no prior TX)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1123,15 +1122,15 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 
 	// TX 5 incarnation 0: writes slotA=100 and slotB=200
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 5, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val200,
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val200,
 			Version: state.Version{TxIndex: 5, Incarnation: 0}},
 	}, true, "")
 
 	// TX 5 incarnation 1: only writes slotA=100
 	inc1Writes := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 5, Incarnation: 1}},
 	}
 	vm.FlushVersionedWrites(inc1Writes, true, "")
@@ -1139,9 +1138,9 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 	// The WriteSet has BOTH incarnation 0 and 1 entries (versionMap doesn't clear old)
 	// But we pass incarnation=1 as the validated one
 	allWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 5, Incarnation: 1}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val200,
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val200,
 			Version: state.Version{TxIndex: 5, Incarnation: 0}}, // stale
 	}
 
@@ -1166,15 +1165,15 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 
 	// TX 0 wrote storage for this address (slots exist in versionMap)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.StoragePath, Key: slotB, Val: val200,
+		{Address: addr, Path: state.StoragePath, Key: slotB, ValU256: val200,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 self-destructs (val=true means actually destructed)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.SelfDestructPath, Val: true,
+		{Address: addr, Path: state.SelfDestructPath, ValBool: true,
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1191,7 +1190,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	// Verify DELETEs have zero values
 	for _, w := range result {
 		if w.Path == state.StoragePath {
-			v := w.Val.(uint256.Int)
+			v := w.ValU256
 			assert.True(t, v.IsZero(), "self-destruct storage DELETE should have zero value")
 		}
 	}
@@ -1204,26 +1203,26 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 
 	// TX 0 writes balance=100
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(100),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(100),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes balance=150 (accumulated from TX 0's 100 + delta)
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(150),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(150),
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}, true, "")
 
 	// Worker's WriteSet had stale balance=120 (from speculative execution)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(120),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(120),
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 
 	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	require.Equal(t, 1, len(result))
-	v := result[0].Val.(uint256.Int)
+	v := result[0].ValU256
 	assert.Equal(t, *uint256.NewInt(150), v,
 		"balance should be resolved from versionMap (150), not worker's stale value (120)")
 }
@@ -1234,9 +1233,9 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x16})
 
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.AddressPath, Val: &accounts.Account{},
+		{Address: addr, Path: state.AddressPath, ValAcc: &accounts.Account{},
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(100),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(100),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1272,7 +1271,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 
 	// TX 0 only writes storage — no balance/nonce/code changes
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1314,13 +1313,13 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 
 	// TX 0 writes slotA=100
 	vm.FlushVersionedWrites(state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}, true, "")
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op, will be filtered)
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slotA, Val: val100,
+		{Address: addr, Path: state.StoragePath, Key: slotA, ValU256: val100,
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1349,15 +1348,15 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 
 	// TX 0 creates a contract with nonce=1, balance=0, non-empty codeHash
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.CreateContractPath, Val: true,
+		{Address: addr, Path: state.CreateContractPath, ValBool: true,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(0),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(0),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.NoncePath, Val: uint64(1),
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(1),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.IncarnationPath, Val: uint64(1),
+		{Address: addr, Path: state.IncarnationPath, ValU64: uint64(1),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
-		{Address: addr, Path: state.CodeHashPath, Val: codeHash,
+		{Address: addr, Path: state.CodeHashPath, ValHash: codeHash,
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1387,7 +1386,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 
 	// TX 0 sends ETH to a new address — only BalancePath written
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(50000),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(50000),
 			Version: state.Version{TxIndex: 0, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1408,7 +1407,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	// Verify nonce is 0 (not missing)
 	for _, w := range result {
 		if w.Path == state.NoncePath {
-			assert.Equal(t, uint64(0), w.Val.(uint64), "nonce should be 0")
+			assert.Equal(t, uint64(0), w.ValU64, "nonce should be 0")
 		}
 	}
 }
@@ -1431,11 +1430,11 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	// (Balance=0, Nonce=0, CodeHash=empty). Serial deletes it via EIP-161.
 	// The WriteSet has BalancePath=0 from the TX that zeroed the balance.
 	writeSet := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(0),
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(0),
 			Version: state.Version{TxIndex: 5, Incarnation: 0}},
-		{Address: addr, Path: state.NoncePath, Val: uint64(0),
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(0),
 			Version: state.Version{TxIndex: 5, Incarnation: 0}},
-		{Address: addr, Path: state.CodeHashPath, Val: emptyCodeHash,
+		{Address: addr, Path: state.CodeHashPath, ValHash: emptyCodeHash,
 			Version: state.Version{TxIndex: 5, Incarnation: 0}},
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
@@ -1460,7 +1459,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	for _, w := range result {
 		if w.Address == addr {
 			if w.Path == state.SelfDestructPath {
-				if v, ok := w.Val.(bool); ok && v {
+				if w.ValBool {
 					hasDelete = true
 				}
 			}

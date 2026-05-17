@@ -160,7 +160,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 
 			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
-			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
+			vw := state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version}
+			vw.SetVal(op.val)
+			t.writeMap.Set(vw)
 		case otherType:
 			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:

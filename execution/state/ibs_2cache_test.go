@@ -49,7 +49,7 @@ func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKe
 	idx := make(map[AccountKey]any)
 	for _, w := range writes {
 		if w.Address == addr {
-			idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
+			idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val()
 		}
 	}
 	return idx

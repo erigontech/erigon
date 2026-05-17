@@ -138,16 +138,61 @@ func (s WriteSet) Set(v VersionedWrite) {
 	}
 }
 
-// UpdateVal updates the Val field of an existing entry. Returns true if the entry was found.
+// UpdateVal updates the path-typed value of an existing entry. Returns true
+// if the entry was found. The value is set via VersionedWrite.SetVal which
+// dispatches on the value type to the corresponding typed field.
 func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
 	if writes, ok := s[addr]; ok {
 		if v, ok := writes[key]; ok {
-			v.Val = val
+			v.SetVal(val)
 			writes[key] = v
 			return true
 		}
 	}
 	return false
+}
+
+// SetVal sets the path-corresponding typed field on vw from val.
+// Uses the dynamic type of val to dispatch; typed callers should set the
+// typed field directly (vw.ValU256 = balance, etc.) to skip the runtime
+// type switch.
+func (vw *VersionedWrite) SetVal(val any) {
+	switch v := val.(type) {
+	case uint256.Int:
+		vw.ValU256 = v
+	case uint64:
+		vw.ValU64 = v
+	case bool:
+		vw.ValBool = v
+	case []byte:
+		vw.ValBytes = v
+	case accounts.CodeHash:
+		vw.ValHash = v
+	case int:
+		vw.ValInt = v
+	case *accounts.Account:
+		vw.ValAcc = v
+	}
+}
+
+// SetVal mirrors VersionedWrite.SetVal for VersionedRead.
+func (vr *VersionedRead) SetVal(val any) {
+	switch v := val.(type) {
+	case uint256.Int:
+		vr.ValU256 = v
+	case uint64:
+		vr.ValU64 = v
+	case bool:
+		vr.ValBool = v
+	case []byte:
+		vr.ValBytes = v
+	case accounts.CodeHash:
+		vr.ValHash = v
+	case int:
+		vr.ValInt = v
+	case *accounts.Account:
+		vr.ValAcc = v
+	}
 }
 
 func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
@@ -177,31 +222,103 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 	}
 }
 
+// VersionedRead records a single read against the version map. Path
+// selects which typed field carries the value; the other fields are zero.
+// Use the Path-corresponding typed field directly (vr.ValU256 for Balance/
+// Storage, vr.ValU64 for Nonce/Incarnation, etc.) to avoid the any-box
+// of vr.Val(). Adding a new AccountPath whose value-type isn't already
+// covered by the union below is a compile-time error rather than a
+// runtime panic on the first read of the cell.
 type VersionedRead struct {
 	Address  accounts.Address
 	Path     AccountPath
 	Key      accounts.StorageKey
 	Source   ReadSource
 	Version  Version
-	Val      any
 	internal bool // when true, read is used for conflict detection only; excluded from BAL
+
+	// Path-typed payload. Reads via vr.Val() box; reads via the typed field
+	// are zero-alloc. The Storage and Balance paths share ValU256 because
+	// they're both uint256.Int; Nonce and Incarnation share ValU64.
+	ValU256  uint256.Int       // BalancePath, StoragePath
+	ValU64   uint64            // NoncePath, IncarnationPath
+	ValBool  bool              // SelfDestructPath, CreateContractPath
+	ValBytes []byte            // CodePath
+	ValHash  accounts.CodeHash // CodeHashPath
+	ValInt   int               // CodeSizePath
+	ValAcc   *accounts.Account // AddressPath
+}
+
+// Val returns the path-typed value as any, allocating one box per call.
+// Prefer the typed field (ValU256/ValU64/…) for hot consumers; this method
+// is for tracing and validation cross-checks that genuinely need an
+// untyped view.
+func (vr VersionedRead) Val() any {
+	switch vr.Path {
+	case BalancePath, StoragePath:
+		return vr.ValU256
+	case NoncePath, IncarnationPath:
+		return vr.ValU64
+	case SelfDestructPath, CreateContractPath:
+		return vr.ValBool
+	case CodePath:
+		return vr.ValBytes
+	case CodeHashPath:
+		return vr.ValHash
+	case CodeSizePath:
+		return vr.ValInt
+	case AddressPath:
+		return vr.ValAcc
+	}
+	return nil
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val()))
 }
 
+// VersionedWrite mirrors VersionedRead's union encoding for the write side.
+// See VersionedRead for the field-meaningful-by-Path contract.
 type VersionedWrite struct {
 	Address accounts.Address
 	Path    AccountPath
 	Key     accounts.StorageKey
 	Version Version
-	Val     any
 	Reason  tracing.BalanceChangeReason
+
+	ValU256  uint256.Int
+	ValU64   uint64
+	ValBool  bool
+	ValBytes []byte
+	ValHash  accounts.CodeHash
+	ValInt   int
+	ValAcc   *accounts.Account
 }
 
-func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s (%d.%d)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Version.TxIndex, vr.Version.Incarnation)
+// Val returns the path-typed value as any, boxing once per call. Prefer
+// the typed field for hot consumers.
+func (vw VersionedWrite) Val() any {
+	switch vw.Path {
+	case BalancePath, StoragePath:
+		return vw.ValU256
+	case NoncePath, IncarnationPath:
+		return vw.ValU64
+	case SelfDestructPath, CreateContractPath:
+		return vw.ValBool
+	case CodePath:
+		return vw.ValBytes
+	case CodeHashPath:
+		return vw.ValHash
+	case CodeSizePath:
+		return vw.ValInt
+	case AddressPath:
+		return vw.ValAcc
+	}
+	return nil
+}
+
+func (vw VersionedWrite) String() string {
+	return fmt.Sprintf("%x %s: %s (%d.%d)", vw.Address, AccountKey{Path: vw.Path, Key: vw.Key}, valueString(vw.Path, vw.Val()), vw.Version.TxIndex, vw.Version.Incarnation)
 }
 
 func valueString(path AccountPath, value any) string {
@@ -253,8 +370,8 @@ func (vr *versionedStateReader) TracePrefix() string {
 }
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(*accounts.Account); ok && account != nil {
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.ValAcc != nil {
+		if account := r.ValAcc; account != nil {
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
@@ -426,8 +543,8 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 }
 
 func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(*accounts.Account); ok {
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.ValAcc != nil {
+		if account := r.ValAcc; true {
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
@@ -448,8 +565,8 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 }
 
 func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok && r.Val != nil {
-		val := r.Val.(uint256.Int)
+	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok {
+		val := r.ValU256
 		return val, true, nil
 	}
 
@@ -489,8 +606,8 @@ func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error
 }
 
 func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
-		if code, ok := r.Val.([]byte); ok {
+	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.ValBytes != nil {
+		if code := r.ValBytes; true {
 			return code, nil
 		}
 	}
@@ -516,8 +633,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 }
 
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
-		if code, ok := r.Val.([]byte); ok {
+	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.ValBytes != nil {
+		if code := r.ValBytes; true {
 			return len(code), nil
 		}
 	}
@@ -541,8 +658,8 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 }
 
 func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		return r.Val.(*accounts.Account).Incarnation, nil
+	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.ValAcc != nil {
+		return r.ValAcc.Incarnation, nil
 	}
 
 	if vr.stateReader != nil {
@@ -564,32 +681,29 @@ type VersionedWrites []*VersionedWrite
 // through as-is.
 func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 	for _, w := range writes {
-		if w.Val == nil {
-			continue
-		}
 		address := w.Address.Value()
 
 		switch w.Path {
 		case BalancePath:
-			v := w.Val.(uint256.Int)
+			v := w.ValU256
 			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
 				Flags:   commitment.BalanceUpdate,
 				Balance: v,
 			})
 		case NoncePath:
-			v := w.Val.(uint64)
+			v := w.ValU64
 			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
 				Flags: commitment.NonceUpdate,
 				Nonce: v,
 			})
 		case CodeHashPath:
-			v := w.Val.(accounts.CodeHash)
+			v := w.ValHash
 			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
 				Flags:    commitment.CodeUpdate,
 				CodeHash: v.Value(),
 			})
 		case CodePath:
-			code := w.Val.([]byte)
+			code := w.ValBytes
 			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
 				Flags:    commitment.CodeUpdate,
 				CodeHash: crypto.Keccak256Hash(code),
@@ -597,7 +711,7 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 		case SelfDestructPath:
 			// Only emit DeleteUpdate when the account was actually self-destructed.
 			// SelfDestructPath=false means the account is NOT deleted (e.g., resurrection).
-			if destructed, ok := w.Val.(bool); ok && destructed {
+			if destructed := w.ValBool; destructed {
 				updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
 					Flags: commitment.DeleteUpdate,
 				})
@@ -607,7 +721,7 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 			composite := make([]byte, 20+32)
 			copy(composite, address[:])
 			copy(composite[20:], keyVal[:])
-			v := w.Val.(uint256.Int)
+			v := w.ValU256
 			vBytes := v.Bytes()
 			var u commitment.Update
 			u.StorageLen = int8(len(vBytes))
@@ -724,17 +838,11 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	if !ok {
 		return
 	}
-	staleRead, ok := balRead.Val.(uint256.Int)
-	if !ok {
-		return
-	}
+	staleRead := balRead.ValU256
 
 	for i, w := range stripped {
 		if w.Address == addr && w.Path == BalancePath {
-			staleWrite, ok := w.Val.(uint256.Int)
-			if !ok {
-				break
-			}
+			staleWrite := w.ValU256
 			// Remove the stale absolute write
 			stripped = append(stripped[:i], stripped[i+1:]...)
 			// Compute the TX's net effect on this balance
@@ -778,22 +886,22 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 				filtered = append(filtered, w)
 			}
 		}
-		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
+		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, ValBool: true})
 	}
 
 	for _, w := range writes {
 		if w.Address == addr && w.Path == BalancePath {
-			w.Val = val
+			w.ValU256 = val
 			w.Reason = reason
 			return writes
 		}
 	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
-		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
-		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
-		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
+		&VersionedWrite{Address: addr, Path: BalancePath, ValU256: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: NoncePath, ValU64: acc.Nonce},
+		&VersionedWrite{Address: addr, Path: IncarnationPath, ValU64: acc.Incarnation},
+		&VersionedWrite{Address: addr, Path: CodeHashPath, ValHash: acc.CodeHash},
 	)
 }
 
@@ -856,7 +964,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			if commited {
 				return zero, MapRead, sdVersion, nil
 			}
-			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
+			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.ValBool {
 				// Record the SelfDestructPath dependency so that
 				// ValidateVersion can verify the destruct is still
 				// valid.  Without this entry the readSet would be
@@ -872,7 +980,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					Key:     accounts.NilKey,
 					Source:  MapRead,
 					Version: sdVersion,
-					Val:     true,
+					ValBool: true,
 				})
 				return zero, MapRead, sdVersion, nil
 			}
@@ -905,7 +1013,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						}
 
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val))
+							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val()))
 						}
 
 						if s.versionedReads == nil {
@@ -918,10 +1026,10 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 
 			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
+				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val()))
 			}
 
-			val := vw.Val.(T)
+			val := vw.Val().(T)
 			return val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
 	}
@@ -933,10 +1041,10 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val()))
 				}
 
-				return pr.Val.(T), vr.Source, vr.Version, nil
+				return pr.Val().(T), vr.Source, vr.Version, nil
 			}
 
 			if vr.Version.TxIndex > s.dep {
@@ -975,7 +1083,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			return v, MapRead, vr.Version, nil
 		}
 
-		vr.Val = copyV(v)
+		setVRVal(&vr, copyV(v))
 
 	case MVReadResultDependency:
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
@@ -997,17 +1105,17 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
+						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val()))
 					}
 
-					return pr.Val.(T), ReadSetRead, pr.Version, nil
+					return pr.Val().(T), ReadSetRead, pr.Version, nil
 				}
 
 				if pr.Source == MapRead {
 					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
 						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
-							return pr.Val.(T), ReadSetRead, pr.Version, nil
+							return pr.Val().(T), ReadSetRead, pr.Version, nil
 						}
 					}
 
@@ -1040,7 +1148,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			// it from the DB — breaking deposit contract execution, etc.
 			if !commited && path != CodePath {
 				vr.Source = StorageRead
-				vr.Val = defaultV
+				setVRVal(&vr, defaultV)
 				if s.versionedReads == nil {
 					s.versionedReads = ReadSet{}
 				}
@@ -1066,7 +1174,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			if inc, incRes, incOk := s.versionMap.ReadIncarnation(addr, s.txIndex); incOk && incRes.Status() == MVReadResultDone {
 				var zero T
 				vr.Source = StorageRead
-				vr.Val = zero
+				setVRVal(&vr, zero)
 
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
@@ -1086,7 +1194,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					Key:     accounts.NilKey,
 					Source:  MapRead,
 					Version: incVersion,
-					Val:     inc,
+					ValU64:  inc,
 				})
 				return zero, StorageRead, UnknownVersion, nil
 			}
@@ -1123,7 +1231,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, v))
 		}
 
-		vr.Val = copyV(v)
+		setVRVal(&vr, copyV(v))
 
 	default:
 		return defaultV, UnknownSource, UnknownVersion, nil
@@ -1310,7 +1418,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// works across transactions, but they should not appear in
 			// the block access list.
 			if vr.Path == AddressPath {
-				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
+				if val := vr.ValAcc; val == nil {
 					return true
 				}
 			}
@@ -1518,7 +1626,7 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 		// to the slot (no prior tx wrote to it) and the written value equals
 		// the original read value, it's a no-op that should remain as a read.
 		if !hasStorageWrite(account.changes, vw.Key) {
-			if val, ok := vw.Val.(uint256.Int); ok {
+			if val := vw.ValU256; true {
 				if origVal, wasRead := account.storageReadValues[vw.Key]; wasRead && val.Eq(&origVal) {
 					return
 				}
@@ -1526,10 +1634,7 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 		}
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case BalancePath:
-		val, ok := vw.Val.(uint256.Int)
-		if !ok {
-			return
-		}
+		val := vw.ValU256
 		// Skip non-zero balance writes for selfdestructed accounts within the
 		// SAME transaction (e.g. priority fee applied during finalize of the
 		// selfdestructing tx). Balance writes from LATER transactions (e.g. a
@@ -1576,17 +1681,17 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint32)
 			return a.Eq(&b)
 		})
 	case NoncePath:
-		if val, ok := vw.Val.(uint64); ok {
+		if val := vw.ValU64; true {
 			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
 				return a == b
 			})
 		}
 	case CodePath:
-		if val, ok := vw.Val.([]byte); ok {
+		if val := vw.ValBytes; true {
 			account.code.recordWrite(accessIndex, val, bytes.Clone, bytes.Equal)
 		}
 	case SelfDestructPath:
-		if val, ok := vw.Val.(bool); ok && val {
+		if val := vw.ValBool; val {
 			account.selfDestructed = true
 			account.selfDestructedAt = accessIndex
 		}
@@ -1600,7 +1705,7 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 		case StoragePath:
 			// Record the original read value for net-zero detection.
 			// Only the first read for each slot is recorded (the original value).
-			if val, ok := vr.Val.(uint256.Int); ok {
+			if val := vr.ValU256; true {
 				if account.storageReadValues == nil {
 					account.storageReadValues = make(map[accounts.StorageKey]uint256.Int)
 				}
@@ -1613,7 +1718,7 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 			}
 			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 		case BalancePath:
-			if val, ok := vr.Val.(uint256.Int); ok {
+			if val := vr.ValU256; true {
 				// Record the initial (pre-block) balance for net-zero detection.
 				// Only set from the first read AND only before any writes have
 				// been recorded. A read that arrives after a write (e.g. the
@@ -1646,21 +1751,21 @@ func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
+			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.ValU256}},
 		}}
 		return
 	}
 
 	for _, slotChange := range ac.StorageChanges {
 		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.Val.(uint256.Int)})
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.ValU256})
 			return
 		}
 	}
 
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
+		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.ValU256}},
 	})
 }
 
