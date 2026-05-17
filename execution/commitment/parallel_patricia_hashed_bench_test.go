@@ -70,6 +70,7 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 
 func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 	ctx := context.Background()
+	b.ReportAllocs()
 	// b.Loop requires the timer to be running on entry, so each iteration ends
 	// with StartTimer to bracket the (untimed) teardown before the next check.
 	for b.Loop() {
@@ -91,6 +92,7 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
+	b.ReportAllocs()
 	for b.Loop() {
 		b.StopTimer()
 		ms := NewMockState(b)
@@ -118,7 +120,6 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 
 	b.Run("100K-AccountsOnly", func(b *testing.B) {
 		pk, updates := build100KAccountsCorpus(b)
-		b.ResetTimer()
 
 		b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
 		for _, w := range workers {
@@ -130,7 +131,6 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 
 	b.Run("500K-StorageHeavy", func(b *testing.B) {
 		pk, updates := build500KStorageHeavyCorpus(b)
-		b.ResetTimer()
 
 		b.Run("ModeDirect", func(b *testing.B) { runDirectBench(b, pk, updates) })
 		for _, w := range workers {
