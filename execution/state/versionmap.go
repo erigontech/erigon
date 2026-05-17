@@ -109,10 +109,12 @@ type AddressEntry struct {
 
 // putCell sets or updates a typed cell at txIdx. Caller must hold vm.mu.Lock().
 // Returns the (possibly newly-created) cell map for the caller to assign back
-// to its AddressEntry field. Write path is cold enough that the generic
-// closure-escape cost is tolerable; the hot Read path inlines descend
-// per-case instead.
-func putCell[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T) *btree.Map[int, *WriteCell[T]] {
+// to its AddressEntry field. `getCell` is the per-T pool fetcher (e.g.
+// getCellBalance for the BalancePath); it is a static function-value, so
+// passing it costs no allocation. The write path uses pool-supplied cells
+// instead of `&WriteCell[T]{...}` literals — Delete/DeleteAll return them
+// to the same pool for reuse across blocks.
+func putCell[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T, getCell func() *WriteCell[T]) *btree.Map[int, *WriteCell[T]] {
 	if cells == nil {
 		cells = &btree.Map[int, *WriteCell[T]]{}
 	}
@@ -123,10 +125,13 @@ func putCell[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address,
 		ci.flag = flag
 		ci.incarnation = incarnation
 		ci.Value = value
-		ci.boxed = value
 		return cells
 	}
-	cells.Set(txIdx, &WriteCell[T]{flag: flag, incarnation: incarnation, Value: value, boxed: value})
+	cell := getCell()
+	cell.flag = flag
+	cell.incarnation = incarnation
+	cell.Value = value
+	cells.Set(txIdx, cell)
 	return cells
 }
 
@@ -231,28 +236,28 @@ func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key a
 	}
 	switch path {
 	case AddressPath:
-		e.Address = putCell(e.Address, addr, path, v.TxIndex, v.Incarnation, flag, data.(*accounts.Account))
+		e.Address = putCell(e.Address, addr, path, v.TxIndex, v.Incarnation, flag, data.(*accounts.Account), getCellAccount)
 	case SelfDestructPath:
-		e.SelfDestruct = putCell(e.SelfDestruct, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool))
+		e.SelfDestruct = putCell(e.SelfDestruct, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool), getCellSelfDestruct)
 	case BalancePath:
-		e.Balance = putCell(e.Balance, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int))
+		e.Balance = putCell(e.Balance, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int), getCellBalance)
 	case NoncePath:
-		e.Nonce = putCell(e.Nonce, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64))
+		e.Nonce = putCell(e.Nonce, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64), getCellNonce)
 	case IncarnationPath:
-		e.Incarnation = putCell(e.Incarnation, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64))
+		e.Incarnation = putCell(e.Incarnation, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64), getCellIncarnation)
 	case CodePath:
-		e.Code = putCell(e.Code, addr, path, v.TxIndex, v.Incarnation, flag, data.([]byte))
+		e.Code = putCell(e.Code, addr, path, v.TxIndex, v.Incarnation, flag, data.([]byte), getCellCode)
 	case CodeHashPath:
-		e.CodeHash = putCell(e.CodeHash, addr, path, v.TxIndex, v.Incarnation, flag, data.(accounts.CodeHash))
+		e.CodeHash = putCell(e.CodeHash, addr, path, v.TxIndex, v.Incarnation, flag, data.(accounts.CodeHash), getCellCodeHash)
 	case CodeSizePath:
-		e.CodeSize = putCell(e.CodeSize, addr, path, v.TxIndex, v.Incarnation, flag, data.(int))
+		e.CodeSize = putCell(e.CodeSize, addr, path, v.TxIndex, v.Incarnation, flag, data.(int), getCellCodeSize)
 	case CreateContractPath:
-		e.CreateContract = putCell(e.CreateContract, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool))
+		e.CreateContract = putCell(e.CreateContract, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool), getCellCreateContract)
 	case StoragePath:
 		if e.Storage == nil {
 			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 		}
-		e.Storage[key] = putCell(e.Storage[key], addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int))
+		e.Storage[key] = putCell(e.Storage[key], addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int), getCellStorage)
 	default:
 		panic(fmt.Errorf("writeLocked: unknown path %v", path))
 	}
@@ -266,63 +271,63 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.Address = putCell(e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Address = putCell(e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct)
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.Balance = putCell(e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Balance = putCell(e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance)
 }
 
 func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.Nonce = putCell(e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Nonce = putCell(e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce)
 }
 
 func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation)
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value []byte, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.Code = putCell(e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Code = putCell(e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode)
 }
 
 func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash)
 }
 
 func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize)
 }
 
 func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	e := vm.entryOrCreate(addr)
-	e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract)
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
@@ -332,7 +337,7 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 	if e.Storage == nil {
 		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 	}
-	e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+	e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage)
 }
 
 // entryOrCreate looks up the AddressEntry for addr, creating it if absent.
@@ -681,7 +686,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case SelfDestructPath:
 		if e.SelfDestruct == nil {
@@ -698,7 +703,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case BalancePath:
 		if e.Balance == nil {
@@ -715,7 +720,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case NoncePath:
 		if e.Nonce == nil {
@@ -732,7 +737,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case IncarnationPath:
 		if e.Incarnation == nil {
@@ -749,7 +754,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case CodePath:
 		if e.Code == nil {
@@ -766,7 +771,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case CodeHashPath:
 		if e.CodeHash == nil {
@@ -783,7 +788,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case CodeSizePath:
 		if e.CodeSize == nil {
@@ -800,7 +805,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case CreateContractPath:
 		if e.CreateContract == nil {
@@ -817,7 +822,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	case StoragePath:
 		cells := e.Storage[key]
@@ -835,7 +840,7 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
 			}
-			res.value = fv.boxed
+			res.value = fv.Value
 		}
 	}
 	return
@@ -937,28 +942,28 @@ func (vm *VersionMap) flushVWLocked(vw *VersionedWrite, complete bool) {
 	addr := vw.Address
 	switch vw.Path {
 	case AddressPath:
-		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValAcc)
+		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValAcc, getCellAccount)
 	case SelfDestructPath:
-		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool)
+		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool, getCellSelfDestruct)
 	case BalancePath:
-		e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256)
+		e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256, getCellBalance)
 	case NoncePath:
-		e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64)
+		e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64, getCellNonce)
 	case IncarnationPath:
-		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64)
+		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64, getCellIncarnation)
 	case CodePath:
-		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBytes)
+		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBytes, getCellCode)
 	case CodeHashPath:
-		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValHash)
+		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValHash, getCellCodeHash)
 	case CodeSizePath:
-		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValInt)
+		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValInt, getCellCodeSize)
 	case CreateContractPath:
-		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool)
+		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool, getCellCreateContract)
 	case StoragePath:
 		if e.Storage == nil {
 			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 		}
-		e.Storage[vw.Key] = putCell(e.Storage[vw.Key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256)
+		e.Storage[vw.Key] = putCell(e.Storage[vw.Key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256, getCellStorage)
 	}
 }
 
@@ -1024,52 +1029,72 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 	case AddressPath:
 		if e.Address != nil {
 			hasField = true
-			e.Address.Delete(txIdx)
+			if c, ok := e.Address.Delete(txIdx); ok {
+				releaseCellAccount(c)
+			}
 		}
 	case SelfDestructPath:
 		if e.SelfDestruct != nil {
 			hasField = true
-			e.SelfDestruct.Delete(txIdx)
+			if c, ok := e.SelfDestruct.Delete(txIdx); ok {
+				releaseCellSelfDestruct(c)
+			}
 		}
 	case BalancePath:
 		if e.Balance != nil {
 			hasField = true
-			e.Balance.Delete(txIdx)
+			if c, ok := e.Balance.Delete(txIdx); ok {
+				releaseCellBalance(c)
+			}
 		}
 	case NoncePath:
 		if e.Nonce != nil {
 			hasField = true
-			e.Nonce.Delete(txIdx)
+			if c, ok := e.Nonce.Delete(txIdx); ok {
+				releaseCellNonce(c)
+			}
 		}
 	case IncarnationPath:
 		if e.Incarnation != nil {
 			hasField = true
-			e.Incarnation.Delete(txIdx)
+			if c, ok := e.Incarnation.Delete(txIdx); ok {
+				releaseCellIncarnation(c)
+			}
 		}
 	case CodePath:
 		if e.Code != nil {
 			hasField = true
-			e.Code.Delete(txIdx)
+			if c, ok := e.Code.Delete(txIdx); ok {
+				releaseCellCode(c)
+			}
 		}
 	case CodeHashPath:
 		if e.CodeHash != nil {
 			hasField = true
-			e.CodeHash.Delete(txIdx)
+			if c, ok := e.CodeHash.Delete(txIdx); ok {
+				releaseCellCodeHash(c)
+			}
 		}
 	case CodeSizePath:
 		if e.CodeSize != nil {
 			hasField = true
-			e.CodeSize.Delete(txIdx)
+			if c, ok := e.CodeSize.Delete(txIdx); ok {
+				releaseCellCodeSize(c)
+			}
 		}
 	case CreateContractPath:
 		if e.CreateContract != nil {
 			hasField = true
-			e.CreateContract.Delete(txIdx)
+			if c, ok := e.CreateContract.Delete(txIdx); ok {
+				releaseCellCreateContract(c)
+			}
 		}
 	case StoragePath:
 		if cells := e.Storage[key]; cells != nil {
 			hasField = true
-			cells.Delete(txIdx)
+			if c, ok := cells.Delete(txIdx); ok {
+				releaseCellStorage(c)
+			}
 		}
 	default:
 		panic(fmt.Errorf("Delete: unknown path %v", path))
@@ -1087,34 +1112,54 @@ func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 		return
 	}
 	if e.Address != nil {
-		e.Address.Delete(txIdx)
+		if c, ok := e.Address.Delete(txIdx); ok {
+			releaseCellAccount(c)
+		}
 	}
 	if e.SelfDestruct != nil {
-		e.SelfDestruct.Delete(txIdx)
+		if c, ok := e.SelfDestruct.Delete(txIdx); ok {
+			releaseCellSelfDestruct(c)
+		}
 	}
 	if e.Balance != nil {
-		e.Balance.Delete(txIdx)
+		if c, ok := e.Balance.Delete(txIdx); ok {
+			releaseCellBalance(c)
+		}
 	}
 	if e.Nonce != nil {
-		e.Nonce.Delete(txIdx)
+		if c, ok := e.Nonce.Delete(txIdx); ok {
+			releaseCellNonce(c)
+		}
 	}
 	if e.Incarnation != nil {
-		e.Incarnation.Delete(txIdx)
+		if c, ok := e.Incarnation.Delete(txIdx); ok {
+			releaseCellIncarnation(c)
+		}
 	}
 	if e.Code != nil {
-		e.Code.Delete(txIdx)
+		if c, ok := e.Code.Delete(txIdx); ok {
+			releaseCellCode(c)
+		}
 	}
 	if e.CodeHash != nil {
-		e.CodeHash.Delete(txIdx)
+		if c, ok := e.CodeHash.Delete(txIdx); ok {
+			releaseCellCodeHash(c)
+		}
 	}
 	if e.CodeSize != nil {
-		e.CodeSize.Delete(txIdx)
+		if c, ok := e.CodeSize.Delete(txIdx); ok {
+			releaseCellCodeSize(c)
+		}
 	}
 	if e.CreateContract != nil {
-		e.CreateContract.Delete(txIdx)
+		if c, ok := e.CreateContract.Delete(txIdx); ok {
+			releaseCellCreateContract(c)
+		}
 	}
 	for _, cells := range e.Storage {
-		cells.Delete(txIdx)
+		if c, ok := cells.Delete(txIdx); ok {
+			releaseCellStorage(c)
+		}
 	}
 }
 
@@ -1312,8 +1357,78 @@ type WriteCell[T any] struct {
 	flag        statusFlag
 	incarnation int
 	Value       T
-	boxed       any
 }
+
+// Per-T pools for *WriteCell[T]. Each VersionMap write goes through
+// putCellFromPool which retrieves a zeroed cell from the path-corresponding
+// pool; Delete/DeleteAll return cells to the same pool. The pools span
+// VersionMap lifetimes — a freed cell from block N is recycled into
+// block N+1's first write.
+//
+// Invariants:
+//   - Get returns a zeroed cell (we overwrite all fields immediately, so the
+//     prior contents are irrelevant; pool's New func returns a zero struct).
+//   - Put on slice-valued types (ValBytes / []byte for CodePath) must clear
+//     the slice header to avoid pinning bytecode in the pool entry —
+//     handled in releaseCellCode below. Other types are value-shaped and
+//     don't pin external memory.
+var (
+	cellPoolAccount        = sync.Pool{New: func() any { return &WriteCell[*accounts.Account]{} }}
+	cellPoolSelfDestruct   = sync.Pool{New: func() any { return &WriteCell[bool]{} }}
+	cellPoolBalance        = sync.Pool{New: func() any { return &WriteCell[uint256.Int]{} }}
+	cellPoolNonce          = sync.Pool{New: func() any { return &WriteCell[uint64]{} }}
+	cellPoolIncarnation    = sync.Pool{New: func() any { return &WriteCell[uint64]{} }}
+	cellPoolCode           = sync.Pool{New: func() any { return &WriteCell[[]byte]{} }}
+	cellPoolCodeHash       = sync.Pool{New: func() any { return &WriteCell[accounts.CodeHash]{} }}
+	cellPoolCodeSize       = sync.Pool{New: func() any { return &WriteCell[int]{} }}
+	cellPoolCreateContract = sync.Pool{New: func() any { return &WriteCell[bool]{} }}
+	cellPoolStorage        = sync.Pool{New: func() any { return &WriteCell[uint256.Int]{} }}
+)
+
+// getCellAccount and the family of getCell* helpers each fetch a typed
+// *WriteCell[T] from the per-path pool. Caller fills the fields before
+// inserting into a btree.
+func getCellAccount() *WriteCell[*accounts.Account] {
+	return cellPoolAccount.Get().(*WriteCell[*accounts.Account])
+}
+func getCellSelfDestruct() *WriteCell[bool] { return cellPoolSelfDestruct.Get().(*WriteCell[bool]) }
+func getCellBalance() *WriteCell[uint256.Int] {
+	return cellPoolBalance.Get().(*WriteCell[uint256.Int])
+}
+func getCellNonce() *WriteCell[uint64] { return cellPoolNonce.Get().(*WriteCell[uint64]) }
+func getCellIncarnation() *WriteCell[uint64] {
+	return cellPoolIncarnation.Get().(*WriteCell[uint64])
+}
+func getCellCode() *WriteCell[[]byte] { return cellPoolCode.Get().(*WriteCell[[]byte]) }
+func getCellCodeHash() *WriteCell[accounts.CodeHash] {
+	return cellPoolCodeHash.Get().(*WriteCell[accounts.CodeHash])
+}
+func getCellCodeSize() *WriteCell[int] { return cellPoolCodeSize.Get().(*WriteCell[int]) }
+func getCellCreateContract() *WriteCell[bool] {
+	return cellPoolCreateContract.Get().(*WriteCell[bool])
+}
+func getCellStorage() *WriteCell[uint256.Int] {
+	return cellPoolStorage.Get().(*WriteCell[uint256.Int])
+}
+
+// releaseCell* return a typed cell to its pool. For slice-valued types the
+// payload slice header is cleared to avoid pinning external memory.
+func releaseCellAccount(c *WriteCell[*accounts.Account]) {
+	c.Value = nil
+	cellPoolAccount.Put(c)
+}
+func releaseCellSelfDestruct(c *WriteCell[bool])  { cellPoolSelfDestruct.Put(c) }
+func releaseCellBalance(c *WriteCell[uint256.Int]) { cellPoolBalance.Put(c) }
+func releaseCellNonce(c *WriteCell[uint64])        { cellPoolNonce.Put(c) }
+func releaseCellIncarnation(c *WriteCell[uint64])  { cellPoolIncarnation.Put(c) }
+func releaseCellCode(c *WriteCell[[]byte]) {
+	c.Value = nil // unpin bytecode
+	cellPoolCode.Put(c)
+}
+func releaseCellCodeHash(c *WriteCell[accounts.CodeHash])  { cellPoolCodeHash.Put(c) }
+func releaseCellCodeSize(c *WriteCell[int])                { cellPoolCodeSize.Put(c) }
+func releaseCellCreateContract(c *WriteCell[bool])         { cellPoolCreateContract.Put(c) }
+func releaseCellStorage(c *WriteCell[uint256.Int])          { cellPoolStorage.Put(c) }
 
 type Version struct {
 	BlockNum    uint64
