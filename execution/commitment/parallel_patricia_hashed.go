@@ -302,7 +302,7 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 	pu.minSplitKeys = p.minSplitKeys
 	if err := pu.Prepare(prepareCtx); err != nil {
-		return nil, fmt.Errorf("parallel commitment prepare: %w", err)
+		return nil, fmt.Errorf("[%s] parallel commitment prepare: %w", logPrefix, err)
 	}
 
 	// Reject multi-bucket no-split configurations: without any split-point,
@@ -310,7 +310,7 @@ func (p *ParallelPatriciaHashed) Process(
 	// touched, producing M mutually-inconsistent root states. The barrier
 	// protocol relies on at least one shared split-point to merge them.
 	if len(pu.splitPoints) == 0 && len(pu.leafQueue) > 1 {
-		return nil, fmt.Errorf("ParallelPatriciaHashed: %d leafTasks emerged with no split-points; multi-bucket merging requires a Task 10 root barrier", len(pu.leafQueue))
+		return nil, fmt.Errorf("[%s] ParallelPatriciaHashed: %d leafTasks emerged with no split-points; multi-bucket merging requires a Task 10 root barrier", logPrefix, len(pu.leafQueue))
 	}
 
 	if warmuper != nil {
@@ -352,6 +352,16 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	if waitErr := g.Wait(); waitErr != nil {
+		// Workers may have already appended partial deferred updates and one
+		// may have staged a pendingRoot via CAS before another sibling failed.
+		// Discard both: a retry that reused pu would re-apply stale deferred
+		// branches against the previous-attempt prev values, and an
+		// intermediate RootHash() read would surface a root that was never
+		// persisted.
+		pu.deferredMu.Lock()
+		pu.deferredCombined = pu.deferredCombined[:0]
+		pu.deferredMu.Unlock()
+		p.pendingRoot.Store(nil)
 		return nil, waitErr
 	}
 
@@ -391,7 +401,6 @@ func (p *ParallelPatriciaHashed) Process(
 		if warmuper != nil {
 			warmuper.DrainPending()
 		}
-		_ = logPrefix
 		return out, nil
 	}
 
@@ -399,7 +408,7 @@ func (p *ParallelPatriciaHashed) Process(
 	// has at least one leafTask (we returned early on empty Updates), and the
 	// barrier protocol guarantees the last-finisher of the topmost split-point
 	// folds to root.
-	return nil, errors.New("ParallelPatriciaHashed: no worker published the root hash")
+	return nil, fmt.Errorf("[%s] ParallelPatriciaHashed: no worker published the root hash", logPrefix)
 }
 
 // acquirePrepareContext returns a PatriciaContext to use during Prepare. The

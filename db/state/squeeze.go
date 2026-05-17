@@ -951,9 +951,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		parallel := statecfg.ExperimentalParallelCommitment
 		concurrent := statecfg.ExperimentalConcurrentCommitment
 		trieVariant := commitment.VariantHexPatriciaTrie
-		if concurrent {
+		switch {
+		case parallel:
+			trieVariant = commitment.VariantParallelHexPatricia
+		case concurrent:
 			trieVariant = commitment.VariantConcurrentHexPatricia
 		}
 
@@ -988,7 +992,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if concurrent {
+			if concurrent || parallel {
 				domains.EnableParaTrieDB(rwDb)
 			}
 

@@ -354,6 +354,8 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			trieState, err = trie.EncodeCurrentState(nil)
 		case *commitment.ConcurrentPatriciaHashed:
 			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
+		case *commitment.ParallelPatriciaHashed:
+			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
 		}
 		if err != nil {
 			log.Warn("[commitment] failed to encode trie state for trace", "err", err)
