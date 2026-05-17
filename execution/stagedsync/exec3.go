@@ -811,21 +811,53 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	// Open a thread-local roTx for domain reads during commitment.
-	// The rwTx (applyTx) is only needed for stage updates above.
-	commitRoTx, err := cfg.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return false, times, fmt.Errorf("commitment: open roTx: %w", err)
-	}
-	defer commitRoTx.Rollback()
-
-	// Get current txNum from the block being committed
-	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
+	// Use applyTx (the block overlay) for both the Max() lookup and the
+	// ComputeCommitment call. The previous code opened a separate
+	// commitRoTx via cfg.db.BeginTemporalRo(ctx) as a "thread-local roTx
+	// for domain reads during commitment" — needed for the parallel
+	// commitment goroutine's view-isolation, but BROKEN for the serial
+	// path: the separate roTx doesn't see writes accumulating in the
+	// SharedDomains block overlay (which is what applyTx is).
+	//
+	// Specifically: CL → ExecModule.InsertBlocks writes the per-block
+	// body to sd.BlockOverlay() (the overlay) via WriteRawBodyIfNotExists,
+	// NOT to MDBX kv.BlockBody directly. Those overlay writes are only
+	// flushed to MDBX at FCU commit time (CommitCycle). Between
+	// InsertBlocks and the next commit, the body lives ONLY in the
+	// overlay — which means applyTx can see it but a separately-opened
+	// commitRoTx cannot.
+	//
+	// When commitRoTx was passed to txNumsReader.Max(blockNum), the
+	// BlockReader-aware MaxTxNum fallback path
+	// (txBlockIndexWithBlockReader.MaxTxNum → CanonicalBodyForStorage)
+	// couldn't find the body via commitRoTx → MaxTxNum returned
+	// (0, false, nil) → MaxWithCursor's outer fallback to c.Last()
+	// returned the frozen-tip's max-txnum. That stale value was then
+	// encoded into KeyCommitmentState alongside the advanced blockNum,
+	// producing an internally-inconsistent pair. SeekCommitment on
+	// next exec entry read the stale pair, restoreTxNum re-derived
+	// blockNum via FindBlockNum(staleTxNum) → low block, exec retried
+	// from there against already-advanced state → "nonce too low" /
+	// "too far unwind" retry loop.
+	//
+	// Reverting to applyTx (matching `main`) fixes both the Max() lookup
+	// and the ComputeCommitment write side. applyTx has the overlay's
+	// body writes; CanonicalBodyForStorage(applyTx, ...) finds them;
+	// Max() returns the correct end-of-block txnum; the saved
+	// commitment-state pair is internally consistent.
+	//
+	// The original commitRoTx design was introduced for parallel
+	// commitment goroutine isolation (commit b72aa7b4f7). The parallel
+	// path has its own commit-compute flow with its own roTx; the
+	// serial path doesn't need the separation and was broken by the
+	// shared code path. If a future change re-introduces the parallel
+	// commit-compute through this function, that path needs its own
+	// tx-selection handling — `parallel` is already a parameter here.
+	blockTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
 	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
