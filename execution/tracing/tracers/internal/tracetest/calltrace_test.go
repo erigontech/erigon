@@ -224,6 +224,328 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 	}
 }
 
+// evmLog0 is a 5-byte EVM snippet that emits a zero-topic, zero-data LOG0.
+var evmLog0 = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+
+// evmRevert is a 5-byte EVM snippet that REVERTs with no return data.
+var evmRevert = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+
+// evmCallTo returns a 34-byte EVM snippet that CALLs a 20-byte address whose last byte is addr.
+// The return value is discarded (POP).
+func evmCallTo(addr byte) []byte {
+	return []byte{
+		byte(vm.PUSH1), 0x00, // retSize
+		byte(vm.PUSH1), 0x00, // retOffset
+		byte(vm.PUSH1), 0x00, // argsSize
+		byte(vm.PUSH1), 0x00, // argsOffset
+		byte(vm.PUSH1), 0x00, // value
+		byte(vm.PUSH20),
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, addr,
+		byte(vm.GAS), byte(vm.CALL),
+		byte(vm.POP),
+	}
+}
+
+// TestCallTracerWithLogPositionAfterRevert verifies that the position field in callTracer logs
+// correctly counts a reverted subcall:
+//   - LOG_A emitted before the subcall → position 0x0
+//   - CALL to addrB which REVERTs (recorded in calls[] even on revert)
+//   - LOG_B emitted after the reverted subcall → position 0x1
+func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
+	var (
+		addrA = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		addrB = common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	)
+
+	codeB := evmRevert
+
+	codeA := evmLog0
+	codeA = append(codeA, evmCallTo(0xbb)...)
+	codeA = append(codeA, evmLog0...)
+	codeA = append(codeA, byte(vm.STOP))
+
+	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
+		GasPrice: *uint256.NewInt(0),
+		CommonTx: types.CommonTx{
+			GasLimit: 100000,
+			To:       &addrA,
+		},
+	})
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	origin, _ := signer.Sender(tx)
+	txContext := evmtypes.TxContext{
+		Origin:   origin,
+		GasPrice: *uint256.NewInt(1),
+	}
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  *uint256.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+	}
+	alloc := types.GenesisAlloc{
+		addrA: types.GenesisAccount{Nonce: 1, Code: codeA},
+		addrB: types.GenesisAccount{Nonce: 1, Code: codeB},
+		origin.Value(): types.GenesisAccount{
+			Nonce:   0,
+			Balance: big.NewInt(500000000000000),
+		},
+	}
+	rules := context.Rules(chainspec.Mainnet.Config)
+	m := execmoduletester.New(t)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+
+	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
+	if err != nil {
+		t.Fatalf("failed to create call tracer: %v", err)
+	}
+	statedb.SetHooks(tracer.Hooks)
+	evm := vm.NewEVM(context, txContext, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	msg, err := tx.AsMessage(*signer, nil, rules)
+	if err != nil {
+		t.Fatalf("failed to prepare transaction for tracing: %v", err)
+	}
+	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	vmRet, err := st.Execute(true /* refunds */, false /* gasBailout */)
+	if err != nil {
+		t.Fatalf("failed to execute transaction: %v", err)
+	}
+	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+
+	res, err := tracer.GetResult()
+	if err != nil {
+		t.Fatalf("failed to retrieve trace result: %v", err)
+	}
+	var result callTrace
+	if err := json.Unmarshal(res, &result); err != nil {
+		t.Fatalf("failed to unmarshal trace: %v", err)
+	}
+
+	require.Len(t, result.Logs, 2, "expected 2 logs in top frame")
+	require.Equal(t, hexutil.Uint(0), result.Logs[0].Position, "LOG_A: emitted before subcall, position should be 0x0")
+	require.Equal(t, hexutil.Uint(1), result.Logs[1].Position, "LOG_B: emitted after reverted subcall, position should be 0x1")
+	require.Len(t, result.Calls, 1, "expected 1 subcall")
+	require.Equal(t, "execution reverted", result.Calls[0].Error, "subcall should be reverted")
+}
+
+// TestCallTracerWithLogPositionMixedSubcalls verifies that position counts both successful
+// and reverted subcalls:
+//   - LOG_A before any subcall → position 0x0
+//   - CALL addrB (succeeds) → calls[] len becomes 1
+//   - CALL addrC (reverts) → calls[] len becomes 2
+//   - LOG_B after both → position 0x2
+func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
+	var (
+		addrA = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		addrB = common.HexToAddress("0x00000000000000000000000000000000000000bb")
+		addrC = common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	)
+
+	codeB := []byte{byte(vm.STOP)} // succeeds
+	codeC := evmRevert
+
+	codeA := evmLog0
+	codeA = append(codeA, evmCallTo(0xbb)...)
+	codeA = append(codeA, evmCallTo(0xcc)...)
+	codeA = append(codeA, evmLog0...)
+	codeA = append(codeA, byte(vm.STOP))
+
+	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
+		GasPrice: *uint256.NewInt(0),
+		CommonTx: types.CommonTx{GasLimit: 100000, To: &addrA},
+	})
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	origin, _ := signer.Sender(tx)
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  *uint256.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+	}
+	alloc := types.GenesisAlloc{
+		addrA: types.GenesisAccount{Nonce: 1, Code: codeA},
+		addrB: types.GenesisAccount{Nonce: 1, Code: codeB},
+		addrC: types.GenesisAccount{Nonce: 1, Code: codeC},
+		origin.Value(): types.GenesisAccount{
+			Nonce:   0,
+			Balance: big.NewInt(500000000000000),
+		},
+	}
+	rules := context.Rules(chainspec.Mainnet.Config)
+	m := execmoduletester.New(t)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+
+	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
+	if err != nil {
+		t.Fatalf("failed to create call tracer: %v", err)
+	}
+	statedb.SetHooks(tracer.Hooks)
+	evm := vm.NewEVM(context, evmtypes.TxContext{Origin: origin, GasPrice: *uint256.NewInt(1)}, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	msg, err := tx.AsMessage(*signer, nil, rules)
+	if err != nil {
+		t.Fatalf("failed to prepare transaction for tracing: %v", err)
+	}
+	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	vmRet, err := st.Execute(true, false)
+	if err != nil {
+		t.Fatalf("failed to execute transaction: %v", err)
+	}
+	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+
+	res, err := tracer.GetResult()
+	if err != nil {
+		t.Fatalf("failed to retrieve trace result: %v", err)
+	}
+	var result callTrace
+	if err := json.Unmarshal(res, &result); err != nil {
+		t.Fatalf("failed to unmarshal trace: %v", err)
+	}
+
+	require.Len(t, result.Logs, 2, "expected 2 logs in top frame")
+	require.Equal(t, hexutil.Uint(0), result.Logs[0].Position, "LOG_A: before any subcall, position should be 0x0")
+	require.Equal(t, hexutil.Uint(2), result.Logs[1].Position, "LOG_B: after success+revert subcalls, position should be 0x2")
+	require.Len(t, result.Calls, 2, "expected 2 subcalls")
+	require.Empty(t, result.Calls[0].Error, "first subcall (B) should succeed")
+	require.Equal(t, "execution reverted", result.Calls[1].Error, "second subcall (C) should revert")
+}
+
+// TestCallTracerWithLogPositionInCreate verifies that position is tracked correctly inside
+// a CREATE frame:
+//   - Factory (addrA) runs CREATE with init code that:
+//   - emits LOG_A → position 0x0 (no subcalls yet)
+//   - CALLs addrC (succeeds)
+//   - emits LOG_B → position 0x1
+func TestCallTracerWithLogPositionInCreate(t *testing.T) {
+	var (
+		addrA = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		addrC = common.HexToAddress("0x00000000000000000000000000000000000000cc")
+	)
+
+	// Init code: LOG_A, CALL addrC (succeeds), LOG_B, RETURN empty runtime
+	initCode := evmLog0
+	initCode = append(initCode, evmCallTo(0xcc)...)
+	initCode = append(initCode, evmLog0...)
+	initCode = append(initCode, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN))
+	initLen := byte(len(initCode))
+
+	// Factory code (15 bytes): CODECOPY init code into memory, then CREATE
+	//   CODECOPY(destOffset=0, codeOffset=factoryLen, size=initLen)
+	//   CREATE(value=0, offset=0, size=initLen)
+	factoryLen := byte(15) // length of the factory code itself
+	codeA := []byte{
+		byte(vm.PUSH1), initLen, // size
+		byte(vm.PUSH1), factoryLen, // offset of init code in codeA
+		byte(vm.PUSH1), 0x00, // memory dest
+		byte(vm.CODECOPY),
+		byte(vm.PUSH1), initLen, // size
+		byte(vm.PUSH1), 0x00, // memory offset
+		byte(vm.PUSH1), 0x00, // value
+		byte(vm.CREATE),
+		byte(vm.STOP),
+	}
+	codeA = append(codeA, initCode...)
+
+	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
+		GasPrice: *uint256.NewInt(0),
+		CommonTx: types.CommonTx{GasLimit: 200000, To: &addrA},
+	})
+	if err != nil {
+		t.Fatalf("err %v", err)
+	}
+	origin, _ := signer.Sender(tx)
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  *uint256.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+	}
+	alloc := types.GenesisAlloc{
+		addrA: types.GenesisAccount{Nonce: 1, Code: codeA},
+		addrC: types.GenesisAccount{Nonce: 1, Code: []byte{byte(vm.STOP)}},
+		origin.Value(): types.GenesisAccount{
+			Nonce:   0,
+			Balance: big.NewInt(500000000000000),
+		},
+	}
+	rules := context.Rules(chainspec.Mainnet.Config)
+	m := execmoduletester.New(t)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+
+	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
+	if err != nil {
+		t.Fatalf("failed to create call tracer: %v", err)
+	}
+	statedb.SetHooks(tracer.Hooks)
+	evm := vm.NewEVM(context, evmtypes.TxContext{Origin: origin, GasPrice: *uint256.NewInt(1)}, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	msg, err := tx.AsMessage(*signer, nil, rules)
+	if err != nil {
+		t.Fatalf("failed to prepare transaction for tracing: %v", err)
+	}
+	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	vmRet, err := st.Execute(true, false)
+	if err != nil {
+		t.Fatalf("failed to execute transaction: %v", err)
+	}
+	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+
+	res, err := tracer.GetResult()
+	if err != nil {
+		t.Fatalf("failed to retrieve trace result: %v", err)
+	}
+	var result callTrace
+	if err := json.Unmarshal(res, &result); err != nil {
+		t.Fatalf("failed to unmarshal trace: %v", err)
+	}
+
+	require.Len(t, result.Calls, 1, "expected CREATE subcall from factory")
+	createFrame := result.Calls[0]
+	require.Equal(t, "CREATE", createFrame.Type, "subcall type should be CREATE")
+	require.Len(t, createFrame.Logs, 2, "expected 2 logs inside CREATE frame")
+	require.Equal(t, hexutil.Uint(0), createFrame.Logs[0].Position, "LOG_A in CREATE: before subcall, position should be 0x0")
+	require.Equal(t, hexutil.Uint(1), createFrame.Logs[1].Position, "LOG_B in CREATE: after subcall, position should be 0x1")
+}
+
 func BenchmarkTracers(b *testing.B) {
 	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
 	if err != nil {
