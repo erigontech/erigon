@@ -93,13 +93,30 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
 	b.ReportAllocs()
+	// pph lives across iterations: production usage is a long-lived instance
+	// servicing many blocks, so the worker pool gets to actually reuse hph
+	// instances. Re-creating pph per iteration (with .Release() dropping the
+	// pool) would amortize zero work.
+	var pph *ParallelPatriciaHashed
+	defer func() {
+		if pph != nil {
+			pph.Release()
+		}
+	}()
 	for b.Loop() {
 		b.StopTimer()
 		ms := NewMockState(b)
 		ms.SetConcurrentCommitment(true)
 		require.NoError(b, ms.applyPlainUpdates(pk, updates))
-		pph := NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
-		pph.SetNumWorkers(workers)
+		if pph == nil {
+			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)
+			pph.SetNumWorkers(workers)
+		} else {
+			// Re-wire MockState dependencies without dropping the worker pool.
+			// pph.Reset()/Release() would call resetPool() and defeat the experiment.
+			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
+			pph.ResetContext(ms)
+		}
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
 		b.StartTimer()
 
@@ -108,7 +125,6 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 		b.StopTimer()
 		require.NoError(b, err)
 		upds.Close()
-		pph.Release()
 		b.StartTimer()
 	}
 }
