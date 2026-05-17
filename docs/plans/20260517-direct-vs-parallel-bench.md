@@ -241,10 +241,10 @@ On an 8-core or 4-core machine the matrix is correspondingly smaller (dedup).
 **Files:**
 - Modify: `execution/commitment/agents.md` (add a short perf snapshot)
 
-- [ ] run a real bench: `go test -run=^$ -bench=Benchmark_Commitment_DirectVsParallel -benchtime=3x ./execution/commitment/ | tee /tmp/parallel-bench-sample.txt` (3 iterations to smooth noise without taking forever)
-- [ ] append a short perf-snapshot section to `execution/commitment/agents.md` — date, machine description (CPU + cores), Go version, and a one-paragraph summary expressed as ratios (e.g. "ModeParallel-w<NumCPU> on 500K-StorageHeavy is ~Nx faster than ModeDirect; w1 is ~Mx slower than ModeDirect due to coordination overhead"). Raw ns/op numbers age badly across hardware and Go versions, but ratios on one machine convey the shape and resist rot.
-- [ ] `git add execution/commitment/parallel_patricia_hashed_bench_test.go execution/commitment/agents.md`
-- [ ] `git commit -m "commitment: add ModeDirect vs ModeParallel benchmark"` per CLAUDE.md commit-prefix convention
+- [x] run a real bench: `go test -run=^$ -bench=Benchmark_Commitment_DirectVsParallel -benchtime=3x ./execution/commitment/ | tee /tmp/parallel-bench-sample.txt` (3 iterations to smooth noise without taking forever)
+- [x] append a short perf-snapshot section to `execution/commitment/agents.md` — date, machine description (CPU + cores), Go version, and a one-paragraph summary expressed as ratios (e.g. "ModeParallel-w<NumCPU> on 500K-StorageHeavy is ~Nx faster than ModeDirect; w1 is ~Mx slower than ModeDirect due to coordination overhead"). Raw ns/op numbers age badly across hardware and Go versions, but ratios on one machine convey the shape and resist rot.
+- [x] `git add execution/commitment/parallel_patricia_hashed_bench_test.go execution/commitment/agents.md`
+- [x] `git commit -m "commitment: add ModeDirect vs ModeParallel benchmark"` per CLAUDE.md commit-prefix convention
 
 ### Task 4: Final — move plan to completed/
 
