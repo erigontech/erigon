@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -79,6 +82,81 @@ rwloop does:
 
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
+
+// Per-block CPU profile, gated on env. Run with PROFILE_BLOCK=<block-number>
+// and (optionally) PROFILE_DIR=<dir> to capture pprof.cpu samples for the
+// execution of one specific block. The default 60s harness pprof captures a
+// ~65ms TEST block in a 60s window — 99.9% idle samples drown the signal.
+// Per-block scope eliminates the idle window: the profile file contains only
+// samples taken while the target block is executing.
+//
+// Output: <PROFILE_DIR>/profile_block_<num>.cpu (default dir /tmp).
+//
+// Start is invoked from the per-block exec-start markers (execStarted ts);
+// stop from the block-completed marker. Concurrent block execution is OK in
+// principle but the diagnostic targets the single-block fork-validation case
+// used by the bench harness.
+var (
+	profileBlockNum  uint64 // 0 = disabled
+	profileBlockDir  string
+	profileBlockMu   sync.Mutex
+	profileBlockOpen *os.File
+)
+
+func init() {
+	if s := os.Getenv("PROFILE_BLOCK"); s != "" {
+		if n, err := strconv.ParseUint(s, 10, 64); err == nil {
+			profileBlockNum = n
+		}
+	}
+	profileBlockDir = os.Getenv("PROFILE_DIR")
+	if profileBlockDir == "" {
+		profileBlockDir = "/tmp"
+	}
+}
+
+// startBlockProfile begins a CPU profile if blockNum matches PROFILE_BLOCK.
+// Idempotent across concurrent block executors — the first matching call
+// opens the profile, subsequent calls are no-ops.
+func startBlockProfile(blockNum uint64) {
+	if profileBlockNum == 0 || blockNum != profileBlockNum {
+		return
+	}
+	profileBlockMu.Lock()
+	defer profileBlockMu.Unlock()
+	if profileBlockOpen != nil {
+		return // already started
+	}
+	path := filepath.Join(profileBlockDir, fmt.Sprintf("profile_block_%d.cpu", blockNum))
+	f, err := os.Create(path)
+	if err != nil {
+		log.Warn("[PROFILE_BLOCK] failed to create profile file", "path", path, "err", err)
+		return
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		log.Warn("[PROFILE_BLOCK] StartCPUProfile failed", "err", err)
+		_ = f.Close()
+		return
+	}
+	profileBlockOpen = f
+	log.Info("[PROFILE_BLOCK] CPU profile started", "block", blockNum, "path", path)
+}
+
+// stopBlockProfile finalises the CPU profile when blockNum matches.
+func stopBlockProfile(blockNum uint64) {
+	if profileBlockNum == 0 || blockNum != profileBlockNum {
+		return
+	}
+	profileBlockMu.Lock()
+	defer profileBlockMu.Unlock()
+	if profileBlockOpen == nil {
+		return
+	}
+	pprof.StopCPUProfile()
+	_ = profileBlockOpen.Close()
+	log.Info("[PROFILE_BLOCK] CPU profile stopped", "block", blockNum, "path", profileBlockOpen.Name())
+	profileBlockOpen = nil
+}
 
 type parallelExecutor struct {
 	txExecutor
@@ -883,6 +961,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
+				stopBlockProfile(blockResult.BlockNum)
 				// Snapshot the just-completed block's changeset BEFORE sending the
 				// blockResult, so that the commitment calculator (which consumes
 				// blockResults on a separate goroutine) can find this block's
@@ -956,6 +1035,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// then installs it lazily on the block's first apply.
 				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
+				startBlockProfile(blockExecutor.blockNum)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
 			}
@@ -1057,6 +1137,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 	if scheduleable != nil {
 		pe.blockExecMetrics.BlockCount.Add(1)
+		startBlockProfile(scheduleable.blockNum)
 		scheduleable.execStarted = time.Now()
 		scheduleable.scheduleExecution(ctx, pe)
 	}
@@ -1247,6 +1328,7 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 		return
 	}
 	pe.blockExecMetrics.BlockCount.Add(1)
+	startBlockProfile(next.blockNum)
 	next.execStarted = time.Now()
 	next.scheduleExecution(ctx, pe)
 }
