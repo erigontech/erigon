@@ -42,6 +42,16 @@ Before committing, always verify changes with: `make lint && make erigon integra
 ./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
 ```
 
+## Test skips — banned
+
+**Never add `t.Skip` (or `SkipLoad`, or any equivalent skip mechanism) unless the user explicitly asks for it in this turn.** A failing test is a real failure that must be diagnosed and fixed. Skipping it hides the failure and pushes the cost onto whoever later removes the skip — at which point the underlying bug is still there and now also surprises them. Concrete example: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` that had been documenting a known parallel-exec SD/CREATE2-reincarnation bug; the underlying bug had never been fixed, so its CI failures suddenly surfaced across multiple downstream PRs. Skipping reduces the effectiveness of the CI process: it converts a loud signal ("this is broken") into silence.
+
+**Never offer skip as an option in user-facing suggestions** (e.g., do not include "add `t.Skip` to unblock CI" in option menus). If a test is blocking CI, the answer is "fix it" or "track it as a known failure with explicit acknowledgement that the underlying bug remains" — never silently mute it.
+
+This applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, removing tests from a runner matrix without a tracking issue, etc.
+
+The only acceptable workflow when a test must temporarily not run: user explicitly asks for it in the current turn, the skip carries a comment with a linked tracking issue, and the skip is reverted as soon as the underlying bug is fixed.
+
 ## Conventions
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
