@@ -178,11 +178,11 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	var wg errgroup.Group
 
-	// BAL is sourced from the in-memory balcache (populated by
-	// EngineServer.HandleNewPayload on receipt). The bal-cache architecture
-	// removes the BAL from chaindata entirely; cache miss is a clean signal
-	// that BAL prefetch is not available for this block — fall through to
-	// per-transaction warming.
+	// BAL source = the in-memory balcache (populated by
+	// EngineServer.HandleNewPayload on receipt). The chaindata
+	// kv.BlockAccessList table no longer exists; cache miss is a clean
+	// signal that BAL prefetch is not available for this block — fall
+	// through to per-transaction warming below.
 	var bal types.BlockAccessList
 	if header != nil {
 		if data, ok := balcache.CachedBlockAccessList(header.Hash()); ok && len(data) > 0 {

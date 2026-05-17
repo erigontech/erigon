@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -73,13 +73,13 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isE
 		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	headerBALHash := *h.BlockAccessListHash
-	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
-	if err != nil {
-		return fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
-	}
-	// BAL data may not be stored for blocks downloaded via backward
-	// block downloader (p2p sync) since it does not carry BAL sidecars.
-	// Remove after eth/71 has been implemented.
+	// BALs are cache-only (see db/rawdb/balcache.go). The sidecar BAL from
+	// engine_newPayload is cached by execmodule.InsertBlocks; the eth/71
+	// bal-downloader also caches what it fetches from peers. Lookup that
+	// cached BAL here for the validator cross-check. Cache misses are OK —
+	// not every code path has a sidecar (backward block downloader doesn't
+	// carry one).
+	dbBALBytes, _ := balcache.CachedBlockAccessList(blockHash)
 	if dbBALBytes != nil {
 		dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 		if err != nil {

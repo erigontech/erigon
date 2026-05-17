@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/balcache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -191,7 +192,7 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // size, MaxBlockAccessListsServe caps the disk-lookup count. When a limit is
 // reached, the response is truncated (not padded with 0x80) — the peer sees a
 // shorter array than requested, same convention as the BlockBodies handler.
-func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockAccessListsQuery(ctx context.Context, db kv.Tx, query GetBlockAccessListsPacket, blockReader services.HeaderReader) []rlp.RawValue { //nolint:unparam
 	var bytes int
 	bals := make([]rlp.RawValue, 0, len(query))
 
@@ -200,18 +201,21 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
+		number, _ := blockReader.HeaderNumber(ctx, db, hash)
 		if number == nil {
 			// We don't know the block — peer can retry elsewhere.
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue
 		}
-		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
+		// 2-tier lookup: in-memory cache → installed BALRegenerator
+		// (re-executes the block when nothing is cached). No MDBX read.
+		bal, _ := balcache.BlockAccessListBytes(ctx, hash, *number)
 		if len(bal) == 0 {
-			// We have the block but no BAL stored (pre-Amsterdam, or pruned).
-			// Return 0x80 — unambiguously "not available", distinct from a
-			// genuinely empty BAL which would be stored as 0xc0.
+			// We have the block header but no source produced a BAL
+			// (pre-Amsterdam, pruned, or regenerator absent/declined).
+			// Return 0x80 — unambiguously "not available", distinct from
+			// a genuinely empty BAL which would be 0xc0.
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue
