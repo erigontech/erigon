@@ -262,6 +262,21 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		return fmt.Errorf("%w: address %v, blobs: %d", ErrTooManyBlobs, from, len(st.msg.BlobHashes()))
 	}
 
+	// Reject any tx whose declared gas exceeds the block's gas limit, before
+	// touching the nonce/EOA/fee-cap checks. geth performs this in core/
+	// block_validator.go's ValidateBody, so the EEST/Hive exception mapper
+	// expects GAS_ALLOWANCE_EXCEEDED (= ErrGasLimitReached wording) for this
+	// case. Erigon historically relied only on the per-block gas pool check
+	// below, which is conditional on st.gp != nil — call sites like
+	// trace_call / simulation that drive ApplyMessage without a gas pool
+	// bypassed the check entirely, and even when set, a low-feeCap tx hit the
+	// fee-cap check first because the gas-pool branch lives later in this
+	// function. An explicit comparison ordered first removes both gaps.
+	if st.msg.CheckGas() && st.msg.Gas() > st.evm.Context.GasLimit {
+		return fmt.Errorf("%w: tx gas %d > block gas limit %d",
+			ErrGasLimitReached, st.msg.Gas(), st.evm.Context.GasLimit)
+	}
+
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce, err := st.state.GetNonce(from)
