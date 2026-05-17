@@ -390,6 +390,13 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
+
+		// negative maxResult should be handled safely and must not panic.
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, -1)
+		require.NoError(t, err)
+		require.Empty(t, result.Storage)
+		require.NotNil(t, result.NextKey)
+		require.Equal(t, keys[0], *result.NextKey)
 	})
 }
 
