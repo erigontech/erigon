@@ -15,9 +15,35 @@ import (
 
 var randomness = rand.Intn(10) + 10
 
-// create test data for a given txIdx and incarnation
-func valueFor(txIdx, inc int) []byte {
-	return fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5)
+// valueFor returns a typed test value matching the AccountPath's value-type
+// contract enforced by the typed AddressEntry. Tests pass the path so the
+// VersionMap stores type-correct values without runtime conversion errors.
+// Most tests pass AddressPath since the original byte-based helper was used
+// almost exclusively for AddressPath; per-path-specific tests pass their path.
+func valueFor(path AccountPath, txIdx, inc int) any {
+	seed := uint64(txIdx*100 + inc)
+	switch path {
+	case BalancePath, StoragePath:
+		return *uint256.NewInt(seed)
+	case NoncePath, IncarnationPath:
+		return seed
+	case CodeSizePath:
+		return int(seed)
+	case SelfDestructPath, CreateContractPath:
+		return (txIdx+inc)%2 == 1
+	case CodePath:
+		return fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5)
+	case CodeHashPath:
+		var h common.Hash
+		h[0] = byte(txIdx)
+		h[1] = byte(inc)
+		return accounts.InternCodeHash(h)
+	case AddressPath:
+		a := &accounts.Account{}
+		a.Balance.SetUint64(seed)
+		return a
+	}
+	return nil
 }
 
 func getAddress(i int) accounts.Address {
@@ -33,26 +59,26 @@ func TestHelperFunctions(t *testing.T) {
 
 	mvh := NewVersionMap(nil)
 
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 1}, valueFor(0, 1), true)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 2}, valueFor(0, 2), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 1}, valueFor(AddressPath, 0, 1), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 2}, valueFor(AddressPath, 0, 2), true)
 	res := mvh.Read(ap1, AddressPath, accounts.NilKey, 0)
 	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
-	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(1, 1), true)
-	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 2}, valueFor(1, 2), true)
+	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(AddressPath, 1, 1), true)
+	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 2}, valueFor(AddressPath, 1, 2), true)
 	res = mvh.Read(ap2, AddressPath, accounts.NilKey, 1)
 	require.Equal(t, UnknownDep, res.DepIdx())
 	require.Equal(t, -1, res.Incarnation())
 	require.Equal(t, 2, res.Status())
 
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 1}, valueFor(2, 1), true)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 2}, valueFor(2, 2), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 1}, valueFor(AddressPath, 2, 1), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 2}, valueFor(AddressPath, 2, 2), true)
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 2)
 	require.Equal(t, 0, res.DepIdx())
 	require.Equal(t, 2, res.Incarnation())
-	require.Equal(t, valueFor(0, 2), res.Value().([]byte))
+	require.Equal(t, valueFor(AddressPath, 0, 2), res.Value())
 	require.Equal(t, 0, res.Status())
 }
 
@@ -72,32 +98,32 @@ func TestFlushMVWrite(t *testing.T) {
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 1},
-		Val:     valueFor(0, 1),
+		Val:     valueFor(AddressPath, 0, 1),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 2},
-		Val:     valueFor(0, 2),
+		Val:     valueFor(AddressPath, 0, 2),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 1},
-		Val:     valueFor(1, 1),
+		Val:     valueFor(AddressPath, 1, 1),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 2},
-		Val:     valueFor(1, 2),
+		Val:     valueFor(AddressPath, 1, 2),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 1},
-		Val:     valueFor(2, 1),
+		Val:     valueFor(AddressPath, 2, 1),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 2},
-		Val:     valueFor(2, 2),
+		Val:     valueFor(AddressPath, 2, 2),
 	})
 
 	mvh.FlushVersionedWrites(wd, true, "")
@@ -115,7 +141,7 @@ func TestFlushMVWrite(t *testing.T) {
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 2)
 	require.Equal(t, 0, res.DepIdx())
 	require.Equal(t, 2, res.Incarnation())
-	require.Equal(t, valueFor(0, 2), res.Value().([]byte))
+	require.Equal(t, valueFor(AddressPath, 0, 2), res.Value())
 	require.Equal(t, 0, res.Status())
 }
 
@@ -128,11 +154,11 @@ func TestLowerIncarnation(t *testing.T) {
 
 	mvh := NewVersionMap(nil)
 
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 2}, valueFor(0, 2), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 2}, valueFor(AddressPath, 0, 2), true)
 	mvh.Read(ap1, AddressPath, accounts.NilKey, 0)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 2}, valueFor(1, 2), true)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 5}, valueFor(0, 5), true)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 5}, valueFor(1, 5), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 2}, valueFor(AddressPath, 1, 2), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 5}, valueFor(AddressPath, 0, 5), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 5}, valueFor(AddressPath, 1, 5), true)
 }
 
 func TestMarkEstimate(t *testing.T) {
@@ -142,9 +168,9 @@ func TestMarkEstimate(t *testing.T) {
 
 	mvh := NewVersionMap(nil)
 
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 2}, valueFor(7, 2), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 2}, valueFor(AddressPath, 7, 2), true)
 	mvh.MarkEstimate(ap1, AddressPath, accounts.NilKey, 7)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 4}, valueFor(7, 4), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 4}, valueFor(AddressPath, 7, 4), true)
 }
 
 func TestMVHashMapBasics(t *testing.T) {
@@ -160,7 +186,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	res := mvh.Read(ap1, AddressPath, accounts.NilKey, 5)
 	require.Equal(t, UnknownDep, res.depIdx)
 
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 10, 1}, valueFor(10, 1), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 10, 1}, valueFor(AddressPath, 10, 1), true)
 
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 9)
 	require.Equal(t, UnknownDep, res.depIdx, "reads that should go the the DB return dependency -2")
@@ -171,27 +197,27 @@ func TestMVHashMapBasics(t *testing.T) {
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 10, res.depIdx, "reads for a higher txn return the entry written by txn 10.")
 	require.Equal(t, 1, res.incarnation)
-	require.Equal(t, valueFor(10, 1), res.value)
+	require.Equal(t, valueFor(AddressPath, 10, 1), res.value)
 
 	// More writes.
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 12, 0}, valueFor(12, 0), true)
-	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 8, 3}, valueFor(8, 3), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 12, 0}, valueFor(AddressPath, 12, 0), true)
+	mvh.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 8, 3}, valueFor(AddressPath, 8, 3), true)
 
 	// Verify reads.
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 12, res.depIdx)
 	require.Equal(t, 0, res.incarnation)
-	require.Equal(t, valueFor(12, 0), res.value)
+	require.Equal(t, valueFor(AddressPath, 12, 0), res.value)
 
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 11)
 	require.Equal(t, 10, res.depIdx)
 	require.Equal(t, 1, res.incarnation)
-	require.Equal(t, valueFor(10, 1), res.value)
+	require.Equal(t, valueFor(AddressPath, 10, 1), res.value)
 
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 10)
 	require.Equal(t, 8, res.depIdx)
 	require.Equal(t, 3, res.incarnation)
-	require.Equal(t, valueFor(8, 3), res.value)
+	require.Equal(t, valueFor(AddressPath, 8, 3), res.value)
 
 	// Mark the entry written by 10 as an estimate.
 	mvh.MarkEstimate(ap1, AddressPath, accounts.NilKey, 10)
@@ -202,27 +228,27 @@ func TestMVHashMapBasics(t *testing.T) {
 
 	// Delete the entry written by 10, write to a different ap.
 	mvh.Delete(ap1, AddressPath, accounts.NilKey, 10, true)
-	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 10, 2}, valueFor(10, 2), true)
+	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 10, 2}, valueFor(AddressPath, 10, 2), true)
 
 	// Read by txn 11 no longer observes entry from txn 10.
 	res = mvh.Read(ap1, AddressPath, accounts.NilKey, 11)
 	require.Equal(t, 8, res.depIdx)
 	require.Equal(t, 3, res.incarnation)
-	require.Equal(t, valueFor(8, 3), res.value)
+	require.Equal(t, valueFor(AddressPath, 8, 3), res.value)
 
 	// Reads, writes for ap2 and ap3.
-	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 5, 0}, valueFor(5, 0), true)
-	mvh.Write(ap3, AddressPath, accounts.NilKey, Version{0, 0, 20, 4}, valueFor(20, 4), true)
+	mvh.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, 5, 0}, valueFor(AddressPath, 5, 0), true)
+	mvh.Write(ap3, AddressPath, accounts.NilKey, Version{0, 0, 20, 4}, valueFor(AddressPath, 20, 4), true)
 
 	res = mvh.Read(ap2, AddressPath, accounts.NilKey, 10)
 	require.Equal(t, 5, res.depIdx)
 	require.Equal(t, 0, res.incarnation)
-	require.Equal(t, valueFor(5, 0), res.value)
+	require.Equal(t, valueFor(AddressPath, 5, 0), res.value)
 
 	res = mvh.Read(ap3, AddressPath, accounts.NilKey, 21)
 	require.Equal(t, 20, res.depIdx)
 	require.Equal(t, 4, res.incarnation)
-	require.Equal(t, valueFor(20, 4), res.value)
+	require.Equal(t, valueFor(AddressPath, 20, 4), res.value)
 
 	// Clear ap1 and ap3.
 	mvh.Delete(ap1, AddressPath, accounts.NilKey, 12, true)
@@ -243,7 +269,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	res = mvh.Read(ap2, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 10, res.depIdx)
 	require.Equal(t, 2, res.incarnation)
-	require.Equal(t, valueFor(10, 2), res.value)
+	require.Equal(t, valueFor(AddressPath, 10, 2), res.value)
 }
 
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
@@ -265,7 +291,7 @@ func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
 	vm.HasBAL = true
 
 	// A concurrent worker wrote to AddressPath at txIndex 0.
-	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(AddressPath, 0, 1), true)
 
 	// Tx 2 originally read from storage (no map entry at execution time).
 	io := NewVersionedIO(2)
@@ -303,7 +329,7 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 			require.False(t, vm.HasBAL)
 
 			// A concurrent worker wrote at txIndex 0.
-			vm.Write(addr, path, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+			vm.Write(addr, path, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(path, 0, 1), true)
 
 			// Tx 2 originally read from storage (no map entry).
 			io := NewVersionedIO(2)
@@ -335,7 +361,7 @@ func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 
 	for i := 0; b.Loop(); i++ {
 		idx := randInts[i%n]
-		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, idx, 1}, valueFor(idx, 1), true)
+		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, idx, 1}, valueFor(AddressPath, idx, 1), true)
 	}
 }
 
@@ -347,7 +373,7 @@ func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
 	for b.Loop() {
 		txIdx := rand.Intn(1000000000000000)
 		txIdxSlice = append(txIdxSlice, txIdx)
-		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, txIdx, 1}, valueFor(txIdx, 1), true)
+		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, txIdx, 1}, valueFor(AddressPath, txIdx, 1), true)
 	}
 
 	b.ResetTimer()
@@ -368,7 +394,7 @@ func TestTimeComplexity(t *testing.T) {
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := getAddress(i)
-		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 		mvh1.Read(ap1, AddressPath, accounts.NilKey, i)
 	}
 
@@ -377,7 +403,7 @@ func TestTimeComplexity(t *testing.T) {
 	ap2 := getAddress(2)
 
 	for i := 0; i < 1000000; i++ {
-		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 		mvh2.Read(ap2, AddressPath, accounts.NilKey, i)
 	}
 }
@@ -392,7 +418,7 @@ func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
 	ap1 := getAddress(1)
 
 	for i := 0; i < 1000000; i++ {
-		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 	}
 }
 
@@ -403,7 +429,7 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 	ap1 := getAddress(1)
 
 	for i := 0; i < 1000000; i++ {
-		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, i}, valueFor(i, 1), true)
+		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, i}, valueFor(AddressPath, i, 1), true)
 	}
 }
 
@@ -417,7 +443,7 @@ func TestWriteTimeDifferentLocation(t *testing.T) {
 
 	for i := 0; i < 1000000; i++ {
 		ap1 := getAddress(i)
-		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(i, 1), true)
+		mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, i, 1}, valueFor(AddressPath, i, 1), true)
 	}
 }
 
@@ -427,7 +453,7 @@ func TestReadTimeSameLocation(t *testing.T) {
 	mvh1 := NewVersionMap(nil)
 	ap1 := getAddress(1)
 
-	mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(1, 1), true)
+	mvh1.Write(ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(AddressPath, 1, 1), true)
 
 	for i := 0; i < 1000000; i++ {
 		mvh1.Read(ap1, AddressPath, accounts.NilKey, 2)
