@@ -124,6 +124,9 @@ func (pu *parallelUpdate) Reset() {
 	pu.splitPoints = pu.splitPoints[:0]
 	pu.leafQueue = pu.leafQueue[:0]
 	pu.deferredMu.Lock()
+	for _, upd := range pu.deferredCombined {
+		putDeferredUpdate(upd)
+	}
 	pu.deferredCombined = pu.deferredCombined[:0]
 	pu.deferredMu.Unlock()
 }
@@ -136,6 +139,9 @@ func (pu *parallelUpdate) Close() {
 	pu.splitPoints = nil
 	pu.leafQueue = nil
 	pu.deferredMu.Lock()
+	for _, upd := range pu.deferredCombined {
+		putDeferredUpdate(upd)
+	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
 }

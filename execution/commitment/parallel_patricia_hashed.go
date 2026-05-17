@@ -357,8 +357,12 @@ func (p *ParallelPatriciaHashed) Process(
 		// Discard both: a retry that reused pu would re-apply stale deferred
 		// branches against the previous-attempt prev values, and an
 		// intermediate RootHash() read would surface a root that was never
-		// persisted.
+		// persisted. Return pooled entries before truncating so they do not
+		// leak from deferredUpdatePool.
 		pu.deferredMu.Lock()
+		for _, upd := range pu.deferredCombined {
+			putDeferredUpdate(upd)
+		}
 		pu.deferredCombined = pu.deferredCombined[:0]
 		pu.deferredMu.Unlock()
 		p.pendingRoot.Store(nil)
@@ -1027,6 +1031,8 @@ func cellEncodeDataIsEmpty(c *cellEncodeData) bool {
 
 // applyDeferredUpdates merges every worker's deferred branch updates and
 // applies them via a single PatriciaContext acquired from the factory.
+// Entries are returned to deferredUpdatePool whether the apply succeeds or
+// fails so the pool's allocation-reuse contract is preserved.
 func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined
@@ -1036,6 +1042,11 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(pu *parallelUpdate) error 
 	if len(deferred) == 0 {
 		return nil
 	}
+	defer func() {
+		for _, upd := range deferred {
+			putDeferredUpdate(upd)
+		}
+	}()
 
 	applyCtx, cleanup := p.trieCtxFactory()
 	if cleanup != nil {
