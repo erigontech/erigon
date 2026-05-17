@@ -175,6 +175,7 @@ type stEnv struct {
 	Timestamp     uint64         `json:"currentTimestamp"  gencodec:"required"`
 	BaseFee       *uint256.Int   `json:"currentBaseFee"    gencodec:"optional"`
 	ExcessBlobGas *uint64        `json:"currentExcessBlobGas" gencodec:"optional"`
+	SlotNumber    *uint64        `json:"slotNumber"        gencodec:"optional"` // EIP-7843
 }
 
 type stEnvMarshaling struct {
@@ -186,6 +187,7 @@ type stEnvMarshaling struct {
 	Timestamp     math.HexOrDecimal64
 	BaseFee       *math.HexOrDecimal256
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 }
 
 // GetChainConfig takes a fork definition and returns a chain config.
@@ -485,6 +487,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 		Number:     t.Json.Env.Number,
 		Timestamp:  t.Json.Env.Timestamp,
 		Alloc:      t.Json.Pre,
+		SlotNumber: t.Json.Env.SlotNumber,
 	}
 }
 

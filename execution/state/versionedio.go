@@ -692,105 +692,6 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
-// SetBalance replaces the BalancePath write for addr in the write set with
-// the given value. If no existing BalancePath write is found, a new entry is
-// appended. This is used in the direct finalize path to adjust fee-calc
-// balances in pre-computed collector writes without IBS reconstruction.
-func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
-	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
-			w.Val = val
-			w.Reason = reason
-			return writes
-		}
-	}
-	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
-}
-
-// BalanceUpdate is one (addr, val, reason) triple consumed by SetBalances.
-type BalanceUpdate struct {
-	Addr   accounts.Address
-	Val    uint256.Int
-	Reason tracing.BalanceChangeReason
-}
-
-// SetBalances applies multiple BalancePath updates in a single pass over
-// writes. Equivalent in result to calling SetBalance once per update, but
-// the linear scan is amortised across the batch. For very large write sets
-// (point_evaluation 150M-gas runs show CollectorWrites >> 1k entries) this
-// turns an O(N · M) hot loop in nextResult into O(N + M).
-func (writes VersionedWrites) SetBalances(updates []BalanceUpdate) VersionedWrites {
-	if len(updates) == 0 {
-		return writes
-	}
-	if len(updates) == 1 {
-		return writes.SetBalance(updates[0].Addr, updates[0].Val, updates[0].Reason)
-	}
-	var found uint
-	const inlineMax = 8
-	if len(updates) <= inlineMax {
-		for _, w := range writes {
-			if w.Path != BalancePath {
-				continue
-			}
-			for i := range updates {
-				bit := uint(1) << i
-				if found&bit != 0 {
-					continue
-				}
-				if w.Address == updates[i].Addr {
-					w.Val = updates[i].Val
-					w.Reason = updates[i].Reason
-					found |= bit
-				}
-			}
-			if found == (uint(1)<<len(updates))-1 {
-				break
-			}
-		}
-		for i := range updates {
-			bit := uint(1) << i
-			if found&bit == 0 {
-				writes = append(writes, &VersionedWrite{
-					Address: updates[i].Addr,
-					Path:    BalancePath,
-					Val:     updates[i].Val,
-					Reason:  updates[i].Reason,
-				})
-			}
-		}
-		return writes
-	}
-	updateIdx := make(map[accounts.Address]int, len(updates))
-	for i := range updates {
-		updateIdx[updates[i].Addr] = i
-	}
-	foundMap := make(map[accounts.Address]struct{}, len(updates))
-	for _, w := range writes {
-		if w.Path != BalancePath {
-			continue
-		}
-		if i, ok := updateIdx[w.Address]; ok {
-			if _, already := foundMap[w.Address]; !already {
-				w.Val = updates[i].Val
-				w.Reason = updates[i].Reason
-				foundMap[w.Address] = struct{}{}
-			}
-		}
-	}
-	for i := range updates {
-		if _, ok := foundMap[updates[i].Addr]; !ok {
-			writes = append(writes, &VersionedWrite{
-				Address: updates[i].Addr,
-				Path:    BalancePath,
-				Val:     updates[i].Val,
-				Reason:  updates[i].Reason,
-			})
-		}
-	}
-	return writes
-}
-
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
 // address has no existing writes in the set, all four account fields (balance,
 // nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
@@ -849,13 +750,47 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
-		if path != CodePath {
+		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
+		// at a strictly higher TxIndex re-creates the account, so the SD
+		// must NOT short-circuit the read. Mirrors versionedStateReader
+		// .ReadAccountData's revival check at lines 273-293 of this file.
+		//
+		// Without this the worker reads zero for any post-revival access:
+		// e.g. EIP-161 fires for the coinbase when tx N's finalize emits
+		// SelfDestructPath=true (empty-removal: balance 0, no fee tip),
+		// then tx N+1's finalize emits BalancePath=FeeTipped (revives it
+		// with a non-zero balance). A subsequent tx's BALANCE coinbase
+		// must surface the revived balance — the serial equivalent is
+		// AddBalance(amount>0) on a previously-deleted stateObject, where
+		// GetOrNewStateObject implicitly recreates a fresh object with
+		// the new balance. Without this check the parallel worker reads
+		// zero, SSTOREs zero into the contract's slot (was non-zero),
+		// triggering a spurious SSTORE_CLEAR_REFUND that doesn't fire
+		// under serial — observed as TestLegacyBlockchain bcEIP3675/
+		// tipInsideBlock failing with gas exactly 4800 short under
+		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
+		destructTxIndex := res.DepIdx()
+		revived := false
+		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+			revived = true
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived && path != CodePath {
 			// A prior tx self-destructed this account — all state reads must
 			// return the zero value of the type, not the caller-supplied default.
 			// refreshVersionedAccount passes the account's pre-destruction field
 			// values as defaultV, so using defaultV here would return stale data.
 			var zero T
-			sdVersion := Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
 			if commited {
 				return zero, MapRead, sdVersion, nil
 			}
@@ -880,7 +815,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return zero, MapRead, sdVersion, nil
 			}
 			destrcutedVersion = Version{
-				TxIndex: res.DepIdx(),
+				TxIndex: destructTxIndex,
 			}
 		}
 	}
