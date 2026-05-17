@@ -75,7 +75,7 @@ func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
 	readSets := ReadSet{}
 	readSets.Set(VersionedRead{
 		Address: userAddr,
-		Path: BalancePath,
+		Path:    BalancePath,
 		ValU256: *uint256.NewInt(100),
 	})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
@@ -84,7 +84,7 @@ func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
 			Address: userAddr,
 			Path:    BalancePath,
 			Version: Version{TxIndex: 0},
-			ValU256:     *uint256.NewInt(200),
+			ValU256: *uint256.NewInt(200),
 		},
 	})
 
@@ -165,7 +165,7 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 			Address: sysAddr,
 			Path:    BalancePath,
 			Version: Version{TxIndex: 0},
-			ValU256:     *uint256.NewInt(42),
+			ValU256: *uint256.NewInt(42),
 		},
 	})
 
@@ -205,7 +205,7 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 	readSets := ReadSet{}
 	readSets.Set(VersionedRead{
 		Address: otherAddr,
-		Path: BalancePath,
+		Path:    BalancePath,
 		ValU256: *uint256.NewInt(50),
 	})
 	io.RecordReads(Version{TxIndex: 0}, readSets)
@@ -214,7 +214,7 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 			Address: otherAddr,
 			Path:    BalancePath,
 			Version: Version{TxIndex: 0},
-			ValU256:     *uint256.NewInt(100),
+			ValU256: *uint256.NewInt(100),
 		},
 	})
 

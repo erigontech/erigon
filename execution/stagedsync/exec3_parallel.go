@@ -1820,8 +1820,8 @@ func (result *execResult) finalizeTx(
 	if coinbaseChanged {
 		allWrites = append(allWrites, &state.VersionedWrite{
 			Address: result.Coinbase,
-			Path: state.BalancePath,
-			ValU256:     newCoinbaseBalance,
+			Path:    state.BalancePath,
+			ValU256: newCoinbaseBalance,
 			Version: task.Version(),
 			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
@@ -1834,8 +1834,8 @@ func (result *execResult) finalizeTx(
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: burntAddr,
-				Path: state.BalancePath,
-				ValU256:     newBurntBalance,
+				Path:    state.BalancePath,
+				ValU256: newBurntBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
@@ -1927,9 +1927,9 @@ func (result *execResult) finalizeTx(
 		if acc != nil {
 			finalizeReads.Set(state.VersionedRead{
 				Address: w.Address,
-				Path: state.BalancePath,
-				Key: accounts.NilKey,
-				ValU256:     acc.Balance,
+				Path:    state.BalancePath,
+				Key:     accounts.NilKey,
+				ValU256: acc.Balance,
 			})
 		}
 	}
@@ -1945,9 +1945,9 @@ func (result *execResult) finalizeTx(
 		}
 		finalizeReads.Set(state.VersionedRead{
 			Address: result.Coinbase,
-			Path: state.BalancePath,
-			Key: accounts.NilKey,
-			ValU256:     coinbaseBalance,
+			Path:    state.BalancePath,
+			Key:     accounts.NilKey,
+			ValU256: coinbaseBalance,
 		})
 	}
 	if hasBurnt {
@@ -1957,9 +1957,9 @@ func (result *execResult) finalizeTx(
 		}
 		finalizeReads.Set(state.VersionedRead{
 			Address: burntAddr,
-			Path: state.BalancePath,
-			Key: accounts.NilKey,
-			ValU256:     burntBalance,
+			Path:    state.BalancePath,
+			Key:     accounts.NilKey,
+			ValU256: burntBalance,
 		})
 	}
 
@@ -2128,15 +2128,15 @@ func (result *execResult) finalizeTxSimple(
 		if emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
-				Path: state.SelfDestructPath,
-				ValBool:     true,
+				Path:    state.SelfDestructPath,
+				ValBool: true,
 				Version: task.Version(),
 			})
 		} else {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
-				Path: state.BalancePath,
-				ValU256:     newCoinbaseBalance,
+				Path:    state.BalancePath,
+				ValU256: newCoinbaseBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 			})
@@ -2150,8 +2150,8 @@ func (result *execResult) finalizeTxSimple(
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: burntAddr,
-				Path: state.BalancePath,
-				ValU256:     newBurntBalance,
+				Path:    state.BalancePath,
+				ValU256: newBurntBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
@@ -3385,9 +3385,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				for _, slot := range sdStorageSlots(w.Address) {
 					filtered = append(filtered, &state.VersionedWrite{
 						Address: w.Address,
-						Path: state.StoragePath,
-						Key: slot,
-						ValU256:     uint256.Int{}, // zero = delete
+						Path:    state.StoragePath,
+						Key:     slot,
+						ValU256: uint256.Int{}, // zero = delete
 						Version: w.Version,
 					})
 				}
@@ -3607,8 +3607,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		for addr := range emptyAddrs {
 			cleaned = append(cleaned, &state.VersionedWrite{
 				Address: addr,
-				Path: state.SelfDestructPath,
-				ValBool:     true,
+				Path:    state.SelfDestructPath,
+				ValBool: true,
 				Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 			})
 		}
@@ -3697,9 +3697,9 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			for _, slot := range vm.StorageKeys(w.Address) {
 				filtered = append(filtered, &state.VersionedWrite{
 					Address: w.Address,
-					Path: state.StoragePath,
-					Key: slot,
-					ValU256:     uint256.Int{}, // zero = delete
+					Path:    state.StoragePath,
+					Key:     slot,
+					ValU256: uint256.Int{}, // zero = delete
 				})
 			}
 			continue // already appended above

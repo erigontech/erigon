@@ -98,32 +98,32 @@ func TestFlushMVWrite(t *testing.T) {
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 1},
-		ValAcc: valueFor(AddressPath, 0, 1).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 0, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 2},
-		ValAcc: valueFor(AddressPath, 0, 2).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 0, 2).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 1},
-		ValAcc: valueFor(AddressPath, 1, 1).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 1, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 2},
-		ValAcc: valueFor(AddressPath, 1, 2).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 1, 2).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 1},
-		ValAcc: valueFor(AddressPath, 2, 1).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 2, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 2},
-		ValAcc: valueFor(AddressPath, 2, 2).(*accounts.Account),
+		ValAcc:  valueFor(AddressPath, 2, 2).(*accounts.Account),
 	})
 
 	mvh.FlushVersionedWrites(wd, true, "")
@@ -507,7 +507,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 		Key:     storageKey,
 		Source:  StorageRead,
 		Version: Version{TxIndex: UnknownDep, Incarnation: -1},
-		ValU256:     storageVal,
+		ValU256: storageVal,
 	})
 	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
 

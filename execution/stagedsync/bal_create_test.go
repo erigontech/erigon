@@ -108,9 +108,9 @@ func addStorageReadVal(readSets map[int]state.ReadSet, txIdx int, addr accounts.
 	}
 	rs.Set(state.VersionedRead{
 		Address: addr,
-		Path: state.StoragePath,
-		Key: slot,
-		ValU256:     val,
+		Path:    state.StoragePath,
+		Key:     slot,
+		ValU256: val,
 	})
 }
 
@@ -122,8 +122,8 @@ func addBalanceRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Add
 	}
 	rs.Set(state.VersionedRead{
 		Address: addr,
-		Path: state.BalancePath,
-		ValU256:     *uint256.NewInt(value),
+		Path:    state.BalancePath,
+		ValU256: *uint256.NewInt(value),
 	})
 }
 
@@ -133,7 +133,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Path:    state.StoragePath,
 		Key:     slot,
 		Version: state.Version{TxIndex: txIdx},
-		ValU256:     *uint256.NewInt(value),
+		ValU256: *uint256.NewInt(value),
 	})
 }
 
@@ -142,7 +142,7 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Address: addr,
 		Path:    state.BalancePath,
 		Version: state.Version{TxIndex: txIdx},
-		ValU256:     *uint256.NewInt(value),
+		ValU256: *uint256.NewInt(value),
 	})
 }
 
@@ -295,7 +295,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 		Path:    state.StoragePath,
 		Key:     slot4788Root,
 		Version: state.Version{TxIndex: -1},
-		ValU256:     *val4788Root,
+		ValU256: *val4788Root,
 	})
 
 	// EIP-2935 contract: balance read+write (no-op), 1 storage write
@@ -306,7 +306,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 		Path:    state.StoragePath,
 		Key:     slot2935,
 		Version: state.Version{TxIndex: -1},
-		ValU256:     *val2935,
+		ValU256: *val2935,
 	})
 
 	// === txIndex=0: Finalize system calls (EIP-7002, EIP-7251 dequeue) ===
