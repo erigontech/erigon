@@ -216,13 +216,13 @@ On an 8-core or 4-core machine the matrix is correspondingly smaller (dedup).
 **Files:**
 - Create: `execution/commitment/parallel_patricia_hashed_bench_test.go`
 
-- [ ] create `execution/commitment/parallel_patricia_hashed_bench_test.go` with copyright header (year 2026) and package declaration matching other files
-- [ ] implement `build100KAccountsCorpus(b testing.TB) ([]plainKey, []*Update)` with seed 133777
-- [ ] implement `build500KStorageHeavyCorpus(b testing.TB) ([]plainKey, []*Update)` with seed 244888 — 1000 accounts × 499 storage slots = 499K storage + 1K account updates = 500K total
-- [ ] implement `runDirectBench(b *testing.B, pk []plainKey, updates []*Update)` with `b.Loop()` + `b.StopTimer/StartTimer` bracketing, fresh `MockState` per iteration
-- [ ] implement `runParallelBench(b *testing.B, pk []plainKey, updates []*Update, workers int)` parallel to runDirectBench, using `NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)` + `SetNumWorkers(workers)`
-- [ ] implement `Benchmark_Commitment_DirectVsParallel(b *testing.B)` driver with two corpus sub-benches; for each, one `ModeDirect` sub-bench and one `ModeParallel-w%d` per worker count. Dedupe the `{1, 4, 8, runtime.NumCPU()}` worker list inline via `slices.Sort` + `slices.Compact` (no custom helper needed).
-- [ ] confirm package builds: `go build ./execution/commitment/` from worktree root
+- [x] create `execution/commitment/parallel_patricia_hashed_bench_test.go` with copyright header (year 2026) and package declaration matching other files
+- [x] implement `build100KAccountsCorpus(b testing.TB) ([][]byte, []Update)` with seed 133777 (signature follows `UpdateBuilder.Build()` return, not `[]plainKey, []*Update` from the original plan text)
+- [x] implement `build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update)` with seed 244888 — 1000 accounts × 499 storage slots = 499K storage + 1K account updates = 500K total
+- [x] implement `runDirectBench(b *testing.B, pk [][]byte, updates []Update)` with `b.Loop()` + `b.StopTimer/StartTimer` bracketing, fresh `MockState` per iteration. Note: `b.Loop()` requires the timer running on entry, so each iteration ends with `b.StartTimer()` after teardown.
+- [x] implement `runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int)` parallel to runDirectBench, using `NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr)` + `SetNumWorkers(workers)`. Calls `ms.SetConcurrentCommitment(true)` so the MockState's map access is locked for parallel workers, and `pph.Release()` after each iteration.
+- [x] implement `Benchmark_Commitment_DirectVsParallel(b *testing.B)` driver with two corpus sub-benches; for each, one `ModeDirect` sub-bench and one `ModeParallel-w%d` per worker count. Dedupe the `{1, 4, 8, runtime.NumCPU()}` worker list inline via `slices.Sort` + `slices.Compact` (no custom helper needed).
+- [x] confirm package builds: `go build ./execution/commitment/` from worktree root
 
 ### Task 2: Smoke-run and verify
 
