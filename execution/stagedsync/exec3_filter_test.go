@@ -18,17 +18,17 @@ func TestFilterWritesByVersionMap_RemovesUnmodifiedFields(t *testing.T) {
 
 	// CollectorWrites has all 4 fields (LightCollector always emits all)
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(5)},
-		{Address: addr, Path: state.IncarnationPath, Val: uint64(0)},
-		{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(1000)},
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(5)},
+		{Address: addr, Path: state.IncarnationPath, ValU64: uint64(0)},
+		{Address: addr, Path: state.CodeHashPath, ValHash: accounts.EmptyCodeHash},
 	}
 
 	// versionMap WriteSet only has BalancePath and NoncePath
 	// (the TX modified balance and nonce but not incarnation/codeHash)
 	vmWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(5)},
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(1000)},
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(5)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)
@@ -45,13 +45,13 @@ func TestFilterWritesByVersionMap_KeepsStorageWrites(t *testing.T) {
 	slot := accounts.InternKey([32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04})
 
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(500)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(1)},
-		{Address: addr, Path: state.StoragePath, Key: slot, Val: *uint256.NewInt(42)},
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(500)},
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(1)},
+		{Address: addr, Path: state.StoragePath, Key: slot, ValU256: *uint256.NewInt(42)},
 	}
 
 	vmWrites := state.VersionedWrites{
-		{Address: addr, Path: state.StoragePath, Key: slot, Val: *uint256.NewInt(42)},
+		{Address: addr, Path: state.StoragePath, Key: slot, ValU256: *uint256.NewInt(42)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)
@@ -66,8 +66,8 @@ func TestFilterWritesByVersionMap_EmptyVMWrites(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x03})
 
 	collectorWrites := state.VersionedWrites{
-		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(100)},
-		{Address: addr, Path: state.NoncePath, Val: uint64(1)},
+		{Address: addr, Path: state.BalancePath, ValU256: *uint256.NewInt(100)},
+		{Address: addr, Path: state.NoncePath, ValU64: uint64(1)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, nil)
@@ -83,17 +83,17 @@ func TestFilterWritesByVersionMap_MultipleAddresses(t *testing.T) {
 
 	collectorWrites := state.VersionedWrites{
 		// addr1: balance + nonce (TX modified balance only)
-		{Address: addr1, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr1, Path: state.NoncePath, Val: uint64(5)},
+		{Address: addr1, Path: state.BalancePath, ValU256: *uint256.NewInt(1000)},
+		{Address: addr1, Path: state.NoncePath, ValU64: uint64(5)},
 		// addr2: balance + nonce (TX modified both)
-		{Address: addr2, Path: state.BalancePath, Val: *uint256.NewInt(2000)},
-		{Address: addr2, Path: state.NoncePath, Val: uint64(10)},
+		{Address: addr2, Path: state.BalancePath, ValU256: *uint256.NewInt(2000)},
+		{Address: addr2, Path: state.NoncePath, ValU64: uint64(10)},
 	}
 
 	vmWrites := state.VersionedWrites{
-		{Address: addr1, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
-		{Address: addr2, Path: state.BalancePath, Val: *uint256.NewInt(2000)},
-		{Address: addr2, Path: state.NoncePath, Val: uint64(10)},
+		{Address: addr1, Path: state.BalancePath, ValU256: *uint256.NewInt(1000)},
+		{Address: addr2, Path: state.BalancePath, ValU256: *uint256.NewInt(2000)},
+		{Address: addr2, Path: state.NoncePath, ValU64: uint64(10)},
 	}
 
 	filtered := filterWritesByVersionMap(collectorWrites, vmWrites)

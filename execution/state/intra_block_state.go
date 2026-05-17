@@ -334,7 +334,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 				Key:     accounts.NilKey,
 				Source:  MapRead,
 				Version: Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()},
-				Val:     inc,
+				ValU64:  inc,
 			})
 			return false, nil
 		}
@@ -1654,7 +1654,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			// Only honour if the current tx hasn't already resurrected.
 			localResurrected := false
 			if vw, ok := sdb.versionedWrite(addr, SelfDestructPath, accounts.NilKey); ok {
-				if v, ok := vw.Val.(bool); ok && !v {
+				if !vw.ValBool {
 					localResurrected = true
 				}
 			}
@@ -1903,7 +1903,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
 	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
-	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
+	versionRead[uint64](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
 	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
@@ -2152,7 +2152,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 			var updated *uint256.Int
 			if sdb.versionedWrites != nil {
 				if w, ok := sdb.versionedWrites[addr][AccountKey{Path: BalancePath}]; ok {
-					val := w.Val.(uint256.Int)
+					val := w.ValU256
 					updated = &val
 				}
 			}
@@ -2456,15 +2456,13 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 			sdb.versionedWrites = WriteSet{}
 		}
 
-		val := val // avoid escape if no versioned map
-
 		vw := VersionedWrite{
 			Address: addr,
 			Path:    path,
 			Key:     key,
 			Version: sdb.Version(),
-			Val:     val,
 		}
+		setVWVal(&vw, val)
 
 		sdb.versionedWrites.Set(vw)
 
@@ -2474,21 +2472,65 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 	}
 }
 
-func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
+// setVWVal routes the generic-typed val into the path-corresponding typed
+// field on the VersionedWrite. Uses a type switch over val rather than path
+// because the caller of versionWritten passes T statically; this keeps the
+// dispatch driven by the type the consumer chose at the call site.
+func setVWVal[T any](vw *VersionedWrite, val T) {
+	switch v := any(val).(type) {
+	case uint256.Int:
+		vw.ValU256 = v
+	case uint64:
+		vw.ValU64 = v
+	case bool:
+		vw.ValBool = v
+	case []byte:
+		vw.ValBytes = v
+	case accounts.CodeHash:
+		vw.ValHash = v
+	case int:
+		vw.ValInt = v
+	case *accounts.Account:
+		vw.ValAcc = v
+	}
+}
+
+// setVRVal mirrors setVWVal for VersionedRead.
+func setVRVal[T any](vr *VersionedRead, val T) {
+	switch v := any(val).(type) {
+	case uint256.Int:
+		vr.ValU256 = v
+	case uint64:
+		vr.ValU64 = v
+	case bool:
+		vr.ValBool = v
+	case []byte:
+		vr.ValBytes = v
+	case accounts.CodeHash:
+		vr.ValHash = v
+	case int:
+		vr.ValInt = v
+	case *accounts.Account:
+		vr.ValAcc = v
+	}
+}
+
+func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val T) {
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
 		}
 
-		sdb.versionedReads.Set(VersionedRead{
+		vr := VersionedRead{
 			Address: addr,
 			Path:    path,
 			Key:     key,
 			Source:  source,
 			Version: version,
-			Val:     val,
-		})
+		}
+		setVRVal(&vr, val)
+		sdb.versionedReads.Set(vr)
 	}
 }
 
@@ -2574,7 +2616,7 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 			// happened to iterate before the SelfDestructPath entry.
 			var selfDestructed bool
 			for _, v := range vwrites {
-				if v.Path == SelfDestructPath && v.Val.(bool) {
+				if v.Path == SelfDestructPath && v.ValBool {
 					selfDestructed = true
 					break
 				}
@@ -2626,63 +2668,61 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 	})
 	for i := range writes {
 		path := writes[i].Path
-		val := writes[i].Val
 		addr := writes[i].Address
 
-		if val != nil {
-			switch path {
-			case AddressPath:
-				continue
-			case StoragePath:
-				stateKey := writes[i].Key
-				state := val.(uint256.Int)
-				if err := sdb.setState(addr, stateKey, state, true); err != nil {
-					return err
-				}
-			case BalancePath:
-				balance := val.(uint256.Int)
-				if err := sdb.SetBalance(addr, balance, writes[i].Reason); err != nil {
-					return err
-				}
-			case NoncePath:
-				nonce := val.(uint64)
-				if err := sdb.SetNonce(addr, nonce); err != nil {
-					return err
-				}
-			case IncarnationPath:
-				incarnation := val.(uint64)
-				if err := sdb.SetIncarnation(addr, incarnation); err != nil {
-					return err
-				}
-				// Re-emit the IncarnationPath write into versionedWrites so that the
-				// finalize IBS's writes are correctly flushed to the global versionMap.
-				versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, incarnation)
-			case CodePath:
-				code := val.([]byte)
-				stateObject, err := sdb.GetOrNewStateObject(addr)
-				if err != nil {
-					return err
-				}
-				codeHash := accounts.InternCodeHash(crypto.HashData(code))
-				// Force-set code bypassing stateObject.SetCode's equality check.
-				// The finalize IBS uses a VersionedStateReader whose ReadSet may
-				// contain the post-write code value (when the worker read the code
-				// after a SetCodeTx modified it), causing SetCode's bytes.Equal
-				// comparison to incorrectly skip the update and leave dirtyCode unset.
-				sdb.journal.append(codeChange{
-					account:     addr,
-					prevhash:    stateObject.data.CodeHash,
-					prevcode:    stateObject.code,
-					wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
-				})
-				stateObject.setCode(codeHash, code)
-				versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
-				versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
-				versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
-			case CodeHashPath, CodeSizePath:
-				// set by CodePath case above
-			case SelfDestructPath:
-				deleted := val.(bool)
+		switch path {
+		case AddressPath:
+			continue
+		case StoragePath:
+			stateKey := writes[i].Key
+			state := writes[i].ValU256
+			if err := sdb.setState(addr, stateKey, state, true); err != nil {
+				return err
+			}
+		case BalancePath:
+			balance := writes[i].ValU256
+			if err := sdb.SetBalance(addr, balance, writes[i].Reason); err != nil {
+				return err
+			}
+		case NoncePath:
+			nonce := writes[i].ValU64
+			if err := sdb.SetNonce(addr, nonce); err != nil {
+				return err
+			}
+		case IncarnationPath:
+			incarnation := writes[i].ValU64
+			if err := sdb.SetIncarnation(addr, incarnation); err != nil {
+				return err
+			}
+			// Re-emit the IncarnationPath write into versionedWrites so that the
+			// finalize IBS's writes are correctly flushed to the global versionMap.
+			versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, incarnation)
+		case CodePath:
+			code := writes[i].ValBytes
+			stateObject, err := sdb.GetOrNewStateObject(addr)
+			if err != nil {
+				return err
+			}
+			codeHash := accounts.InternCodeHash(crypto.HashData(code))
+			// Force-set code bypassing stateObject.SetCode's equality check.
+			// The finalize IBS uses a VersionedStateReader whose ReadSet may
+			// contain the post-write code value (when the worker read the code
+			// after a SetCodeTx modified it), causing SetCode's bytes.Equal
+			// comparison to incorrectly skip the update and leave dirtyCode unset.
+			sdb.journal.append(codeChange{
+				account:     addr,
+				prevhash:    stateObject.data.CodeHash,
+				prevcode:    stateObject.code,
+				wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+			})
+			stateObject.setCode(codeHash, code)
+			versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+			versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+			versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
+		case CodeHashPath, CodeSizePath:
+			// set by CodePath case above
+		case SelfDestructPath:
+			deleted := writes[i].ValBool
 				if deleted {
 					// Ensure the state object exists before calling Selfdestruct.
 					// For newly-created accounts (e.g. coinbase born via CREATE in the
@@ -2724,9 +2764,8 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				if so != nil {
 					so.createdContract = true
 				}
-			default:
-				return fmt.Errorf("unknown key type: %d", path)
-			}
+		default:
+			return fmt.Errorf("unknown key type: %d", path)
 		}
 	}
 	return nil

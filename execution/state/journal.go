@@ -238,10 +238,10 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			if ch.wasCommited {
 				if trace {
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, &ch.prev)
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val(), &ch.prev)
 					}
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-						val := v.Val.(uint256.Int)
+						val := v.ValU256
 						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
 				}
@@ -250,12 +250,12 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			} else {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
 					if trace {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, &ch.prev)
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val(), &ch.prev)
 					}
 					s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: SelfDestructPath}, ch.prev)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-					val := v.Val.(uint256.Int)
+					val := v.ValU256
 					if trace {
 						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
@@ -303,7 +303,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
-					val := v.Val.(uint256.Int)
+					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
 			}
@@ -311,7 +311,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
 				if trace {
-					val := v.Val.(uint256.Int)
+					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: BalancePath}, ch.prev)
@@ -366,14 +366,14 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, ch.prev)
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val(), ch.prev)
 				}
 			}
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: NoncePath})
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, ch.prev)
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val(), ch.prev)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: NoncePath}, ch.prev)
 			}
@@ -407,10 +407,10 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(accounts.CodeHash), ch.prevhash)
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.ValHash, ch.prevhash)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
-					_, cs := printCode(v.Val.([]byte))
+					_, cs := printCode(v.ValBytes)
 					_, ps := printCode(ch.prevcode)
 					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
 				}
@@ -421,7 +421,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 				if trace {
-					_, cs := printCode(v.Val.([]byte))
+					_, cs := printCode(v.ValBytes)
 					_, ps := printCode(ch.prevcode)
 					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
 				}
@@ -429,7 +429,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			}
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val(), ch.prevhash)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
 			}
@@ -463,7 +463,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
-					val := v.Val.(uint256.Int)
+					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
 			}
@@ -471,7 +471,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
 				if trace {
-					val := v.Val.(uint256.Int)
+					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: StoragePath, Key: ch.key}, ch.prevalue)
