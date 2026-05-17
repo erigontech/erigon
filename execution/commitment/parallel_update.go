@@ -32,7 +32,7 @@ import (
 // fork is collapsed into a single leafTask instead of being elevated to a
 // split-point. Smaller subtrees do not benefit from parallel execution because
 // the barrier coordination cost dominates the saved work.
-const MinSplitKeys uint32 = 32
+const MinSplitKeys uint32 = 64
 
 // PrefixTrieMaxDepth bounds the nibble depth Prepare is willing to traverse.
 // A keccak256-hashed key is 64 bytes = 128 nibbles, so this is the worst-case

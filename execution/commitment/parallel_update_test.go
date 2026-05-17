@@ -338,11 +338,10 @@ func TestPrepareTwoWayForkAboveThreshold(t *testing.T) {
 	pu := newParallelUpdate()
 	ctx := newPrepareMockCtx()
 
-	// 16 keys under [0x0A,0x0B]... and 16 under [0x0A,0x0C]...
-	// Fork node at prefix [0x0A] has subtreeCount = 32 (== MinSplitKeys) and
-	// fanout=2 so it qualifies as a split-point. Each side has 16 keys (< 32)
-	// so no nested split-point emerges below.
-	const perSide = 16
+	// Fork node at prefix [0x0A] has subtreeCount = MinSplitKeys and fanout=2
+	// so it qualifies as a split-point. Each side has MinSplitKeys/2 keys
+	// (< MinSplitKeys) so no nested split-point emerges below.
+	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, perSide) {
 		pu.Insert(k)
 	}
@@ -427,13 +426,13 @@ func TestPrepareDeepStorageShapeSplitsAtStorageFork(t *testing.T) {
 	ctx := newPrepareMockCtx()
 
 	// 60-nibble shared account-prefix, then storage diverges in the 61st nibble.
-	// 16 keys per side keeps each child subtree below MinSplitKeys so the only
-	// split-point sits at the storage-fork depth.
+	// MinSplitKeys/2 keys per side keeps each child subtree below MinSplitKeys
+	// so the only split-point sits at the storage-fork depth.
 	accountPrefix := make([]byte, 60)
 	for i := range accountPrefix {
 		accountPrefix[i] = 0x0A
 	}
-	const perSide = 16
+	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix(append(append([]byte{}, accountPrefix...), 0x01), perSide) {
 		pu.Insert(k)
 	}
@@ -460,8 +459,8 @@ func TestPrepareUntouchedNibblePrePopulation(t *testing.T) {
 	// Worker arrives at nibbles 0x03 and 0x07; the DB branch at prefix [0x0A]
 	// has nibbles 0x03, 0x05, 0x07, 0x0A, 0x0F. 0x05/0x0A/0x0F are untouched
 	// siblings and must survive into sp.cells after Prepare.
-	// 16 keys per side keeps the fork at [0x0A] as the sole split-point.
-	const perSide = 16
+	// MinSplitKeys/2 keys per side keeps the fork at [0x0A] as the sole split-point.
+	perSide := int(MinSplitKeys) / 2
 	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x03}, perSide) {
 		pu.Insert(k)
 	}
@@ -514,16 +513,21 @@ func TestPrepareLeafQueueSortedByKeyCount(t *testing.T) {
 	pu := newParallelUpdate()
 	ctx := newPrepareMockCtx()
 
-	// Three top-level nibbles, varying counts. Root fanout = 3 and root
-	// subtreeCount = 35 ≥ MinSplitKeys so root is the sole split-point.
-	// Each child subtree (10, 20, 5) sits below MinSplitKeys so no nested splits.
-	for _, k := range keysWithSharedPrefix([]byte{0x01}, 10) {
+	// Three top-level nibbles, varying counts scaled by MinSplitKeys/4 so each
+	// child subtree stays below MinSplitKeys but the root sums above it. Root
+	// fanout = 3, root subtreeCount = 6*unit = 1.5*MinSplitKeys ≥ MinSplitKeys
+	// so root is the sole split-point.
+	unit := int(MinSplitKeys) / 4
+	smallCount := unit   // 1u
+	medCount := 2 * unit // 2u
+	bigCount := 3 * unit // 3u, still < MinSplitKeys = 4u
+	for _, k := range keysWithSharedPrefix([]byte{0x01}, medCount) {
 		pu.Insert(k)
 	}
-	for _, k := range keysWithSharedPrefix([]byte{0x02}, 20) {
+	for _, k := range keysWithSharedPrefix([]byte{0x02}, bigCount) {
 		pu.Insert(k)
 	}
-	for _, k := range keysWithSharedPrefix([]byte{0x03}, 5) {
+	for _, k := range keysWithSharedPrefix([]byte{0x03}, smallCount) {
 		pu.Insert(k)
 	}
 
@@ -537,9 +541,9 @@ func TestPrepareLeafQueueSortedByKeyCount(t *testing.T) {
 	}
 	require.True(t, sort.SliceIsSorted(counts, func(i, j int) bool { return counts[i] > counts[j] }),
 		"leafQueue must be sorted by keyCount descending: %v", counts)
-	assert.Equal(t, uint32(20), counts[0])
-	assert.Equal(t, uint32(10), counts[1])
-	assert.Equal(t, uint32(5), counts[2])
+	assert.Equal(t, uint32(bigCount), counts[0])
+	assert.Equal(t, uint32(medCount), counts[1])
+	assert.Equal(t, uint32(smallCount), counts[2])
 }
 
 func TestPrepareSingleKey(t *testing.T) {
@@ -564,10 +568,11 @@ func TestPrepareCtxBranchErrorPropagates(t *testing.T) {
 	ctx := &erroringPrepareCtx{prefixToFail: string(nibbles.HexToCompact([]byte{0x0A}))}
 
 	// Force a split-point at [0x0A] so loadDBBranch fires for that prefix.
-	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x01}, 16) {
+	perSide := int(MinSplitKeys) / 2
+	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x01}, perSide) {
 		pu.Insert(k)
 	}
-	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x02}, 16) {
+	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x02}, perSide) {
 		pu.Insert(k)
 	}
 
@@ -598,10 +603,11 @@ func TestPrepareResetClearsPreviousResults(t *testing.T) {
 	ctx := newPrepareMockCtx()
 
 	// First run: produces a split-point and two leafTasks.
-	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, 16) {
+	perSide := int(MinSplitKeys) / 2
+	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0B}, perSide) {
 		pu.Insert(k)
 	}
-	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0C}, 16) {
+	for _, k := range keysWithSharedPrefix([]byte{0x0A, 0x0C}, perSide) {
 		pu.Insert(k)
 	}
 	require.NoError(t, pu.Prepare(ctx))

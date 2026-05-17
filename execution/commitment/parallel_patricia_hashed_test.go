@@ -619,20 +619,25 @@ func TestParallelBarrier_FanoutFour(t *testing.T) {
 // the most work — can equally play either the depositor or the last-finisher
 // role depending on Go's goroutine scheduling.
 //
-// Setup: 24 + 4 + 4 = 32 accounts; root fanout=3.
+// Setup: counts scale with MinSplitKeys so root subtreeCount = MinSplitKeys
+// exactly and the root qualifies as a split-point. 6:1:1 size ratio across
+// three top-level nibbles; root fanout=3.
 func TestParallelBarrier_AsymmetricWorkload(t *testing.T) {
 	t.Parallel()
 
+	big := 6 * int(MinSplitKeys) / 8 // 6/8 of total
+	small := int(MinSplitKeys) / 8   // 1/8 of total
+
 	ub := NewUpdateBuilder()
-	for i := range 24 {
+	for i := range big {
 		addr := findAddressForNibble(0x2, i)
 		ub.Balance(addrHex(addr), uint64(3_000+i))
 	}
-	for i := range 4 {
+	for i := range small {
 		addr := findAddressForNibble(0x6, i)
 		ub.Balance(addrHex(addr), uint64(5_000+i))
 	}
-	for i := range 4 {
+	for i := range small {
 		addr := findAddressForNibble(0xB, i)
 		ub.Balance(addrHex(addr), uint64(7_000+i))
 	}
