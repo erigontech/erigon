@@ -18,6 +18,7 @@ package graph
 
 import (
 	"context"
+	"math"
 	"math/big"
 	"testing"
 
@@ -125,6 +126,58 @@ func TestBlockResolverLogsAppliesFilter(t *testing.T) {
 	}
 }
 
+func TestBlockResolverLogsTopicWildcardDoesNotRequireTopicPosition(t *testing.T) {
+	block := &model.Block{
+		Logs: []*model.Log{
+			{
+				Index: 0,
+				Topics: []string{
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				},
+			},
+		},
+	}
+
+	resolver := &blockResolver{&Resolver{}}
+	logs, err := resolver.Logs(context.Background(), block, model.BlockFilterCriteria{
+		Topics: [][]string{
+			{"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+}
+
+func TestBlockResolverLogsFallsBackToFlattenTransactionsWhenLogsNil(t *testing.T) {
+	block := &model.Block{
+		Logs: nil,
+		Transactions: []*model.Transaction{
+			{
+				Logs: []*model.Log{
+					{Index: 7},
+				},
+			},
+		},
+	}
+
+	resolver := &blockResolver{&Resolver{}}
+	logs, err := resolver.Logs(context.Background(), block, model.BlockFilterCriteria{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 flattened log, got %d", len(logs))
+	}
+	if logs[0].Index != 7 {
+		t.Fatalf("expected flattened log index 7, got %d", logs[0].Index)
+	}
+}
+
 func TestTransactionResolverFromUsesRequestedBlock(t *testing.T) {
 	const address = "0x1111111111111111111111111111111111111111"
 
@@ -186,5 +239,31 @@ func TestLogResolverAccountFallsBackToEmbeddedBlock(t *testing.T) {
 	}
 	if account.BlockNum != 55 {
 		t.Fatalf("expected result block 55, got %d", account.BlockNum)
+	}
+}
+
+func TestTransactionResolverFromRejectsOverflowRequestedBlock(t *testing.T) {
+	const address = "0x1111111111111111111111111111111111111111"
+
+	called := false
+	resolver := &transactionResolver{&Resolver{
+		GraphQLAPI: mockGraphQLAPI{
+			getAccountInfo: func(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
+				called = true
+				return "0x10", 7, "0x6000", nil
+			},
+		},
+	}}
+
+	tx := &model.Transaction{From: model.NewAccountAtBlock(12)}
+	tx.From.Address = address
+	overflow := uint64(math.MaxInt64) + 1
+
+	_, err := resolver.From(context.Background(), tx, &overflow)
+	if err == nil {
+		t.Fatal("expected overflow error, got nil")
+	}
+	if called {
+		t.Fatal("expected resolver to reject overflow before GetAccountInfo call")
 	}
 }

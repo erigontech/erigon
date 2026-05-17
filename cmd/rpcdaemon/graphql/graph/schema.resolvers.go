@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -19,20 +20,21 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func accountBlockNumber(block *uint64, fallback uint64) uint64 {
-	if block != nil {
-		return *block
-	}
-	return fallback
-}
-
 func normalizeHex(value string) string {
 	return strings.ToLower(value)
 }
 
-func (r *Resolver) accountAtBlock(ctx context.Context, address string, blockNum uint64) (*model.Account, error) {
+func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, defaultBlock uint64, override *uint64) (*model.Account, error) {
+	blockNum := defaultBlock
+	if override != nil {
+		blockNum = *override
+	}
+
 	if !common.IsHexAddress(address) {
 		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	if blockNum > uint64(math.MaxInt64) {
+		return nil, fmt.Errorf("block number %d exceeds max supported value", blockNum)
 	}
 
 	addr := common.HexToAddress(address)
@@ -54,7 +56,7 @@ func (r *Resolver) resolveAccountAtRequestedBlock(ctx context.Context, account *
 	if account == nil || account.Address == "" {
 		return nil, nil
 	}
-	return r.accountAtBlock(ctx, account.Address, accountBlockNumber(block, account.BlockNum))
+	return r.resolveAccountAtBlock(ctx, account.Address, account.BlockNum, block)
 }
 
 func flattenBlockLogs(transactions []*model.Transaction) []*model.Log {
@@ -90,13 +92,12 @@ func blockLogMatchesFilter(log *model.Log, filter model.BlockFilterCriteria) boo
 		}
 	}
 
-	if len(filter.Topics) > len(log.Topics) {
-		return false
-	}
-
 	for i, alternatives := range filter.Topics {
 		if len(alternatives) == 0 {
 			continue
+		}
+		if i >= len(log.Topics) {
+			return false
 		}
 
 		match := false
@@ -199,8 +200,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 		block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
 		block.Transactions = []*model.Transaction{}
-		block.Logs = []*model.Log{}
-
 		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
 		block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
 
@@ -376,7 +375,7 @@ type transactionResolver struct{ *Resolver }
 
 // Account is the resolver for the account field on Block.
 func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
-	return r.accountAtBlock(ctx, address, obj.Number)
+	return r.resolveAccountAtBlock(ctx, address, obj.Number, nil)
 }
 
 // Miner is the resolver for the miner field on Block.
