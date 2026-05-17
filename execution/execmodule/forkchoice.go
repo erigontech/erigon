@@ -477,7 +477,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle:    initialCycle,
 		FirstCycle:      firstCycle,
-		PruneTimeout:    500 * time.Millisecond,
 		BeforeIteration: nil,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Release the old RO snapshot before the (long) flush so MDBX can
@@ -968,7 +967,17 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 // The caller is responsible for committing (or rolling back) the tx. Used by
 // the commit-cycle path to fold prune into the same tx as flush, saving one
 // extra commit per cycle.
+//
+// Unbounded prune by design: CommitCycle is only entered when a batch has
+// accumulated, so we already know there's work to do. Drain as much as we
+// have rather than the slot-bounded SecondsPerSlot/6 budget that's only
+// appropriate for actual chain-tip slot cadence. Pass initialCycle=false
+// regardless of caller to bypass PruneExecutionStage's "if IsInitialCycle
+// then 12h" override path — instead we explicitly request the 12h timeout,
+// which also causes the aggregator's PruneSmallBatches to use furious mode
+// (pruneLimit=1M) since timeout > 5h.
 func (e *ExecModule) runForkchoicePruneOnTx(tx kv.TemporalRwTx, initialCycle bool) error {
+	_ = initialCycle
 	// check that the current header isn't less than a step, this
 	// is mainly to prevent noise in testing on short chains with
 	// no snapshots and no need for pruning
@@ -980,8 +989,8 @@ func (e *ExecModule) runForkchoicePruneOnTx(tx kv.TemporalRwTx, initialCycle boo
 	if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
 		return nil
 	}
-	pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-	return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
+	const pruneTimeout = 12 * time.Hour
+	return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, false, pruneTimeout)
 }
 
 func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {

@@ -130,7 +130,6 @@ type BeforeIterationFn func(sd *execctx.SharedDomains)
 type RunLoopConfig struct {
 	InitialCycle    bool
 	FirstCycle      bool
-	PruneTimeout    time.Duration
 	CommitCycle     CommitCycleFn     // required when hasMore
 	ShouldBreak     ShouldBreakFn     // optional early exit
 	BeforeIteration BeforeIterationFn // optional per-iteration setup
@@ -139,14 +138,14 @@ type RunLoopConfig struct {
 // RunLoop executes the pipeline in a hasMore loop:
 //
 //	for hasMore {
-//	    [BeforeIteration] → sync.Run → RunPrune → [ShouldBreak] → if hasMore { CommitCycle }
+//	    [BeforeIteration] → sync.Run → [ShouldBreak] → if hasMore { CommitCycle }
 //	}
 //
-// RunPrune runs unconditionally on every iteration (including the last) to
-// match the original stageloop.ProcessFrozenBlocks behaviour. The loop
-// continues until Run returns hasMore=false, ShouldBreak returns true, or
-// an error occurs. The returned tx may differ from the input tx if
-// CommitCycle was called (which returns a fresh tx).
+// Pruning is the responsibility of CommitCycle (folded into the same tx as
+// flush, mirroring the FCU CommitCycle pattern). The loop continues until
+// Run returns hasMore=false, ShouldBreak returns true, or an error occurs.
+// The returned tx may differ from the input tx if CommitCycle was called
+// (which returns a fresh tx).
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
 	for hasMore := true; hasMore; {
 		if cfg.BeforeIteration != nil {
@@ -156,10 +155,6 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
-			return tx, err
-		}
-
-		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
 			return tx, err
 		}
 
@@ -229,12 +224,21 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		FirstCycle:   false,
-		PruneTimeout: 0,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			if err := sd.Flush(ctx, tx); err != nil {
 				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
 			}
 			sd.ClearRam(true)
+			// Fold prune into the same tx as flush. Unbounded (12h) +
+			// initialCycle=false so the aggregator's PruneSmallBatches
+			// uses furious mode (pruneLimit=1M). CommitCycle is only
+			// entered when a batch has accumulated, so we know there's
+			// work to do — drain as much as we have rather than the
+			// slot-bounded tip budget.
+			const pruneTimeout = 12 * time.Hour
+			if err := pe.RunPrune(ctx, tx, false, pruneTimeout); err != nil {
+				return nil, fmt.Errorf("ProcessFrozenBlocks: prune: %w", err)
+			}
 			if err := tx.Commit(); err != nil {
 				return nil, err
 			}
@@ -265,6 +269,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return fmt.Errorf("ProcessFrozenBlocks: final flush: %w", err)
 	}
 	doms.ClearRam(true)
+	// Prune the final-iter leftover before commit. RunLoop's CommitCycle
+	// folded prune only fires when hasMore=true; on the final iter
+	// (hasMore=false) it never ran, so without this call the last batch
+	// would be committed unpruned and stay until the next FCU.
+	const finalPruneTimeout = 12 * time.Hour
+	if err := pe.RunPrune(ctx, tx, false, finalPruneTimeout); err != nil {
+		return fmt.Errorf("ProcessFrozenBlocks: final prune: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
