@@ -182,25 +182,28 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	return keys
 }
 
+// WriteChanges pre-populates the version map from a BAL (EIP-7928). Each
+// per-path change is routed through the typed Write primitive so the value
+// type is enforced at compile time — a future BAL field-type change that
+// breaks the contract surfaces as a build error here rather than a runtime
+// panic on the first read of the cell.
 func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
-				value := change.Value
-				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, value, true)
+				vm.WriteStorage(accountChanges.Address, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
-			vm.Write(accountChanges.Address, BalancePath, accounts.NilKey, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+			vm.WriteBalance(accountChanges.Address, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
 		}
 		for _, nonceChange := range accountChanges.NonceChanges {
-			vm.Write(accountChanges.Address, NoncePath, accounts.NilKey, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+			vm.WriteNonce(accountChanges.Address, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			vm.Write(accountChanges.Address, CodePath, accounts.NilKey, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Bytecode, true)
+			vm.WriteCode(accountChanges.Address, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Bytecode, true)
 		}
 	}
-
 }
 
 func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
@@ -253,6 +256,390 @@ func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key a
 	default:
 		panic(fmt.Errorf("writeLocked: unknown path %v", path))
 	}
+}
+
+// Typed Write primitives. Each takes the AccountPath-contracted value type
+// directly so wrong-type writes are caught at compile time — there is no
+// runtime data.(T) assertion path through these.
+
+func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *accounts.Account, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.Address = putCell(e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.Balance = putCell(e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.Nonce = putCell(e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value []byte, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.Code = putCell(e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	e := vm.entryOrCreate(addr)
+	if e.Storage == nil {
+		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+	}
+	e.Storage[key] = putCell(e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value)
+}
+
+// entryOrCreate looks up the AddressEntry for addr, creating it if absent.
+// Caller must hold vm.mu.Lock().
+func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
+	e, ok := vm.s[addr]
+	if !ok {
+		e = &AddressEntry{}
+		vm.s[addr] = e
+	}
+	return e
+}
+
+func flagFor(complete bool) statusFlag {
+	if complete {
+		return FlagDone
+	}
+	return FlagEstimate
+}
+
+// Typed Read primitives. Each returns the typed value, a ReadResult holding
+// the conflict-detection metadata (depIdx, incarnation), and ok=true when a
+// cell exists. The any boundary in ReadResult.value is skipped — callers
+// consume the typed value directly.
+
+func (vm *VersionMap) ReadAddress(addr accounts.Address, txIdx int) (val *accounts.Account, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.Address == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[*accounts.Account]
+	e.Address.Descend(txIdx-1, func(k int, v *WriteCell[*accounts.Account]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadSelfDestruct(addr accounts.Address, txIdx int) (val bool, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.SelfDestruct == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[bool]
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadBalance(addr accounts.Address, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.Balance == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[uint256.Int]
+	e.Balance.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadNonce(addr accounts.Address, txIdx int) (val uint64, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.Nonce == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[uint64]
+	e.Nonce.Descend(txIdx-1, func(k int, v *WriteCell[uint64]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadIncarnation(addr accounts.Address, txIdx int) (val uint64, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.Incarnation == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[uint64]
+	e.Incarnation.Descend(txIdx-1, func(k int, v *WriteCell[uint64]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadCode(addr accounts.Address, txIdx int) (val []byte, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.Code == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[[]byte]
+	e.Code.Descend(txIdx-1, func(k int, v *WriteCell[[]byte]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadCodeHash(addr accounts.Address, txIdx int) (val accounts.CodeHash, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.CodeHash == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[accounts.CodeHash]
+	e.CodeHash.Descend(txIdx-1, func(k int, v *WriteCell[accounts.CodeHash]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadCodeSize(addr accounts.Address, txIdx int) (val int, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.CodeSize == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[int]
+	e.CodeSize.Descend(txIdx-1, func(k int, v *WriteCell[int]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadCreateContract(addr accounts.Address, txIdx int) (val bool, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present || e.CreateContract == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[bool]
+	e.CreateContract.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
+}
+
+func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey, txIdx int) (val uint256.Int, res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return val, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present {
+		return val, res, false
+	}
+	cells := e.Storage[key]
+	if cells == nil {
+		return val, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[uint256.Int]
+	cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return val, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv.Value, res, true
 }
 
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
@@ -881,10 +1268,12 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 // type parameter T matches the AccountPath's value-type contract: writing
 // the wrong T to a cell is a compile-time error, not a runtime panic.
 //
-// `boxed` caches the any-form of Value, populated once on Write so the
-// legacy any-shaped Read API (ReadResult.value) does not re-box on every
-// read. Typed Read primitives (commit 2b/follow-up) consume Value directly
-// and bypass the any boundary entirely.
+// Typed Read primitives (ReadBalance / ReadStorage / etc.) consume Value
+// directly without crossing the any boundary. The legacy any-shaped Read
+// API still exists for the consumers that have not yet migrated; for those
+// the boxed field caches the any form of Value populated once at write
+// time, so the legacy Read doesn't re-box on every call. Once every
+// consumer of Read is migrated to a typed primitive, boxed is dropped.
 type WriteCell[T any] struct {
 	flag        statusFlag
 	incarnation int
