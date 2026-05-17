@@ -202,6 +202,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinSubscribeAllTopicsFlag,
 	&utils.CaplinMaxPeerCount,
 	&utils.CaplinEnableUPNPlag,
+	&utils.CaplinLocalDiscoveryFlag,
 	&utils.CaplinNATFlag,
 	&utils.CaplinMaxInboundTrafficPerPeerFlag,
 	&utils.CaplinMaxOutboundTrafficPerPeerFlag,

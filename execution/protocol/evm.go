@@ -107,9 +107,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		BlobBaseFee:      blobBaseFee,
 		SlotNumber:       slotNumber,
 	}
-	if config.IsAmsterdam(header.Time) {
-		blockContext.CostPerStateByte = misc.CostPerStateByte(header.GasLimit)
-	}
 	return blockContext
 }
 

@@ -950,7 +950,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	endTxNum := file.EndRootNum()
 	txCount := endTxNum - startTxNum
 	if numBuckets > txCount {
-		panic(fmt.Errorf("numBuckets %d is greater than total tx count %d", numBuckets, txCount))
+		return 0, fmt.Errorf("numBuckets %d is greater than total tx count %d in file %s", numBuckets, txCount, fileName)
 	}
 	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
