@@ -63,6 +63,26 @@ type ParallelPatriciaHashed struct {
 	// rootHash holds the bytes published by the last-finisher of the topmost
 	// split-point. Nil until Process completes successfully.
 	rootHash atomic.Pointer[[]byte]
+
+	// pendingRoot stages the worker-published root (hash + cell) until the
+	// main Process goroutine has confirmed applyDeferredUpdates succeeded.
+	// Promoting to rootHash/template.root before then would leave the trie
+	// caching a root that was never committed to the DB if the deferred
+	// branch apply fails.
+	pendingRoot atomic.Pointer[publishedRoot]
+}
+
+// publishedRoot bundles the candidate root hash with the worker's final root
+// cell so both can be promoted (or discarded) atomically after the deferred
+// branch apply completes. rootChecked/rootTouched/rootPresent mirror the
+// worker's terminal flag state — they are serialized by EncodeCurrentState
+// and consumed by SetState/unfold on a restore-then-continue flow.
+type publishedRoot struct {
+	hash        []byte
+	cell        cell
+	rootChecked bool
+	rootTouched bool
+	rootPresent bool
 }
 
 // NewParallelPatriciaHashed constructs a fresh ParallelPatriciaHashed. The
@@ -123,6 +143,7 @@ func (p *ParallelPatriciaHashed) Reset() {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
+	p.pendingRoot.Store(nil)
 	p.resetPool()
 }
 
@@ -135,6 +156,7 @@ func (p *ParallelPatriciaHashed) Release() {
 		p.template = nil
 	}
 	p.rootHash.Store(nil)
+	p.pendingRoot.Store(nil)
 	p.resetPool()
 }
 
@@ -238,6 +260,7 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	p.rootHash.Store(nil)
+	p.pendingRoot.Store(nil)
 
 	pu := updates.parallel
 	// Empty update set: no touches occurred. Fall back to the template's
@@ -305,6 +328,14 @@ func (p *ParallelPatriciaHashed) Process(
 		}
 	}
 
+	// foldSem is a global semaphore shared by every active bucket's fold-phase
+	// goroutines. Without it, each bucket's inner errgroup would independently
+	// cap at p.numWorkers, so the total fold concurrency could grow to
+	// p.numWorkers * active_buckets (up to p.numWorkers * 16). With it, the
+	// total fold-phase goroutine count across all buckets is bounded by
+	// p.numWorkers regardless of how many buckets are active simultaneously.
+	foldSem := make(chan struct{}, p.numWorkers)
+
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(p.numWorkers)
 
@@ -316,7 +347,7 @@ func (p *ParallelPatriciaHashed) Process(
 		}
 		nib := byte(nib)
 		g.Go(func() error {
-			return p.runNibbleBucket(gctx, updates, nib, tasks, onProgress)
+			return p.runNibbleBucket(gctx, updates, nib, tasks, foldSem, onProgress)
 		})
 	}
 
@@ -325,7 +356,31 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	if err := p.applyDeferredUpdates(pu); err != nil {
+		// Deferred branch apply failed: discard the staged root so neither
+		// p.rootHash nor p.template.root surface a state that was never
+		// persisted to the DB. The pending pointer is dropped on the next
+		// Process call too, but clearing here guards intermediate RootHash
+		// reads between the failure and the next Process invocation.
+		p.pendingRoot.Store(nil)
 		return nil, err
+	}
+
+	// Promote the worker-staged root now that deferred updates are durable.
+	// All fields must move together: rootHash drives RootHash() on this
+	// instance, and template.root + the three root flags are what
+	// RootTrie().EncodeCurrentState serializes for persistence. SetState on
+	// restore replays both the cell and the flags; without the flag promotion
+	// the restored trie would see rootChecked/rootTouched/rootPresent == false
+	// and treat the persisted root cell as "not present" during the next
+	// unfold/fold cycle.
+	if pending := p.pendingRoot.Swap(nil); pending != nil {
+		if p.template != nil {
+			p.template.root = pending.cell
+			p.template.rootChecked = pending.rootChecked
+			p.template.rootTouched = pending.rootTouched
+			p.template.rootPresent = pending.rootPresent
+		}
+		p.rootHash.Store(&pending.hash)
 	}
 
 	// The topmost finisher publishes the root hash via rootHash. For Task 6
@@ -368,16 +423,24 @@ func (p *ParallelPatriciaHashed) acquirePrepareContext() (PatriciaContext, func(
 // the barrier protocol concurrently (via a sub-errgroup that shares the
 // outer worker-count budget through gctx cancellation).
 //
+// trieCtx lifecycle: one shared trieCtx is acquired for the entire dispatch
+// phase (safe because dispatch is single-pass and sequential through fn).
+// Each fold goroutine acquires its own trieCtx after passing through foldSem,
+// so simultaneous trieCtx (and MDBX reader-slot) usage per bucket is bounded
+// by 1 + min(p.numWorkers, len(tasks)) instead of len(tasks).
+//
 // Lifecycle per worker:
-//   - acquire hph from the pool, bind it to a per-worker PatriciaContext,
-//     enable deferred branch updates;
+//   - acquire hph from the pool, bind it to the shared dispatch ctx, enable
+//     deferred branch updates;
 //   - receive its share of the bucket's keys via followAndUpdate during the
 //     scan dispatch;
-//   - fold its grid through every ancestor split-point via foldDrainWithBarrier,
+//   - inside the fold goroutine, swap in a fresh per-worker trieCtx and fold
+//     its grid through every ancestor split-point via foldDrainWithBarrier,
 //     either exiting at a barrier or — as the topmost finisher — publishing
 //     the root hash;
 //   - on return, the worker's deferred updates have been folded into
-//     pu.deferredCombined and the worker has been put back into the pool.
+//     pu.deferredCombined and the worker has been put back into the pool;
+//     the per-worker trieCtx is released via its cleanup defer.
 //
 // Errors from either the dispatch or any worker's drain cancel the whole
 // bucket via gctx.
@@ -386,6 +449,7 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 	updates *Updates,
 	nib byte,
 	tasks []leafTask,
+	foldSem chan struct{},
 	_ func(*CommitProgress),
 ) (retErr error) {
 	if len(tasks) == 0 {
@@ -397,42 +461,47 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 		return fmt.Errorf("ParallelPatriciaHashed: nibbles[%x] collector is nil", nib)
 	}
 
-	type workerSlot struct {
-		hph     *HexPatriciaHashed
-		cleanup func()
-	}
-
-	workers := make([]*workerSlot, len(tasks))
-	cleanupAll := func() {
-		for _, w := range workers {
-			if w == nil {
-				continue
-			}
-			if w.cleanup != nil {
-				w.cleanup()
-			}
-			if w.hph != nil {
-				w.hph.resetForReuse()
-				p.workerPool.Put(w.hph)
-			}
-		}
-	}
+	workers := make([]*HexPatriciaHashed, len(tasks))
 	// Defensive cleanup on early-return paths. Successful runs hand each
 	// worker off to foldDrainWithBarrier which is responsible for returning
-	// them to the pool; we set workers[i].hph=nil before handoff so this
-	// loop becomes a no-op for handed-off slots.
+	// it to the pool; we set workers[i]=nil before handoff so this loop
+	// becomes a no-op for handed-off slots.
 	defer func() {
-		if retErr != nil {
-			cleanupAll()
+		if retErr == nil {
+			return
+		}
+		for _, hph := range workers {
+			if hph == nil {
+				continue
+			}
+			hph.resetForReuse()
+			p.workerPool.Put(hph)
 		}
 	}()
+
+	// Dispatch is single-pass and sequential through fn, so only one hph reads
+	// from the DB at any moment. Share a single trieCtx across every hph for
+	// dispatch; per-worker trieCtxes are acquired lazily inside the fold
+	// goroutines (after foldSem) and released when the fold returns. This
+	// bounds simultaneous trieCtx (and MDBX reader-slot) usage per bucket to
+	// 1 + min(p.numWorkers, len(tasks)) instead of len(tasks).
+	dispatchCtx, dispatchCleanup := p.trieCtxFactory()
+	dispatchReleased := false
+	releaseDispatchCtx := func() {
+		if dispatchReleased {
+			return
+		}
+		dispatchReleased = true
+		if dispatchCleanup != nil {
+			dispatchCleanup()
+		}
+	}
+	defer releaseDispatchCtx()
 
 	for i := range tasks {
 		hph := p.workerPool.Get().(*HexPatriciaHashed)
 		hph.resetForReuse()
-
-		workerCtx, cleanup := p.trieCtxFactory()
-		hph.ResetContext(workerCtx)
+		hph.ResetContext(dispatchCtx)
 		hph.branchEncoder.SetDeferUpdates(true)
 		hph.SetLeaveDeferredForCaller(true)
 
@@ -446,7 +515,7 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 			}
 		}
 
-		workers[i] = &workerSlot{hph: hph, cleanup: cleanup}
+		workers[i] = hph
 	}
 
 	// Single scan of the bucket. dispatchLeafKeys silently skips keys with no
@@ -454,29 +523,55 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 	// routed through Updates landed in the bucket because some leafTask under
 	// it claimed it.
 	if err := dispatchLeafKeys(ctx, collector, tasks, func(idx int, hk, pk []byte) error {
-		w := workers[idx]
-		if err := w.hph.followAndUpdate(hk, pk, nil); err != nil {
+		if err := workers[idx].followAndUpdate(hk, pk, nil); err != nil {
 			return fmt.Errorf("followAndUpdate (nibble=%x task[%d]): %w", nib, idx, err)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
+	// Dispatch is complete; the shared roTx is no longer needed. Releasing it
+	// here keeps the bucket from holding two reader slots once the first fold
+	// goroutine acquires its own trieCtx below.
+	releaseDispatchCtx()
 
 	// All workers fold back concurrently. They synchronise via splitMap
 	// deposits; deadlock is impossible because sp.arrived's last decrement
 	// triggers the last-finisher path even if the other workers exited
 	// already.
+	//
+	// foldSem is a process-wide semaphore (sized p.numWorkers) shared by every
+	// active bucket so the total fold-phase goroutine count across all buckets
+	// is bounded by p.numWorkers — not p.numWorkers per bucket, which would
+	// fan out to p.numWorkers * 16 with all buckets active. Workers that exit
+	// at a sub-barrier release their slot immediately; the last-finisher holds
+	// its slot while folding upward, bounded by the split-point chain depth.
+	// Per-worker trieCtxes are acquired inside foldSem so concurrent trieCtx
+	// (and MDBX reader-slot) usage tracks the fold concurrency cap, not
+	// len(tasks).
 	sg, sgctx := errgroup.WithContext(ctx)
 	for i := range workers {
-		w := workers[i]
 		taskIdx := i
 		taskPrefix := tasks[i].prefix
 		// Hand off ownership: foldDrainWithBarrier resets and re-pools the
-		// worker, so we must not double-cleanup from this orchestrator.
-		hph := w.hph
-		w.hph = nil
+		// worker, so the deferred cleanup above must skip this slot.
+		hph := workers[i]
+		workers[i] = nil
 		sg.Go(func() error {
+			select {
+			case foldSem <- struct{}{}:
+			case <-sgctx.Done():
+				p.releaseHandedOffWorker(hph)
+				return sgctx.Err()
+			}
+			defer func() { <-foldSem }()
+
+			workerCtx, cleanup := p.trieCtxFactory()
+			if cleanup != nil {
+				defer cleanup()
+			}
+			hph.ResetContext(workerCtx)
+
 			err := p.foldDrainWithBarrier(sgctx, hph, updates, taskPrefix)
 			if err != nil {
 				return fmt.Errorf("foldDrainWithBarrier (nibble=%x task[%d]): %w", nib, taskIdx, err)
@@ -485,20 +580,24 @@ func (p *ParallelPatriciaHashed) runNibbleBucket(
 		})
 	}
 	if err := sg.Wait(); err != nil {
-		// On error, cleanup() handles the per-worker trieCtx releases. The
-		// hph instances have already been returned to the pool by
-		// foldDrainWithBarrier (or were nil'd above before the goroutine
-		// took ownership, so cleanupAll's hph!=nil check skips them).
+		// foldDrainWithBarrier (or the deferred cleanup func above) has
+		// returned each hph to the pool and released its per-worker trieCtx.
 		return err
 	}
-	// Release per-worker context lifetimes now that all workers have folded.
-	for _, w := range workers {
-		if w != nil && w.cleanup != nil {
-			w.cleanup()
-			w.cleanup = nil
-		}
-	}
 	return nil
+}
+
+// releaseHandedOffWorker returns a worker to the pool when the fold goroutine
+// has already taken ownership (so cleanupAll's hph!=nil guard skips it) but a
+// foldSem-acquire context cancellation aborts before foldDrainWithBarrier
+// runs. The per-worker trieCtx cleanup is still owned by runNibbleBucket's
+// workers[i].cleanup and runs via cleanupAll on the error path.
+func (p *ParallelPatriciaHashed) releaseHandedOffWorker(hph *HexPatriciaHashed) {
+	if hph == nil {
+		return
+	}
+	hph.resetForReuse()
+	p.workerPool.Put(hph)
 }
 
 // foldDrainWithBarrier folds the worker's grid all the way to the root cell,
@@ -642,9 +741,36 @@ func (p *ParallelPatriciaHashed) foldDrainWithBarrier(
 	}
 }
 
-// publishRootFromWorker computes the worker's hph.RootHash and stores it
-// atomically into p.rootHash. CAS detects orchestration bugs that let
-// multiple workers reach this terminal state.
+// publishRootFromWorker computes the worker's hph.RootHash and stages it on
+// p.pendingRoot together with the worker's final root cell and root flags.
+// CAS detects orchestration bugs that let multiple workers reach this
+// terminal state.
+//
+// Staging (rather than writing rootHash / template.root directly) lets the
+// main Process goroutine promote the result only after applyDeferredUpdates
+// has succeeded. If the deferred apply fails, the staged pending pointer is
+// dropped and the trie does not surface a root that was never persisted.
+//
+// The captured hph.root cell and rootChecked/rootTouched/rootPresent flags
+// are mirrored into the template on promotion. Workers never write to the
+// template during Process, so without this copy the template stays at its
+// initial (empty) state and downstream paths that depend on template's root
+// state return the wrong value:
+//
+//   - RootHash() on this instance falls back to template.RootHash() when
+//     p.rootHash is nil (e.g. on a fresh instance after restart);
+//   - Process()'s zero-update fast-path returns template.RootHash() directly;
+//   - commitmentdb.encodeCommitmentState serializes template via
+//     RootTrie().EncodeCurrentState, which writes the three root flags
+//     alongside the root cell; restorePatriciaState replays both via
+//     SetState. Without the flag mirror the persisted state restores with
+//     rootChecked/rootTouched/rootPresent == false, and the next unfold
+//     treats the persisted root cell as "not present" in the fold/unfold
+//     cycle.
+//
+// Safe to read hph.root and the flags without locks: CAS guarantees this
+// branch runs in only one worker per Process call, and the worker is the
+// sole owner of its pooled hph at this point.
 func (p *ParallelPatriciaHashed) publishRootFromWorker(hph *HexPatriciaHashed) error {
 	rh, err := hph.RootHash()
 	if err != nil {
@@ -652,7 +778,14 @@ func (p *ParallelPatriciaHashed) publishRootFromWorker(hph *HexPatriciaHashed) e
 	}
 	rhCopy := make([]byte, len(rh))
 	copy(rhCopy, rh)
-	if !p.rootHash.CompareAndSwap(nil, &rhCopy) {
+	pending := &publishedRoot{
+		hash:        rhCopy,
+		cell:        hph.root,
+		rootChecked: hph.rootChecked,
+		rootTouched: hph.rootTouched,
+		rootPresent: hph.rootPresent,
+	}
+	if !p.pendingRoot.CompareAndSwap(nil, pending) {
 		return errors.New("ParallelPatriciaHashed: another worker already published the root hash — split-point coverage is incomplete")
 	}
 	return nil

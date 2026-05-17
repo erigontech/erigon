@@ -830,3 +830,118 @@ func TestParallelBarrier_LoadSiblingsTouchedAndDeleted(t *testing.T) {
 	assert.Equal(t, uint16(1<<0x3), hph.afterMap[0],
 		"afterMap drops deleted touched nibbles")
 }
+
+// TestParallelPatriciaHashedTemplateMirrorsPublishedRoot verifies that after a
+// successful Process the template's root cell mirrors the publishing worker's
+// final root, so RootHash() returns the correct value via the template
+// fallback. Without the mirror, the template stays at its initial empty state
+// and downstream paths (zero-update fast-path, encode/restore for the parallel
+// trie variant in commitmentdb) return the empty-trie hash instead of the
+// computed root.
+func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
+	t.Parallel()
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 42).
+		Build()
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
+
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	defer p.Release()
+	p.SetNumWorkers(1)
+	p.ResetContext(parMs)
+
+	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer parUpds.Close()
+	for i, k := range plainKeys {
+		i, k := i, k
+		ks := string(k)
+		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = KeyToHexNibbleHash(k)
+			c.update = &updates[i]
+		})
+	}
+
+	published, err := p.Process(context.Background(), parUpds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, published)
+
+	// Drop the atomic publish so RootHash must compute from the template's
+	// root cell — emulating a fresh instance (post-restart) or any caller
+	// that hits the template fallback.
+	p.rootHash.Store(nil)
+
+	got, err := p.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, published, got,
+		"template.RootHash must return the published root once the worker has folded into it")
+}
+
+// TestParallelPatriciaHashedStateRoundTrip drives Process, encodes the
+// resulting trie state via the template, restores it into a fresh template,
+// and asserts the restored RootHash matches the originally published value.
+// This is the persistence path the commitmentdb layer takes for the parallel
+// trie variant.
+func TestParallelPatriciaHashedStateRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	plainKeys, updates := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 42).
+		Build()
+
+	parMs := NewMockState(t)
+	parMs.SetConcurrentCommitment(true)
+	require.NoError(t, parMs.applyPlainUpdates(plainKeys, updates))
+
+	p := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	defer p.Release()
+	p.SetNumWorkers(1)
+	p.ResetContext(parMs)
+
+	parUpds := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer parUpds.Close()
+	for i, k := range plainKeys {
+		i, k := i, k
+		ks := string(k)
+		parUpds.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
+			c.plainKey = ks
+			c.hashedKey = KeyToHexNibbleHash(k)
+			c.update = &updates[i]
+		})
+	}
+
+	published, err := p.Process(context.Background(), parUpds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotEmpty(t, published)
+
+	// The template's root flags must mirror the worker's terminal state. They
+	// are serialized below and any drift surfaces as a restore-then-continue
+	// bug on the next unfold/fold cycle.
+	tmpl := p.RootTrie()
+	require.True(t, tmpl.rootChecked, "template.rootChecked must be promoted from the worker")
+	require.True(t, tmpl.rootTouched, "template.rootTouched must be promoted from the worker")
+	require.True(t, tmpl.rootPresent, "template.rootPresent must be promoted from the worker")
+
+	encoded, err := tmpl.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, encoded, "EncodeCurrentState must capture template state mirrored from the worker")
+
+	// Restore on a brand-new instance, simulating a process restart.
+	p2 := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr)
+	defer p2.Release()
+	p2.ResetContext(parMs)
+	require.NoError(t, p2.RootTrie().SetState(encoded))
+
+	require.True(t, p2.RootTrie().rootChecked, "rootChecked must round-trip through SetState")
+	require.True(t, p2.RootTrie().rootTouched, "rootTouched must round-trip through SetState")
+	require.True(t, p2.RootTrie().rootPresent, "rootPresent must round-trip through SetState")
+
+	restored, err := p2.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, published, restored,
+		"RootHash after SetState must reproduce the published root")
+}
