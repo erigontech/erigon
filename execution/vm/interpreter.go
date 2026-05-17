@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -62,47 +63,109 @@ type CallContext struct {
 	input    []byte
 	Memory   Memory
 
-	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
-	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
-	// the generation at which the entry was populated. An entry is valid only
-	// when its gen equals cacheGen, giving the gas phase and execute phase of
-	// the same opcode a shared interned value without a second unique.Make call.
+	// Two-tier intern cache for the top-of-stack key/address bytes:
+	//
+	//   Tier 1 (gen check): same-opcode dispatch reuses the prior interned
+	//     value via cachedKeyGen == cacheGen. Catches gas-phase + execute-
+	//     phase pair of a single opcode.
+	//
+	//   Tier 2 (direct-mapped associative cache): the first uint64 of the
+	//     stack-top bytes selects a slot in cachedKeyTable; the slot holds
+	//     the FULL bytes32 plus the interned handle. On lookup we mask the
+	//     uint64 to size, compare the full bytes against the slot, return
+	//     the cached handle on equal; otherwise unique.Make and replace the
+	//     slot. The full-equal check prevents false positives from
+	//     first-uint64 collisions. On `sload_same_key` (pprof: 22 % of TEST-
+	//     block samples on accounts.InternKey via peekStorageKey +
+	//     gasSLoadEIP2929) the table catches every successive same-key SLOAD
+	//     in O(1) without unique.Make. Per-CallContext cost: 16 × 40 = 640
+	//     bytes for keys + 16 × 28 = 448 bytes for addresses; pool-amortised.
+	//
 	// Placed before Stack so these fields stay in L1D rather than being pushed
 	// out by Stack.data (32 KB).
-	cacheGen      uint64
-	cachedKeyGen  uint64
-	cachedAddrGen uint64
-	cachedKey     accounts.StorageKey
-	cachedAddr    accounts.Address
+	cacheGen        uint64
+	cachedKeyGen    uint64
+	cachedAddrGen   uint64
+	cachedKey       accounts.StorageKey
+	cachedAddr      accounts.Address
+	cachedKeyTable  [internTableSize]internStorageKeyEntry
+	cachedAddrTable [internTableSize]internAddressEntry
 
 	Stack    Stack
 	Contract Contract
 }
 
+// internTableSize is the size of the direct-mapped intern caches on each
+// CallContext. 16 slots covers the typical EVM call-frame working set of
+// hot keys/addresses; collisions on the first-uint64 index resolve via
+// replacement (correctness preserved by the full-bytes equal check).
+const internTableSize = 16
+
+type internStorageKeyEntry struct {
+	bytes [32]byte
+	key   accounts.StorageKey
+	valid bool
+}
+
+type internAddressEntry struct {
+	bytes [20]byte
+	addr  accounts.Address
+	valid bool
+}
+
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
-// The result is cached for the lifetime of one opcode dispatch (gas phase +
-// execute phase share the same cacheGen), so unique.Make is called at most
-// once per opcode. Callers must invoke this before any stack mutation
-// (pop/push/swap) within the same dispatch — the cache is keyed by generation
-// only and will not detect a changed stack top within the same opcode.
+// Two-tier cache (see CallContext struct comment for full design):
+//  1. Same opcode dispatch (cachedKeyGen == cacheGen): return cachedKey.
+//  2. Direct-mapped table: index by the first uint64 of the raw bytes,
+//     full-bytes-equal verify the slot; hit returns cached, miss runs
+//     unique.Make and replaces the slot.
+//
+// On `sload_same_key` the first SLOAD of a slot misses the table, runs
+// unique.Make once, populates the slot. Every subsequent same-key SLOAD
+// hits the slot in O(1) and skips unique.Make. pprof: ~22 % of TEST-block
+// CPU on this workload was unique.Make via peekStorageKey + gas path.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	if ctx.cachedKeyGen == ctx.cacheGen {
 		return ctx.cachedKey
 	}
-	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	bytes := ctx.Stack.peek().Bytes32()
+	idx := binary.BigEndian.Uint64(bytes[:8]) & (internTableSize - 1)
+	e := &ctx.cachedKeyTable[idx]
+	if e.valid && e.bytes == bytes {
+		ctx.cachedKey = e.key
+		ctx.cachedKeyGen = ctx.cacheGen
+		return e.key
+	}
+	k := accounts.InternKey(bytes)
+	e.bytes = bytes
+	e.key = k
+	e.valid = true
+	ctx.cachedKey = k
 	ctx.cachedKeyGen = ctx.cacheGen
-	return ctx.cachedKey
+	return k
 }
 
-// peekAddress returns the top-of-stack value as an interned Address.
-// Cached like peekStorageKey; same constraint: call before any stack mutation.
+// peekAddress mirrors peekStorageKey for addresses (bytes20 instead of
+// bytes32). The first 8 bytes of the address index the direct-mapped table.
 func (ctx *CallContext) peekAddress() accounts.Address {
 	if ctx.cachedAddrGen == ctx.cacheGen {
 		return ctx.cachedAddr
 	}
-	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	bytes := ctx.Stack.peek().Bytes20()
+	idx := binary.BigEndian.Uint64(bytes[:8]) & (internTableSize - 1)
+	e := &ctx.cachedAddrTable[idx]
+	if e.valid && e.bytes == bytes {
+		ctx.cachedAddr = e.addr
+		ctx.cachedAddrGen = ctx.cacheGen
+		return e.addr
+	}
+	a := accounts.InternAddress(bytes)
+	e.bytes = bytes
+	e.addr = a
+	e.valid = true
+	ctx.cachedAddr = a
 	ctx.cachedAddrGen = ctx.cacheGen
-	return ctx.cachedAddr
+	return a
 }
 
 var contextPool = sync.Pool{
