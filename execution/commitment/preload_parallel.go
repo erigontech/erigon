@@ -276,7 +276,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			// Preserve un-pinned items at the current depth for the next Run.
 			// Resolved-but-not-pinned file values are discarded (callable resolver
 			// will be re-invoked on the next Run for these keys).
-			var rest []pathKey
+			rest := make([]pathKey, 0, len(dbHits)-dbHitStop+(len(fileMiss)-fileMissStop)+len(fileMissDeferred))
 			rest = append(rest, dbHits[dbHitStop:]...)
 			rest = append(rest, fileMiss[fileMissStop:]...)
 			rest = append(rest, fileMissDeferred...)
