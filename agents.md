@@ -50,7 +50,19 @@ Before committing, always verify changes with: `make lint && make erigon integra
 
 This applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, removing tests from a runner matrix without a tracking issue, etc.
 
-The only acceptable workflow when a test must temporarily not run: user explicitly asks for it in the current turn, the skip carries a comment with a linked tracking issue, and the skip is reverted as soon as the underlying bug is fixed.
+### Acceptable reasons to add a skip (still requires explicit user request)
+
+There are two narrow exceptions where a skip is the correct call. Both still require the user to ask for the skip in the current turn — agents must not add skips proactively.
+
+1. **External test suites we import where we know we can't pass all the tests** — typically because we haven't done the corresponding development yet. Example: an upstream Ethereum spec test for a feature we haven't implemented. The skip documents the gap rather than hiding a regression. Every such skip MUST link to a tracking issue describing what work is needed before the skip can be removed.
+
+2. **Flaky tests that intermittently break CI** — partially valid, with very low tolerance. The general rule for flakes is: **reproduce locally and fix**. Only after a serious attempt at local repro and root-cause analysis (not "I ran it three times locally and it passed") should a skip be considered. When a skip is the chosen escape valve, it MUST link to a tracking issue with the local-repro investigation attached, and the test owner accepts responsibility for un-skipping once the flake is fixed.
+
+In both cases the skip carries an inline comment with the linked tracking issue, and the issue gets closed by removing the skip — not by closing the issue with the skip still in place.
+
+### Default workflow
+
+When a test must temporarily not run: user explicitly asks for it in the current turn, the skip carries a comment with a linked tracking issue, and the skip is reverted as soon as the underlying bug is fixed.
 
 ## Conventions
 
