@@ -270,8 +270,8 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// stays 0 → empty-account prune); a later TX that tips the same
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
+		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
+			if destructed {
 				destructTxIndex := res.DepIdx()
 				revived := false
 				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
@@ -292,7 +292,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 				}
 			}
 		}
-		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {
+		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
 			return &updated, nil
 		}
@@ -334,12 +334,74 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	return nil, nil
 }
 
-func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
-	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
-		return res.Value().(T), true
+// Per-path versionedUpdate helpers replace the legacy generic
+// versionedUpdate[T] — they consume the typed VersionMap Read primitives
+// directly so neither the call site nor the read path crosses an any
+// boundary. Each returns the cell value if a Done write exists at txIndex,
+// otherwise the zero value and ok=false.
+
+func versionedUpdateAddress(vm *VersionMap, addr accounts.Address, txIndex int) (*accounts.Account, bool) {
+	val, res, ok := vm.ReadAddress(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
 	}
-	var v T
-	return v, false
+	return nil, false
+}
+
+func versionedUpdateSelfDestruct(vm *VersionMap, addr accounts.Address, txIndex int) (bool, bool) {
+	val, res, ok := vm.ReadSelfDestruct(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return false, false
+}
+
+func versionedUpdateBalance(vm *VersionMap, addr accounts.Address, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadBalance(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return uint256.Int{}, false
+}
+
+func versionedUpdateNonce(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadNonce(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateIncarnation(vm *VersionMap, addr accounts.Address, txIndex int) (uint64, bool) {
+	val, res, ok := vm.ReadIncarnation(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return 0, false
+}
+
+func versionedUpdateCode(vm *VersionMap, addr accounts.Address, txIndex int) ([]byte, bool) {
+	val, res, ok := vm.ReadCode(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return nil, false
+}
+
+func versionedUpdateCodeHash(vm *VersionMap, addr accounts.Address, txIndex int) (accounts.CodeHash, bool) {
+	val, res, ok := vm.ReadCodeHash(addr, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return accounts.CodeHash{}, false
+}
+
+func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.StorageKey, txIndex int) (uint256.Int, bool) {
+	val, res, ok := vm.ReadStorage(addr, key, txIndex)
+	if ok && res.Status() == MVReadResultDone {
+		return val, true
+	}
+	return uint256.Int{}, false
 }
 
 // applyVersionedUpdates applies updated from the version map to the account before returning it, this is necessary
@@ -348,16 +410,16 @@ func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path 
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, accounts.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdateBalance(vr.versionMap, address, vr.txIndex); ok {
 		account.Balance = update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdateNonce(vr.versionMap, address, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, IncarnationPath, accounts.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdateIncarnation(vr.versionMap, address, vr.txIndex); ok {
 		account.Incarnation = update
 	}
-	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
+	if update, ok := versionedUpdateCodeHash(vr.versionMap, address, vr.txIndex); ok {
 		account.CodeHash = update
 	}
 	return account
@@ -393,12 +455,12 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
+		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
+			if destructed {
 				return uint256.Int{}, false, nil
 			}
 		}
-		if val, ok := versionedUpdate[uint256.Int](vr.versionMap, address, StoragePath, key, vr.txIndex); ok {
+		if val, ok := versionedUpdateStorage(vr.versionMap, address, key, vr.txIndex); ok {
 			return val, true, nil
 		}
 	}
@@ -436,12 +498,12 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	// Check version map for CodePath entries written by prior transactions
 	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
+		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
+			if destructed {
 				return nil, nil
 			}
 		}
-		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
+		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
 			return code, nil
 		}
 	}
@@ -461,12 +523,12 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	}
 
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
+		if destructed, res, ok := vr.versionMap.ReadSelfDestruct(address, vr.txIndex); ok && res.Status() == MVReadResultDone {
+			if destructed {
 				return 0, nil
 			}
 		}
-		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
+		if code, ok := versionedUpdateCode(vr.versionMap, address, vr.txIndex); ok {
 			return len(code), nil
 		}
 	}
@@ -749,7 +811,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	var destrcutedVersion Version
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
+	} else if destructed, res, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && res.Status() == MVReadResultDone && destructed {
 		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
 		// at a strictly higher TxIndex re-creates the account, so the SD
 		// must NOT short-circuit the read. Mirrors versionedStateReader
@@ -900,8 +962,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		if path == CodePath {
-			sdres := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
-			if sdres.Status() == MVReadResultDone && sdres.Value().(bool) && sdres.DepIdx() >= res.DepIdx() {
+			if destructed, sdres, ok := s.versionMap.ReadSelfDestruct(addr, s.txIndex); ok && sdres.Status() == MVReadResultDone && destructed && sdres.DepIdx() >= res.DepIdx() {
 				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
 			}
 		}
