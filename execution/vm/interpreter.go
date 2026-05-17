@@ -65,9 +65,11 @@ type CallContext struct {
 
 	// Two-tier intern cache for the top-of-stack key/address bytes:
 	//
-	//   Tier 1 (gen check): same-opcode dispatch reuses the prior interned
-	//     value via cachedKeyGen == cacheGen. Catches gas-phase + execute-
-	//     phase pair of a single opcode.
+	//   Tier 1 (validity flag): same-opcode dispatch reuses the prior
+	//     interned value via cachedKeyValid. The interpreter clears the
+	//     flag on every opcode dispatch; the flag is set when the cache
+	//     is populated. Default-zero (false) is correctly "invalid", so
+	//     struct-literal CallContexts (e.g. unit tests) miss safely.
 	//
 	//   Tier 2 (direct-mapped associative cache): the first uint64 of the
 	//     stack-top bytes selects a slot in cachedKeyTable; the slot holds
@@ -83,9 +85,8 @@ type CallContext struct {
 	//
 	// Placed before Stack so these fields stay in L1D rather than being pushed
 	// out by Stack.data (32 KB).
-	cacheGen        uint64
-	cachedKeyGen    uint64
-	cachedAddrGen   uint64
+	cachedKeyValid  bool
+	cachedAddrValid bool
 	cachedKey       accounts.StorageKey
 	cachedAddr      accounts.Address
 	cachedKeyTable  [internTableSize]internStorageKeyEntry
@@ -115,7 +116,7 @@ type internAddressEntry struct {
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
 // Two-tier cache (see CallContext struct comment for full design):
-//  1. Same opcode dispatch (cachedKeyGen == cacheGen): return cachedKey.
+//  1. Same opcode dispatch (cachedKeyValid): return cachedKey.
 //  2. Direct-mapped table: index by the first uint64 of the raw bytes,
 //     full-bytes-equal verify the slot; hit returns cached, miss runs
 //     unique.Make and replaces the slot.
@@ -125,7 +126,7 @@ type internAddressEntry struct {
 // hits the slot in O(1) and skips unique.Make. pprof: ~22 % of TEST-block
 // CPU on this workload was unique.Make via peekStorageKey + gas path.
 func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
-	if ctx.cachedKeyGen == ctx.cacheGen {
+	if ctx.cachedKeyValid {
 		return ctx.cachedKey
 	}
 	bytes := ctx.Stack.peek().Bytes32()
@@ -133,7 +134,7 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	e := &ctx.cachedKeyTable[idx]
 	if e.valid && e.bytes == bytes {
 		ctx.cachedKey = e.key
-		ctx.cachedKeyGen = ctx.cacheGen
+		ctx.cachedKeyValid = true
 		return e.key
 	}
 	k := accounts.InternKey(bytes)
@@ -141,14 +142,14 @@ func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
 	e.key = k
 	e.valid = true
 	ctx.cachedKey = k
-	ctx.cachedKeyGen = ctx.cacheGen
+	ctx.cachedKeyValid = true
 	return k
 }
 
 // peekAddress mirrors peekStorageKey for addresses (bytes20 instead of
 // bytes32). The first 8 bytes of the address index the direct-mapped table.
 func (ctx *CallContext) peekAddress() accounts.Address {
-	if ctx.cachedAddrGen == ctx.cacheGen {
+	if ctx.cachedAddrValid {
 		return ctx.cachedAddr
 	}
 	bytes := ctx.Stack.peek().Bytes20()
@@ -156,7 +157,7 @@ func (ctx *CallContext) peekAddress() accounts.Address {
 	e := &ctx.cachedAddrTable[idx]
 	if e.valid && e.bytes == bytes {
 		ctx.cachedAddr = e.addr
-		ctx.cachedAddrGen = ctx.cacheGen
+		ctx.cachedAddrValid = true
 		return e.addr
 	}
 	a := accounts.InternAddress(bytes)
@@ -164,7 +165,7 @@ func (ctx *CallContext) peekAddress() accounts.Address {
 	e.addr = a
 	e.valid = true
 	ctx.cachedAddr = a
-	ctx.cachedAddrGen = ctx.cacheGen
+	ctx.cachedAddrValid = true
 	return a
 }
 
@@ -190,11 +191,8 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
-	c.cacheGen = 0
-	// Use sentinel values so that a peek call before the first cacheGen++ is
-	// always a miss rather than returning a stale handle from a prior use.
-	c.cachedKeyGen = ^uint64(0)
-	c.cachedAddrGen = ^uint64(0)
+	c.cachedKeyValid = false
+	c.cachedAddrValid = false
 	// Zero the handles to release their canonMap pins while the context is
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
@@ -490,7 +488,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	for {
-		callContext.cacheGen++
+		callContext.cachedKeyValid = false
+		callContext.cachedAddrValid = false
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
