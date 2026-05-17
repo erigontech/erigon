@@ -46,10 +46,6 @@ type StateV3 struct {
 	logger                     log.Logger
 	persistReceiptsCacheV2     bool
 	txNum                      uint64
-	// trace is toggled by the apply-loop goroutine (SetTrace) while the
-	// execLoop goroutine reads it in applyVersionedWrites' trace-gating
-	// branches — atomic.Bool is sufficient since the flag only gates debug
-	// printing.
 	trace                      atomic.Bool
 	skipStepBoundaryCommitment bool
 }
