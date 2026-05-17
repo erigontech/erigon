@@ -7,112 +7,75 @@ package graph
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
 
-func normalizeHex(value string) string {
-	return strings.ToLower(value)
+// Storage is the resolver for the storage field.
+func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
+	addr := common.HexToAddress(obj.Address)
+	blockNumber := rpc.BlockNumber(obj.BlockNum)
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, blockNumber)
 }
 
-func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, defaultBlock uint64, override *uint64) (*model.Account, error) {
-	blockNum := defaultBlock
-	if override != nil {
-		blockNum = *override
+// TransactionAt is the resolver for the transactionAt field.
+func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, index int) (*model.Transaction, error) {
+	if index < 0 || index >= len(obj.Transactions) {
+		return nil, nil
+	}
+	return obj.Transactions[index], nil
+}
+
+// Logs is the resolver for the logs field.
+func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
+	logs := obj.Logs
+	if logs == nil {
+		logs = flattenBlockLogs(obj.Transactions)
+	}
+	if len(logs) == 0 {
+		return []*model.Log{}, nil
 	}
 
+	filtered := make([]*model.Log, 0, len(logs))
+	for _, log := range logs {
+		if blockLogMatchesFilter(log, filter) {
+			filtered = append(filtered, log)
+		}
+	}
+	return filtered, ctx.Err()
+}
+
+// Account is the resolver for the account field.
+func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
 	if !common.IsHexAddress(address) {
 		return nil, fmt.Errorf("invalid address %q", address)
 	}
-	if blockNum > uint64(math.MaxInt64) {
-		return nil, fmt.Errorf("block number %d exceeds max supported value", blockNum)
-	}
-
-	addr := common.HexToAddress(address)
-	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.BlockNumber(blockNum))
-	if err != nil {
-		return nil, err
-	}
-
-	return &model.Account{
-		Address:          normalizeHex(address),
-		Balance:          balance,
-		TransactionCount: nonce,
-		Code:             code,
-		BlockNum:         blockNum,
-	}, nil
+	return r.resolveAccountAtBlock(ctx, address, obj.Number, nil)
 }
 
-func (r *Resolver) resolveAccountAtRequestedBlock(ctx context.Context, account *model.Account, block *uint64) (*model.Account, error) {
-	if account == nil || account.Address == "" {
-		return nil, nil
-	}
-	return r.resolveAccountAtBlock(ctx, account.Address, account.BlockNum, block)
+// Call is the resolver for the call field.
+func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.CallData) (*model.CallResult, error) {
+	panic("not implemented: Call - call")
 }
 
-func flattenBlockLogs(transactions []*model.Transaction) []*model.Log {
-	var logs []*model.Log
-	for _, tx := range transactions {
-		if tx == nil {
-			continue
-		}
-		logs = append(logs, tx.Logs...)
-	}
-	return logs
+// EstimateGas is the resolver for the estimateGas field.
+func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
+	panic("not implemented: EstimateGas - estimateGas")
 }
 
-func blockLogMatchesFilter(log *model.Log, filter model.BlockFilterCriteria) bool {
-	if log == nil {
-		return false
+// Miner is the resolver for the miner field.
+func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Miner, block)
+	if account != nil || err != nil {
+		return account, err
 	}
-
-	if len(filter.Addresses) > 0 {
-		if log.Account == nil || log.Account.Address == "" {
-			return false
-		}
-
-		match := false
-		for _, address := range filter.Addresses {
-			if normalizeHex(address) == normalizeHex(log.Account.Address) {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
-		}
-	}
-
-	for i, alternatives := range filter.Topics {
-		if len(alternatives) == 0 {
-			continue
-		}
-		if i >= len(log.Topics) {
-			return false
-		}
-
-		match := false
-		for _, topic := range alternatives {
-			if normalizeHex(topic) == normalizeHex(log.Topics[i]) {
-				match = true
-				break
-			}
-		}
-		if !match {
-			return false
-		}
-	}
-
-	return true
+	return nil, fmt.Errorf("block miner is unavailable")
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -122,41 +85,43 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 
 // Block is the resolver for the block field.
 func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
+	if number != nil && hash != nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+
+	if hash != nil {
+		blockHash := common.HexToHash(*hash)
+		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash)
+		if err != nil {
+			return nil, err
+		}
+		if res == nil {
+			return nil, nil
+		}
+		return r.buildBlock(res)
+	}
+
 	var blockNumber rpc.BlockNumber
 
 	if number != nil {
-		// Block number is not null, test for a positive long integer
 		bNum, err := strconv.ParseUint(*number, 10, 64)
 		if err == nil {
-			// Positive integer, go ahead
+			if bNum > uint64(math.MaxInt64) {
+				return nil, fmt.Errorf("block number %d exceeds max supported value", bNum)
+			}
 			blockNumber = rpc.BlockNumber(bNum)
 		} else {
 			bNum, err := hexutil.DecodeUint64(*number)
 			if err == nil {
-				// Hexadecimal, 0x prefixed
+				if bNum > uint64(math.MaxInt64) {
+					return nil, fmt.Errorf("block number %d exceeds max supported value", bNum)
+				}
 				blockNumber = rpc.BlockNumber(bNum)
 			} else {
-				var err error
-				return nil, err
+				return nil, fmt.Errorf("invalid block number: %s", *number)
 			}
 		}
 	} else {
-		if hash != nil {
-			blockHash, _ := hexutil.DecodeBig(*hash)
-			fmt.Println("TODO/GraphQL/Implement me, get Block by hash=", blockHash)
-			hash = nil
-		}
-	}
-
-	if number == nil && hash == nil {
-		// If neither number or hash is specified (nil), we should deliver "latest" block
-		/*
-			rpc.LatestExecutedBlockNumber = BlockNumber(-5)
-			rpc.FinalizedBlockNumber      = BlockNumber(-4)
-			rpc.SafeBlockNumber           = BlockNumber(-3)
-			rpc.PendingBlockNumber        = BlockNumber(-2)
-			rpc.LatestBlockNumber         = BlockNumber(-1)
-		*/
 		blockNumber = rpc.LatestBlockNumber
 	}
 
@@ -164,148 +129,50 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	if err != nil {
 		return nil, err
 	}
-
-	block := &model.Block{}
-	absBlk := res["block"]
-
-	if absBlk != nil {
-		blk := absBlk.(map[string]any)
-
-		block.Difficulty = *convertDataToStringP(blk, "difficulty")
-		block.ExtraData = *convertDataToStringP(blk, "extraData")
-		block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
-		block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
-		block.Hash = *convertDataToStringP(blk, "hash")
-		block.Miner = model.NewAccountAtBlock(block.Number)
-		address := convertDataToStringP(blk, "miner")
-		if address != nil {
-			block.Miner.Address = strings.ToLower(*address)
-		}
-		mixHash := convertDataToStringP(blk, "mixHash")
-		if mixHash != nil {
-			block.MixHash = *mixHash
-		}
-		blockNonce := convertDataToStringP(blk, "nonce")
-		if blockNonce != nil {
-			block.Nonce = *blockNonce
-		}
-		block.Number = *convertDataToUint64P(blk, "number")
-		block.Miner.BlockNum = block.Number
-		block.Parent = &model.Block{}
-		block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
-		block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
-		block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-		block.Timestamp = *convertDataToStringP(blk, "timestamp")
-		block.TransactionCount = convertDataToIntP(blk, "transactionCount")
-		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
-		block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
-		block.Transactions = []*model.Transaction{}
-		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
-		block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
-
-		// Ommers
-		block.Ommers = []*model.Block{}
-		for _, ommerHash := range blk["uncles"].([]common.Hash) {
-			block.Ommers = append(block.Ommers, &model.Block{Hash: ommerHash.String()})
-		}
-
-		ommerCount := len(block.Ommers)
-		block.OmmerCount = &ommerCount
-
-		// Transactions
-		absRcp := res["receipts"]
-		rcp := absRcp.([]map[string]any)
-		for _, transReceipt := range rcp {
-			trans := &model.Transaction{}
-			trans.Block = block
-			trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
-			trans.InputData = *convertDataToStringP(transReceipt, "data")
-			trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
-			trans.GasPrice = *convertDataToStringP(transReceipt, "effectiveGasPrice")
-			trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
-			trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-			trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
-			transNonce := convertDataToStringP(transReceipt, "nonce")
-			if transNonce != nil {
-				trans.Nonce = *transNonce
-			}
-			trans.Status = convertDataToUint64P(transReceipt, "status")
-			trans.Type = convertDataToIntP(transReceipt, "type")
-			trans.Value = *convertDataToStringP(transReceipt, "value")
-
-			trans.Logs = make([]*model.Log, 0)
-			for _, rlog := range transReceipt["logs"].(types.Logs) {
-				tlog := model.Log{
-					Index: int(rlog.Index),
-					Data:  "0x" + hex.EncodeToString(rlog.Data),
-				}
-				tlog.Account = model.NewAccountAtBlock(block.Number)
-				tlog.Account.Address = strings.ToLower(rlog.Address.String())
-				tlog.Transaction = trans
-
-				for _, rtopic := range rlog.Topics {
-					tlog.Topics = append(tlog.Topics, rtopic.String())
-				}
-
-				trans.Logs = append(trans.Logs, &tlog)
-				block.Logs = append(block.Logs, &tlog)
-			}
-
-			trans.From = model.NewAccountAtBlock(block.Number)
-			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
-
-			address := convertDataToStringP(transReceipt, "to")
-			// To address could be nil in case of contract creation
-			if address != nil {
-				trans.To = model.NewAccountAtBlock(block.Number)
-				trans.To.Address = strings.ToLower(*address)
-			}
-
-			contractAddress := convertDataToStringP(transReceipt, "contractAddress")
-			if contractAddress != nil {
-				trans.CreatedContract = model.NewAccountAtBlock(block.Number)
-				trans.CreatedContract.Address = strings.ToLower(*contractAddress)
-			}
-
-			block.Transactions = append(block.Transactions, trans)
-		}
-
-		// Withdrawals
-		block.Withdrawals = []*model.Withdrawal{}
-		absWthd := res["withdrawals"]
-		wthd := absWthd.([]map[string]any)
-		for _, withdrawal := range wthd {
-			wthd := &model.Withdrawal{}
-			wthd.Index = *convertDataToIntP(withdrawal, "index")
-			wthd.Validator = *convertDataToIntP(withdrawal, "validator")
-			wthd.Address = *convertDataToStringP(withdrawal, "address")
-			wthd.Amount = *convertDataToStringP(withdrawal, "amount")
-
-			block.Withdrawals = append(block.Withdrawals, wthd)
-		}
+	if res == nil {
+		return nil, nil
 	}
-
-	return block, ctx.Err()
+	return r.buildBlock(res)
 }
 
 // Blocks is the resolver for the blocks field.
 func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
-	var blocks []*model.Block
+	if from == nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+	fromBlockNumber := *from
+
+	var toBlockNumber uint64
+	if to != nil {
+		toBlockNumber = *to
+	} else {
+		latest, err := r.GraphQLAPI.GetLatestBlockNumber(ctx)
+		if err != nil {
+			return nil, err
+		}
+		toBlockNumber = latest
+	}
+
+	if toBlockNumber < fromBlockNumber {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
 
 	const maxBlocks = 25
+	if toBlockNumber-fromBlockNumber+1 > maxBlocks {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
 
-	fromBlockNumber := *from
-	toBlockNumber := *to
-
-	if toBlockNumber >= fromBlockNumber && (toBlockNumber-fromBlockNumber+1) < maxBlocks {
-
-		for i := fromBlockNumber; i <= toBlockNumber; i++ {
-			blockNumberStr := strconv.FormatUint(i, 10)
-			block, _ := r.Block(ctx, &blockNumberStr, nil)
-			if block != nil {
-				blocks = append(blocks, block)
-			}
+	blocks := make([]*model.Block, 0, toBlockNumber-fromBlockNumber+1)
+	for i := fromBlockNumber; i <= toBlockNumber; i++ {
+		blockNumberStr := strconv.FormatUint(i, 10)
+		block, err := r.Block(ctx, &blockNumberStr, nil)
+		if err != nil {
+			return nil, err
 		}
+		if block == nil {
+			return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+		}
+		blocks = append(blocks, block)
 	}
 
 	return blocks, ctx.Err()
@@ -318,7 +185,36 @@ func (r *queryResolver) Pending(ctx context.Context) (*model.Pending, error) {
 
 // Transaction is the resolver for the transaction field.
 func (r *queryResolver) Transaction(ctx context.Context, hash string) (*model.Transaction, error) {
-	panic("not implemented: Transaction - transaction")
+	hashBytes, decErr := hexutil.Decode(hash)
+	if decErr != nil {
+		return nil, fmt.Errorf("invalid transaction hash: %w", decErr)
+	}
+	txHash := common.BytesToHash(hashBytes)
+
+	blockNum, ok, err := r.GraphQLAPI.GetBlockNumberForTx(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	blockNumberStr := strconv.FormatUint(blockNum, 10)
+	block, err := r.Block(ctx, &blockNumberStr, nil)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	hashStr := txHash.String()
+	for _, trans := range block.Transactions {
+		if trans.Hash == hashStr {
+			return trans, nil
+		}
+	}
+	return nil, nil
 }
 
 // Logs is the resolver for the logs field.
@@ -338,7 +234,7 @@ func (r *queryResolver) MaxPriorityFeePerGas(ctx context.Context) (string, error
 
 // Syncing is the resolver for the syncing field.
 func (r *queryResolver) Syncing(ctx context.Context) (*model.SyncState, error) {
-	panic("not implemented: Syncing - syncing")
+	return nil, nil
 }
 
 // ChainID is the resolver for the chainID field.
@@ -348,74 +244,7 @@ func (r *queryResolver) ChainID(ctx context.Context) (string, error) {
 	return "0x" + strconv.FormatUint(chainID.Uint64(), 16), err
 }
 
-// Mutation returns MutationResolver implementation.
-func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
-
-// Query returns QueryResolver implementation.
-func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
-
-// Block returns BlockResolver implementation.
-func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
-
-// Account returns AccountResolver implementation.
-func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
-
-// Log returns LogResolver implementation.
-func (r *Resolver) Log() LogResolver { return &logResolver{r} }
-
-// Transaction returns TransactionResolver implementation.
-func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
-
-type mutationResolver struct{ *Resolver }
-type queryResolver struct{ *Resolver }
-type blockResolver struct{ *Resolver }
-type accountResolver struct{ *Resolver }
-type logResolver struct{ *Resolver }
-type transactionResolver struct{ *Resolver }
-
-// Account is the resolver for the account field on Block.
-func (r *blockResolver) Account(ctx context.Context, obj *model.Block, address string) (*model.Account, error) {
-	return r.resolveAccountAtBlock(ctx, address, obj.Number, nil)
-}
-
-// Miner is the resolver for the miner field on Block.
-func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
-	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Miner, block)
-	if account != nil || err != nil {
-		return account, err
-	}
-	return nil, fmt.Errorf("block miner is unavailable")
-}
-
-// Logs is the resolver for the logs field on Block.
-func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
-	logs := obj.Logs
-	if logs == nil {
-		logs = flattenBlockLogs(obj.Transactions)
-	}
-	if len(logs) == 0 {
-		return []*model.Log{}, nil
-	}
-
-	filtered := make([]*model.Log, 0, len(logs))
-	for _, log := range logs {
-		if blockLogMatchesFilter(log, filter) {
-			filtered = append(filtered, log)
-		}
-	}
-	return filtered, ctx.Err()
-}
-
-// Account is the resolver for the account field on Log.
-func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
-	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Account, block)
-	if account != nil || err != nil {
-		return account, err
-	}
-	return nil, fmt.Errorf("log account is unavailable")
-}
-
-// From is the resolver for the from field on Transaction.
+// From is the resolver for the from field.
 func (r *transactionResolver) From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
 	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.From, block)
 	if account != nil || err != nil {
@@ -424,23 +253,46 @@ func (r *transactionResolver) From(ctx context.Context, obj *model.Transaction, 
 	return nil, fmt.Errorf("transaction sender is unavailable")
 }
 
-// To is the resolver for the to field on Transaction.
+// To is the resolver for the to field.
 func (r *transactionResolver) To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
 	return r.resolveAccountAtRequestedBlock(ctx, obj.To, block)
 }
 
-// CreatedContract is the resolver for the createdContract field on Transaction.
+// Account is the resolver for the account field.
+func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Account, block)
+	if account != nil || err != nil {
+		return account, err
+	}
+	return nil, fmt.Errorf("log account is unavailable")
+}
+
+// CreatedContract is the resolver for the createdContract field.
 func (r *transactionResolver) CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
 	return r.resolveAccountAtRequestedBlock(ctx, obj.CreatedContract, block)
 }
 
-// Storage is the resolver for the storage field on Account.
-// TODO: each storage(slot) call opens a new DB transaction and rebuilds the state reader,
-// causing an N+1 pattern when a query resolves multiple slots. Fix by caching the state
-// reader in the request context so all slots for the same account/block share one tx.
-func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
-	addr := common.HexToAddress(obj.Address)
-	blockNumber := rpc.BlockNumber(obj.BlockNum)
+// Account returns AccountResolver implementation.
+func (r *Resolver) Account() AccountResolver { return &accountResolver{r} }
 
-	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, blockNumber)
-}
+// Block returns BlockResolver implementation.
+func (r *Resolver) Block() BlockResolver { return &blockResolver{r} }
+
+// Mutation returns MutationResolver implementation.
+func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+
+// Query returns QueryResolver implementation.
+func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
+
+// Log returns LogResolver implementation.
+func (r *Resolver) Log() LogResolver { return &logResolver{r} }
+
+// Transaction returns TransactionResolver implementation.
+func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
+
+type accountResolver struct{ *Resolver }
+type blockResolver struct{ *Resolver }
+type logResolver struct{ *Resolver }
+type mutationResolver struct{ *Resolver }
+type queryResolver struct{ *Resolver }
+type transactionResolver struct{ *Resolver }

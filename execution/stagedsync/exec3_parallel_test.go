@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type OpType int
@@ -524,11 +523,10 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -589,7 +587,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 	applyResults := make(chan applyResult, 1000)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
 
 	// TODO get results back
 
@@ -648,11 +646,10 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -706,7 +703,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			txExecutor: txExecutor{
 				cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
 				doms:   domains,
-				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 				logger: logger,
 			},
 			workerCount: runtime.NumCPU() - 1,

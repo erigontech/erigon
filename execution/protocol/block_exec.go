@@ -272,9 +272,14 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
-		State:   0, // state gas reservoir will consume from regular gas for sys calls
+		State:   0, // pre-Amsterdam: state-gas reservoir not used; spills into regular gas
 	}
-	ret, _, err := evm.Call(
+	if evm.ChainRules().IsAmsterdam {
+		// EIP-8037: extra state-gas reservoir on top of the 30M regular budget
+		// so system calls keep their pre-EIP-8037 execution margin.
+		mdGas.State = params.StateGasSystemMaxSstores
+	}
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
@@ -376,7 +381,7 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
+func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if blockGasUsed != h.GasUsed {
 		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
 			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
@@ -413,7 +418,15 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
 		}
+	}
 
+	// The logs bloom is part of every block header from Frontier on, so it must
+	// be validated independently of the receipt-root check (which is gated on
+	// Byzantium because pre-Byzantium receipts encode an intermediate state
+	// root that Erigon doesn't materialise). Without this, an invalid bloom on
+	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
+	// is silently accepted.
+	if checkBloom && !alwaysSkipReceiptCheck {
 		lbloom := types.CreateBloom(receipts)
 		if lbloom != h.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)

@@ -29,6 +29,7 @@ func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *htt
 			http.Error(w, fmt.Sprintf("could not encode state: %s", err), http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, err = w.Write(enc)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("could not write encoded state: %s", err), http.StatusInternalServerError)
@@ -90,6 +91,18 @@ func TestRemoteCheckpointSyncTimeout(t *testing.T) {
 	require.True(t, errors.Is(err, context.DeadlineExceeded))
 }
 
+func TestRemoteCheckpointSyncCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	clparams.ConfigurableCheckpointsURLs = []string{"http://127.0.0.1:1"}
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
+	currentState, err := syncer.GetLatestBeaconState(ctx)
+
+	require.Nil(t, currentState)
+	require.ErrorIs(t, err, context.Canceled)
+}
+
 func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -121,6 +134,36 @@ func TestRemoteCheckpointSyncPossiblyAfterTimeout(t *testing.T) {
 	actualRoot, err := actualState.HashSSZ()
 	require.NoError(t, err)
 	assert.Equal(t, expectedRoot, actualRoot)
+}
+
+func TestNormalizeCheckpointURL(t *testing.T) {
+	tests := []struct {
+		input, want string
+	}{
+		{"https://checkpoint-sync.example.io", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://checkpoint-sync.example.io/", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized", "https://checkpoint-sync.example.io/eth/v2/debug/beacon/states/finalized"},
+		{"https://example.io/eth/v2/debug/beacon/states/head", "https://example.io/eth/v2/debug/beacon/states/head"},
+	}
+	for _, tt := range tests {
+		got := normalizeCheckpointURL(tt.input)
+		assert.Equal(t, tt.want, got, "normalizeCheckpointURL(%q)", tt.input)
+	}
+}
+
+func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {
+	mockHTMLServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html><head><meta charset="utf-8"/></head></html>`)
+	}))
+	defer mockHTMLServer.Close()
+
+	clparams.ConfigurableCheckpointsURLs = []string{mockHTMLServer.URL + beaconStatePath}
+	syncer := NewRemoteCheckpointSync(&clparams.MainnetBeaconConfig, chainspec.MainnetChainID)
+	st, err := syncer.GetLatestBeaconState(context.Background())
+	require.Nil(t, st)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unexpected content-type")
 }
 
 func TestLocalCheckpointSyncFromFile(t *testing.T) {

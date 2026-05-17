@@ -44,7 +44,7 @@ func Verify(
 	if dataDir != "" {
 		dirs = datadir.Open(dataDir)
 	}
-	chains := selectChains(targetChain, snapcfg.EmbeddedWebseedsRaw)
+	chains := selectChains(targetChain, snapcfg.EmbeddedWebseeds)
 	if len(chains) == 0 {
 		err = errors.New("no matching chains")
 		return

@@ -13,8 +13,10 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -261,12 +263,33 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// Check version map for AddressPath — handles accounts created by
 	// prior transactions in the same block that aren't in the read set.
 	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. If so, the
-		// account must be treated as non-existent even if the version map
-		// still holds the pre-destruct AddressPath entry.
+		// A prior tx may have self-destructed this account. Honor the
+		// destruct ONLY if no subsequent write at a strictly higher
+		// TxIndex re-creates the account. EIP-161 emits a SelfDestruct
+		// for the coinbase when a TX touches it without tipping (Balance
+		// stays 0 → empty-account prune); a later TX that tips the same
+		// coinbase re-creates it, and we must surface the re-created
+		// account so finalize accumulates the prior cumulative value.
 		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
 			if destructed, ok := res.Value().(bool); ok && destructed {
-				return nil, nil
+				destructTxIndex := res.DepIdx()
+				revived := false
+				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					revived = true
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+						revived = true
+					}
+				}
+				if !revived {
+					return nil, nil
+				}
 			}
 		}
 		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {
@@ -284,6 +307,26 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 
 		if account != nil {
 			updated := vr.applyVersionedUpdates(address, *account)
+			return &updated, nil
+		}
+	}
+
+	// Account doesn't exist in state reader and no AddressPath entry in
+	// versionMap. The BAL pre-population writes only BalancePath/NoncePath/
+	// CodePath/StoragePath entries (NOT AddressPath, by design — see
+	// validateRead invariant). For an account that is created mid-block
+	// purely by tip credits (e.g. fee_recipient with no pre-state and no
+	// transfers to it), the BAL has the post-tx balance at each TxIndex,
+	// but ReadAccountData would return nil because it only checks
+	// AddressPath / stateReader. Synthesize an empty account and let
+	// applyVersionedUpdates apply the BAL-preloaded fields.
+	if vr.versionMap != nil {
+		var synth accounts.Account
+		updated := vr.applyVersionedUpdates(address, synth)
+		// Only return the synthesized account if applyVersionedUpdates
+		// actually applied at least one field — otherwise we'd return a
+		// zero account for addresses that have no versionMap entries.
+		if updated != synth {
 			return &updated, nil
 		}
 	}
@@ -449,6 +492,74 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 
 type VersionedWrites []*VersionedWrite
 
+// TouchUpdates feeds VersionedWrites directly to a commitment.Updates buffer
+// via TouchPlainKeyDirect. Each VersionedWrite maps to a single Update with
+// the appropriate key and flags. The Updates buffer handles per-key merging
+// (same address gets accumulated flags from BalancePath, NoncePath, etc.).
+//
+// This is used by the commitment calculator to process writes received via
+// the fan-out channel. No serialization/deserialization — the values pass
+// through as-is.
+func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
+	for _, w := range writes {
+		if w.Val == nil {
+			continue
+		}
+		address := w.Address.Value()
+
+		switch w.Path {
+		case BalancePath:
+			v := w.Val.(uint256.Int)
+			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+				Flags:   commitment.BalanceUpdate,
+				Balance: v,
+			})
+		case NoncePath:
+			v := w.Val.(uint64)
+			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+				Flags: commitment.NonceUpdate,
+				Nonce: v,
+			})
+		case CodeHashPath:
+			v := w.Val.(accounts.CodeHash)
+			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+				Flags:    commitment.CodeUpdate,
+				CodeHash: v.Value(),
+			})
+		case CodePath:
+			code := w.Val.([]byte)
+			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+				Flags:    commitment.CodeUpdate,
+				CodeHash: crypto.Keccak256Hash(code),
+			})
+		case SelfDestructPath:
+			// Only emit DeleteUpdate when the account was actually self-destructed.
+			// SelfDestructPath=false means the account is NOT deleted (e.g., resurrection).
+			if destructed, ok := w.Val.(bool); ok && destructed {
+				updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+					Flags: commitment.DeleteUpdate,
+				})
+			}
+		case StoragePath:
+			keyVal := w.Key.Value()
+			composite := make([]byte, 20+32)
+			copy(composite, address[:])
+			copy(composite[20:], keyVal[:])
+			v := w.Val.(uint256.Int)
+			vBytes := v.Bytes()
+			var u commitment.Update
+			u.StorageLen = int8(len(vBytes))
+			if len(vBytes) == 0 {
+				u.Flags = commitment.DeleteUpdate
+			} else {
+				u.Flags = commitment.StorageUpdate
+				copy(u.Storage[:], vBytes)
+			}
+			updates.TouchPlainKeyDirect(string(composite), &u)
+		}
+	}
+}
+
 // sortVersionedWrites sorts a VersionedWrites slice by (Address, Path, Key)
 // to ensure deterministic processing order. VersionedWrites originate from
 // WriteSet map iteration which has non-deterministic order in Go.
@@ -581,21 +692,6 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
-// SetBalance replaces the BalancePath write for addr in the write set with
-// the given value. If no existing BalancePath write is found, a new entry is
-// appended. This is used in the direct finalize path to adjust fee-calc
-// balances in pre-computed collector writes without IBS reconstruction.
-func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
-	for _, w := range writes {
-		if w.Address == addr && w.Path == BalancePath {
-			w.Val = val
-			w.Reason = reason
-			return writes
-		}
-	}
-	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
-}
-
 // SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
 // address has no existing writes in the set, all four account fields (balance,
 // nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
@@ -654,13 +750,47 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
-		if path != CodePath {
+		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
+		// at a strictly higher TxIndex re-creates the account, so the SD
+		// must NOT short-circuit the read. Mirrors versionedStateReader
+		// .ReadAccountData's revival check at lines 273-293 of this file.
+		//
+		// Without this the worker reads zero for any post-revival access:
+		// e.g. EIP-161 fires for the coinbase when tx N's finalize emits
+		// SelfDestructPath=true (empty-removal: balance 0, no fee tip),
+		// then tx N+1's finalize emits BalancePath=FeeTipped (revives it
+		// with a non-zero balance). A subsequent tx's BALANCE coinbase
+		// must surface the revived balance — the serial equivalent is
+		// AddBalance(amount>0) on a previously-deleted stateObject, where
+		// GetOrNewStateObject implicitly recreates a fresh object with
+		// the new balance. Without this check the parallel worker reads
+		// zero, SSTOREs zero into the contract's slot (was non-zero),
+		// triggering a spurious SSTORE_CLEAR_REFUND that doesn't fire
+		// under serial — observed as TestLegacyBlockchain bcEIP3675/
+		// tipInsideBlock failing with gas exactly 4800 short under
+		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
+		destructTxIndex := res.DepIdx()
+		revived := false
+		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+			revived = true
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+				revived = true
+			}
+		}
+		if !revived && path != CodePath {
 			// A prior tx self-destructed this account — all state reads must
 			// return the zero value of the type, not the caller-supplied default.
 			// refreshVersionedAccount passes the account's pre-destruction field
 			// values as defaultV, so using defaultV here would return stale data.
 			var zero T
-			sdVersion := Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
+			sdVersion := Version{TxIndex: destructTxIndex, Incarnation: res.Incarnation()}
 			if commited {
 				return zero, MapRead, sdVersion, nil
 			}
@@ -685,7 +815,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return zero, MapRead, sdVersion, nil
 			}
 			destrcutedVersion = Version{
-				TxIndex: res.DepIdx(),
+				TxIndex: destructTxIndex,
 			}
 		}
 	}
@@ -820,16 +950,16 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						}
 					}
 
-					// a previous dependency has been removed from the map
+					// A previous dependency has been removed from the map
+					// (prior TX is being re-executed, entry marked Estimate).
+					// Instead of aborting with ErrDependency (which causes
+					// cascading re-executions and livelocks in dense blocks),
+					// fall through to read from storage. Validation will catch
+					// any mismatch when the prior TX's value returns to Done.
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
+						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
-
-					if pr.Version.TxIndex > s.dep {
-						s.dep = pr.Version.TxIndex
-					}
-
-					panic(ErrDependency)
+					// Fall through to storage read below
 				}
 			}
 		}

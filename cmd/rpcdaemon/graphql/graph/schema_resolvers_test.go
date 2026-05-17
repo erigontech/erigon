@@ -35,6 +35,14 @@ func (m mockGraphQLAPI) GetBlockDetails(context.Context, rpc.BlockNumber) (map[s
 	return nil, nil
 }
 
+func (m mockGraphQLAPI) GetBlockDetailsByHash(context.Context, common.Hash) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m mockGraphQLAPI) GetLatestBlockNumber(context.Context) (uint64, error) {
+	return 0, nil
+}
+
 func (m mockGraphQLAPI) GetChainID(context.Context) (*big.Int, error) {
 	return big.NewInt(1), nil
 }
@@ -48,6 +56,10 @@ func (m mockGraphQLAPI) GetAccountInfo(ctx context.Context, address common.Addre
 
 func (m mockGraphQLAPI) GetAccountStorage(context.Context, common.Address, string, rpc.BlockNumber) (string, error) {
 	return "0x0", nil
+}
+
+func (m mockGraphQLAPI) GetBlockNumberForTx(context.Context, common.Hash) (uint64, bool, error) {
+	return 0, false, nil
 }
 
 // TestBlockResolver_Account_InvalidAddress verifies that a malformed address
@@ -265,5 +277,56 @@ func TestTransactionResolverFromRejectsOverflowRequestedBlock(t *testing.T) {
 	}
 	if called {
 		t.Fatal("expected resolver to reject overflow before GetAccountInfo call")
+	}
+}
+
+func TestBlockResolver_TransactionAt(t *testing.T) {
+	r := &blockResolver{&Resolver{}}
+
+	tx0 := &model.Transaction{Hash: "0xaaa"}
+	tx1 := &model.Transaction{Hash: "0xbbb"}
+	block := &model.Block{Transactions: []*model.Transaction{tx0, tx1}}
+
+	tests := []struct {
+		name  string
+		index int
+		want  *model.Transaction
+	}{
+		{"first", 0, tx0},
+		{"second", 1, tx1},
+		{"out of range", 2, nil},
+		{"negative", -1, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.TransactionAt(context.Background(), block, tt.index)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("TransactionAt(%d) = %v, want %v", tt.index, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
+	r := &queryResolver{&Resolver{}} // GraphQLAPI is nil; error fires before it is called
+
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"empty", ""},
+		{"no 0x prefix", "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"},
+		{"invalid hex chars", "0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := r.Transaction(context.Background(), tt.hash)
+			if err == nil {
+				t.Errorf("hash %q: expected error, got nil", tt.hash)
+			}
+		})
 	}
 }
