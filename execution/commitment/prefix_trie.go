@@ -74,6 +74,10 @@ func (a *prefixArena) resetArena() {
 		}
 		clear(a.slabs[i].nodes[:limit])
 	}
+	// Drop pointers to trailing slabs so the GC can reclaim them; the slice
+	// reslice below would otherwise keep them alive via the backing array
+	// until subsequent appends overwrote each slot.
+	clear(a.slabs[1:])
 	a.slabs = a.slabs[:1]
 	a.slabIdx = 0
 	a.nextIdx = 0

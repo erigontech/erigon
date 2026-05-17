@@ -1590,9 +1590,10 @@ func (t *Updates) initCollector() {
 func (t *Updates) Mode() Mode { return t.mode }
 
 // PlainKeys returns a copy of the set of plain keys that have been touched.
-// Only meaningful in ModeDirect; returns nil otherwise.
+// Meaningful in ModeDirect and ModeParallel (both populate t.keys); returns
+// nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
-	if t.mode != ModeDirect || t.keys == nil {
+	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
 		return nil
 	}
 	cp := make(map[string]struct{}, len(t.keys))
