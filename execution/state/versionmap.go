@@ -66,6 +66,10 @@ const (
 	CreateContractPath
 )
 
+// AccountKey is a (Path, Key) pair used as a selector for the field within
+// an AddressEntry and as a debug-printable identifier. It is no longer used
+// as an internal map key — VersionMap dispatches on Path via a switch on
+// the AddressEntry struct so the inner map's composite-key hash is gone.
 type AccountKey struct {
 	Path AccountPath
 	Key  accounts.StorageKey
@@ -79,16 +83,134 @@ func (k AccountKey) String() string {
 	return k.Path.String()
 }
 
+// AddressEntry holds the multi-version cells for one address, organised
+// per AccountPath. Every field is an independently addressable unit — the
+// struct exists only to eliminate the inner map[AccountKey] hash lookup
+// (~27 % of pre-restructure warm-read CPU was aeshashbody on AccountKey).
+//
+// Invariant — per-field independence: no consumer treats AddressEntry as
+// a transactional whole. Reads, writes, mark-estimate/complete, delete and
+// validation all operate at (Path, Key) granularity. Helpers that look
+// like address-level operations (DeleteAll, StorageKeys) are pure
+// iterations of per-field operations.
+type AddressEntry struct {
+	Address        *btree.Map[int, *WriteCell]
+	SelfDestruct   *btree.Map[int, *WriteCell]
+	Balance        *btree.Map[int, *WriteCell]
+	Nonce          *btree.Map[int, *WriteCell]
+	Incarnation    *btree.Map[int, *WriteCell]
+	Code           *btree.Map[int, *WriteCell]
+	CodeHash       *btree.Map[int, *WriteCell]
+	CodeSize       *btree.Map[int, *WriteCell]
+	CreateContract *btree.Map[int, *WriteCell]
+	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell]
+}
+
+// cells returns the existing cell map for (path, key), or nil if no write
+// has yet been recorded for that field on this address. A nil return is
+// the hot-path early-exit for warm reads on addresses that have never
+// been touched on the queried field (e.g. the SelfDestruct probe on the
+// overwhelming majority of warm reads, since selfdestructs are rare).
+func (e *AddressEntry) cells(path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell] {
+	switch path {
+	case AddressPath:
+		return e.Address
+	case SelfDestructPath:
+		return e.SelfDestruct
+	case BalancePath:
+		return e.Balance
+	case NoncePath:
+		return e.Nonce
+	case IncarnationPath:
+		return e.Incarnation
+	case CodePath:
+		return e.Code
+	case CodeHashPath:
+		return e.CodeHash
+	case CodeSizePath:
+		return e.CodeSize
+	case CreateContractPath:
+		return e.CreateContract
+	case StoragePath:
+		return e.Storage[key]
+	}
+	return nil
+}
+
+// cellsOrCreate returns the cell map for (path, key), creating an empty
+// btree (and the Storage sub-map for StoragePath) if no write has yet
+// been recorded for that field on this address.
+func (e *AddressEntry) cellsOrCreate(path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell] {
+	switch path {
+	case AddressPath:
+		if e.Address == nil {
+			e.Address = &btree.Map[int, *WriteCell]{}
+		}
+		return e.Address
+	case SelfDestructPath:
+		if e.SelfDestruct == nil {
+			e.SelfDestruct = &btree.Map[int, *WriteCell]{}
+		}
+		return e.SelfDestruct
+	case BalancePath:
+		if e.Balance == nil {
+			e.Balance = &btree.Map[int, *WriteCell]{}
+		}
+		return e.Balance
+	case NoncePath:
+		if e.Nonce == nil {
+			e.Nonce = &btree.Map[int, *WriteCell]{}
+		}
+		return e.Nonce
+	case IncarnationPath:
+		if e.Incarnation == nil {
+			e.Incarnation = &btree.Map[int, *WriteCell]{}
+		}
+		return e.Incarnation
+	case CodePath:
+		if e.Code == nil {
+			e.Code = &btree.Map[int, *WriteCell]{}
+		}
+		return e.Code
+	case CodeHashPath:
+		if e.CodeHash == nil {
+			e.CodeHash = &btree.Map[int, *WriteCell]{}
+		}
+		return e.CodeHash
+	case CodeSizePath:
+		if e.CodeSize == nil {
+			e.CodeSize = &btree.Map[int, *WriteCell]{}
+		}
+		return e.CodeSize
+	case CreateContractPath:
+		if e.CreateContract == nil {
+			e.CreateContract = &btree.Map[int, *WriteCell]{}
+		}
+		return e.CreateContract
+	case StoragePath:
+		if e.Storage == nil {
+			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell]{}
+		}
+		cells, ok := e.Storage[key]
+		if !ok {
+			cells = &btree.Map[int, *WriteCell]{}
+			e.Storage[key] = cells
+		}
+		return cells
+	}
+	return nil
+}
+
 type VersionMap struct {
 	mu     sync.RWMutex
-	s      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
+	s      map[accounts.Address]*AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
-		s:      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+		s:      map[accounts.Address]*AddressEntry{},
 		HasBAL: len(changes) > 0,
 	}
 	vm.WriteChanges(changes)
@@ -106,27 +228,23 @@ func (vm *VersionMap) SetTrace(trace bool) {
 func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-	addrMap, ok := vm.s[addr]
-	if !ok {
+	e, ok := vm.s[addr]
+	if !ok || len(e.Storage) == 0 {
 		return nil
 	}
-	var keys []accounts.StorageKey
-	for ak := range addrMap {
-		if ak.Path == StoragePath {
-			keys = append(keys, ak.Key)
-		}
+	keys := make([]accounts.StorageKey, 0, len(e.Storage))
+	for k := range e.Storage {
+		keys = append(keys, k)
 	}
 	return keys
 }
 
 func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
-	it, ok := vm.s[addr]
-
-	if ok {
-		cells, ok = it[AccountKey{path, key}]
+	if e, ok := vm.s[addr]; ok {
+		cells = e.cells(path, key)
 	}
 
-	if !ok && fNoKey != nil {
+	if cells == nil && fNoKey != nil {
 		cells = fNoKey(addr, path, key)
 	}
 
@@ -164,18 +282,12 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 // writeLocked performs the write without acquiring the lock.
 // Caller must hold vm.mu.Lock().
 func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
-	cells := vm.getKeyCells(addr, path, key, func(addr accounts.Address, path AccountPath, key accounts.StorageKey) (cells *btree.Map[int, *WriteCell]) {
-		it, ok := vm.s[addr]
-		cells = &btree.Map[int, *WriteCell]{}
-		if ok {
-			it[AccountKey{path, key}] = cells
-		} else {
-			vm.s[addr] = map[AccountKey]*btree.Map[int, *WriteCell]{
-				{path, key}: cells,
-			}
-		}
-		return
-	})
+	e, ok := vm.s[addr]
+	if !ok {
+		e = &AddressEntry{}
+		vm.s[addr] = e
+	}
+	cells := e.cellsOrCreate(path, key)
 
 	ci, ok := cells.Get(v.TxIndex)
 
@@ -350,10 +462,39 @@ func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accoun
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-	if writes, ok := vm.s[addr]; ok {
-		for _, cells := range writes {
-			cells.Delete(txIdx)
-		}
+	e, ok := vm.s[addr]
+	if !ok {
+		return
+	}
+	if e.Address != nil {
+		e.Address.Delete(txIdx)
+	}
+	if e.SelfDestruct != nil {
+		e.SelfDestruct.Delete(txIdx)
+	}
+	if e.Balance != nil {
+		e.Balance.Delete(txIdx)
+	}
+	if e.Nonce != nil {
+		e.Nonce.Delete(txIdx)
+	}
+	if e.Incarnation != nil {
+		e.Incarnation.Delete(txIdx)
+	}
+	if e.Code != nil {
+		e.Code.Delete(txIdx)
+	}
+	if e.CodeHash != nil {
+		e.CodeHash.Delete(txIdx)
+	}
+	if e.CodeSize != nil {
+		e.CodeSize.Delete(txIdx)
+	}
+	if e.CreateContract != nil {
+		e.CreateContract.Delete(txIdx)
+	}
+	for _, cells := range e.Storage {
+		cells.Delete(txIdx)
 	}
 }
 
