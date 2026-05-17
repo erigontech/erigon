@@ -110,7 +110,14 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too many similar error logs
 			continue
 		}
-		if time.Since(t) < 5*time.Minute {
+		// Tighter threshold (was 5 min): only flip to tip mode when a stage
+		// iteration is fast enough that we're plausibly close to tip. On
+		// bloatnet, exec batches take >1 min, so a 5-min threshold could
+		// still flip prematurely; 25 s is derived from the sustainability
+		// inequality (writes_per_iter ≤ prune_per_cycle): with ~16 MB/s
+		// writes and ~2 s × ~200 MB/s commitment prune throughput, we need
+		// threshold ≤ 25 s to guarantee no per-iteration backlog growth.
+		if time.Since(t) < 25*time.Second {
 			initialCycle = false
 		}
 		if !initialCycle {
