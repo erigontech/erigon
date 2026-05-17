@@ -98,32 +98,32 @@ func TestFlushMVWrite(t *testing.T) {
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 1},
-		Val:     valueFor(AddressPath, 0, 1),
+		ValAcc: valueFor(AddressPath, 0, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 2},
-		Val:     valueFor(AddressPath, 0, 2),
+		ValAcc: valueFor(AddressPath, 0, 2).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 1},
-		Val:     valueFor(AddressPath, 1, 1),
+		ValAcc: valueFor(AddressPath, 1, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 2},
-		Val:     valueFor(AddressPath, 1, 2),
+		ValAcc: valueFor(AddressPath, 1, 2).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 1},
-		Val:     valueFor(AddressPath, 2, 1),
+		ValAcc: valueFor(AddressPath, 2, 1).(*accounts.Account),
 	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 2},
-		Val:     valueFor(AddressPath, 2, 2),
+		ValAcc: valueFor(AddressPath, 2, 2).(*accounts.Account),
 	})
 
 	mvh.FlushVersionedWrites(wd, true, "")
@@ -507,7 +507,7 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 		Key:     storageKey,
 		Source:  StorageRead,
 		Version: Version{TxIndex: UnknownDep, Incarnation: -1},
-		Val:     storageVal,
+		ValU256:     storageVal,
 	})
 	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, rs)
 
@@ -538,7 +538,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	// Simulate: TX 5 is valid, flushed as Done (complete=true).
 	writes := VersionedWrites{
 		{Address: addr, Path: BalancePath, Key: accounts.NilKey,
-			Version: Version{TxIndex: 5, Incarnation: 1}, Val: *uint256.NewInt(100)},
+			Version: Version{TxIndex: 5, Incarnation: 1}, ValU256: *uint256.NewInt(100)},
 	}
 	vm.FlushVersionedWrites(writes, true, "")
 
@@ -552,7 +552,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	// Simulate: TX 7 is invalid, flushed as Estimate (complete=false).
 	writes2 := VersionedWrites{
 		{Address: addr, Path: NoncePath, Key: accounts.NilKey,
-			Version: Version{TxIndex: 7, Incarnation: 2}, Val: uint64(5)},
+			Version: Version{TxIndex: 7, Incarnation: 2}, ValU64: uint64(5)},
 	}
 	vm.FlushVersionedWrites(writes2, false, "")
 

@@ -1817,8 +1817,8 @@ func (result *execResult) finalizeTx(
 	if coinbaseChanged {
 		allWrites = append(allWrites, &state.VersionedWrite{
 			Address: result.Coinbase,
-			Path:    state.BalancePath,
-			Val:     newCoinbaseBalance,
+			Path: state.BalancePath,
+			ValU256:     newCoinbaseBalance,
 			Version: task.Version(),
 			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
@@ -1831,8 +1831,8 @@ func (result *execResult) finalizeTx(
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
+				Path: state.BalancePath,
+				ValU256:     newBurntBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
@@ -1924,9 +1924,9 @@ func (result *execResult) finalizeTx(
 		if acc != nil {
 			finalizeReads.Set(state.VersionedRead{
 				Address: w.Address,
-				Path:    state.BalancePath,
-				Key:     accounts.NilKey,
-				Val:     acc.Balance,
+				Path: state.BalancePath,
+				Key: accounts.NilKey,
+				ValU256:     acc.Balance,
 			})
 		}
 	}
@@ -1942,9 +1942,9 @@ func (result *execResult) finalizeTx(
 		}
 		finalizeReads.Set(state.VersionedRead{
 			Address: result.Coinbase,
-			Path:    state.BalancePath,
-			Key:     accounts.NilKey,
-			Val:     coinbaseBalance,
+			Path: state.BalancePath,
+			Key: accounts.NilKey,
+			ValU256:     coinbaseBalance,
 		})
 	}
 	if hasBurnt {
@@ -1954,9 +1954,9 @@ func (result *execResult) finalizeTx(
 		}
 		finalizeReads.Set(state.VersionedRead{
 			Address: burntAddr,
-			Path:    state.BalancePath,
-			Key:     accounts.NilKey,
-			Val:     burntBalance,
+			Path: state.BalancePath,
+			Key: accounts.NilKey,
+			ValU256:     burntBalance,
 		})
 	}
 
@@ -2012,7 +2012,7 @@ func (result *execResult) finalizeTxSimple(
 	if result.CollectorWrites != nil {
 		for _, w := range result.CollectorWrites {
 			if w.Address == result.Coinbase && w.Path == state.BalancePath {
-				if execBal, ok := w.Val.(uint256.Int); ok {
+				if execBal := w.ValU256; true {
 					// The worker's execution balance = staleBase + executionDelta
 					// We want: correctBase + executionDelta + tip
 					// executionDelta = execBal - staleBase
@@ -2046,7 +2046,7 @@ func (result *execResult) finalizeTxSimple(
 		if result.CollectorWrites != nil {
 			for _, w := range result.CollectorWrites {
 				if w.Address == burntAddr && w.Path == state.BalancePath {
-					if execBal, ok := w.Val.(uint256.Int); ok {
+					if execBal := w.ValU256; true {
 						newBurntBalance = execBal
 					}
 					break
@@ -2125,15 +2125,15 @@ func (result *execResult) finalizeTxSimple(
 		if emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
-				Path:    state.SelfDestructPath,
-				Val:     true,
+				Path: state.SelfDestructPath,
+				ValBool:     true,
 				Version: task.Version(),
 			})
 		} else {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
-				Path:    state.BalancePath,
-				Val:     newCoinbaseBalance,
+				Path: state.BalancePath,
+				ValU256:     newCoinbaseBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 			})
@@ -2147,8 +2147,8 @@ func (result *execResult) finalizeTxSimple(
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
+				Path: state.BalancePath,
+				ValU256:     newBurntBalance,
 				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
@@ -2749,15 +2749,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							if w.Path != state.BalancePath {
 								continue
 							}
-							bal, ok := w.Val.(uint256.Int)
-							if !ok {
-								continue
-							}
+							bal := w.ValU256
 							if i, found := balIdx[w.Address]; found {
-								txResult.CollectorWrites[i].Val = bal
+								txResult.CollectorWrites[i].ValU256 = bal
 								txResult.CollectorWrites[i].Reason = w.Reason
 							} else {
-								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, Reason: w.Reason})
+								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, ValU256: bal, Reason: w.Reason})
 								balIdx[w.Address] = len(txResult.CollectorWrites) - 1
 							}
 						}
@@ -3270,7 +3267,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 	sdSet := make(map[accounts.Address]bool)
 	for _, w := range writes {
 		if w.Path == state.SelfDestructPath && w.Version.Incarnation == incarnation {
-			if v, ok := w.Val.(bool); ok {
+			if v := w.ValBool; true {
 				sdSet[w.Address] = v
 			}
 		}
@@ -3312,7 +3309,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if w.Version.Incarnation != incarnation {
 				continue
 			}
-			writeVal, _ := w.Val.(uint256.Int)
+			writeVal := w.ValU256
 			// If addr was self-destructed by an earlier TX in this block, its
 			// storage was wiped — the effective baseline for any slot not
 			// re-written since is 0, regardless of what the versionMap (prior
@@ -3357,7 +3354,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// Account fields: resolve from versionMap to get correct accumulated values.
 			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				w.Val = rr.Value()
+				w.SetVal(rr.Value())
 			}
 			hasAccountWrite[w.Address] = true
 		case state.CodePath:
@@ -3379,15 +3376,15 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// self-destructed (val=true). SelfDestructPath=false means the
 			// account was NOT deleted (e.g., contract creation via CREATE2
 			// sets selfdestructed=false after createObject).
-			destructed, _ := w.Val.(bool)
+			destructed := w.ValBool
 			if destructed {
 				filtered = append(filtered, w)
 				for _, slot := range sdStorageSlots(w.Address) {
 					filtered = append(filtered, &state.VersionedWrite{
 						Address: w.Address,
-						Path:    state.StoragePath,
-						Key:     slot,
-						Val:     uint256.Int{}, // zero = delete
+						Path: state.StoragePath,
+						Key: slot,
+						ValU256:     uint256.Int{}, // zero = delete
 						Version: w.Version,
 					})
 				}
@@ -3474,17 +3471,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				case state.CodeHashPath:
 					val = accounts.EmptyCodeHash
 				}
-				filtered = append(filtered, &state.VersionedWrite{Address: addr, Path: path, Val: val, Version: ver})
+				vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
+				vw.SetVal(val)
+				filtered = append(filtered, vw)
 				continue
 			}
 			rr := vm.Read(addr, path, accounts.NilKey, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				filtered = append(filtered, &state.VersionedWrite{
-					Address: addr,
-					Path:    path,
-					Val:     rr.Value(),
-					Version: ver,
-				})
+				vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
+				vw.SetVal(rr.Value())
+				filtered = append(filtered, vw)
 				continue
 			}
 			// Fall back to stateReader for pre-block account state.
@@ -3519,12 +3515,9 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 						}
 					}
 					if val != nil {
-						filtered = append(filtered, &state.VersionedWrite{
-							Address: addr,
-							Path:    path,
-							Val:     val,
-							Version: ver,
-						})
+						vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
+						vw.SetVal(val)
+						filtered = append(filtered, vw)
 					}
 				}
 			}
@@ -3559,7 +3552,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[w.Address] = s
 			}
-			s.balance = w.Val.(uint256.Int)
+			s.balance = w.ValU256
 			s.hasBal = true
 		case state.NoncePath:
 			s := acctStates[w.Address]
@@ -3567,7 +3560,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[w.Address] = s
 			}
-			s.nonce = w.Val.(uint64)
+			s.nonce = w.ValU64
 			s.hasNonce = true
 		case state.CodeHashPath:
 			s := acctStates[w.Address]
@@ -3575,7 +3568,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				s = &acctState{}
 				acctStates[w.Address] = s
 			}
-			s.codeHash = w.Val.(accounts.CodeHash)
+			s.codeHash = w.ValHash
 			s.hasCode = true
 		}
 	}
@@ -3611,8 +3604,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		for addr := range emptyAddrs {
 			cleaned = append(cleaned, &state.VersionedWrite{
 				Address: addr,
-				Path:    state.SelfDestructPath,
-				Val:     true,
+				Path: state.SelfDestructPath,
+				ValBool:     true,
 				Version: state.Version{TxIndex: txIndex, Incarnation: incarnation},
 			})
 		}
@@ -3641,7 +3634,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 				if rr.Incarnation() != incarnation {
 					continue // stale incarnation entry
 				}
-				w.Val = val
+				w.SetVal(val)
 			} else {
 				continue // not written by this TX
 			}
@@ -3651,7 +3644,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			// Origin = versionMap floor at txIndex (prior TX's write), or
 			// pre-block value from snapshots if no prior TX wrote this key.
 			{
-				resolved := w.Val.(uint256.Int)
+				resolved := w.ValU256
 				originVal, origin, originOk := vm.ReadStorage(w.Address, w.Key, txIndex)
 				if originOk && origin.Status() == state.MVReadResultDone {
 					if resolved.Eq(&originVal) {
@@ -3685,7 +3678,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			// CollectorWrites may have stale values from speculative execution.
 			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)
 			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				w.Val = rr.Value()
+				w.SetVal(rr.Value())
 			}
 		case state.AddressPath:
 			// AddressPath is a record-level write — skip it.
@@ -3701,9 +3694,9 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			for _, slot := range vm.StorageKeys(w.Address) {
 				filtered = append(filtered, &state.VersionedWrite{
 					Address: w.Address,
-					Path:    state.StoragePath,
-					Key:     slot,
-					Val:     uint256.Int{}, // zero = delete
+					Path: state.StoragePath,
+					Key: slot,
+					ValU256:     uint256.Int{}, // zero = delete
 				})
 			}
 			continue // already appended above

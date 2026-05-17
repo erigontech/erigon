@@ -923,7 +923,42 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 		if vm.trace {
 			fmt.Println(tracePrefix, "FLSH", v.String())
 		}
-		vm.writeLocked(v.Address, v.Path, v.Key, v.Version, v.Val, complete)
+		vm.flushVWLocked(v, complete)
+	}
+}
+
+// flushVWLocked routes a VersionedWrite into the typed AddressEntry field
+// matching its Path. Caller must hold vm.mu.Lock(). Avoids the runtime
+// any-boundary that writeLocked still has — the typed value flows directly
+// from VersionedWrite's typed field into putCell.
+func (vm *VersionMap) flushVWLocked(vw *VersionedWrite, complete bool) {
+	e := vm.entryOrCreate(vw.Address)
+	flag := flagFor(complete)
+	addr := vw.Address
+	switch vw.Path {
+	case AddressPath:
+		e.Address = putCell(e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValAcc)
+	case SelfDestructPath:
+		e.SelfDestruct = putCell(e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool)
+	case BalancePath:
+		e.Balance = putCell(e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256)
+	case NoncePath:
+		e.Nonce = putCell(e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64)
+	case IncarnationPath:
+		e.Incarnation = putCell(e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU64)
+	case CodePath:
+		e.Code = putCell(e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBytes)
+	case CodeHashPath:
+		e.CodeHash = putCell(e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValHash)
+	case CodeSizePath:
+		e.CodeSize = putCell(e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValInt)
+	case CreateContractPath:
+		e.CreateContract = putCell(e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValBool)
+	case StoragePath:
+		if e.Storage == nil {
+			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
+		}
+		e.Storage[vw.Key] = putCell(e.Storage[vw.Key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.ValU256)
 	}
 }
 
@@ -1213,7 +1248,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	if readSet := lastIO.ReadSet(txIdx); readSet != nil {
 		readSet.Scan(func(vr *VersionedRead) bool {
 			valid = vm.validateRead(txIdx, vr.Address, vr.Path, vr.Key, vr.Source, vr.Version,
-				vr.Val, checkVersion, traceInvalid, tracePrefix)
+				vr.Val(), checkVersion, traceInvalid, tracePrefix)
 			return valid == VersionValid
 		})
 	}
