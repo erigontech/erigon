@@ -29,9 +29,19 @@ import (
 // addresses maps each address to its index in slots (-1 if address-only, no slots).
 // This layout matches go-ethereum's design: the slots slice backing array is
 // reused across transactions via Reset, eliminating per-tx slot-map allocations.
+//
+// lastHitAddr/lastHitSlot/lastHitValid form a one-entry warm-only cache: when
+// AddSlot is invoked with the same (addr, slot) as the previous call AND that
+// previous call was a warm hit (no mutation), we skip both map lookups and
+// return (false, false). Catches the `sload_same_key` workload's ~100k
+// repeat-SLOAD AL probes per tx — the cache is invalidated on any mutating
+// call to maintain correctness on cold-then-warm sequences.
 type accessList struct {
-	addresses map[accounts.Address]int
-	slots     []map[accounts.StorageKey]struct{}
+	addresses    map[accounts.Address]int
+	slots        []map[accounts.StorageKey]struct{}
+	lastHitAddr  accounts.Address
+	lastHitSlot  accounts.StorageKey
+	lastHitValid bool
 }
 
 // newAccessList creates a new accessList.
@@ -50,6 +60,7 @@ func (al *accessList) Reset() {
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	al.lastHitValid = false
 }
 
 // ContainsAddress returns true if the address is in the access list.
@@ -100,6 +111,12 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 // - slot added
 // For any 'true' value returned, a corresponding journal entry must be made.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
+	// Warm-only fast path: same (addr, slot) as the previous warm hit returns
+	// without touching the maps. Mutating outcomes do not populate this
+	// cache, so its only effect is to short-circuit repeat warm probes.
+	if al.lastHitValid && al.lastHitAddr == address && al.lastHitSlot == slot {
+		return false, false
+	}
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
@@ -115,13 +132,18 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
+		al.lastHitValid = false
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
 	if _, ok := slotmap[slot]; !ok {
 		slotmap[slot] = struct{}{}
+		al.lastHitValid = false
 		return false, true
 	}
+	al.lastHitAddr = address
+	al.lastHitSlot = slot
+	al.lastHitValid = true
 	return false, false
 }
 
@@ -148,6 +170,7 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
 	}
+	al.lastHitValid = false
 }
 
 // DeleteAddress removes an address from the access list. This operation
@@ -163,4 +186,5 @@ func (al *accessList) DeleteAddress(address accounts.Address) {
 		panic("reverting address change, address still has slots")
 	}
 	delete(al.addresses, address)
+	al.lastHitValid = false
 }
