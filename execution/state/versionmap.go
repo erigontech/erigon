@@ -1417,7 +1417,7 @@ func releaseCellAccount(c *WriteCell[*accounts.Account]) {
 	c.Value = nil
 	cellPoolAccount.Put(c)
 }
-func releaseCellSelfDestruct(c *WriteCell[bool])  { cellPoolSelfDestruct.Put(c) }
+func releaseCellSelfDestruct(c *WriteCell[bool])   { cellPoolSelfDestruct.Put(c) }
 func releaseCellBalance(c *WriteCell[uint256.Int]) { cellPoolBalance.Put(c) }
 func releaseCellNonce(c *WriteCell[uint64])        { cellPoolNonce.Put(c) }
 func releaseCellIncarnation(c *WriteCell[uint64])  { cellPoolIncarnation.Put(c) }
@@ -1425,10 +1425,10 @@ func releaseCellCode(c *WriteCell[[]byte]) {
 	c.Value = nil // unpin bytecode
 	cellPoolCode.Put(c)
 }
-func releaseCellCodeHash(c *WriteCell[accounts.CodeHash])  { cellPoolCodeHash.Put(c) }
-func releaseCellCodeSize(c *WriteCell[int])                { cellPoolCodeSize.Put(c) }
-func releaseCellCreateContract(c *WriteCell[bool])         { cellPoolCreateContract.Put(c) }
-func releaseCellStorage(c *WriteCell[uint256.Int])          { cellPoolStorage.Put(c) }
+func releaseCellCodeHash(c *WriteCell[accounts.CodeHash]) { cellPoolCodeHash.Put(c) }
+func releaseCellCodeSize(c *WriteCell[int])               { cellPoolCodeSize.Put(c) }
+func releaseCellCreateContract(c *WriteCell[bool])        { cellPoolCreateContract.Put(c) }
+func releaseCellStorage(c *WriteCell[uint256.Int])        { cellPoolStorage.Put(c) }
 
 type Version struct {
 	BlockNum    uint64

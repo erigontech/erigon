@@ -2685,47 +2685,47 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			// set by CodePath case above
 		case SelfDestructPath:
 			deleted := writes[i].ValBool
-				if deleted {
-					// Ensure the state object exists before calling Selfdestruct.
-					// For newly-created accounts (e.g. coinbase born via CREATE in the
-					// same transaction, with no pre-block DB entry), getStateObject
-					// returns nil and Selfdestruct silently no-ops.  This matters for
-					// the EIP-7708 finalize IBS: without a stateObject, the account will
-					// not be marked as selfdestructed and GetRemovedAccountsWithBalance
-					// will miss it, omitting the residual-balance burn log.
-					if _, err := sdb.GetOrNewStateObject(addr); err != nil {
-						return err
-					}
-					if _, err := sdb.Selfdestruct(addr); err != nil {
-						return err
-					}
-				} else {
-					// SelfDestructPath=false indicates account resurrection in this block.
-					// The worker IBS set createdContract=true (ensuring CreateContract is called
-					// during commit to clear old storage), but that flag is not a versioned write
-					// path and is lost in the finalize IBS.
-					so, err := sdb.GetOrNewStateObject(addr)
-					if err != nil {
-						return err
-					}
-					if so != nil {
-						so.selfdestructed = false
-						so.createdContract = true
-					}
-					// Re-emit SelfDestructPath=false so the global versionMap reflects the
-					// resurrection; subsequent workers reading SelfDestructPath will see the
-					// updated value and not mistake the account for still being selfdestructed.
-					versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
+			if deleted {
+				// Ensure the state object exists before calling Selfdestruct.
+				// For newly-created accounts (e.g. coinbase born via CREATE in the
+				// same transaction, with no pre-block DB entry), getStateObject
+				// returns nil and Selfdestruct silently no-ops.  This matters for
+				// the EIP-7708 finalize IBS: without a stateObject, the account will
+				// not be marked as selfdestructed and GetRemovedAccountsWithBalance
+				// will miss it, omitting the residual-balance burn log.
+				if _, err := sdb.GetOrNewStateObject(addr); err != nil {
+					return err
 				}
-			case CreateContractPath:
-				// Contract creation: set createdContract flag on the stateObject.
+				if _, err := sdb.Selfdestruct(addr); err != nil {
+					return err
+				}
+			} else {
+				// SelfDestructPath=false indicates account resurrection in this block.
+				// The worker IBS set createdContract=true (ensuring CreateContract is called
+				// during commit to clear old storage), but that flag is not a versioned write
+				// path and is lost in the finalize IBS.
 				so, err := sdb.GetOrNewStateObject(addr)
 				if err != nil {
 					return err
 				}
 				if so != nil {
+					so.selfdestructed = false
 					so.createdContract = true
 				}
+				// Re-emit SelfDestructPath=false so the global versionMap reflects the
+				// resurrection; subsequent workers reading SelfDestructPath will see the
+				// updated value and not mistake the account for still being selfdestructed.
+				versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
+			}
+		case CreateContractPath:
+			// Contract creation: set createdContract flag on the stateObject.
+			so, err := sdb.GetOrNewStateObject(addr)
+			if err != nil {
+				return err
+			}
+			if so != nil {
+				so.createdContract = true
+			}
 		default:
 			return fmt.Errorf("unknown key type: %d", path)
 		}
