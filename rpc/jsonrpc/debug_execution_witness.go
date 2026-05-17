@@ -414,9 +414,7 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
-// OnCodeAccess is called by IntraBlockState when code is returned from a stateObject
-// cache hit (bypassing ReadAccountCode). This ensures code accessed via CALL/EXTCODESIZE
-// on contracts whose bytecode is already in the stateObject cache is tracked.
+// OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
 		s.AccessedCode[address.Value()] = code
@@ -693,21 +691,18 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	modifiedCode := recordingState.GetModifiedCode()
 	accessedCode := recordingState.GetAccessedCode()
 
-	// result.Codes includes only code explicitly accessed during execution (matching Geth's
-	// witness.AddCode behavior: called on GetCode/GetCodeSize, not on deployment alone).
+	// result.Codes: only code explicitly accessed during execution, matching Geth's
+	// witness.AddCode semantics (GetCode/GetCodeSize, not deployment alone).
 	type codeWithHash struct {
 		code []byte
 		hash common.Hash
 	}
 	allCodesByHash := make(map[common.Hash][]byte)
-	addToResultCodes := func(code []byte) {
+	for _, code := range accessedCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
 			allCodesByHash[h] = code
 		}
-	}
-	for _, code := range accessedCode {
-		addToResultCodes(code)
 	}
 
 	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))

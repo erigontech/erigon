@@ -628,6 +628,14 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
+	if hook, ok := sdb.stateReader.(interface {
+		OnCodeAccess(accounts.Address, []byte)
+	}); ok {
+		hook.OnCodeAccess(addr, code)
+	}
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return sdb.getCode(addr, false)
@@ -649,11 +657,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 				}
 			}
 			if err == nil {
-				if hook, ok := sdb.stateReader.(interface {
-					OnCodeAccess(accounts.Address, []byte)
-				}); ok {
-					hook.OnCodeAccess(addr, code)
-				}
+				sdb.callCodeAccessHook(addr, code)
 			}
 			return code, err
 		}
@@ -670,11 +674,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	// not in a previous tx sharing the same IBS (block generator reuses IBS).
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
-			if hook, ok := sdb.stateReader.(interface {
-				OnCodeAccess(accounts.Address, []byte)
-			}); ok {
-				hook.OnCodeAccess(addr, so.code)
-			}
+			sdb.callCodeAccessHook(addr, so.code)
 			return so.code, nil
 		}
 	}
@@ -698,11 +698,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 		}
 	}
 	if err == nil {
-		if hook, ok := sdb.stateReader.(interface {
-			OnCodeAccess(accounts.Address, []byte)
-		}); ok {
-			hook.OnCodeAccess(addr, code)
-		}
+		sdb.callCodeAccessHook(addr, code)
 	}
 	return code, err
 }
@@ -718,11 +714,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			return 0, nil
 		}
 		if stateObject.code != nil {
-			if hook, ok := sdb.stateReader.(interface {
-				OnCodeAccess(accounts.Address, []byte)
-			}); ok {
-				hook.OnCodeAccess(addr, stateObject.code)
-			}
+			sdb.callCodeAccessHook(addr, stateObject.code)
 			return len(stateObject.code), nil
 		}
 		if stateObject.data.CodeHash.IsEmpty() {
@@ -738,11 +730,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 				return 0, nil
 			}
 			if s.code != nil {
-				if hook, ok := sdb.stateReader.(interface {
-					OnCodeAccess(accounts.Address, []byte)
-				}); ok {
-					hook.OnCodeAccess(addr, s.code)
-				}
+				sdb.callCodeAccessHook(addr, s.code)
 				return len(s.code), nil
 			}
 			if s.data.CodeHash.IsEmpty() {
