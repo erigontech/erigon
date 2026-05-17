@@ -433,6 +433,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
 		hph.SetLeaveDeferredForCaller(true)
 		defer hph.SetLeaveDeferredForCaller(false)
+	} else if _, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+		// ParallelPatriciaHashed applies worker-accumulated deferred branch
+		// updates inline at the end of Process via applyDeferredUpdates; there
+		// is no hook to stash them for later flush. Combining the parallel trie
+		// with deferred mode would write branches at the current txNum but
+		// bypass FlushPendingUpdates, breaking per-block changeset attribution
+		// during fork validation and parallel initial-sync apply. Fail loudly
+		// rather than silently producing incorrect state.
+		return nil, errors.New("ParallelPatriciaHashed does not support deferred commitment updates; disable --experimental.parallel-commitment when running with fork validation or parallel block apply")
 	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
