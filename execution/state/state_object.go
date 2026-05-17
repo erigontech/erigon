@@ -418,12 +418,9 @@ func (so *stateObject) Code() ([]byte, error) {
 	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
 	// synthetic code but the domain/stateReader does not.
 	if so.db.versionMap != nil {
-		rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex)
-		if rr.Status() == MVReadResultDone {
-			if code, ok := rr.Value().([]byte); ok {
-				so.code = code
-				return code, nil
-			}
+		if code, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
+			so.code = code
+			return code, nil
 		}
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
