@@ -1172,8 +1172,7 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 					// or worker flush). A nil AddressPath read from storage
 					// is then stale and must be invalidated.
 					if valid == VersionValid {
-						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
-						if balRR.Status() == MVReadResultDone {
+						if _, balRR, ok := vm.ReadBalance(addr, txIndex); ok && balRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
 						}
 					}

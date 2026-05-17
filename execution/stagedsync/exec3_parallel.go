@@ -3243,19 +3243,16 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
 			sdTxIdx, sdOk := -1, false
-			if sd := vm.Read(w.Address, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
-				if v, ok := sd.Value().(bool); ok && v {
-					sdTxIdx, sdOk = sd.Version().TxIndex, true
-				}
+			if v, sd, ok := vm.ReadSelfDestruct(w.Address, txIndex); ok && sd.Status() == state.MVReadResultDone && v {
+				sdTxIdx, sdOk = sd.Version().TxIndex, true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
-			origin := vm.Read(w.Address, state.StoragePath, w.Key, txIndex)
-			originValid := origin.Status() == state.MVReadResultDone && origin.Value() != nil &&
+			originVal, origin, originOk := vm.ReadStorage(w.Address, w.Key, txIndex)
+			originValid := originOk && origin.Status() == state.MVReadResultDone &&
 				!(sdOk && sdTxIdx > origin.Version().TxIndex)
 			if originValid {
-				originVal := origin.Value().(uint256.Int)
 				if writeVal.Eq(&originVal) {
 					continue // write-back same as prior TX's value — no-op
 				}
@@ -3377,10 +3374,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 		// vm.Read returns that recreate's SelfDestructPath=false, so we correctly
 		// fall through to the normal versionMap lookup.
 		sdEarlier := false
-		if sd := vm.Read(addr, state.SelfDestructPath, accounts.NilKey, txIndex); sd.Status() == state.MVReadResultDone {
-			if v, ok := sd.Value().(bool); ok && v {
-				sdEarlier = true
-			}
+		if v, sd, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sd.Status() == state.MVReadResultDone && v {
+			sdEarlier = true
 		}
 
 		// For each missing field, try versionMap then stateReader.
@@ -3562,14 +3557,12 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		case state.StoragePath:
 			// Check versionMap for this TX's write at this address+slot.
 			// Use the resolved value from the versionMap (post-validation correct).
-			rr := vm.Read(w.Address, state.StoragePath, w.Key, txIndex+1)
-			if rr.Status() == state.MVReadResultDone && rr.Version().TxIndex == txIndex {
+			val, rr, ok := vm.ReadStorage(w.Address, w.Key, txIndex+1)
+			if ok && rr.Status() == state.MVReadResultDone && rr.Version().TxIndex == txIndex {
 				if rr.Incarnation() != incarnation {
 					continue // stale incarnation entry
 				}
-				if rr.Value() != nil {
-					w.Val = rr.Value().(uint256.Int)
-				}
+				w.Val = val
 			} else {
 				continue // not written by this TX
 			}
@@ -3580,9 +3573,8 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 			// pre-block value from snapshots if no prior TX wrote this key.
 			{
 				resolved := w.Val.(uint256.Int)
-				origin := vm.Read(w.Address, state.StoragePath, w.Key, txIndex)
-				if origin.Status() == state.MVReadResultDone && origin.Value() != nil {
-					originVal := origin.Value().(uint256.Int)
+				originVal, origin, originOk := vm.ReadStorage(w.Address, w.Key, txIndex)
+				if originOk && origin.Status() == state.MVReadResultDone {
 					if resolved.Eq(&originVal) {
 						continue // write-back same as origin — no-op
 					}
