@@ -42,27 +42,38 @@ Before committing, always verify changes with: `make lint && make erigon integra
 ./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
 ```
 
-## Test skips — banned
+## Test skips
 
-**Never add `t.Skip` (or `SkipLoad`, or any equivalent skip mechanism) unless the user explicitly asks for it in this turn.** A failing test is a real failure that must be diagnosed and fixed. Skipping it hides the failure and pushes the cost onto whoever later removes the skip — at which point the underlying bug is still there and now also surprises them. Concrete example: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` that had been documenting a known parallel-exec SD/CREATE2-reincarnation bug; the underlying bug had never been fixed, so its CI failures suddenly surfaced across multiple downstream PRs. Skipping reduces the effectiveness of the CI process: it converts a loud signal ("this is broken") into silence.
+These rules apply project-wide — to every contributor and to every automated agent (LLM coding assistants, CI bots, etc.) working in this repository.
 
-**Never offer skip as an option in user-facing suggestions** (e.g., do not include "add `t.Skip` to unblock CI" in option menus). If a test is blocking CI, the answer is "fix it" or "track it as a known failure with explicit acknowledgement that the underlying bug remains" — never silently mute it.
+### Why skips are dangerous
 
-This applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, removing tests from a runner matrix without a tracking issue, etc.
+A failing test is a real failure that must be diagnosed and fixed. Skipping it hides the failure and pushes the cost onto whoever later removes the skip — at which point the underlying bug is still there and now also surprises them. Skipping converts a loud "this is broken" signal into silence, then back into surprise. Concrete case: `#21153` removed a `t.Skip` for `TestGeneratedTraceApiCollision` that had documented a known parallel-exec SD/CREATE2-reincarnation bug; the underlying bug was never actually fixed (the comment said "fixed on `exec3/remove-rwtx-threading` branch" — that branch's fix never merged), so removing the skip suddenly red'd CI across downstream PRs (notably #21017).
 
-### Acceptable reasons to add a skip (still requires explicit user request)
+### Two valid reasons a skip may exist
 
-There are two narrow exceptions where a skip is the correct call. Both still require the user to ask for the skip in the current turn — agents must not add skips proactively.
+Both apply to human contributors. Both require an explicit, linked tracking issue. Neither permits an automated agent to add the skip on its own.
 
-1. **External test suites we import where we know we can't pass all the tests** — typically because we haven't done the corresponding development yet. Example: an upstream Ethereum spec test for a feature we haven't implemented. The skip documents the gap rather than hiding a regression. Every such skip MUST link to a tracking issue describing what work is needed before the skip can be removed.
+1. **External test suites we import where we can't pass all the tests** — typically because we haven't done the corresponding development yet (e.g., an upstream Ethereum spec test for a feature we haven't implemented). The skip documents the gap rather than hiding a regression.
 
-2. **Flaky tests that intermittently break CI** — partially valid, with very low tolerance. The general rule for flakes is: **reproduce locally and fix**. Only after a serious attempt at local repro and root-cause analysis (not "I ran it three times locally and it passed") should a skip be considered. When a skip is the chosen escape valve, it MUST link to a tracking issue with the local-repro investigation attached, and the test owner accepts responsibility for un-skipping once the flake is fixed.
+2. **Flaky tests** — partially valid, with very low (not zero) tolerance. The general rule for flakes is **reproduce locally and fix**. Only after a serious attempt at local repro and root-cause analysis (not "I ran it three times and it passed") should a skip be considered. The tracking issue must include the local-repro investigation attached, and the test owner accepts responsibility for un-skipping once the flake is fixed.
 
 In both cases the skip carries an inline comment with the linked tracking issue, and the issue gets closed by removing the skip — not by closing the issue with the skip still in place.
 
-### Default workflow
+### Rule for automated agents (LLM assistants etc.)
 
-When a test must temporarily not run: user explicitly asks for it in the current turn, the skip carries a comment with a linked tracking issue, and the skip is reverted as soon as the underlying bug is fixed.
+**Automated agents must never add a skip. Period.** Not even with a "the user can review it" framing. Not as an option in `AskUserQuestion` menus. Not as a "tactical unblock" suggestion in text answers. Not behind any conditional or env-var gate.
+
+When an agent encounters a failing test:
+- Investigate the failure: read logs, reproduce locally, narrow to a minimal repro
+- Fix the underlying bug
+- If the agent genuinely can't fix it in-session, the correct outcomes are: (a) escalate to the user with the investigation findings, or (b) report it as a tracked blocker — never (c) skip it
+
+If a flaky test is blocking the agent's own CI iteration, the agent reproduces locally and either fixes the flake or hands off to the user with the repro recipe. Adding a skip "just to get CI green" is exactly the pattern that produced #21153's surprise.
+
+Applies to all forms of test muting: `t.Skip`, `t.SkipNow`, `t.Skipf`, `SkipLoad`, `bt.SkipLoad`, build-tag exclusions, conditional bypasses behind `dbg.*` env flags, removing tests from a runner matrix without a tracking issue. **All off-limits for automated agents.**
+
+If a user explicitly directs an agent to add a skip in the current turn (overriding this rule for a specific case), the agent should still flag the trade-off and ensure a tracking issue exists.
 
 ## Conventions
 
