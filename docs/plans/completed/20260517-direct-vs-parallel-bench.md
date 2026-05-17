@@ -248,10 +248,10 @@ On an 8-core or 4-core machine the matrix is correspondingly smaller (dedup).
 
 ### Task 4: Final — move plan to completed/
 
-- [ ] verify all checkboxes above are `[x]`
-- [ ] `mkdir -p docs/plans/completed`
-- [ ] `git mv docs/plans/20260517-direct-vs-parallel-bench.md docs/plans/completed/`
-- [ ] commit with `docs: archive direct-vs-parallel-bench plan`
+- [x] verify all checkboxes above are `[x]`
+- [x] `mkdir -p docs/plans/completed`
+- [x] `git mv docs/plans/20260517-direct-vs-parallel-bench.md docs/plans/completed/`
+- [x] commit with `docs: archive direct-vs-parallel-bench plan`
 
 ## Post-Completion
 
