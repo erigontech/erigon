@@ -44,7 +44,7 @@ var (
 	ErrGasUintOverflow          = errors.New("gas uint64 overflow")
 	ErrInvalidRetsub            = errors.New("invalid retsub")
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
-	ErrInvalidCode              = errors.New("invalid code")
+	ErrInvalidCode              = errors.New("invalid code: must not begin with 0xef")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 
 	// errStopToken is an internal token indicating interpreter loop termination,

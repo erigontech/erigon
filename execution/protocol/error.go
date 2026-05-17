@@ -34,19 +34,21 @@ var (
 
 	// ErrTipAboveFeeCap is a sanity error to ensure no one is able to specify a
 	// transaction with a tip higher than the total fee cap.
-	ErrTipAboveFeeCap = errors.New("tip higher than fee cap")
+	// Wording matches go-ethereum (core/error.go) so EEST/Hive exception
+	// mappers calibrated against geth apply to erigon unchanged.
+	ErrTipAboveFeeCap = errors.New("max priority fee per gas higher than max fee per gas")
 
 	// ErrMaxFeePerBlobGas is returned if the transaction specified a
 	// max_fee_per_blob_gas that is below the current blob gas price.
-	ErrMaxFeePerBlobGas = errors.New("max fee per blob gas too low")
+	ErrMaxFeePerBlobGas = errors.New("max fee per blob gas less than block blob gas fee")
 
 	// ErrTipVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the tip field.
-	ErrTipVeryHigh = errors.New("tip higher than 2^256-1")
+	ErrTipVeryHigh = errors.New("max priority fee per gas higher than 2^256-1")
 
 	// ErrFeeCapVeryHigh is a sanity error to avoid extremely big numbers specified
 	// in the fee cap field.
-	ErrFeeCapVeryHigh = errors.New("fee cap higher than 2^256-1")
+	ErrFeeCapVeryHigh = errors.New("max fee per gas higher than 2^256-1")
 
 	// ErrTooManyBlobs is returned when a transaction has more than 6 blobs
 	// (introduced by EIP-7594).
@@ -106,7 +108,7 @@ var (
 
 	// ErrFeeCapTooLow is returned if the transaction fee cap is less than the
 	// the base fee of the block.
-	ErrFeeCapTooLow = errors.New("fee cap less than block base fee")
+	ErrFeeCapTooLow = errors.New("max fee per gas less than block base fee")
 
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	// See EIP-3607: Reject transactions from senders with deployed code.
@@ -114,5 +116,10 @@ var (
 
 	// ErrGasLimitTooHigh is returned if the gas limit of a transaction exceeds MaxTxnGasLimit.
 	// See EIP-7825: Transaction Gas Limit Cap.
-	ErrGasLimitTooHigh = errors.New("gas limit too high")
+	ErrGasLimitTooHigh = errors.New("transaction gas limit too high")
+
+	// ErrFloorDataGas is returned if the transaction is specified to use less gas
+	// than required to start the invocation taking into account the floor data
+	// cost (EIP-7623). Wording matches go-ethereum (core/error.go).
+	ErrFloorDataGas = errors.New("insufficient gas for floor data gas cost")
 )

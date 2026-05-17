@@ -245,10 +245,12 @@ func (st *TxnExecutor) buyGas(gasBailout bool) error {
 
 func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uint256.Int, isFree bool) error {
 	if feeCap.Lt(tipCap) {
-		return fmt.Errorf("%w: address %v, tipCap: %s, feeCap: %s", ErrTipAboveFeeCap, from, tipCap, feeCap)
+		return fmt.Errorf("%w: address %v, maxPriorityFeePerGas: %s, maxFeePerGas: %s",
+			ErrTipAboveFeeCap, from, tipCap, feeCap)
 	}
 	if baseFee != nil && feeCap.Lt(baseFee) && !isFree {
-		return fmt.Errorf("%w: address %v, feeCap: %s baseFee: %s", ErrFeeCapTooLow, from, feeCap, baseFee)
+		return fmt.Errorf("%w: address %v, maxFeePerGas: %s baseFee: %s",
+			ErrFeeCapTooLow, from, feeCap, baseFee)
 	}
 	return nil
 }
@@ -348,11 +350,12 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the regular gas dimension only.
 			gasToCap := max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
 			if gasToCap > params.MaxTxnGasLimit {
-				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-					ErrIntrinsicGas, gasToCap, params.MaxTxnGasLimit)
+				return fmt.Errorf("%w (cap: %d, tx: %d)",
+					ErrGasLimitTooHigh, params.MaxTxnGasLimit, gasToCap)
 			}
 		} else if st.msg.Gas() > params.MaxTxnGasLimit {
-			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
+			return fmt.Errorf("%w (cap: %d, tx: %d)",
+				ErrGasLimitTooHigh, params.MaxTxnGasLimit, st.msg.Gas())
 		}
 	}
 
@@ -402,8 +405,8 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		return nil, ErrGasUintOverflow
 	}
 	if st.msg.Gas() < intrinsicGas {
-		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
-			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas)
+		return nil, fmt.Errorf("%w: have %d, want %d",
+			ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
@@ -541,8 +544,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+	if st.msg.Gas() < intrinsicGas {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
+	}
+	if st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrFloorDataGas, st.msg.Gas(), intrinsicGasResult.FloorGasCost)
 	}
 
 	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
