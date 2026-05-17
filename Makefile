@@ -278,32 +278,6 @@ $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
 $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
 	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
 
-## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
-.PHONY: test-fixtures-eest
-test-fixtures-eest:
-	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
-
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
-# against EEST fixtures. CI defines failure budgets in
-# .github/workflows/test-eest-spec.yml's matrix.include:; local runs use the
-# per-shard fallback defaults baked into tools/run-eest-spec-test.sh. Override
-# either with EEST_SPEC_MAX_FAILURES / EEST_SPEC_WORKERS.
-EEST_SPEC_SHARDS := \
-	statetests-stable statetests-devnet \
-	blocktests-stable blocktests-devnet \
-	enginextests-stable enginextests-devnet \
-	enginextests-benchmark-1m \
-	enginextests-benchmark-5m \
-	enginextests-benchmark-10m \
-	enginextests-benchmark-30m \
-	enginextests-benchmark-60m \
-	enginextests-benchmark-100m \
-	enginextests-benchmark-150m
-
-.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS))
-$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
-	@bash tools/run-eest-spec-test.sh $(subst -, ,$*)
-
 ## test-bench:                         check the benchmarks compile and run
 test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
 test-bench:
