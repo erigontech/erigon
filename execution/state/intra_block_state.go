@@ -322,8 +322,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	// return false.  This mirrors the same check in versionedRead for
 	// StoragePath (versionedio.go:660-703).
 	if sdb.versionMap != nil {
-		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
-		if incRes.Status() == MVReadResultDone {
+		if inc, incRes, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && incRes.Status() == MVReadResultDone {
 			// Record IncarnationPath dependency for validation.
 			if sdb.versionedReads == nil {
 				sdb.versionedReads = ReadSet{}
@@ -334,7 +333,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 				Key:     accounts.NilKey,
 				Source:  MapRead,
 				Version: Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()},
-				Val:     incRes.Value(),
+				Val:     inc,
 			})
 			return false, nil
 		}
@@ -1613,24 +1612,22 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// SelfDestructPath directly from the versionMap (not via versionedRead
 		// which itself short-circuits on the same flag). Use the same pattern
 		// as CreateAccount (line 1628).
-		if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				// Only honour if the current tx hasn't already resurrected.
-				localResurrected := false
-				if vw, ok := sdb.versionedWrite(addr, SelfDestructPath, accounts.NilKey); ok {
-					if v, ok := vw.Val.(bool); ok && !v {
-						localResurrected = true
-					}
+		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed {
+			// Only honour if the current tx hasn't already resurrected.
+			localResurrected := false
+			if vw, ok := sdb.versionedWrite(addr, SelfDestructPath, accounts.NilKey); ok {
+				if v, ok := vw.Val.(bool); ok && !v {
+					localResurrected = true
 				}
-				if !localResurrected {
-					so := stateObjectPool.Get().(*stateObject)
-					so.db = sdb
-					so.address = addr
-					so.selfdestructed = true
-					so.deleted = true
-					sdb.setStateObject(addr, so)
-					return nil, nil
-				}
+			}
+			if !localResurrected {
+				so := stateObjectPool.Get().(*stateObject)
+				so.db = sdb
+				so.address = addr
+				so.selfdestructed = true
+				so.deleted = true
+				sdb.setStateObject(addr, so)
+				return nil, nil
 			}
 		}
 
@@ -1791,7 +1788,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
 					// versionedRead returns false for SelfDestructPath via the early-exit at
 					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
-					if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
+					if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
 						destructed = true
 					}
 				}
@@ -1828,10 +1825,8 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// Read IncarnationPath directly from the versionMap to get the
 	// incarnation written by the prior CreateAccount, giving the correct prevInc.
 	if sdb.versionMap != nil && (previous == nil || previous.selfdestructed) {
-		if res := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
-			if inc, ok := res.value.(uint64); ok && inc > prevInc {
-				prevInc = inc
-			}
+		if inc, res, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && inc > prevInc {
+			prevInc = inc
 		}
 	}
 	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
