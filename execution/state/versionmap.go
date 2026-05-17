@@ -84,121 +84,64 @@ func (k AccountKey) String() string {
 }
 
 // AddressEntry holds the multi-version cells for one address, organised
-// per AccountPath. Every field is an independently addressable unit — the
-// struct exists only to eliminate the inner map[AccountKey] hash lookup
-// (~27 % of pre-restructure warm-read CPU was aeshashbody on AccountKey).
+// per AccountPath. Each field is typed by the AccountPath's value-type
+// contract so adding the wrong type to a cell is a compile-time error
+// rather than a runtime panic — and the storage layer carries the typed
+// value end-to-end (no interface box on writes).
 //
 // Invariant — per-field independence: no consumer treats AddressEntry as
-// a transactional whole. Reads, writes, mark-estimate/complete, delete and
-// validation all operate at (Path, Key) granularity. Helpers that look
-// like address-level operations (DeleteAll, StorageKeys) are pure
+// a transactional whole. Reads, writes, mark-estimate/complete, delete
+// and validation all operate at (Path, Key) granularity. Helpers that
+// look like address-level operations (DeleteAll, StorageKeys) are pure
 // iterations of per-field operations.
 type AddressEntry struct {
-	Address        *btree.Map[int, *WriteCell]
-	SelfDestruct   *btree.Map[int, *WriteCell]
-	Balance        *btree.Map[int, *WriteCell]
-	Nonce          *btree.Map[int, *WriteCell]
-	Incarnation    *btree.Map[int, *WriteCell]
-	Code           *btree.Map[int, *WriteCell]
-	CodeHash       *btree.Map[int, *WriteCell]
-	CodeSize       *btree.Map[int, *WriteCell]
-	CreateContract *btree.Map[int, *WriteCell]
-	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell]
+	Address        *btree.Map[int, *WriteCell[*accounts.Account]]
+	SelfDestruct   *btree.Map[int, *WriteCell[bool]]
+	Balance        *btree.Map[int, *WriteCell[uint256.Int]]
+	Nonce          *btree.Map[int, *WriteCell[uint64]]
+	Incarnation    *btree.Map[int, *WriteCell[uint64]]
+	Code           *btree.Map[int, *WriteCell[[]byte]]
+	CodeHash       *btree.Map[int, *WriteCell[accounts.CodeHash]]
+	CodeSize       *btree.Map[int, *WriteCell[int]]
+	CreateContract *btree.Map[int, *WriteCell[bool]]
+	Storage        map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]
 }
 
-// cells returns the existing cell map for (path, key), or nil if no write
-// has yet been recorded for that field on this address. A nil return is
-// the hot-path early-exit for warm reads on addresses that have never
-// been touched on the queried field (e.g. the SelfDestruct probe on the
-// overwhelming majority of warm reads, since selfdestructs are rare).
-func (e *AddressEntry) cells(path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell] {
-	switch path {
-	case AddressPath:
-		return e.Address
-	case SelfDestructPath:
-		return e.SelfDestruct
-	case BalancePath:
-		return e.Balance
-	case NoncePath:
-		return e.Nonce
-	case IncarnationPath:
-		return e.Incarnation
-	case CodePath:
-		return e.Code
-	case CodeHashPath:
-		return e.CodeHash
-	case CodeSizePath:
-		return e.CodeSize
-	case CreateContractPath:
-		return e.CreateContract
-	case StoragePath:
-		return e.Storage[key]
+// putCell sets or updates a typed cell at txIdx. Caller must hold vm.mu.Lock().
+// Returns the (possibly newly-created) cell map for the caller to assign back
+// to its AddressEntry field. Write path is cold enough that the generic
+// closure-escape cost is tolerable; the hot Read path inlines descend
+// per-case instead.
+func putCell[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T) *btree.Map[int, *WriteCell[T]] {
+	if cells == nil {
+		cells = &btree.Map[int, *WriteCell[T]]{}
 	}
-	return nil
-}
-
-// cellsOrCreate returns the cell map for (path, key), creating an empty
-// btree (and the Storage sub-map for StoragePath) if no write has yet
-// been recorded for that field on this address.
-func (e *AddressEntry) cellsOrCreate(path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell] {
-	switch path {
-	case AddressPath:
-		if e.Address == nil {
-			e.Address = &btree.Map[int, *WriteCell]{}
+	if ci, ok := cells.Get(txIdx); ok {
+		if ci.incarnation > incarnation {
+			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, path, txIdx))
 		}
-		return e.Address
-	case SelfDestructPath:
-		if e.SelfDestruct == nil {
-			e.SelfDestruct = &btree.Map[int, *WriteCell]{}
-		}
-		return e.SelfDestruct
-	case BalancePath:
-		if e.Balance == nil {
-			e.Balance = &btree.Map[int, *WriteCell]{}
-		}
-		return e.Balance
-	case NoncePath:
-		if e.Nonce == nil {
-			e.Nonce = &btree.Map[int, *WriteCell]{}
-		}
-		return e.Nonce
-	case IncarnationPath:
-		if e.Incarnation == nil {
-			e.Incarnation = &btree.Map[int, *WriteCell]{}
-		}
-		return e.Incarnation
-	case CodePath:
-		if e.Code == nil {
-			e.Code = &btree.Map[int, *WriteCell]{}
-		}
-		return e.Code
-	case CodeHashPath:
-		if e.CodeHash == nil {
-			e.CodeHash = &btree.Map[int, *WriteCell]{}
-		}
-		return e.CodeHash
-	case CodeSizePath:
-		if e.CodeSize == nil {
-			e.CodeSize = &btree.Map[int, *WriteCell]{}
-		}
-		return e.CodeSize
-	case CreateContractPath:
-		if e.CreateContract == nil {
-			e.CreateContract = &btree.Map[int, *WriteCell]{}
-		}
-		return e.CreateContract
-	case StoragePath:
-		if e.Storage == nil {
-			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell]{}
-		}
-		cells, ok := e.Storage[key]
-		if !ok {
-			cells = &btree.Map[int, *WriteCell]{}
-			e.Storage[key] = cells
-		}
+		ci.flag = flag
+		ci.incarnation = incarnation
+		ci.Value = value
+		ci.boxed = value
 		return cells
 	}
-	return nil
+	cells.Set(txIdx, &WriteCell[T]{flag: flag, incarnation: incarnation, Value: value, boxed: value})
+	return cells
+}
+
+// markCellFlag sets the flag on an existing typed cell. Panics with msg if
+// no cell is present at txIdx — used by MarkEstimate/MarkComplete which
+// require a prior write.
+func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statusFlag, msg string) {
+	if cells == nil {
+		panic(msg)
+	}
+	ci, ok := cells.Get(txIdx)
+	if !ok {
+		panic(msg)
+	}
+	ci.flag = flag
 }
 
 type VersionMap struct {
@@ -239,18 +182,6 @@ func (vm *VersionMap) StorageKeys(addr accounts.Address) []accounts.StorageKey {
 	return keys
 }
 
-func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
-	if e, ok := vm.s[addr]; ok {
-		cells = e.cells(path, key)
-	}
-
-	if cells == nil && fNoKey != nil {
-		cells = fNoKey(addr, path, key)
-	}
-
-	return
-}
-
 func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		for _, storageChanges := range accountChanges.StorageChanges {
@@ -280,43 +211,47 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 }
 
 // writeLocked performs the write without acquiring the lock.
-// Caller must hold vm.mu.Lock().
+// Caller must hold vm.mu.Lock(). The `data any` argument is asserted to
+// the AccountPath's contracted value type before storage; a wrong-type
+// `data` panics here rather than masquerading as a wrong typed cell on a
+// later read. Commit 2b introduces typed Write primitives so call sites
+// can avoid this runtime assertion entirely.
 func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	e, ok := vm.s[addr]
 	if !ok {
 		e = &AddressEntry{}
 		vm.s[addr] = e
 	}
-	cells := e.cellsOrCreate(path, key)
-
-	ci, ok := cells.Get(v.TxIndex)
-
-	var flag statusFlag = FlagDone
-
+	flag := FlagDone
 	if !complete {
 		flag = FlagEstimate
 	}
-
-	if ok {
-		if ci.incarnation > v.Incarnation {
-			panic(fmt.Errorf("existing transaction value does not have lower incarnation: %x %s, %v", addr, AccountKey{path, key}, v.TxIndex))
+	switch path {
+	case AddressPath:
+		e.Address = putCell(e.Address, addr, path, v.TxIndex, v.Incarnation, flag, data.(*accounts.Account))
+	case SelfDestructPath:
+		e.SelfDestruct = putCell(e.SelfDestruct, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool))
+	case BalancePath:
+		e.Balance = putCell(e.Balance, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int))
+	case NoncePath:
+		e.Nonce = putCell(e.Nonce, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64))
+	case IncarnationPath:
+		e.Incarnation = putCell(e.Incarnation, addr, path, v.TxIndex, v.Incarnation, flag, data.(uint64))
+	case CodePath:
+		e.Code = putCell(e.Code, addr, path, v.TxIndex, v.Incarnation, flag, data.([]byte))
+	case CodeHashPath:
+		e.CodeHash = putCell(e.CodeHash, addr, path, v.TxIndex, v.Incarnation, flag, data.(accounts.CodeHash))
+	case CodeSizePath:
+		e.CodeSize = putCell(e.CodeSize, addr, path, v.TxIndex, v.Incarnation, flag, data.(int))
+	case CreateContractPath:
+		e.CreateContract = putCell(e.CreateContract, addr, path, v.TxIndex, v.Incarnation, flag, data.(bool))
+	case StoragePath:
+		if e.Storage == nil {
+			e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 		}
-
-		ci.flag = flag
-		ci.incarnation = v.Incarnation
-		ci.data = data
-	} else {
-		if ci, ok = cells.Get(v.TxIndex); !ok {
-			cells.Set(v.TxIndex, &WriteCell{
-				flag:        flag,
-				incarnation: v.Incarnation,
-				data:        data,
-			})
-		} else {
-			ci.flag = flag
-			ci.incarnation = v.Incarnation
-			ci.data = data
-		}
+		e.Storage[key] = putCell(e.Storage[key], addr, path, v.TxIndex, v.Incarnation, flag, data.(uint256.Int))
+	default:
+		panic(fmt.Errorf("writeLocked: unknown path %v", path))
 	}
 }
 
@@ -331,40 +266,191 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	cells := vm.getKeyCells(addr, path, key, nil)
-
-	if cells == nil {
+	e, ok := vm.s[addr]
+	if !ok {
 		return
 	}
 
-	var floor = func(i int) (key int, val *WriteCell) {
-		key = UnknownDep
-		cells.Descend(i, func(k int, v *WriteCell) bool {
-			key = k
-			val = v
+	// Per-path Descend is inlined per case. A generic helper here costs an
+	// extra heap alloc per Read (Go generic functions are dictionary-passed
+	// rather than fully inlined, so the closure capture escapes once per
+	// instantiation). Inlining the descend keeps reads at one alloc (the
+	// any-box of fv.Value into res.value at the API boundary). Commit 2b
+	// drops that any-box too via typed Read primitives.
+	maxIdx := txIdx - 1
+	switch path {
+	case AddressPath:
+		if e.Address == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[*accounts.Account]
+		e.Address.Descend(maxIdx, func(k int, v *WriteCell[*accounts.Account]) bool {
+			fk, fv = k, v
 			return false
 		})
-		return key, val
-	}
-
-	fk, fv := floor(txIdx - 1)
-
-	if fk != UnknownDep && fv != nil {
-		switch fv.flag {
-		case FlagEstimate:
+		if fk != UnknownDep && fv != nil {
 			res.depIdx = fk
-			res.value = fv.data
-		case FlagDone:
-			{
-				res.depIdx = fk
+			if fv.flag == FlagDone {
 				res.incarnation = fv.incarnation
-				res.value = fv.data
 			}
-		default:
-			panic(errors.New("should not happen - unknown flag value"))
+			res.value = fv.boxed
+		}
+	case SelfDestructPath:
+		if e.SelfDestruct == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[bool]
+		e.SelfDestruct.Descend(maxIdx, func(k int, v *WriteCell[bool]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case BalancePath:
+		if e.Balance == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[uint256.Int]
+		e.Balance.Descend(maxIdx, func(k int, v *WriteCell[uint256.Int]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case NoncePath:
+		if e.Nonce == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[uint64]
+		e.Nonce.Descend(maxIdx, func(k int, v *WriteCell[uint64]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case IncarnationPath:
+		if e.Incarnation == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[uint64]
+		e.Incarnation.Descend(maxIdx, func(k int, v *WriteCell[uint64]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case CodePath:
+		if e.Code == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[[]byte]
+		e.Code.Descend(maxIdx, func(k int, v *WriteCell[[]byte]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case CodeHashPath:
+		if e.CodeHash == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[accounts.CodeHash]
+		e.CodeHash.Descend(maxIdx, func(k int, v *WriteCell[accounts.CodeHash]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case CodeSizePath:
+		if e.CodeSize == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[int]
+		e.CodeSize.Descend(maxIdx, func(k int, v *WriteCell[int]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case CreateContractPath:
+		if e.CreateContract == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[bool]
+		e.CreateContract.Descend(maxIdx, func(k int, v *WriteCell[bool]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
+		}
+	case StoragePath:
+		cells := e.Storage[key]
+		if cells == nil {
+			return
+		}
+		fk := UnknownDep
+		var fv *WriteCell[uint256.Int]
+		cells.Descend(maxIdx, func(k int, v *WriteCell[uint256.Int]) bool {
+			fk, fv = k, v
+			return false
+		})
+		if fk != UnknownDep && fv != nil {
+			res.depIdx = fk
+			if fv.flag == FlagDone {
+				res.incarnation = fv.incarnation
+			}
+			res.value = fv.boxed
 		}
 	}
-
 	return
 }
 
@@ -380,19 +466,60 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
 
-	cells := vm.getKeyCells(addr, path, key, nil)
-	if cells == nil {
+	e, ok := vm.s[addr]
+	if !ok {
 		return 0, false
 	}
-	highest := UnknownDep
-	cells.Descend(txIdxLimit, func(k int, _ *WriteCell) bool {
-		highest = k
-		return false
-	})
-	if highest == UnknownDep {
+
+	fk := UnknownDep
+	switch path {
+	case AddressPath:
+		if e.Address != nil {
+			e.Address.Descend(txIdxLimit, func(k int, _ *WriteCell[*accounts.Account]) bool { fk = k; return false })
+		}
+	case SelfDestructPath:
+		if e.SelfDestruct != nil {
+			e.SelfDestruct.Descend(txIdxLimit, func(k int, _ *WriteCell[bool]) bool { fk = k; return false })
+		}
+	case BalancePath:
+		if e.Balance != nil {
+			e.Balance.Descend(txIdxLimit, func(k int, _ *WriteCell[uint256.Int]) bool { fk = k; return false })
+		}
+	case NoncePath:
+		if e.Nonce != nil {
+			e.Nonce.Descend(txIdxLimit, func(k int, _ *WriteCell[uint64]) bool { fk = k; return false })
+		}
+	case IncarnationPath:
+		if e.Incarnation != nil {
+			e.Incarnation.Descend(txIdxLimit, func(k int, _ *WriteCell[uint64]) bool { fk = k; return false })
+		}
+	case CodePath:
+		if e.Code != nil {
+			e.Code.Descend(txIdxLimit, func(k int, _ *WriteCell[[]byte]) bool { fk = k; return false })
+		}
+	case CodeHashPath:
+		if e.CodeHash != nil {
+			e.CodeHash.Descend(txIdxLimit, func(k int, _ *WriteCell[accounts.CodeHash]) bool { fk = k; return false })
+		}
+	case CodeSizePath:
+		if e.CodeSize != nil {
+			e.CodeSize.Descend(txIdxLimit, func(k int, _ *WriteCell[int]) bool { fk = k; return false })
+		}
+	case CreateContractPath:
+		if e.CreateContract != nil {
+			e.CreateContract.Descend(txIdxLimit, func(k int, _ *WriteCell[bool]) bool { fk = k; return false })
+		}
+	case StoragePath:
+		if cells := e.Storage[key]; cells != nil {
+			cells.Descend(txIdxLimit, func(k int, _ *WriteCell[uint256.Int]) bool { fk = k; return false })
+		}
+	default:
 		return 0, false
 	}
-	return highest, true
+	if fk == UnknownDep {
+		return 0, false
+	}
+	return fk, true
 }
 
 // FlushVersionedWrites atomically flushes all writes to the version map
@@ -416,47 +543,118 @@ func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool
 func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-
-	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
-		panic(errors.New("path must already exist"))
-	})
-
-	if ci, ok := cells.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, key}, cells.Keys()))
-	} else {
-		ci.flag = FlagEstimate
-	}
+	vm.markFlag(addr, path, key, txIdx, FlagEstimate)
 }
 
 func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
+	vm.markFlag(addr, path, key, txIdx, FlagDone)
+}
 
-	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
-		panic(errors.New("path must already exist"))
-	})
-
-	if ci, ok := cells.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, key}, cells.Keys()))
-	} else {
-		ci.flag = FlagDone
+// markFlag updates the flag on an existing (addr, path, key, txIdx) cell.
+// Caller must hold vm.mu.Lock(). Panics if no cell is present at txIdx —
+// MarkEstimate/MarkComplete require a prior write.
+func (vm *VersionMap) markFlag(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, flag statusFlag) {
+	e, ok := vm.s[addr]
+	if !ok {
+		panic(fmt.Errorf("markFlag: no entry for addr %x, path %s, txIdx %d", addr, path, txIdx))
+	}
+	msg := fmt.Sprintf("markFlag: missing cell. addr=%x path=%s key=%x txIdx=%d", addr, path, key, txIdx)
+	switch path {
+	case AddressPath:
+		markCellFlag(e.Address, txIdx, flag, msg)
+	case SelfDestructPath:
+		markCellFlag(e.SelfDestruct, txIdx, flag, msg)
+	case BalancePath:
+		markCellFlag(e.Balance, txIdx, flag, msg)
+	case NoncePath:
+		markCellFlag(e.Nonce, txIdx, flag, msg)
+	case IncarnationPath:
+		markCellFlag(e.Incarnation, txIdx, flag, msg)
+	case CodePath:
+		markCellFlag(e.Code, txIdx, flag, msg)
+	case CodeHashPath:
+		markCellFlag(e.CodeHash, txIdx, flag, msg)
+	case CodeSizePath:
+		markCellFlag(e.CodeSize, txIdx, flag, msg)
+	case CreateContractPath:
+		markCellFlag(e.CreateContract, txIdx, flag, msg)
+	case StoragePath:
+		markCellFlag(e.Storage[key], txIdx, flag, msg)
+	default:
+		panic(fmt.Errorf("markFlag: unknown path %v", path))
 	}
 }
 
 func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
-	cells := vm.getKeyCells(addr, path, key, nil)
-
-	if cells == nil {
+	e, ok := vm.s[addr]
+	if !ok {
 		if !checkExists {
 			return
 		}
-
 		panic(errors.New("path must already exist"))
 	}
-
-	cells.Delete(txIdx)
+	var hasField bool
+	switch path {
+	case AddressPath:
+		if e.Address != nil {
+			hasField = true
+			e.Address.Delete(txIdx)
+		}
+	case SelfDestructPath:
+		if e.SelfDestruct != nil {
+			hasField = true
+			e.SelfDestruct.Delete(txIdx)
+		}
+	case BalancePath:
+		if e.Balance != nil {
+			hasField = true
+			e.Balance.Delete(txIdx)
+		}
+	case NoncePath:
+		if e.Nonce != nil {
+			hasField = true
+			e.Nonce.Delete(txIdx)
+		}
+	case IncarnationPath:
+		if e.Incarnation != nil {
+			hasField = true
+			e.Incarnation.Delete(txIdx)
+		}
+	case CodePath:
+		if e.Code != nil {
+			hasField = true
+			e.Code.Delete(txIdx)
+		}
+	case CodeHashPath:
+		if e.CodeHash != nil {
+			hasField = true
+			e.CodeHash.Delete(txIdx)
+		}
+	case CodeSizePath:
+		if e.CodeSize != nil {
+			hasField = true
+			e.CodeSize.Delete(txIdx)
+		}
+	case CreateContractPath:
+		if e.CreateContract != nil {
+			hasField = true
+			e.CreateContract.Delete(txIdx)
+		}
+	case StoragePath:
+		if cells := e.Storage[key]; cells != nil {
+			hasField = true
+			cells.Delete(txIdx)
+		}
+	default:
+		panic(fmt.Errorf("Delete: unknown path %v", path))
+	}
+	if !hasField && checkExists {
+		panic(errors.New("path must already exist"))
+	}
 }
 
 func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
@@ -679,10 +877,19 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 	}
 }
 
-type WriteCell struct {
+// WriteCell holds one version of a typed value on a (path, key) cell. The
+// type parameter T matches the AccountPath's value-type contract: writing
+// the wrong T to a cell is a compile-time error, not a runtime panic.
+//
+// `boxed` caches the any-form of Value, populated once on Write so the
+// legacy any-shaped Read API (ReadResult.value) does not re-box on every
+// read. Typed Read primitives (commit 2b/follow-up) consume Value directly
+// and bypass the any boundary entirely.
+type WriteCell[T any] struct {
 	flag        statusFlag
 	incarnation int
-	data        any
+	Value       T
+	boxed       any
 }
 
 type Version struct {
