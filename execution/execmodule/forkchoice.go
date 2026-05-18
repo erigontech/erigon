@@ -506,12 +506,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
-		PruneFn: func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// Chain-tip last batch (!initialCycle && !hasMore): post-RunLoop
-			// path handles flush+commit+prune. In catchup (initialCycle), let
-			// the last batch flow through so it gets the in-loop furious
-			// prune treatment too.
-			if !hasMore && !initialCycle {
+		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			// Chain tip (!initialCycle): only one block per FCU, so skip the
+			// in-loop work entirely — the post-RunLoop path handles
+			// flush+commit+prune. In catchup, run on every iter so the last
+			// batch gets the in-loop furious prune treatment too.
+			if !initialCycle {
 				return nil
 			}
 			// Release the old RO snapshot so MDBX can reclaim retired pages.
@@ -525,8 +525,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return nil
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// Chain-tip last batch: post-RunLoop path commits.
-			if !hasMore && !initialCycle {
+			// Chain tip: post-RunLoop path commits.
+			if !initialCycle {
 				return nil, nil
 			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic

@@ -118,13 +118,15 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 // CommitCycleFn is called after PruneFn to persist the iteration's writes
 // and refresh the loop's tx. Implementations typically open a fresh RwTx,
 // flush+clear the SharedDomains into it, commit, and re-open the read-side
-// tx. May return (nil, nil) to leave the loop's tx unchanged.
+// tx. hasMore tells the impl whether another iteration follows — useful to
+// skip refreshing the tx on the final iter. May return (nil, nil) to leave
+// the loop's tx unchanged.
 type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
 
 // PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
 // pe.sync.Run and before CommitCycle. Implementations typically close the
 // read-side tx (if separate) and run pruning on a tx of their choosing.
-type PruneFn func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error
+type PruneFn func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error
 
 // ShouldBreakFn is an optional callback to stop the loop early (return true).
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
@@ -149,7 +151,7 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			return tx, err
 		}
 
-		if err := cfg.PruneFn(ctx, hasMore, cfg.InitialCycle, tx, sd); err != nil {
+		if err := cfg.PruneFn(ctx, cfg.InitialCycle, tx, sd); err != nil {
 			return tx, err
 		}
 
@@ -215,7 +217,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
-		PruneFn: func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
@@ -237,6 +239,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 					agg.BuildFilesInBackground(toTxNum)
 				}
 			}
+			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
 				return nil, nil
 			}
