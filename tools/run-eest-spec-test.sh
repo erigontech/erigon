@@ -7,18 +7,18 @@
 #
 #   statetests-stable                          state tests vs. eest_stable
 #   statetests-devnet                          state tests vs. eest_devnet
-#   blocktests-stable                          blockchain tests vs. eest_stable
+#   blocktests-stable-sequential               blockchain tests vs. eest_stable
 #   blocktests-devnet                          blockchain tests vs. eest_devnet
-#   enginextests-stable                        engine-x tests vs. eest_stable
-#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}
+#   enginextests-stable-sequential             engine-x tests vs. eest_stable
+#   enginextests-benchmark-{1m,5m,10m,30m,60m,100m,150m}-sequential
 #                                              engine-x benchmark fixtures per
 #                                              gas-target subdir; each value
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
 #                                              race-detector variant of
-#                                              blocktests-stable, split by
+#                                              blocktests-stable-sequential, split by
 #                                              fork via the --run regex so
 #                                              each sub-shard fits under ~30
 #                                              min. Caller (Makefile / CI) must
@@ -28,8 +28,13 @@
 #   blocktests-devnet-race-amsterdam           race-detector variant filtered
 #                                              to the Amsterdam fork only.
 #   *-parallel                                  any of the above with "-parallel"
-#                                              appended sets ERIGON_EXEC3_PARALLEL=true
-#                                              from the manifest entry.
+#                                              appended runs with
+#                                              ERIGON_EXEC3_PARALLEL=true. Every
+#                                              other shard runs with
+#                                              ERIGON_EXEC3_PARALLEL=false so
+#                                              the runtime default in
+#                                              dbg.Exec3Parallel can flip without
+#                                              redefining the shards.
 #
 # Each shard maps to one cmd/evm subcommand running with --jsonout. Pass/fail
 # is decided here (not by the binary, which always exits 0): the shard fails
@@ -71,14 +76,17 @@ if [[ -z "$budget_row" ]]; then
 	exit 2
 fi
 IFS=$'\t' read -r default_workers default_max exec3_parallel <<<"$budget_row"
-if [[ "$exec3_parallel" == "true" ]]; then
-	export ERIGON_EXEC3_PARALLEL=true
-fi
+# Always set ERIGON_EXEC3_PARALLEL explicitly (true or false) so the shard's
+# behaviour is pinned to the manifest, independent of whatever dbg.Exec3Parallel
+# defaults to at runtime. If the default flips, the shards still run the mode
+# they were defined for.
+export ERIGON_EXEC3_PARALLEL="$exec3_parallel"
 
-# Strip "-parallel" suffix for case-arm routing — the parallel variant has the
-# same fixture path / regex as the non-parallel parent shard; only the
+# Strip "-parallel" / "-sequential" suffix for case-arm routing — both variants
+# share the same fixture path / regex as the parent shard; only the
 # ERIGON_EXEC3_PARALLEL env var differs.
 shard_route="${shard%-parallel}"
+shard_route="${shard_route%-sequential}"
 
 # Per-shard structural config (cmd / fixture path / extra CLI flags). Match
 # against shard_route so "-parallel" variants reuse the same arm as their
@@ -177,7 +185,10 @@ if (( total == 0 )); then
 fi
 if (( failed > max )); then
 	echo "ERROR: $failed failures exceed max-allowed $max" >&2
-	jq -r '.[] | select(.pass == false) | "  FAIL " + .name' "$result_file" >&2
+	# Emit the cmd/evm `error` field per failing test, not just the name,
+	# so transient CI flakes are diagnosable from the job log alone (the
+	# raw JSON output is dropped after this script exits).
+	jq -r '.[] | select(.pass == false) | "  FAIL " + .name + "\n        error: " + (.error // "<no error message>")' "$result_file" >&2
 	exit 1
 fi
 exit 0

@@ -20,7 +20,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -193,8 +194,12 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, block
 		if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
 			bd.logger.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
 		} else if parent != nil {
-			td := new(big.Int).Add(header.Difficulty.ToBig(), parent)
-			go blockPropagator(context.Background(), header, body, td)
+			var td uint256.Int
+			if _, overflow := td.AddOverflow(&header.Difficulty, parent); overflow {
+				bd.logger.Error("TD overflows uint256", "number", header.Number.Uint64(), "hash", hash)
+			} else {
+				go blockPropagator(context.Background(), header, body, td)
+			}
 		} else {
 			bd.logger.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 		}

@@ -2107,7 +2107,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
 			}
 		}
-		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
+		cfg.Genesis.Config.TerminalTotalDifficulty = uint256.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
 		zero := uint64(0)
 		cfg.Genesis.Config.ShanghaiTime = &zero
