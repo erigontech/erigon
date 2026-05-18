@@ -540,13 +540,14 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 	if err != nil {
 		panic(err)
 	}
+	if headTd == nil {
+		headTd = new(uint256.Int)
+	}
 
-	headTd256 := new(uint256.Int)
-	headTd256.SetFromBig(headTd)
 	heightForks, timeForks := forkid.GatherForks(genesis.Config, genesis.Timestamp)
 	s.statusData = &sentryproto.StatusData{
 		NetworkId:       1,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd),
 		BestHash:        gointerfaces.ConvertHashToH256(head.Hash()),
 		MaxBlockHeight:  head.Number.Uint64(),
 		MaxBlockTime:    head.Time,
@@ -585,9 +586,9 @@ func TestForkIDSplit68(t *testing.T) {
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
 		ctx           = context.Background()
-		configNoFork  = &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: big.NewInt(1)}
+		configNoFork  = &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 		configProFork = &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(1),
 			TangerineWhistleBlock: common.NewUint64(2),
 			SpuriousDragonBlock:   common.NewUint64(2),
@@ -685,7 +686,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 		}
 	}()
 
-	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: big.NewInt(1)}
+	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())

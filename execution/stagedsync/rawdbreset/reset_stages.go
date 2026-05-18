@@ -20,8 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -235,11 +236,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
-			td := big.NewInt(0)
+			var td uint256.Int
 			blockNumBytes := make([]byte, 8)
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				td.Add(td, header.Difficulty.ToBig())
+				if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
+					return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
+				}
 				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
 				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
 				if blockNum > blocksAvailable {
