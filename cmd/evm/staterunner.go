@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -200,6 +199,20 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
 	results := make([]testResult, 0, len(stateTests))
 
+	// One temp datadir + DB per file; per-subtest isolation comes from a
+	// fresh write tx that is always rolled back. Mirrors the Go-test pattern
+	// in execution/tests/state_test.go and avoids re-opening MDBX (and its
+	// aggregator) for every subtest, which dominated wall time on
+	// short-EVM-work subtests.
+	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
+	if err != nil {
+		return nil, err
+	}
+	defer dir.RemoveAll(tmpDir)
+	dirs := datadir.New(tmpDir)
+	db := temporaltest.NewTestDB(nil, dirs)
+	defer db.Close()
+
 	for key, test := range stateTests {
 		if !re.MatchString(key) {
 			continue
@@ -207,17 +220,14 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 		for _, st := range test.Subtests() {
 			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
 
-			// Create fresh DB per subtest to avoid state pollution
-			tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
-			if err != nil {
-				result.Pass, result.Error = false, err.Error()
-				results = append(results, *result)
-				continue
-			}
-			dirs := datadir.New(tmpDir)
-			db := temporaltest.NewTestDB(nil, dirs)
+			func() {
+				tx, err := db.BeginTemporalRw(context.Background())
+				if err != nil {
+					result.Pass, result.Error = false, err.Error()
+					return
+				}
+				defer tx.Rollback()
 
-			err = db.UpdateTemporal(context.Background(), func(tx kv.TemporalRwTx) error {
 				statedb, root, err := test.Run(nil, tx, st, cfg, dirs)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
@@ -238,14 +248,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 					})
 					result.Stats = &stats
 				}
-				return nil
-			})
-			if err != nil && result.Pass {
-				result.Pass, result.Error = false, err.Error()
-			}
-
-			db.Close()
-			dir.RemoveAll(tmpDir)
+			}()
 
 			results = append(results, *result)
 		}
