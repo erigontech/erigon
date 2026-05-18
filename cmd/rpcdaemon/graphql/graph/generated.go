@@ -119,7 +119,7 @@ type ComplexityRoot struct {
 
 	Query struct {
 		Block                func(childComplexity int, number *string, hash *string) int
-		Blocks               func(childComplexity int, from *uint64, to *uint64) int
+		Blocks               func(childComplexity int, from uint64, to *uint64) int
 		ChainID              func(childComplexity int) int
 		GasPrice             func(childComplexity int) int
 		Logs                 func(childComplexity int, filter model.FilterCriteria) int
@@ -190,7 +190,7 @@ type MutationResolver interface {
 }
 type QueryResolver interface {
 	Block(ctx context.Context, number *string, hash *string) (*model.Block, error)
-	Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error)
+	Blocks(ctx context.Context, from uint64, to *uint64) ([]*model.Block, error)
 	Pending(ctx context.Context) (*model.Pending, error)
 	Transaction(ctx context.Context, hash string) (*model.Transaction, error)
 	Logs(ctx context.Context, filter model.FilterCriteria) ([]*model.Log, error)
@@ -647,7 +647,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Query.Blocks(childComplexity, args["from"].(*uint64), args["to"].(*uint64)), true
+		return e.ComplexityRoot.Query.Blocks(childComplexity, args["from"].(uint64), args["to"].(*uint64)), true
 	case "Query.chainID":
 		if e.ComplexityRoot.Query.ChainID == nil {
 			break
@@ -1214,7 +1214,7 @@ func (ec *executionContext) field_Query_block_args(ctx context.Context, rawArgs 
 func (ec *executionContext) field_Query_blocks_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalOLong2ᚖuint64)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "from", ec.unmarshalNLong2uint64)
 	if err != nil {
 		return nil, err
 	}
@@ -3771,7 +3771,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query_blocks,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Query().Blocks(ctx, fc.Args["from"].(*uint64), fc.Args["to"].(*uint64))
+			return ec.Resolvers.Query().Blocks(ctx, fc.Args["from"].(uint64), fc.Args["to"].(*uint64))
 		},
 		nil,
 		ec.marshalNBlock2ᚕᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐBlockᚄ,

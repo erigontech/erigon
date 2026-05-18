@@ -141,6 +141,7 @@ func (e *EngineServer) Start(
 ) error {
 	e.filters = filters
 	e.events = events
+	cli.AuthenticatedEngineRESTHandler = e.SSZRESTHandler()
 
 	var eg errgroup.Group
 	if !e.internalCL {

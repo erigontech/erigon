@@ -1050,7 +1050,7 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 0, storageCount, "no-op storage write should be filtered")
@@ -1078,7 +1078,7 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "changed storage write should be kept")
@@ -1103,7 +1103,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "new storage key should be kept")
@@ -1144,7 +1144,7 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 			Version: state.Version{TxIndex: 5, Incarnation: 0}}, // stale
 	}
 
-	result := normalizeWriteSet(allWrites, vm, 5, 1, nil)
+	result := normalizeWriteSet(allWrites, vm, 5, 1, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "only incarnation 1's slotA should survive")
@@ -1178,7 +1178,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	// Should have: SelfDestructPath + DELETE for slotA + DELETE for slotB
 	sdCount := countPath(result, state.SelfDestructPath)
@@ -1219,7 +1219,7 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	require.Equal(t, 1, len(result))
 	v := result[0].Val.(uint256.Int)
@@ -1240,7 +1240,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	addrCount := countPath(result, state.AddressPath)
 	balCount := countPath(result, state.BalancePath)
@@ -1276,7 +1276,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true)
 
 	// Should have storage write AND account-level fields for addr.
 	// Serial emits UpdateAccountData for every dirty object.
@@ -1324,7 +1324,7 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, reader, nil, true)
 
 	// Storage write should be filtered (no-op).
 	// But account fields should still be emitted — the IBS would have
@@ -1361,7 +1361,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	// Should have CreateContractPath + all 4 account fields.
 	// The empty balance should NOT cause deletion because CreateContractPath is present.
@@ -1394,7 +1394,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	// stateReader returns nil for this address (doesn't exist yet)
 	reader := newMapStateReader() // empty — no accounts
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true)
 
 	balCount := countPath(result, state.BalancePath)
 	nonceCount := countPath(result, state.NoncePath)
@@ -1447,7 +1447,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 		CodeHash: emptyCodeHash,
 	}
 
-	result := normalizeWriteSet(writeSet, vm, 5, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 5, 0, reader, nil, true)
 
 	// The normalized output should produce a Delete for this account,
 	// NOT a regular write with Balance=0, Nonce=0.
