@@ -499,7 +499,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
 	// Run the forkchoice
-	initialCycle := limitedBigJump
+	// initialCycle reflects "not at chain tip" — derived from isSynced so the
+	// stage prune budget downstream matches the actual sync state, not just
+	// the LoopBlockLimit chunking decision.
+	initialCycle := !isSynced
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
