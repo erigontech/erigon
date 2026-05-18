@@ -341,6 +341,91 @@ func TestBALPrePop_SameSenderTxs_NoConflicts(t *testing.T) {
 	}
 }
 
+// TestNoBAL_SameSenderTxs_DetectsConflicts is the safety counterpart of
+// TestBALPrePop_SameSenderTxs_NoConflicts: when no BAL is supplied, removing
+// the BalancePath cross-check from validateRead's AddressPath MVReadResultNone
+// branch must NOT silently break the existing same-sender conflict-detection
+// path (which now relies entirely on the MVReadResultDone arm's
+// !vm.HasBAL || !isBALPrePopulatedPath gate + value-tiebreaker).
+//
+// Setup: 9 concurrent workers each read sender.BalancePath / sender.NoncePath
+// from storage at UnknownVersion (vm has no entries yet). Then tx 0 commits
+// and flushes BalancePath=V0, NoncePath=N0 at TxIndex=0. The other 8 txs'
+// recorded StorageReads now conflict with the newly-Done vm entries (their
+// recorded values differ from V0/N0), so each must invalidate.
+//
+// Without this guarantee, parallel execution of same-sender txs without BAL
+// would commit stale balances/nonces — silently corrupting the chain.
+func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
+	t.Parallel()
+
+	sender := getAddress(11)
+	const numTxs = 9
+
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	require.False(t, vm.HasBAL, "test exercises the no-BAL path")
+
+	// Phase 1: 9 concurrent workers each read the sender's pre-block state
+	// from storage (vm has no entries). Each records a (BalancePath,
+	// StorageRead, UnknownVersion) read with the original storage value, and
+	// the same for NoncePath. AddressPath also goes via the storage-fallback
+	// path in production but isn't relevant to the conflict here.
+	origBalance := *uint256.NewInt(1_000_000)
+	origNonce := uint64(42)
+	io := NewVersionedIO(numTxs)
+	for txIdx := 0; txIdx < numTxs; txIdx++ {
+		rs := ReadSet{}
+		rs.Set(VersionedRead{
+			Address: sender, Path: BalancePath,
+			Source: StorageRead, Version: UnknownVersion,
+			Val: origBalance,
+		})
+		rs.Set(VersionedRead{
+			Address: sender, Path: NoncePath,
+			Source: StorageRead, Version: UnknownVersion,
+			Val: origNonce,
+		})
+		rs.Set(VersionedRead{
+			Address: sender, Path: AddressPath,
+			Source: StorageRead, Version: UnknownVersion,
+		})
+		io.RecordReads(Version{TxIndex: txIdx, Incarnation: 0}, rs)
+	}
+
+	// Phase 2: tx 0 finishes execution and flushes its writes. It debits
+	// gas (balance changes) and increments the nonce.
+	postBalance := *uint256.NewInt(900_000)
+	postNonce := origNonce + 1
+	vm.FlushVersionedWrites(VersionedWrites{
+		{Address: sender, Path: BalancePath, Version: Version{TxIndex: 0, Incarnation: 0}, Val: postBalance},
+		{Address: sender, Path: NoncePath, Version: Version{TxIndex: 0, Incarnation: 0}, Val: postNonce},
+	}, true, "")
+
+	// Phase 3: tx 0 itself revalidates clean — its recorded reads are all
+	// (StorageRead, UnknownVersion) and vm.Read at txIdx=0 returns
+	// MVReadResultNone (no prior writes at TxIdx < 0), which goes through
+	// the StorageRead-valid branch.
+	require.Equal(t, VersionValid, vm.ValidateVersion(0, io, checkVersionEqual, false, ""),
+		"tx 0 should validate (no prior writes to conflict with)")
+
+	// Phase 4: every other same-sender tx must invalidate. vm.Read at
+	// txIdx=K for K>=1 now returns Done at (0, 0) for BalancePath/NoncePath;
+	// the recorded StorageRead values differ from the post-flush values, so
+	// the value-tiebreaker fails and validation returns Invalid.
+	for txIdx := 1; txIdx < numTxs; txIdx++ {
+		valid := vm.ValidateVersion(txIdx, io, checkVersionEqual, false, "")
+		require.Equal(t, VersionInvalid, valid,
+			"tx %d: recorded StorageRead of sender.BalancePath conflicts with tx 0's flushed Done; got %s", txIdx, valid)
+	}
+}
+
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a
