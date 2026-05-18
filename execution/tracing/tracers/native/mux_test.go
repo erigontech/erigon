@@ -200,4 +200,3 @@ func TestMuxNilHooksPointerDoesNotPanic(t *testing.T) {
 		mux.OnNonceChangeV2(accounts.Address{}, 0, 1, tracing.NonceChangeEoACall)
 	}, "OnNonceChangeV2 with nil Hooks pointer must not panic")
 }
-
