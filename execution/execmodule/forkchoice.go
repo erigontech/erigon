@@ -507,9 +507,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// At-tip last batch (!initialCycle): post-RunLoop path handles
-			// flush+commit+prune. In catchup, let the last batch flow through
-			// so it gets the in-loop furious prune treatment too.
+			// Chain-tip last batch (!initialCycle && !hasMore): post-RunLoop
+			// path handles flush+commit+prune. In catchup (initialCycle), let
+			// the last batch flow through so it gets the in-loop furious
+			// prune treatment too.
 			if !hasMore && !initialCycle {
 				return nil
 			}
@@ -524,7 +525,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return nil
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// At-tip last batch: post-RunLoop path commits.
+			// Chain-tip last batch: post-RunLoop path commits.
 			if !hasMore && !initialCycle {
 				return nil, nil
 			}
