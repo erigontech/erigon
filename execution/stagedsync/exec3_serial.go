@@ -288,9 +288,11 @@ func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	se.committedGas.Add(int64(committedGas))
+	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
 	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	se.progress.LogCommitments(se.rs.StateV3, se, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {

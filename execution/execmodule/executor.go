@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -188,7 +189,8 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
-func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
+func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool, syncCfg ethconfig.Sync) error {
+	initialCycle := !syncCfg.ChainTipMode()
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -228,7 +230,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	}
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: initialCycle,
 		FirstCycle:   false,
 		PruneTimeout: 0,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
