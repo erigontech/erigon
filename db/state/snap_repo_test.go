@@ -1,14 +1,12 @@
 package state
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -165,7 +163,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 	filesItem := newFilesItemWithSnapConfig(0, 1024, repo.cfg)
 	filename, _ := repo.schema.DataFile(version.V1_0, 0, 1024)
-	comp, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	comp, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	defer comp.Close()
 	comp.DisableFsync()
@@ -363,8 +361,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
-		//filesGetter: ,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *DirtyFiles {
 			return commitmentR.dirtyFiles
 		},
 		accessors: commitmentR.accessors,
@@ -681,7 +678,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 	// 1. account domain, history and ii
 	fileGen := func(filename string) {
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
-			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg, err := seg.NewCompressor(t.Context(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg.Close()
 			seg.DisableFsync()
@@ -699,7 +696,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 
 		if strings.HasSuffix(filename, ".bt") {
 			sampleFile := filename + ".sample"
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg2, err := seg.NewCompressor(t.Context(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg2.Close()
 			seg2.DisableFsync()
@@ -762,7 +759,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 				t.Error(err)
 			}
-			if err = rs.Build(context.Background()); err != nil {
+			if err = rs.Build(t.Context()); err != nil {
 				t.Errorf("test is expected to fail, too few keys added")
 			}
 			rs.Close()

@@ -196,9 +196,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if len(indices) != 1 {
 			return fmt.Errorf("invalid committee_bits length in aggregate and proof: %v", len(indices))
 		}
-		// [REJECT] aggregate.data.index == 0
-		if aggregate.Data.CommitteeIndex != 0 {
-			return errors.New("invalid committee_index in aggregate and proof")
+
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			// [New in GLOAS] [REJECT] aggregate.data.index >= 2
+			if aggregate.Data.CommitteeIndex >= 2 {
+				return errors.New("invalid committee_index in aggregate and proof: must be < 2")
+			}
+		} else {
+			// [Electra/Fulu] [REJECT] aggregate.data.index == 0
+			if aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof")
+			}
 		}
 		committeeIndex = uint64(indices[0])
 	}
@@ -210,6 +218,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// If our head state is too far from the aggregate's epoch, committee
+		// computations will use a stale RANDAO mix and produce wrong results.
+		// Allow current and previous epoch per spec: compute_epoch_at_slot(slot)
+		// in (get_previous_epoch(state), get_current_epoch(state)).
+		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
+		// with wrong target.Epoch still reach the reject check below.
+		headEpoch := state.Epoch(headState)
+		if epoch != headEpoch && epoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from aggregate epoch %d: %w",
+				headEpoch, epoch, ErrIgnore)
+		}
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
 		// When the head state lags behind (solo validator / genesis start), use the
 		// highest seen slot to widen the accepted epoch window.
@@ -235,13 +254,37 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			finalizedSlot,
-		) != finalizedCheckpoint.Root {
+		).Root != finalizedCheckpoint.Root {
 			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
 		}
 
 		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
+		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+		if !blockHeaderOk {
 			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+		}
+
+		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
+		// This means: when same slot, index MUST be 0 (reject if not 0)
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			if blockHeader.Slot == slot && aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
+			}
+
+			// [New in GLOAS] When index=1 (payload-present attestation), the execution
+			// payload envelope for the block must have been received and validated.
+			// Spec conditions:
+			//   [IGNORE] The signed execution payload envelope has been seen.
+			//   [REJECT] The signed execution payload envelope has been validated (processed by forkchoice).
+			// In our implementation, HasEnvelope returns true only after OnExecutionPayload
+			// has successfully processed and persisted the envelope, so it implies both
+			// "seen" and "validated". We use IGNORE disposition here because the envelope
+			// may simply not have arrived yet (timing issue, not a protocol violation).
+			if aggregate.Data.CommitteeIndex == 1 {
+				if !a.forkchoiceStore.HasEnvelope(aggregateData.BeaconBlockRoot) {
+					return fmt.Errorf("%w: execution payload envelope not seen/validated for block %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+				}
+			}
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
@@ -274,7 +317,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			target.Epoch*a.beaconCfg.SlotsPerEpoch,
-		) != target.Root {
+		).Root != target.Root {
 			return errors.New("invalid target block")
 		}
 		if a.test {

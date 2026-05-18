@@ -59,10 +59,59 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 type CallContext struct {
 	gas      uint64
 	stateGas uint64
-	input    []byte
-	Memory   Memory
+	// EIP-8037 per-frame state-gas tracker. Increments on every state-gas
+	// charge (including reservoir→regular spill), decrements on inline refund
+	// applied to this frame. Returned via gasUsed.State at frame exit.
+	frameStateUsed uint64
+	// EIP-8037 inline state-gas refund credit that couldn't be applied to this
+	// frame's own usage (creditStateGasRefund excess). Propagates to the caller
+	// on successful return so an ancestor with own usage can absorb it; on
+	// revert the frame returns 0 so the credit is dropped.
+	refundCreditPending uint64
+	input               []byte
+	Memory              Memory
+
+	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
+	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
+	// the generation at which the entry was populated. An entry is valid only
+	// when its gen equals cacheGen, giving the gas phase and execute phase of
+	// the same opcode a shared interned value without a second unique.Make call.
+	// Placed before Stack so these fields stay in L1D rather than being pushed
+	// out by Stack.data (32 KB).
+	cacheGen      uint64
+	cachedKeyGen  uint64
+	cachedAddrGen uint64
+	cachedKey     accounts.StorageKey
+	cachedAddr    accounts.Address
+
 	Stack    Stack
 	Contract Contract
+}
+
+// peekStorageKey returns the top-of-stack value as an interned StorageKey.
+// The result is cached for the lifetime of one opcode dispatch (gas phase +
+// execute phase share the same cacheGen), so unique.Make is called at most
+// once per opcode. Callers must invoke this before any stack mutation
+// (pop/push/swap) within the same dispatch — the cache is keyed by generation
+// only and will not detect a changed stack top within the same opcode.
+func (ctx *CallContext) peekStorageKey() accounts.StorageKey {
+	if ctx.cachedKeyGen == ctx.cacheGen {
+		return ctx.cachedKey
+	}
+	ctx.cachedKey = accounts.InternKey(ctx.Stack.peek().Bytes32())
+	ctx.cachedKeyGen = ctx.cacheGen
+	return ctx.cachedKey
+}
+
+// peekAddress returns the top-of-stack value as an interned Address.
+// Cached like peekStorageKey; same constraint: call before any stack mutation.
+func (ctx *CallContext) peekAddress() accounts.Address {
+	if ctx.cachedAddrGen == ctx.cacheGen {
+		return ctx.cachedAddr
+	}
+	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	ctx.cachedAddrGen = ctx.cacheGen
+	return ctx.cachedAddr
 }
 
 var contextPool = sync.Pool{
@@ -79,6 +128,8 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 
 	ctx.gas = gas.Regular
 	ctx.stateGas = gas.State
+	ctx.frameStateUsed = 0
+	ctx.refundCreditPending = 0
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -87,6 +138,17 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
+	c.cacheGen = 0
+	c.frameStateUsed = 0
+	c.refundCreditPending = 0
+	// Use sentinel values so that a peek call before the first cacheGen++ is
+	// always a miss rather than returning a stale handle from a prior use.
+	c.cachedKeyGen = ^uint64(0)
+	c.cachedAddrGen = ^uint64(0)
+	// Zero the handles to release their canonMap pins while the context is
+	// idle in the pool; unique.Handle values keep interned entries alive.
+	c.cachedKey = accounts.NilKey
+	c.cachedAddr = accounts.NilAddress
 	contextPool.Put(c)
 }
 
@@ -100,14 +162,31 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 	return false
 }
 
-func (c *CallContext) useMdGas(evm *EVM, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	remaining, ok := useMdGas(evm, c.Gas(), gas, t, tracer, reason)
+func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	remaining, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
 	if ok {
 		c.gas = remaining.Regular
 		c.stateGas = remaining.State
-		return true
+		if t == mdgas.StateGas {
+			c.frameStateUsed += gas
+		}
 	}
-	return false
+	return ok
+}
+
+// creditStateGasRefund applies an inline state-gas refund, clamped to this
+// frame's own state-gas usage. The applied portion grows the frame's reservoir
+// (so subsequent state ops can draw from it) and decrements frameStateUsed.
+// Any unapplied excess accumulates in refundCreditPending and propagates to the
+// caller on successful return; on revert the credit is dropped.
+func (c *CallContext) creditStateGasRefund(amount uint64) {
+	applied := amount
+	if applied > c.frameStateUsed {
+		applied = c.frameStateUsed
+	}
+	c.stateGas += applied
+	c.frameStateUsed -= applied
+	c.refundCreditPending += amount - applied
 }
 
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
@@ -122,31 +201,27 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
-func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
+// useMdGas charges gas in the requested dimension. State charges that
+// exceed the reservoir spill the deficit into the regular dimension. No
+// EVM-level tracker is touched here — frame-level accounting lives on
+// CallContext.frameStateUsed (for in-loop charges via CallContext.useMdGas)
+// or on the caller's local gasUsed accumulator (for code-deposit charges
+// in evm.create after Run returns).
+func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
 	var ok bool
 	switch t {
 	case mdgas.StateGas:
-		originalGas := gas
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
-			if evm != nil {
-				evm.stateGasConsumed += originalGas
-			}
 			return initial, true
 		}
 		// otherwise use up all remaining state gas and try to use some from the regular gas
 		gas = gas - initial.State
 		initial.State = 0
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
-			evm.stateGasConsumed += originalGas
-		}
 		return initial, ok
 	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
-		if ok && evm != nil {
-			evm.regularGasConsumed += gas
-		}
 		return initial, ok
 	default:
 		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
@@ -302,10 +377,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (_ []byte, _ mdgas.MdGas, err error) {
+func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, leftOver mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, gas, nil
+		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
@@ -351,6 +426,15 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}
+		// EIP-8037: snapshot gasUsed and pending credit before callContext.put()
+		// clears them. Pending credit propagates only on success (revert drops it).
+		// gasUsed.Regular is derived uniformly by evm.call/evm.create's defer from
+		// the final leftOverGas (covers precompile/no-code paths and
+		// handleFrameRevert gas burn).
+		gasUsed.State = callContext.frameStateUsed
+		if err == nil {
+			gasUsed.PendingStateGasCredit = callContext.refundCreditPending
+		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {
@@ -374,10 +458,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	isAmsterdam := evm.chainRules.IsAmsterdam
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	for {
+		callContext.cacheGen++
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
@@ -390,19 +474,15 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.Gas(), &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
-			return nil, callContext.Gas(), &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
-			return nil, callContext.Gas(), ErrOutOfGas
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
 			callContext.gas -= cost
-		}
-		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
-		if isAmsterdam && cost > 0 {
-			evm.regularGasConsumed += cost
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -415,12 +495,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.Gas(), ErrGasUintOverflow
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), ErrGasUintOverflow
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
 				}
 			}
 			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
@@ -433,36 +513,32 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
 				}
-				return nil, callContext.Gas(), err
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
-			cost += dynamicCost.Regular // for tracing
-			callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
-			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
-				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+			if anyTrace {
+				cost += dynamicCost.Regular
+				callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
+				}
 			}
 			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
 			// gas charge triggers an out-of-gas error, the state gas charge is
 			// not applied." Deduct regular gas before state gas so that any
 			// state-to-regular spill operates on the already-reduced balance.
 			if callContext.gas < dynamicCost.Regular {
-				return nil, callContext.Gas(), ErrOutOfGas
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
 			callContext.gas -= dynamicCost.Regular
-			if isAmsterdam {
-				// EIP-8037: Track dynamic regular gas immediately after deduction.
-				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
-				// so we subtract it to get parent's actual cost.
-				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
-			}
 			if dynamicCost.State > 0 {
 				// Note: do NOT add dynamicCost.State to `cost` here.
 				// `cost` is only used for tracing and is compared against `gasCopy`
 				// which captures only regular gas. Adding state gas would cause
 				// uint64 underflow in the OnGasChange(gasCopy, gasCopy-cost, ...) call below.
 				// State gas is charged separately via useMdGas.
-				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
-					return nil, callContext.Gas(), ErrOutOfGas
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
 			}
 		}
@@ -508,5 +584,5 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.Gas(), err
+	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }

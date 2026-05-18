@@ -185,9 +185,13 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 			log.Warn("failed to read state root by block root", "err", err, "block_root", headRoot)
 			return nil
 		}
+		reorgDepth := uint64(0)
+		if headSlot > currentSlot {
+			reorgDepth = headSlot - currentSlot
+		}
 		reorgEvent := &beaconevents.ChainReorgData{
 			Slot:                headSlot,
-			Depth:               currentSlot - headSlot,
+			Depth:               reorgDepth,
 			OldHeadBlock:        oldCanonical,
 			NewHeadBlock:        headRoot,
 			OldHeadState:        oldStateRoot,
@@ -231,6 +235,11 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {
+	// [GLOAS] payload_attributes event is obsolete in GLOAS: the builder gossips SignedExecutionPayloadBid
+	// instead, and LatestExecutionPayloadHeader is no longer updated in GLOAS states.
+	if cfg.beaconCfg.GetCurrentStateVersion(headSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+		return nil
+	}
 	headPayloadHeader := s.LatestExecutionPayloadHeader().Copy()
 	nextSlot := headSlot + 1
 
@@ -243,8 +252,11 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		return err
 	}
 	withdrawals := []*types.Withdrawal{}
-	expWithdrawals, _ := state.ExpectedWithdrawals(s, epoch)
-	for _, w := range expWithdrawals {
+	expWithdrawals, err := state.GetExpectedWithdrawals(s, epoch)
+	if err != nil {
+		return err
+	}
+	for _, w := range expWithdrawals.Withdrawals {
 		withdrawals = append(withdrawals, &types.Withdrawal{
 			Amount:    w.Amount,
 			Index:     w.Index,
@@ -269,7 +281,7 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 			ProposerIndex:     proposerIndex,
 			ProposalSlot:      nextSlot,
 			ParentBlockNumber: headPayloadHeader.BlockNumber,
-			ParentBlockHash:   headPayloadHeader.StateRoot,
+			ParentBlockHash:   headPayloadHeader.BlockHash,
 			ParentBlockRoot:   headRoot,
 			PayloadAttributes: payloadAttributes,
 		},
@@ -307,8 +319,10 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
-	// Retrieve the head state
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	// Retrieve the head state.
+	var headState *state.CachingBeaconState
+	var err error
+	headState, err = cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}
@@ -330,7 +344,7 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	start := time.Now()
 	cfg.forkChoice.SetSynced(true) // Now we are synced
 	// Update the head state with the new head state
-	if err := cfg.syncedData.OnHeadState(headState); err != nil {
+	if err := cfg.syncedData.OnHeadStateWithBlockRoot(headState, headRoot); err != nil {
 		return fmt.Errorf("failed to set head state: %w", err)
 	}
 	defer func() {
@@ -450,7 +464,7 @@ func preCacheShuffledSetForEpoch(logger log.Logger, beaconConfig *clparams.Beaco
 	shuffling_metrics.ObserveComputeShuffledIndiciesTime(start)
 
 	caches.ShuffledIndiciesCacheGlobal.Put(epoch, blockRootAtBegginingPrevEpoch, shuffledIndicies)
-	log.Info("Pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
+	log.Info("[CL] pre-cached shuffled set", "epoch", epoch, "len", len(shuffledIndicies), "mix", common.Hash(mix))
 }
 
 func preCacheActiveValidatorsForEpoch(b *state.CachingBeaconState, epoch uint64, blockRoot common.Hash) {

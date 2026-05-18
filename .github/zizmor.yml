@@ -1,0 +1,62 @@
+rules:
+  # This repo uses version tags (e.g. @v6) rather than SHA pins.
+  # Pinning all third-party actions to SHAs is a separate policy decision;
+  # disable globally so the linter catches real security findings instead.
+  unpinned-uses:
+    disable: true
+
+  # Pre-existing template-injection findings need a dedicated cleanup pass;
+  # tracked in issue #21132. Files not listed here still get full coverage.
+  template-injection:
+    ignore:
+      - backups-dashboards.yml
+      - ci-cd-main-branch-docker-images.yml
+      - ci-gate.yml               # toJSON(needs) is not user-controllable
+      - docker-image-remove.yml
+      - qa-clean-exit-block-downloading.yml
+      - qa-clean-exit-snapshot-downloading.yml
+      - qa-constrained-tip-tracking.yml
+      - qa-rpc-integration-tests-clients.yml
+      - qa-rpc-integration-tests-gnosis.yml
+      - qa-rpc-integration-tests-latest.yml
+      - qa-rpc-integration-tests-polygon.yml
+      - qa-rpc-integration-tests-remote.yml
+      - qa-rpc-integration-tests.yml
+      - qa-rpc-performance-comparison-tests.yml
+      - qa-rpc-performance-tests.yml
+      - qa-snap-download.yml
+      - qa-stage-exec.yml
+      - qa-sync-from-scratch-minimal-node.yml
+      - qa-sync-from-scratch.yml
+      - qa-sync-with-externalcl.yml
+      - qa-tip-tracking-gnosis.yml
+      - qa-tip-tracking-with-load.yml
+      - qa-tip-tracking.yml
+      - qa-txpool-performance-test.yml
+      - release.yml
+      - test-all-erigon-race.yml
+
+  # Cache-poisoning (artipacked) findings in these workflows are intentional;
+  # tracked in issue #21132.
+  cache-poisoning:
+    ignore:
+      - manifest.yml
+      - qa-rpc-integration-tests-gnosis.yml
+      - qa-rpc-integration-tests.yml
+      - qa-sync-from-scratch.yml
+      - test-kurtosis-assertoor.yml
+      - test-kurtosis-gloas.yml
+
+  # Workflows missing explicit permissions: blocks — needs a cleanup pass
+  # to add least-privilege permissions to each workflow; tracked in #21132.
+  excessive-permissions:
+    disable: true
+
+  # persist-credentials: false not set on most checkouts; tracked in #21132.
+  overprovisioned-secrets:
+    disable: true
+
+  # secrets: inherit is intentional in ci-gate.yml and cache-warming.yml;
+  # tracked in #21132.
+  secrets-inherit:
+    disable: true

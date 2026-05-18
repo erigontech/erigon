@@ -89,9 +89,6 @@ const (
 	// Progress of sync stages: stageName -> stageData
 	SyncStageProgress = "SyncStage"
 
-	CliqueSeparate     = "CliqueSeparate"
-	CliqueLastSnapshot = "CliqueLastSnapshot"
-
 	// Node database tables (see nodedb.go)
 
 	// NodeRecords stores P2P node records (ENR)
@@ -263,6 +260,19 @@ const (
 	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
 	// End Electra
 
+	// GLOAS (EIP-7732)
+	BuildersDump                      = "BuildersDump"                   // slot => dump
+	Builders                          = "Builders"                       // slot => queue_diffs
+	BuilderPendingWithdrawalsDump     = "BuilderPendingWithdrawalsDump"  // slot => dump
+	BuilderPendingWithdrawals         = "BuilderPendingWithdrawals"      // slot => queue_diffs
+	PayloadExpectedWithdrawalsDump    = "PayloadExpectedWithdrawalsDump" // slot => dump
+	PayloadExpectedWithdrawals        = "PayloadExpectedWithdrawals"     // slot => queue_diffs
+	ExecutionPayloadAvailabilityTable = "ExecutionPayloadAvailability"   // slot => bitvector SSZ
+	BuilderPendingPaymentsTable       = "BuilderPendingPayments"         // slot => vector SSZ
+	PtcWindowTable                    = "PtcWindow"                      // slot => ptc window SSZ
+	LatestExecutionPayloadBidTable    = "LatestExecutionPayloadBid"      // slot => compressed SSZ
+	// End GLOAS
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -430,6 +440,17 @@ var ChaindataTables = []string{
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,
+	// GLOAS (EIP-7732)
+	BuildersDump,
+	Builders,
+	BuilderPendingWithdrawalsDump,
+	BuilderPendingWithdrawals,
+	PayloadExpectedWithdrawalsDump,
+	PayloadExpectedWithdrawals,
+	ExecutionPayloadAvailabilityTable,
+	BuilderPendingPaymentsTable,
+	PtcWindowTable,
+	LatestExecutionPayloadBidTable,
 	AccountChangeSetDeprecated,
 	StorageChangeSetDeprecated,
 	HashedAccountsDeprecated,
@@ -453,12 +474,7 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = append([]string{
-	CliqueSeparate,
-	CliqueLastSnapshot,
-},
-	ChaindataTables..., //TODO: move bor tables from chaintables to `ConsensusTables`
-)
+var ConsensusTables = ChaindataTables //TODO: move bor tables from chaintables to `ConsensusTables`
 var HeimdallTables = ChaindataTables
 var PolygonBridgeTables = ChaindataTables
 var DownloaderTables = []string{
@@ -700,6 +716,8 @@ const (
 	LogAddrIdx    InvertedIdx = 7
 	TracesFromIdx InvertedIdx = 8
 	TracesToIdx   InvertedIdx = 9
+
+	StandaloneIdxLen = 4 // Count of standalone IIs registered via RegisterII (LogTopicIdx..TracesToIdx). Update this when adding a new standalone II.
 )
 
 func (idx InvertedIdx) String() string {

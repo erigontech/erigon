@@ -1,0 +1,344 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package remote;
+
+option go_package = "./remote;remoteproto";
+
+
+//Variables Naming:
+//  ts - TimeStamp
+//  tx - Database Transaction
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
+//  RoTx - Read-Only Database Transaction
+//  RwTx - Read-Write Database Transaction
+//  k - key
+//  v - value
+
+//Methods Naming:
+// Get: exact match of criterias
+// Range: [from, to)
+// Each: [from, INF)
+// Prefix: Has(k, prefix)
+// Amount: [from, INF) AND maximum N records
+
+//Entity Naming:
+// State: simple table in db
+// InvertedIndex: supports range-scans
+// History: can return value of key K as of given TimeStamp. Doesn't know about latest/current value of key K. Returns NIL if K not changed after TimeStamp.
+// Domain: as History but also aware about latest/current value of key K.
+
+// Provides methods to access key-value data
+service KV {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+
+  // Tx exposes read-only transactions for the key-value store
+  //
+  // When tx open, client must receive 1 message from server with txID
+  // When cursor open, client must receive 1 message from server with cursorID
+  // Then only client can initiate messages from server
+  rpc Tx(stream Cursor) returns (stream Pair);
+
+  rpc StateChanges(StateChangeRequest) returns (stream StateChangeBatch);
+
+  // Snapshots returns list of current snapshot files. Then client can just open all of them.
+  rpc Snapshots(SnapshotsRequest) returns (SnapshotsReply);
+
+  // Range [from, to)
+  // Range(from, nil) means [from, EndOfTable)
+  // Range(nil, to)   means [StartOfTable, to)
+  // If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
+  rpc Range(RangeReq) returns (Pairs);
+  //    rpc Stream(RangeReq) returns (stream Pairs);
+
+  rpc Sequence(SequenceReq) returns (SequenceReply);
+
+  //Temporal methods
+  rpc GetLatest(GetLatestReq) returns (GetLatestReply); // can return latest value or as of given timestamp
+  rpc HistorySeek(HistorySeekReq) returns (HistorySeekReply);
+
+  rpc IndexRange(IndexRangeReq) returns (IndexRangeReply);
+  rpc HistoryRange(HistoryRangeReq) returns (Pairs);
+  rpc RangeAsOf(RangeAsOfReq) returns (Pairs);
+  rpc HasPrefix(HasPrefixReq) returns (HasPrefixReply);
+  rpc HistoryStartFrom(HistoryStartFromReq) returns (HistoryStartFromReply);
+  rpc CurrentDomainVersion(CurrentDomainVersionReq) returns (CurrentDomainVersionReply);
+  rpc StepSize(StepSizeReq) returns (StepSizeReply);
+}
+
+enum Op {
+  FIRST = 0;
+  FIRST_DUP = 1;
+  SEEK = 2;
+  SEEK_BOTH = 3;
+  CURRENT = 4;
+  LAST = 6;
+  LAST_DUP = 7;
+  NEXT = 8;
+  NEXT_DUP = 9;
+  NEXT_NO_DUP = 11;
+  PREV = 12;
+  PREV_DUP = 13;
+  PREV_NO_DUP = 14;
+  SEEK_EXACT = 15;
+  SEEK_BOTH_EXACT = 16;
+
+  OPEN = 30;
+  CLOSE = 31;
+  OPEN_DUP_SORT = 32;
+}
+
+message Cursor {
+  Op op = 1;
+  string bucket_name = 2;
+  uint32 cursor = 3;
+  bytes k = 4;
+  bytes v = 5;
+}
+
+message Pair {
+  bytes k = 1;
+  bytes v = 2;
+  uint32 cursor_id = 3; // send once after new cursor open
+  uint64 view_id = 4;   // return once after tx open. mdbx's tx.ViewID() - id of write transaction in db
+  uint64 tx_id = 5;     // return once after tx open. internal identifier - use it in other methods - to achieve consistent DB view (to read data from same DB tx on server).
+}
+
+enum Action {
+  STORAGE = 0;     // Change only in the storage
+  UPSERT = 1;      // Change of balance or nonce (and optionally storage)
+  CODE = 2;        // Change of code (and optionally storage)
+  UPSERT_CODE = 3; // Change in (balance or nonce) and code (and optionally storage)
+  REMOVE = 4;      // Account is deleted
+}
+
+message StorageChange {
+  types.H256 location = 1;
+  bytes data = 2;
+}
+
+message AccountChange {
+  types.H160 address = 1;
+  uint64 incarnation = 2;
+  Action action = 3;
+  bytes data = 4; // nil if there is no UPSERT in action
+  bytes code = 5; // nil if there is no CODE in action
+  repeated StorageChange storage_changes = 6;
+}
+
+enum Direction {
+  FORWARD = 0;
+  UNWIND = 1;
+}
+
+// StateChangeBatch - list of StateDiff done in one DB transaction
+message StateChangeBatch {
+  uint64 state_version_id = 1; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
+  repeated StateChange change_batch = 2;
+  uint64 pending_block_base_fee = 3; // BaseFee of the next block to be produced
+  uint64 block_gas_limit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
+  uint64 finalized_block = 5;
+  uint64 pending_blob_fee_per_gas = 6;  // Base Blob Fee for the next block to be produced
+}
+
+// StateChange - changes done by 1 block or by 1 unwind
+message StateChange {
+  Direction direction = 1;
+  uint64 block_height = 2;
+  types.H256 block_hash = 3;
+  repeated AccountChange changes = 4;
+  repeated bytes txs = 5;     // enable by withTransactions=true
+  uint64 block_time = 6;
+}
+
+message StateChangeRequest {
+  bool with_storage = 1;
+  bool with_transactions = 2;
+}
+
+message SnapshotsRequest {
+}
+
+message SnapshotsReply {
+  repeated string blocks_files = 1;
+  repeated string history_files = 2;
+}
+
+message RangeReq  {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // It's ok to query wide/unlimited range of data, server will use `pagination params`
+  // reply by limited batches/pages and client can decide: request next page or not
+
+  // query params
+  string table = 2;
+  bytes from_prefix = 3;
+  bytes to_prefix = 4;
+  bool order_ascend = 5;
+  sint64 limit = 6;   // <= 0 means no limit
+
+  // pagination params
+  int32 page_size = 7; // <= 0 means server will choose
+  string page_token = 8;
+}
+
+
+// `kv.Sequence` method
+message SequenceReq  {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  string table = 2;
+}
+
+message SequenceReply  {
+  uint64 value = 1;
+}
+
+
+//Temporal methods
+message GetLatestReq {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  string table = 2;
+  bytes k = 3;
+  uint64 ts = 4;
+  bytes k2 = 5;
+  bool latest = 6; // if true, then `ts` ignored and return latest state (without history lookup)
+}
+
+message GetLatestReply{
+  bytes v = 1;
+  bool ok = 2;
+}
+
+message HistorySeekReq {
+  uint64 tx_id = 1; // returned by .Tx()
+  string table = 2;
+  bytes k = 3;
+  uint64 ts = 4;
+}
+
+message  HistorySeekReply{
+  bytes v = 1;
+  bool ok = 2;
+}
+message IndexRangeReq {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  string table = 2;
+  bytes k = 3;
+  sint64 from_ts = 4;    // -1 means Inf
+  sint64 to_ts = 5;      // -1 means Inf
+  bool order_ascend = 6;
+  sint64 limit = 7;       // <= 0 means no limit
+
+  // pagination params
+  int32 page_size = 8;    // <= 0 means server will choose
+  string page_token = 9;
+}
+
+message IndexRangeReply  {
+  repeated uint64 timestamps = 1; //TODO: it can be a bitmap
+
+  string next_page_token = 2;
+}
+
+message HistoryRangeReq {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  string table = 2;
+  sint64 from_ts = 4;    // -1 means Inf
+  sint64 to_ts = 5;      // -1 means Inf
+  bool order_ascend = 6;
+  sint64 limit = 7;       // <= 0 means no limit
+
+  // pagination params
+  int32 page_size = 8;    // <= 0 means server will choose
+  string page_token = 9;
+}
+
+message RangeAsOfReq {
+  uint64 tx_id = 1; // returned by .Tx()
+
+  // query params
+  string table = 2;
+  bytes from_key = 3;    // nil means Inf
+  bytes to_key = 4;      // nil means Inf
+  uint64 ts = 5;
+  bool latest = 6;      // if true, then `ts` ignored and return latest state (without history lookup)
+  bool order_ascend = 7;
+  sint64 limit = 8;       // <= 0 means no limit
+
+  // pagination params
+  int32 page_size = 9;    // <= 0 means server will choose
+  string page_token = 10;
+}
+
+
+message Pairs {
+  repeated bytes keys = 1; // TODO: replace by lengtsh+arena? Anyway on server we need copy (serialization happening outside tx)
+  repeated bytes values = 2;
+
+  string next_page_token = 3;
+  //  uint32 estimateTotal = 3; // send once after stream creation
+
+  // repeated sint64 lengths = 1; //A length of -1 means that the field is NULL
+  // bytes keys = 2;
+  // bytes values = 3;
+}
+
+message PairsPagination {
+  bytes next_key = 1;
+  sint64 limit = 2;
+}
+message IndexPagination {
+  sint64 next_time_stamp = 1;
+  sint64 limit = 2;
+}
+
+message HasPrefixReq {
+  uint64 tx_id = 1;
+  string table = 2;
+  bytes prefix = 3;
+}
+
+message HasPrefixReply {
+  bytes first_key = 1;
+  bytes first_val = 2;
+  bool has_prefix = 3;
+}
+
+message HistoryStartFromReq {
+  uint32 domain = 1;
+  uint64 tx_id = 2; // returned by .Tx()
+}
+
+message HistoryStartFromReply {
+  uint64 start_from = 1;
+}
+
+message CurrentDomainVersionReq {
+  uint64 tx_id = 1;
+  uint32 domain = 2;
+}
+
+message CurrentDomainVersionReply {
+  uint64 major = 1;
+  uint64 minor = 2;
+}
+
+message StepSizeReq {
+  uint64 tx_id = 1;
+}
+
+message StepSizeReply {
+  uint64 step = 1;
+}
+

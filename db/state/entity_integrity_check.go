@@ -3,8 +3,6 @@ package state
 import (
 	"fmt"
 
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -63,7 +61,7 @@ var (
 	CommitmentDomainUniversal = FromDomain(kv.CommitmentDomain)
 )
 
-type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
+type DirtyFilesGetter func() *DirtyFiles
 
 // DependencyIntegrityChecker: used when a dependent domain has
 // references to a dependency domain. e.g. commitment.kv has
@@ -126,7 +124,7 @@ func (d *DependencyIntegrityChecker) EnableInterDomain() {
 // CheckDependentPresent checks if the dependent domain file is present. All/Any are the two quantifiers provided here
 // All: all dependent files are present
 // Any: there exists a dependent file, which is present
-// NOTE: the caller MUST hold a lock on btree2.BTreeG[*filesItem] returned by filesGetter.
+// NOTE: the caller MUST hold a lock on DirtyFiles returned by filesGetter.
 // example:
 // dependency: account
 // is (dependent) commitment.0-2 present?

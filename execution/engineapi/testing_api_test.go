@@ -17,23 +17,29 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
-	"math/big"
+	"crypto/ecdsa"
 	"testing"
+	"time"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -117,7 +123,7 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	return nil, nil
 }
-func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
+func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
@@ -133,7 +139,7 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 // Prague, Osaka, Amsterdam) are activated at timestamp 0.
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
 		SpuriousDragonBlock:           common.NewUint64(0),
@@ -146,7 +152,7 @@ func allForksChainConfig() *chain.Config {
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -228,7 +234,7 @@ func validPayloadAttrs(parentTimestamp uint64) *engine_types.PayloadAttributes {
 }
 
 // newTestingAPI creates a testingImpl backed by a stub execution module.
-func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule, enabled bool) TestingAPI {
+func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule) TestingAPI {
 	srv := NewEngineServer(
 		log.New(),
 		cfg,
@@ -242,7 +248,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionModule, enabled bool) T
 		0,     // fcuTimeout
 		0,     // maxReorgDepth
 	)
-	return NewTestingImpl(srv, enabled)
+	return NewTestingImpl(srv, log.New(), nil)
 }
 
 // makeAssembledBlock builds a minimal BlockWithReceipts for use in stub
@@ -273,6 +279,20 @@ func makeAssembledBlock(blockHash, parentHash, stateRoot common.Hash, blockNumbe
 	}
 }
 
+// makeSignedRawTx builds, signs, and RLP-encodes a legacy transaction.
+// The result is the raw bytes suitable for passing to BuildBlockV1 as a tx entry.
+func makeSignedRawTx(t *testing.T, key *ecdsa.PrivateKey, cfg *chain.Config, nonce, blockNumber, timestamp uint64) hexutil.Bytes {
+	t.Helper()
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	tx := types.NewTransaction(nonce, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+	signer := types.MakeSigner(cfg, blockNumber, timestamp)
+	signed, err := types.SignTx(tx, *signer, key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, signed.MarshalBinary(&buf))
+	return buf.Bytes()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -287,22 +307,10 @@ func TestBuildBlockV1(t *testing.T) {
 	parentHdr := makeParentHeader(parentTimestamp)
 	parentHash := parentHdr.Hash()
 
-	t.Run("disabled gate", func(t *testing.T) {
-		t.Parallel()
-		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, false)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
-		require.Nil(t, resp)
-		require.Error(t, err)
-		var rpcErr *rpc.InvalidParamsError
-		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "testing namespace is disabled")
-	})
-
 	t.Run("nil payloadAttributes", func(t *testing.T) {
 		t.Parallel()
 		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, nil, nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -311,17 +319,20 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "payloadAttributes must not be null")
 	})
 
-	t.Run("explicit non-empty transaction list", func(t *testing.T) {
+	t.Run("explicit non-empty transaction list with invalid tx bytes", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionModule{}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		// Invalid raw bytes that cannot be decoded as a transaction.
 		txs := []hexutil.Bytes{{0x01, 0x02}}
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
-		assert.Contains(t, rpcErr.Message, "explicit transaction list not yet supported")
+		assert.Contains(t, rpcErr.Message, "decode error")
 	})
 
 	t.Run("empty transaction list is allowed", func(t *testing.T) {
@@ -334,7 +345,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return nil, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		txs := []hexutil.Bytes{} // empty slice, not nil
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
 		require.Nil(t, resp)
@@ -352,7 +363,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return nil, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -366,7 +377,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp) // equal, not greater
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -382,7 +393,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.Timestamp = hexutil.Uint64(parentTimestamp - 1) // less than parent
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -398,7 +409,7 @@ func TestBuildBlockV1(t *testing.T) {
 		stub := &stubExecutionModule{
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		attrs.ParentBeaconBlockRoot = nil // required for Cancun+
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -415,7 +426,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use a pre-Cancun config (Shanghai only).
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := validPayloadAttrs(parentTimestamp)
 		// attrs already has ParentBeaconBlockRoot set, which is invalid pre-Cancun.
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
@@ -427,8 +438,8 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	// These two tests exercise the waitForResponse busy-polling loop.
-	// We use an Aura config (5 s slot) to keep the timeout short while
-	// still validating the busy-path logic.
+	// We use context with a short deadline (100ms) so the busy-retry loop
+	// terminates quickly while still validating the busy-path logic.
 	shortSlotCfg := allForksChainConfig()
 	shortSlotCfg.Aura = &chain.AuRaConfig{} // SecondsPerSlot() == 5
 	shortSlotCfg.Ethash = nil               // Aura and Ethash are mutually exclusive
@@ -441,8 +452,10 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembleBlockResult{Busy: true}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		api := newTestingAPI(shortSlotCfg, stub)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy")
@@ -459,8 +472,10 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Busy: true}, nil
 			},
 		}
-		api := newTestingAPI(shortSlotCfg, stub, true)
-		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		api := newTestingAPI(shortSlotCfg, stub)
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		resp, err := api.BuildBlockV1(ctx, parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "execution service is busy retrieving assembled block")
@@ -477,7 +492,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -505,7 +520,7 @@ func TestBuildBlockV1(t *testing.T) {
 				return execmodule.AssembledBlockResult{Block: blk, BlockValue: blockValue, Busy: false}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -518,9 +533,8 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Equal(t, hexutil.Bytes("test"), resp.ExecutionPayload.ExtraData)
 		assert.Equal(t, false, resp.ShouldOverrideBuilder)
 
-		// Block value should match.
 		require.NotNil(t, resp.BlockValue)
-		assert.Equal(t, blockValue.ToBig().String(), resp.BlockValue.ToInt().String())
+		assert.Equal(t, "12345", resp.BlockValue.ToInt().String())
 	})
 
 	t.Run("happy path with extraData override", func(t *testing.T) {
@@ -539,7 +553,7 @@ func TestBuildBlockV1(t *testing.T) {
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(allForksChainConfig(), stub)
 		overrideData := hexutil.Bytes("overridden-extra")
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, &overrideData)
 		require.NoError(t, err)
@@ -554,7 +568,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use pre-Cancun (Shanghai-only) config.
-		api := newTestingAPI(preCancunChainConfig(), stub, true)
+		api := newTestingAPI(preCancunChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},
@@ -576,7 +590,7 @@ func TestBuildBlockV1(t *testing.T) {
 			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
 		}
 		// Use pre-Shanghai config.
-		api := newTestingAPI(preShanghaiChainConfig(), stub, true)
+		api := newTestingAPI(preShanghaiChainConfig(), stub)
 		attrs := &engine_types.PayloadAttributes{
 			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
 			PrevRandao:            common.Hash{0xaa},
@@ -590,6 +604,285 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "withdrawals before Shanghai")
+	})
+
+	t.Run("nonce too high", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		// State nonce is 0 (default stub), but tx nonce is 1 → too high.
+		rawTx := makeSignedRawTx(t, key, allForksChainConfig(), 1, 101, parentTimestamp+1)
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		txs := []hexutil.Bytes{rawTx}
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "nonce too high")
+	})
+
+	t.Run("nonce too low", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		cfg := allForksChainConfig()
+		// Two txs from the same sender with the same nonce (0, 0).
+		// After the first tx is accepted (expectedNonce→1), the second nonce=0 is too low.
+		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
+		rawTx1 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1}
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "nonce too low")
+	})
+
+	t.Run("valid explicit tx list reaches assembler with CustomTxnProvider set", func(t *testing.T) {
+		t.Parallel()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		cfg := allForksChainConfig()
+		// Two sequential txs from the same sender: nonces 0 and 1.
+		rawTx0 := makeSignedRawTx(t, key, cfg, 0, 101, parentTimestamp+1)
+		rawTx1 := makeSignedRawTx(t, key, cfg, 1, 101, parentTimestamp+1)
+
+		var capturedParams *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc: func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+				capturedParams = params
+				// Return busy=false with payloadID=1 so execution proceeds to GetAssembledBlock.
+				return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+			},
+			getAssembledBlockFunc: func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+				// Returning nil block triggers "no assembled block data available" error,
+				// which is fine — we only care that AssembleBlock was reached.
+				return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+			},
+		}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1}
+		_, err = api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		// The call fails because getAssembledBlock returns nil block, but that's expected.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no assembled block data")
+		// The important check: CustomTxnProvider was set and forwarded to AssembleBlock.
+		require.NotNil(t, capturedParams, "AssembleBlock should have been called")
+		require.NotNil(t, capturedParams.CustomTxnProvider)
+	})
+
+}
+
+// ---------------------------------------------------------------------------
+// staticTxnProvider tests
+// ---------------------------------------------------------------------------
+
+func TestStaticTxnProvider(t *testing.T) {
+	t.Parallel()
+
+	// stubTx is a minimal unsigned transaction; its content is irrelevant for
+	// testing the atomic "consumed" semantics of staticTxnProvider.
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	stubTx := types.NewTransaction(0, to, uint256.NewInt(0), 21_000, uint256.NewInt(1_000_000_000), nil)
+
+	t.Run("returns transactions on first call", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		txns, err := p.ProvideTxns(context.Background())
+		require.NoError(t, err)
+		require.Len(t, txns, 1)
+	})
+
+	t.Run("returns nil on second call (consumed)", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{stubTx}}
+		_, _ = p.ProvideTxns(context.Background()) // first call consumes
+		txns, err := p.ProvideTxns(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, txns)
+	})
+
+	t.Run("empty provider returns empty slice then nil", func(t *testing.T) {
+		t.Parallel()
+		p := &staticTxnProvider{txns: []types.Transaction{}}
+		txns, err := p.ProvideTxns(context.Background())
+		require.NoError(t, err)
+		require.Empty(t, txns)
+
+		txns, err = p.ProvideTxns(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, txns)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// assembleParams propagation tests
+// ---------------------------------------------------------------------------
+
+// nilGetAssembledBlock is a shared stub for getAssembledBlockFunc that always
+// returns a nil block (triggers "no assembled block data" error). Used by tests
+// that only care about what was passed to AssembleBlock, not the assembled result.
+var nilGetAssembledBlock = func(_ context.Context, _ uint64) (execmodule.AssembledBlockResult, error) {
+	return execmodule.AssembledBlockResult{Block: nil, Busy: false}, nil
+}
+
+// captureAssembleParams is a helper that returns an assembleBlockFunc which
+// captures the Parameters passed to AssembleBlock.
+func captureAssembleParams(dest **builder.Parameters) func(context.Context, *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+	return func(_ context.Context, params *builder.Parameters) (execmodule.AssembleBlockResult, error) {
+		*dest = params
+		return execmodule.AssembleBlockResult{PayloadID: 1, Busy: false}, nil
+	}
+}
+
+func TestBuildBlockV1AssembleParamsVersion(t *testing.T) {
+	t.Parallel()
+
+	const parentTimestamp = 1000
+
+	parentHdr := makeParentHeader(parentTimestamp)
+	parentHash := parentHdr.Hash()
+
+	t.Run("nil transactions produces nil CustomTxnProvider (mempool path)", func(t *testing.T) {
+		t.Parallel()
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
+		require.NotNil(t, captured)
+		assert.Nil(t, captured.CustomTxnProvider, "nil transactions should leave CustomTxnProvider nil (use mempool)")
+	})
+
+	t.Run("Cancun: ParentBeaconBlockRoot and Withdrawals propagated", func(t *testing.T) {
+		t.Parallel()
+		beaconRoot := common.Hash{0xbe, 0xef}
+		withdrawals := []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.Address{0x33}, Amount: 100}}
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
+			PrevRandao:            common.Hash{0xaa},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           withdrawals,
+			ParentBeaconBlockRoot: &beaconRoot,
+		}
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(allForksChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		require.NotNil(t, captured.ParentBeaconBlockRoot, "ParentBeaconBlockRoot must be set for Cancun+")
+		assert.Equal(t, beaconRoot, *captured.ParentBeaconBlockRoot)
+		require.NotNil(t, captured.Withdrawals, "Withdrawals must be set for Capella+")
+		assert.Equal(t, withdrawals, captured.Withdrawals)
+	})
+
+	t.Run("Shanghai (pre-Cancun): Withdrawals set but no ParentBeaconBlockRoot", func(t *testing.T) {
+		t.Parallel()
+		withdrawals := []*types.Withdrawal{{Index: 5, Validator: 6, Address: common.Address{0x44}, Amount: 200}}
+		attrs := &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(parentTimestamp + 1),
+			PrevRandao:            common.Hash{0xbb},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           withdrawals,
+			ParentBeaconBlockRoot: nil,
+		}
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(preCancunChainConfig(), stub)
+		_, _ = api.BuildBlockV1(context.Background(), parentHash, attrs, nil, nil)
+		require.NotNil(t, captured)
+		assert.Nil(t, captured.ParentBeaconBlockRoot, "ParentBeaconBlockRoot must NOT be set pre-Cancun")
+		require.NotNil(t, captured.Withdrawals, "Withdrawals must be set for Shanghai/Capella")
+		assert.Equal(t, withdrawals, captured.Withdrawals)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Multi-sender nonce tracking test
+// ---------------------------------------------------------------------------
+
+func TestBuildBlockV1MultipleSendersNonce(t *testing.T) {
+	t.Parallel()
+
+	const parentTimestamp = 1000
+	parentHdr := makeParentHeader(parentTimestamp)
+	parentHash := parentHdr.Hash()
+
+	t.Run("two senders with sequential nonces accepted", func(t *testing.T) {
+		t.Parallel()
+		key1, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		key2, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		cfg := allForksChainConfig()
+		// Interleaved txs from two different senders, each starting at nonce 0.
+		rawTx0 := makeSignedRawTx(t, key1, cfg, 0, 101, parentTimestamp+1)
+		rawTx1 := makeSignedRawTx(t, key2, cfg, 0, 101, parentTimestamp+1)
+		rawTx2 := makeSignedRawTx(t, key1, cfg, 1, 101, parentTimestamp+1)
+		rawTx3 := makeSignedRawTx(t, key2, cfg, 1, 101, parentTimestamp+1)
+
+		var captured *builder.Parameters
+		stub := &stubExecutionModule{
+			getHeaderFunc:         getHeaderReturning(parentHash, parentHdr),
+			assembleBlockFunc:     captureAssembleParams(&captured),
+			getAssembledBlockFunc: nilGetAssembledBlock,
+		}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1, rawTx2, rawTx3}
+		_, err = api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		// Fails at nil block, not at nonce check.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no assembled block data")
+		require.NotNil(t, captured, "AssembleBlock should have been called")
+		require.NotNil(t, captured.CustomTxnProvider)
+	})
+
+	t.Run("second sender nonce gap detected independently", func(t *testing.T) {
+		t.Parallel()
+		key1, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		key2, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		cfg := allForksChainConfig()
+		rawTx0 := makeSignedRawTx(t, key1, cfg, 0, 101, parentTimestamp+1)
+		// key2 skips nonce 0 → nonce 1 (too high).
+		rawTx1 := makeSignedRawTx(t, key2, cfg, 1, 101, parentTimestamp+1)
+
+		stub := &stubExecutionModule{
+			getHeaderFunc: getHeaderReturning(parentHash, parentHdr),
+		}
+		api := newTestingAPI(cfg, stub)
+		txs := []hexutil.Bytes{rawTx0, rawTx1}
+		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		var rpcErr *rpc.CustomError
+		require.ErrorAs(t, err, &rpcErr)
+		assert.Equal(t, rpc.ErrCodeDefault, rpcErr.Code)
+		assert.Contains(t, rpcErr.Message, "nonce too high")
 	})
 }
 
@@ -673,6 +966,144 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		require.Error(t, err)
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
+}
+
+// TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing pins the engine-api spec
+// requirement that payloadAttributes validation runs regardless of fork-choice
+// sync state. The hive `engine-withdrawals / Empty Withdrawals (Paris)` test
+// exercises exactly this: CLMocker sends fcuV2 with nil withdrawals at a
+// Shanghai timestamp while the EL reports SYNCING, and expects -38003.
+func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{} // GetHeaderHashNumber returns nil -> HandleForkChoice -> SYNCING
+	srv := NewEngineServer(
+		log.New(),
+		preCancunChainConfig(),
+		stub,
+		// minimal downloader just provides the badHeaders LRU used by
+		// getQuickPayloadStatusIfPossible; other deps are not touched because
+		// srv.test = true guards StartDownloading below.
+		engine_block_downloader.NewEngineBlockDownloader(
+			context.Background(), log.New(), stub, nil, nil, preCancunChainConfig(), ethconfig.Sync{}, nil,
+		),
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+	srv.test = true // avoid invoking downloader.StartDownloading on the SYNCING path
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           nil, // invalid: Shanghai timestamp requires non-nil withdrawals
+	}, clparams.CapellaVersion)
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+}
+
+// TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing pins the
+// engine API spec rule that the "Extend point (8)" checks added by
+// engine_forkchoiceUpdatedV3 (cancun.md) — including the
+// `parentBeaconBlockRoot != null` requirement — only run when the head is
+// VALID. The hive `engine-cancun / Invalid PayloadAttributes, Missing
+// BeaconRoot, Syncing=True` test exercises exactly this: CLMocker sends
+// fcuV3 with nil parentBeaconBlockRoot to a head the EL hasn't seen, and
+// expects {payloadStatus: SYNCING} with no JSON-RPC error.
+func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{} // GetForkChoice/GetHeaderByHash stubs -> SYNCING
+	cfg := allForksChainConfig()
+	srv := NewEngineServer(
+		log.New(),
+		cfg,
+		stub,
+		engine_block_downloader.NewEngineBlockDownloader(
+			context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil,
+		),
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+	srv.test = true // avoid invoking downloader.StartDownloading on the SYNCING path
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: nil, // V3 attrs MUST carry it, but head is unknown -> SYNCING wins
+	}, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+	require.Nil(t, resp.PayloadId)
+}
+
+// TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid pins the other
+// half of the spec rule: when the head IS VALID, fcuV3 with a nil
+// parentBeaconBlockRoot MUST return -38003 (cancun.md point 8.1).
+func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	srv := NewEngineServer(
+		log.New(),
+		allForksChainConfig(),
+		&stubExecutionModule{
+			getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
+				return execmodule.ForkChoiceState{
+					HeadHash:      forkchoiceState.HeadHash,
+					SafeHash:      forkchoiceState.SafeBlockHash,
+					FinalizedHash: forkchoiceState.FinalizedBlockHash,
+				}, nil
+			},
+		},
+		nil,
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: nil,
+	}, clparams.DenebVersion)
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 }
 
 func ptrUint64(v uint64) *uint64 {

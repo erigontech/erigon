@@ -20,5 +20,10 @@ assertoor_params:
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/synchronized-check.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/block-proposal-check.yaml
-    - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/eoa-transactions-test.yaml
+    # eoa-transactions-test omitted: the upstream test uses 100 child wallets
+    # per phase, which is too aggressive for a single-node minimal-preset
+    # environment. The legacy phase drains child wallet balances, causing the
+    # subsequent dynfee phase to fail with "insufficient funds" (maxFeePerGas *
+    # gasLimit exceeds remaining balance). EOA transactions are already covered
+    # by the regular assertoor suite.
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/stability-check.yaml

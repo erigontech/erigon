@@ -34,6 +34,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Read RPC version
+        run: |
+          source .github/workflows/scripts/rpc_version.env
+          echo "RPC_VERSION=$RPC_VERSION" >> $GITHUB_ENV
+
       - name: Wait for port 8545 to be available
         run: |
           for i in {1..30}; do
@@ -50,10 +55,10 @@ jobs:
           fi
 
       - name: Restore rpc-tests cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.workspace }}/rpc-tests
-          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v2.4.0
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-${{ env.RPC_VERSION }}
 
       - name: Run RPC Integration Tests
         id: test_step
@@ -108,7 +113,7 @@ jobs:
 
       - name: Upload test results
         if: always() && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.client }}
           path: ${{ env.TEST_RESULT_DIR }}

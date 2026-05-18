@@ -1,0 +1,181 @@
+---
+title: "Why using Erigon?"
+description: "Understand what makes Erigon different — performance benchmarks, disk savings, and architecture advantages over other clients."
+sidebar_position: 1
+---
+
+import Link from '@docusaurus/Link';
+
+# Why using Erigon?
+
+Erigon is an Ethereum execution client focused on performance, low disk usage, and modular architecture.
+
+A core benefit of Erigon is its **reduced disk footprint** across all available sync modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
+
+{/* ─── Stats strip ─── */}
+
+<div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:'1rem', margin:'2rem 0'}}>
+  {[
+    {stat:'10×',     label:'cheaper to backup & distribute node data'},
+    {stat:'< 2 TB',  label:'archive node on consumer SSD'},
+    {stat:'1 binary',label:'execution + consensus, no extra software'},
+    {stat:'40+',     label:'AI query tools via built-in MCP server'},
+  ].map(({stat, label}) => (
+    <div key={stat} style={{
+      textAlign:'center', padding:'1.25rem 1rem', borderRadius:'8px',
+      border:'1px solid var(--ifm-color-emphasis-200)',
+      background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
+    }}>
+      <div style={{fontSize:'1.75rem', fontWeight:800, fontFamily:"'Montserrat', sans-serif", color:'#EF7716', lineHeight:1}}>{stat}</div>
+      <div style={{fontSize:'0.78rem', color:'var(--ifm-color-emphasis-700)', marginTop:'0.4rem', lineHeight:1.4}}>{label}</div>
+    </div>
+  ))}
+</div>
+
+## Key Architectural & Performance Advantages
+
+Erigon's architecture provides measurable improvements in cost, performance, and reliability.
+
+<div className="lp-grid" style={{marginTop:'1.25rem'}}>
+
+<Link to="../fundamentals/caplin" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2L2 7l10 5 10-5-10-5M2 17l10 5 10-5M2 12l10 5 10-5"/>
+  </svg>
+  <div className="lp-card-title">Integrated Consensus Layer (Caplin)</div>
+  <div className="lp-card-desc">Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.</div>
+</Link>
+
+<Link to="../fundamentals/optimizing-storage" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+    <path d="M21 12c0 1.66-4 3-9 3S3 13.66 3 12"/>
+    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+  </svg>
+  <div className="lp-card-title">State Storage (Flat DB)</div>
+  <div className="lp-card-desc">Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.</div>
+</Link>
+
+<Link to="../fundamentals/modules/downloader" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    <path d="m9 12 2 2 4-4"/>
+  </svg>
+  <div className="lp-card-title">Immutable, Decentralised Data</div>
+  <div className="lp-card-desc">Historical data lives in immutable files distributed via BitTorrent — up to <strong>10× cheaper</strong> to backup, repair, and distribute. No double-disk usage, no complex serialisation.</div>
+</Link>
+
+<Link to="../fundamentals/sync-modes" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>
+    <path d="M18 9a9 9 0 0 1-9 9"/>
+  </svg>
+  <div className="lp-card-title">Staged Sync</div>
+  <div className="lp-card-desc">Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.</div>
+</Link>
+
+<Link to="../fundamentals/modules/rpc-daemon" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </svg>
+  <div className="lp-card-title">Predictable RPC Performance</div>
+  <div className="lp-card-desc">No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.</div>
+</Link>
+
+<Link to="../fundamentals/modules/" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+  </svg>
+  <div className="lp-card-title">Modularity</div>
+  <div className="lp-card-desc">Core node, RPC daemon, and tx pool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.</div>
+</Link>
+
+<Link to="../fundamentals/sync-modes" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  </svg>
+  <div className="lp-card-title">OtterSync</div>
+  <div className="lp-card-desc">Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.</div>
+</Link>
+
+<Link to="../fundamentals/optimizing-storage" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+    <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+    <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/>
+    <line x1="17" y1="16" x2="23" y2="16"/>
+  </svg>
+  <div className="lp-card-title">Flexible Pruning</div>
+  <div className="lp-card-desc"><code>--prune.mode=minimal</code> gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.</div>
+</Link>
+
+</div>
+
+---
+
+## Benefits by Audience
+
+<div className="lp-grid" style={{marginTop:'1.25rem'}}>
+
+<Link to="../fundamentals/modules/rpc-daemon" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+    <line x1="6" y1="6" x2="6.01" y2="6"/>
+    <line x1="6" y1="18" x2="6.01" y2="18"/>
+  </svg>
+  <div className="lp-card-title">RPC Providers & Large Stakers</div>
+  <div className="lp-card-desc">Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.</div>
+</Link>
+
+<Link to="../staking/" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+    <polyline points="9 22 9 12 15 12 15 22"/>
+  </svg>
+  <div className="lp-card-title">Home Users & Solo Stakers</div>
+  <div className="lp-card-desc">Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.</div>
+</Link>
+
+<Link to="../interacting-with-erigon/" className="lp-card">
+  <svg className="lp-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6"/>
+    <polyline points="8 6 2 12 8 18"/>
+  </svg>
+  <div className="lp-card-title">Developers</div>
+  <div className="lp-card-desc">Full <code>trace_</code> namespace, historical <code>eth_getProof</code>, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.</div>
+</Link>
+
+</div>
+
+---
+
+## AI-Native Node Access (MCP)
+
+Erigon ships a built-in **[Model Context Protocol (MCP) server](../fundamentals/mcp)**, enabled by default on `127.0.0.1:8553`. Connect any MCP-compatible AI assistant — Claude Code, Claude Desktop, or OpenAI Codex — directly to your node and query it in plain English, with zero integration overhead.
+
+<div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(210px, 1fr))', gap:'0.75rem', margin:'1.25rem 0'}}>
+  {[
+    "What is the ETH balance of vitalik.eth right now?",
+    "Show all ERC-20 transfers in the last 100 blocks.",
+    "Which tx in block 21,000,000 used the most gas?",
+    "My node seems stuck — check sync status and recent logs.",
+  ].map((q) => (
+    <div key={q} style={{
+      padding:'0.85rem 1rem', borderRadius:'8px',
+      background:'var(--ifm-background-surface-color, var(--ifm-background-color))',
+      border:'1px solid var(--ifm-color-emphasis-200)',
+      fontSize:'0.82rem', color:'var(--ifm-color-emphasis-700)',
+      fontStyle:'italic', lineHeight:1.5,
+    }}>{'💬 ' + q}</div>
+  ))}
+</div>
+
+The interface is **read-only** and localhost-bound — no risk of unintended state changes. For developers this means instant on-chain lookups during development, natural-language log triage, and a complete RPC surface accessible without writing a single line of code.
+
+```bash
+# Register with Claude Code in one command
+claude mcp add --transport sse erigon http://127.0.0.1:8553/sse
+```

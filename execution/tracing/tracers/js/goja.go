@@ -41,10 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-const (
-	memoryPadLimit = 1024 * 1024
-)
-
 var assetTracers = make(map[string]string)
 
 // init retrieves the JavaScript transaction tracers included in go-ethereum.
@@ -313,7 +309,7 @@ func (t *jsTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.
 	log.pc = pc
 	log.gas = gas
 	log.cost = cost
-	log.refund = t.env.IntraBlockState.GetRefund().Total()
+	log.refund = t.env.IntraBlockState.GetRefund()
 	log.depth = depth
 	log.err = err
 	if _, err := t.step(t.obj, t.logValue, t.dbValue); err != nil {

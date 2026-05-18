@@ -52,7 +52,7 @@ func TestParseTransactionRLP(t *testing.T) {
 						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
 						var computedSignHash common.Hash
 						if txn.Txn.Protected() {
-							computedSignHash = txn.Txn.SigningHash(ctx.chainID.ToBig())
+							computedSignHash = txn.Txn.SigningHash(&ctx.chainID)
 						} else {
 							computedSignHash = txn.Txn.SigningHash(nil)
 						}
@@ -709,6 +709,11 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 	assert.Equal(t, SetCodeTxnType, txnType)
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, false /* hasEnvelope */, false, nil)
+	// Note: the test fixture encodes yParity as a 32-byte field, which is
+	// rejected at RLP decoding (uint overflow) before the parser ever reaches
+	// auth-signer recovery. So this test still validates that grossly malformed
+	// auth tuples are rejected at parse time. Per-tuple recovery failures with
+	// well-formed RLP are exercised separately in TestEIP7702BatchPoisoning.
 	assert.Error(t, err)
 }
 

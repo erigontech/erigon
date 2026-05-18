@@ -116,7 +116,8 @@ Run Erigon in the background:
 ./build/bin/erigon --datadir=<path> [port flags if needed] [user extra flags] &
 ```
 
-- The user can pass extra flags (e.g., `--chain=dev --beacon.api=beacon,validator,node,config`, `--log.console.verbosity=4`) which get appended to the command.
+- The user can pass extra flags (e.g., `--chain=dev --beacon.api=beacon,validator,node,config`,
+  `--log.console.verbosity=4`) which get appended to the command.
 - **Always** print the full CLI command to the user in a formatted code block (one flag per line with `\` continuation) before launching, so they can see exactly what is being run.
 - Report the PID to the user after launching.
 - Use `run_in_background: true` on the Bash tool so the process survives.

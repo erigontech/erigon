@@ -533,7 +533,6 @@ Command line params that need to be supported are:
                                 <file> - into the file <file>
                                 `stdout` - into the stdout output
                                 `stderr` - into the stderr output
-    --seal.clique value         Seal block with Clique. `stdin` or file name of where to find the Clique sealing data.
     --seal.ethash               Seal block with ethash. (default: false)
     --seal.ethash.dir value     Path to ethash DAG. If none exists, a new DAG will be generated.
     --seal.ethash.mode value    Defines the type and amount of PoW verification an ethash engine makes. (default: "normal")
@@ -581,20 +580,6 @@ The `txs` object is a list of RLP-encoded transactions in hex representation.
 
 ```go=
 type Txs []string
-```
-
-#### `clique`
-
-The `clique` object provides the necessary information to complete a clique
-seal of the block.
-
-```go=
-var CliqueInfo struct {
-        Key       *common.Hash    `json:"secretKey"`
-        Voted     *common.Address `json:"voted"`
-        Authorize *bool           `json:"authorize"`
-        Vanity    common.Hash     `json:"vanity"`
-}
 ```
 
 #### `output`

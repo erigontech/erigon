@@ -92,7 +92,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		db, h := filledHistoryValues(t, largeValues, values, log.New())
 		defer db.Close()
 
-		ctx := context.Background()
+		ctx := t.Context()
 		rwtx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer rwtx.Rollback()
@@ -161,7 +161,6 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 				require.True(t, slices.IsSorted(seenKeys))
 			}
 			h.integrateDirtyFiles(sf, i, i+h.stepSize)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			lastAggergatedTx = i + h.stepSize
 		}
 
@@ -190,7 +189,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB) {
 		t.Helper()
@@ -198,7 +197,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -361,14 +360,14 @@ func TestHistoryAfterPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 	test := func(t *testing.T, h *History, db kv.RwDB) {
 		t.Helper()
 		require := require.New(t)
 		tx, err := db.BeginRw(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -395,7 +394,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(h.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 		hc.Close()
 
-		hc = h.BeginFilesRo()
+		hc = h.beginForTests()
 		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
 		hc.Close()
 
@@ -426,7 +425,7 @@ func TestHistoryRangeWithPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, h, _ := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, 32, true)
@@ -435,7 +434,7 @@ func TestHistoryRangeWithPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	hc := h.BeginFilesRo()
+	hc := h.beginForTests()
 	defer hc.Close()
 
 	var keys, vals []string
@@ -455,7 +454,7 @@ func TestHistoryRangeWithPrune(t *testing.T) {
 	roTx2, err := db2.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx2.Rollback()
-	hc2 := h2.BeginFilesRo()
+	hc2 := h2.beginForTests()
 	defer hc2.Close()
 
 	var keys2, vals2 []string
@@ -480,7 +479,7 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, h, _ := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, 200, false)
@@ -489,7 +488,7 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	hc := h.BeginFilesRo()
+	hc := h.beginForTests()
 	defer hc.Close()
 
 	var keys, vals []string
@@ -511,7 +510,7 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 	roTx2, err := db2.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx2.Rollback()
-	hc2 := h2.BeginFilesRo()
+	hc2 := h2.beginForTests()
 	defer hc2.Close()
 
 	var keys2, vals2 []string
@@ -535,7 +534,7 @@ func TestHistoryCanPrune(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stepsTotal := uint64(4)
 	stepKeepInDB := uint64(1)
@@ -548,7 +547,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -588,11 +587,11 @@ func TestHistoryCanPrune(t *testing.T) {
 			defer db.Close()
 			writeKey(t, h, db)
 
-			rwTx, err := db.BeginRw(context.Background())
+			rwTx, err := db.BeginRw(t.Context())
 			require.NoError(t, err)
 			defer rwTx.Rollback()
 
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 
 			maxTxInSnaps := hc.files.EndTxNum()
@@ -606,7 +605,7 @@ func TestHistoryCanPrune(t *testing.T) {
 				} else {
 					require.Truef(t, cp, "step %d should be prunable", i)
 				}
-				stat, err := hc.Prune(context.Background(), rwTx, i*h.stepSize, (i+1)*h.stepSize, math.MaxUint64, false, logEvery)
+				stat, err := hc.Prune(t.Context(), rwTx, i*h.stepSize, (i+1)*h.stepSize, math.MaxUint64, false, logEvery)
 				require.NoError(t, err)
 				if i >= stepsTotal-stepKeepInDB {
 					require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -627,11 +626,11 @@ func TestHistoryCanPrune(t *testing.T) {
 
 		writeKey(t, h, db)
 
-		rwTx, err := db.BeginRw(context.Background())
+		rwTx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		for i := uint64(0); i < stepsTotal; i++ {
@@ -644,7 +643,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.stepSize, (i+1)*h.stepSize, math.MaxUint64, false, logEvery)
+			stat, err := hc.Prune(t.Context(), rwTx, i*h.stepSize, (i+1)*h.stepSize, math.MaxUint64, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -673,7 +672,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		logEvery := time.NewTicker(30 * time.Second)
 		t.Cleanup(logEvery.Stop)
 
-		rwTx, err := db.BeginRw(context.Background())
+		rwTx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		t.Cleanup(rwTx.Rollback)
 
@@ -706,60 +705,30 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
 	}
 
-	t.Run("hash_prune", func(t *testing.T) {
-		h, rwTx, logEvery := setup(t)
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		canHist, txTo := hc.canHashPruneUntil(rwTx, math.MaxUint64)
-		t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
-
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 500, false, logEvery)
-		require.NoError(t, err)
-		require.NotNil(t, stat)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, true, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 600, 10, false, logEvery)
-		require.NoError(t, err)
-		t.Logf("stat=%v", stat)
-
-		assertResults(t, h, rwTx, hc)
-		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
-	})
-
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Skip("TODO: figure out pretty way to do this check")
 		h, rwTx, logEvery := setup(t)
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
 		t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
 
-		stat, err := hc.Prune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
+		stat, err := hc.Prune(t.Context(), rwTx, 0, txTo, 50, false, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
 
-		stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 500, false, logEvery)
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 500, false, logEvery)
 		require.NoError(t, err)
 		require.NotNil(t, stat)
 		t.Logf("stat=%v", stat)
 
-		stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, true, logEvery)
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, true, logEvery)
 		require.NoError(t, err)
 		t.Logf("stat=%v", stat)
 
-		stat, err = hc.Prune(context.Background(), rwTx, 0, 600, 10, false, logEvery)
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 600, 10, false, logEvery)
 		require.NoError(t, err)
 		t.Logf("stat=%v", stat)
 
@@ -786,7 +755,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		logEvery := time.NewTicker(30 * time.Second)
 		t.Cleanup(logEvery.Stop)
 
-		rwTx, err := db.BeginRw(context.Background())
+		rwTx, err := db.BeginRw(t.Context())
 		require.NoError(t, err)
 		t.Cleanup(rwTx.Rollback)
 
@@ -811,54 +780,20 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		return h, rwTx, logEvery
 	}
 
-	t.Run("hash_prune", func(t *testing.T) {
-		t.Parallel()
-		h, rwTx, logEvery := setup(t)
-
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-
-		// should not prune anything: forced=false but no files built
-		stat, err := hc.OldPrune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
-		require.NoError(t, err)
-		require.Nil(t, stat)
-
-		// should prune tx=0: range [0,1) forced=true
-		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
-		require.NoError(t, err)
-		require.EqualValues(t, 1, stat.PruneCountValues)
-		require.EqualValues(t, 1, stat.PruneCountTx)
-
-		// prune exactly pruneLimit*pruneIters transactions
-		for i := 0; i < pruneIters; i++ {
-			stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
-			require.NoError(t, err)
-			t.Logf("[%d] stats: %v", i, stat)
-		}
-
-		icc, err := rwTx.CursorDupSort(h.ValuesTable)
-		require.NoError(t, err)
-		defer icc.Close()
-		key, _, err := icc.First()
-		require.NoError(t, err)
-		require.NotNil(t, key)
-		require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
-	})
-
 	t.Run("scan_prune", func(t *testing.T) {
 		t.Parallel()
 		h, rwTx, logEvery := setup(t)
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		// should not prune anything: forced=false but no files built
-		stat, err := hc.Prune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
+		stat, err := hc.Prune(t.Context(), rwTx, 0, 10, pruneLimit, false, logEvery)
 		require.NoError(t, err)
 		require.Nil(t, stat)
 
 		// should prune tx=0: range [0,1) forced=true
-		stat, err = hc.Prune(context.Background(), rwTx, 0, 1, MaxUint64, true, logEvery)
+		stat, err = hc.Prune(t.Context(), rwTx, 0, 1, MaxUint64, true, logEvery)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, stat.PruneCountValues)
 		require.EqualValues(t, 1, stat.PruneCountTx)
@@ -866,7 +801,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		//TODO: figure out pretty way to deal with it.
 		//// prune exactly pruneLimit*pruneIters transactions
 		//for i := 0; i < pruneIters; i++ {
-		//	stat, err = hc.Prune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
+		//	stat, err = hc.Prune(t.Context(), rwTx, 0, 1000, pruneLimit, true, logEvery)
 		//	require.NoError(t, err)
 		//	t.Logf("[%d] stats: %v", i, stat)
 		//}
@@ -893,13 +828,13 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)
 
-	ctx := context.Background()
+	ctx := tb.Context()
 	//tx, err := db.BeginRw(ctx)
 	//require.NoError(tb, err)
 	//defer tx.Rollback()
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		writer := hc.NewWriter()
 		defer writer.close()
@@ -937,11 +872,11 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
-	ctx := context.Background()
+	ctx := tb.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	hc := h.BeginFilesRo()
+	hc := h.beginForTests()
 	defer hc.Close()
 	writer := hc.NewWriter()
 	defer writer.close()
@@ -991,7 +926,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history
-	hc := h.BeginFilesRo()
+	hc := h.beginForTests()
 	defer hc.Close()
 
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -1235,7 +1170,6 @@ func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv
 		return err
 	}
 	h.integrateDirtyFiles(sf, txFrom, txTo)
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 	return nil
 }
 
@@ -1245,7 +1179,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := tb.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -1255,7 +1189,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		require.NoError(h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 		if doPrune {
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
 			hc.Close()
 			require.NoError(err)
@@ -1267,7 +1201,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 	for {
 		if stop := func() bool {
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
 			if !r.any() {
@@ -1278,7 +1212,6 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -1297,7 +1230,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := tb.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -1306,7 +1239,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
 		require.NoError(h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
 		hc.Close()
 		require.NoError(err)
@@ -1324,7 +1257,7 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 
 	for {
 		if stop := func() bool {
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 			r = hc.findMergeRange(hc.files.EndTxNum(), maxSpan)
 			if !r.any() {
@@ -1335,7 +1268,6 @@ func collateAndMergeHistoryWithCollisionRetry(tb testing.TB, db kv.RwDB, h *Hist
 			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedDirtyFiles(indexIn, historyIn)
-			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 			return false
 		}(); stop {
 			break
@@ -1387,7 +1319,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		require := require.New(t)
 
 		collateAndMergeHistory(t, db, h, txs, true)
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
@@ -1419,7 +1351,7 @@ func TestHistoryRange1(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -1431,7 +1363,7 @@ func TestHistoryRange1(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		var keys, vals []string
-		ic := h.BeginFilesRo()
+		ic := h.beginForTests()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
@@ -1580,7 +1512,7 @@ func TestHistoryRange2(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -1605,7 +1537,7 @@ func TestHistoryRange2(t *testing.T) {
 
 		var keys, vals []string
 		t.Run("before merge", func(t *testing.T) {
-			hc, require := h.BeginFilesRo(), require.New(t)
+			hc, require := h.beginForTests(), require.New(t)
 			defer hc.Close()
 
 			{ //check IdxRange
@@ -1733,7 +1665,7 @@ func TestHistoryRange2(t *testing.T) {
 		})
 		t.Run("after merge", func(t *testing.T) {
 			collateAndMergeHistory(t, db, h, txs, true)
-			hc, require := h.BeginFilesRo(), require.New(t)
+			hc, require := h.beginForTests(), require.New(t)
 			defer hc.Close()
 
 			keys = keys[:0]
@@ -1817,18 +1749,19 @@ func TestScanStaticFilesH(t *testing.T) {
 	}
 	h.scanDirtyFiles(files)
 	require.Equal(t, 6, h.dirtyFiles.Len())
-	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
-	require.Equal(t, 0, len(h._visible.files))
+	hc := h.beginForTests()
+	require.Equal(t, 0, len(hc.files))
+	hc.Close()
 }
 
 func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, [][]byte, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
-	ctx := context.Background()
+	ctx := tb.Context()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(tb, err)
 	defer tx.Rollback()
-	hc := h.BeginFilesRo()
+	hc := h.beginForTests()
 	defer hc.Close()
 	writer := hc.NewWriter()
 	defer writer.close()
@@ -1896,7 +1829,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, writtenKeys [][]byte, txs uint64) {
 		t.Helper()
@@ -1907,7 +1840,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
-		ic := h.BeginFilesRo()
+		ic := h.beginForTests()
 		defer ic.Close()
 
 		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
@@ -1955,10 +1888,12 @@ func TestHistory_OpenFolder(t *testing.T) {
 	db, h, txs := filledHistory(t, true, logger)
 	collateAndMergeHistory(t, db, h, txs, true)
 
-	list := h._visibleFiles
+	hc := h.beginForTests()
+	list := hc.files
 	require.NotEmpty(t, list)
 	ff := list[len(list)-1]
 	fn := ff.src.decompressor.FilePath()
+	hc.Close()
 	h.Close()
 
 	err := dir.RemoveFile(fn)
@@ -1983,7 +1918,7 @@ func TestHistoryRange_DBOnly(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB) {
 		t.Helper()
@@ -1994,7 +1929,7 @@ func TestHistoryRange_DBOnly(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		ic := h.BeginFilesRo()
+		ic := h.beginForTests()
 		defer ic.Close()
 
 		collect := func(it stream.KV) (keys, vals []string) {
@@ -2072,7 +2007,7 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -2083,7 +2018,7 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 		require.NoError(err)
 		defer roTx.Rollback()
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		// Encode keys 1..5 with the same layout used by filledHistory.
@@ -2166,7 +2101,7 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, largeValues bool) {
 		t.Helper()
@@ -2175,7 +2110,7 @@ func TestRangeAsOf_DBIteratorSkipsFileRange(t *testing.T) {
 		db, h, txs := filledHistory(t, largeValues, logger)
 		collateAndMergeHistory(t, db, h, txs, false)
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		endTxNum := hc.iit.files.EndTxNum()
@@ -2237,7 +2172,7 @@ func TestHistoryRange_EmptyRange(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
@@ -2248,7 +2183,7 @@ func TestHistoryRange_EmptyRange(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 
-		ic := h.BeginFilesRo()
+		ic := h.beginForTests()
 		defer ic.Close()
 
 		drain := func(label string, it stream.KV, err error) {
@@ -2296,7 +2231,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -2314,7 +2249,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 
 		var filesEnd int
 		func() {
-			hc2 := h2.BeginFilesRo()
+			hc2 := h2.beginForTests()
 			defer hc2.Close()
 			filesEnd = int(hc2.iit.files.EndTxNum())
 			require.Greater(filesEnd, 0, "expected files to cover some range")
@@ -2325,7 +2260,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 		require.NoError(err)
 		defer rwTx.Rollback()
 		func() {
-			hc2 := h2.BeginFilesRo()
+			hc2 := h2.beginForTests()
 			defer hc2.Close()
 			_, err = hc2.Prune(ctx, rwTx, 0, uint64(filesEnd), math.MaxUint64, true, logEvery)
 			require.NoError(err)
@@ -2342,7 +2277,7 @@ func TestHistory_IterateChangedRecent_SkipsFileRange(t *testing.T) {
 			require.NoError(err)
 			defer tx.Rollback()
 
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 
 			it, err := hc.HistoryRange(fromTxNum, toTxNum, order.Asc, -1, tx)
@@ -2389,7 +2324,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	test := func(t *testing.T, largeValues bool) {
 		t.Helper()
@@ -2401,7 +2336,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		var filesEnd int
 		var valsTable string
 		func() {
-			hc := h.BeginFilesRo()
+			hc := h.beginForTests()
 			defer hc.Close()
 			filesEnd = int(hc.iit.files.EndTxNum())
 			valsTable = hc.h.ValuesTable
@@ -2440,7 +2375,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 		require.NoError(err)
 		defer roTx.Rollback()
 
-		hc := h.BeginFilesRo()
+		hc := h.beginForTests()
 		defer hc.Close()
 
 		it, err := hc.HistoryRange(fromTxNum, -1, order.Asc, -1, roTx)
@@ -2464,7 +2399,7 @@ func TestHistory_IterateChangedRecent_PhantomDBKey(t *testing.T) {
 // across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
 func BenchmarkHistoryRange(b *testing.B) {
 	logger := log.New()
-	ctx := context.Background()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
@@ -2473,7 +2408,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	ic := h.BeginFilesRo()
+	ic := h.beginForTests()
 	defer ic.Close()
 
 	b.ResetTimer()
@@ -2493,7 +2428,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 // from segment files (exercises HistoryRangeAsOfFiles.advanceInFiles).
 func BenchmarkRangeAsOf(b *testing.B) {
 	logger := log.New()
-	ctx := context.Background()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
@@ -2502,7 +2437,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	ic := h.BeginFilesRo()
+	ic := h.beginForTests()
 	defer ic.Close()
 
 	checkTxNum := txs / 2
@@ -2524,7 +2459,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 // This leaves many small files in the heap, exercising heap operations during iteration.
 func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
 	b.Helper()
-	ctx := context.Background()
+	ctx := b.Context()
 	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(b, err)
 	defer tx.Rollback()
@@ -2538,7 +2473,7 @@ func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	logger := log.New()
-	ctx := context.Background()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateHistory(b, db, h, txs)
@@ -2547,7 +2482,7 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	ic := h.BeginFilesRo()
+	ic := h.beginForTests()
 	defer ic.Close()
 
 	b.ResetTimer()
@@ -2567,7 +2502,7 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 // step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
 func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	logger := log.New()
-	ctx := context.Background()
+	ctx := b.Context()
 
 	db, h, txs := filledHistory(b, true, logger)
 	collateHistory(b, db, h, txs)
@@ -2576,7 +2511,7 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	ic := h.BeginFilesRo()
+	ic := h.beginForTests()
 	defer ic.Close()
 
 	checkTxNum := txs / 2

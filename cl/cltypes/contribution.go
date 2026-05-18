@@ -47,7 +47,9 @@ func (a *ContributionAndProof) Static() bool {
 }
 
 func (a *ContributionAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.Contribution = new(Contribution)
+	if a.Contribution == nil {
+		a.Contribution = new(Contribution)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
@@ -69,8 +71,12 @@ func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.Message = new(ContributionAndProof)
-	a.Message.Contribution = new(Contribution)
+	if a.Message == nil {
+		a.Message = new(ContributionAndProof)
+	}
+	if a.Message.Contribution == nil {
+		a.Message.Contribution = new(Contribution)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 

@@ -164,9 +164,10 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 	}
 	list := newAccessList()
 	for _, al := range acl {
-		if _, ok := excl[al.Address]; !ok {
-			list.addAddress(al.Address)
+		if _, ok := excl[al.Address]; ok {
+			continue
 		}
+		list.addAddress(al.Address)
 		for _, slot := range al.StorageKeys {
 			list.addSlot(al.Address, slot)
 		}

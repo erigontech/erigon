@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -54,6 +55,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -145,7 +147,7 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil {
+	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
 	if emt.Engine != nil {
@@ -156,6 +158,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.tb == nil && emt.Dirs.DataDir != "" {
+		dir.RemoveAll(emt.Dirs.DataDir)
 	}
 }
 
@@ -412,8 +417,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		panic(err)
 	}
 	if tb != nil {
-		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
-		// produces test names that cause 'file name too long' errors
+		// we can't use tb.TempDir() here because some tests produce names long
+		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
 			dir.RemoveAll(tmpdir)
 		})
@@ -517,7 +522,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
 	if gspec.Config.IsPrague(0) {
-		if err := blockgen.InitPraguePreDeploys(mock.DB, mock.Log); err != nil {
+		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
 			} else {
@@ -539,7 +544,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
+	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td uint256.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -547,7 +552,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -616,6 +621,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		close(miningCancel)
 	}()
 
+	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
 		mock.Ctx,
 		mock.DB,
@@ -639,6 +645,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			gspec,
 			cfg.Sync,
 			false, /*experimentalBAL*/
+			readAheader,
 		),
 		nil, /*notifier*/
 		&vm.Config{},
@@ -655,11 +662,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,
@@ -676,6 +683,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				gspec,
 				cfg.Sync,
 				false, /*experimentalBAL*/
+				readAheader,
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(),
@@ -695,13 +703,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	// Create validation Sync and PipelineExecutor.
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-		validationNotifications, mock.BlockReader, blockWriter, logger)
+		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
 	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
@@ -731,6 +739,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		readAheader,
 		func() error { return nil },
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()

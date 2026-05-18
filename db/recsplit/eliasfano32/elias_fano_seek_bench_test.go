@@ -17,6 +17,7 @@
 package eliasfano32
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"testing"
 )
@@ -75,13 +76,8 @@ func BenchmarkGet(b *testing.B) {
 	}
 }
 
-// BenchmarkSeek measures Seek on a single large EF with uniform-random targets.
-// This does NOT reflect real-world usage (see BenchmarkSeekPool) because:
-//   - real EFs are mostly tiny (83% have 1–3 word upperBits = 8–24 bytes)
-//   - real seeks are not uniform: 63% hit the fast-lane (upper(0) >= hi) on mainnet
-//
-// Use this benchmark only to measure raw binary-search cost on large EFs.
-func BenchmarkSeek(b *testing.B) {
+// BenchmarkGet2 measures Get2(i) which returns both element i and i+1.
+func BenchmarkGet2(b *testing.B) {
 	const count = 1_000_000
 
 	cases := []struct {
@@ -95,21 +91,65 @@ func BenchmarkSeek(b *testing.B) {
 
 	for _, tc := range cases {
 		ef := buildEF(count, tc.stride)
-		maxOffset := (count - 1) * tc.stride
+		indices := rand.Perm(count - 1) // -1 because Get2 reads element i+1
 
-		targets := make([]uint64, count)
-		for i := range targets {
-			targets[i] = uint64(rand.Int64N(int64(maxOffset + 1)))
-		}
-
-		b.Run(tc.name, func(b *testing.B) {
+		b.Run(tc.name+"/sequential", func(b *testing.B) {
 			b.ReportAllocs()
-			n := 0
+			n := uint64(0)
 			for b.Loop() {
-				_, _ = ef.Seek(targets[n%count])
+				_, _ = ef.Get2(n % (count - 1))
 				n++
 			}
 		})
+
+		b.Run(tc.name+"/random", func(b *testing.B) {
+			b.ReportAllocs()
+			n := 0
+			for b.Loop() {
+				_, _ = ef.Get2(uint64(indices[n%(count-1)]))
+				n++
+			}
+		})
+	}
+}
+
+// BenchmarkSeek measures Seek on a single large EF with uniform-random targets.
+// This does NOT reflect real-world usage because:
+//   - real EFs are mostly tiny (83% have 1–3 word upperBits = 8–24 bytes)
+//   - real seeks are not uniform: 63% hit the fast-lane (upper(0) >= hi) on mainnet
+//
+// Use this benchmark only to measure raw search cost on EFs of various sizes.
+func BenchmarkSeek(b *testing.B) {
+	counts := []uint64{32, 1000, 100_000}
+	strides := []struct {
+		name   string
+		stride uint64
+	}{
+		{"stride1_l0", 1},
+		{"stride123_l6", 123},
+		{"stride1000_l9", 1000},
+	}
+
+	for _, count := range counts {
+		for _, tc := range strides {
+			ef := buildEF(count, tc.stride)
+			maxOffset := (count - 1) * tc.stride
+
+			const nTargets = 100_000
+			targets := make([]uint64, nTargets)
+			for i := range targets {
+				targets[i] = uint64(rand.Int64N(int64(maxOffset + 1)))
+			}
+
+			b.Run(fmt.Sprintf("n%d/%s", count, tc.name), func(b *testing.B) {
+				b.ReportAllocs()
+				n := 0
+				for b.Loop() {
+					_, _ = ef.Seek(targets[n%nTargets])
+					n++
+				}
+			})
+		}
 	}
 }
 
@@ -141,38 +181,49 @@ func BenchmarkAddOffset(b *testing.B) {
 	}
 }
 
-// BenchmarkSeekPool models real mainnet seek patterns:
-//   - a pool of many small EFs placed at random offsets in a large global range
-//     (matching the real distribution: 83% of EFs have 1–3 word upperBits = 8–24 bytes)
-//   - seek targets uniform over the global range, so many seeks land before the first
-//     element of the chosen EF, exercising the fast-lane path (upper(0) >= hi)
-func BenchmarkSeekPool(b *testing.B) {
-	const (
-		numEFs    = 100_000
-		globalMax = 1 << 25 // 33M — representative global value range
-		stride    = 1000
-	)
-
-	rng := rand.New(rand.NewPCG(1, 2))
-
-	count := uint64(rng.IntN(7)) + 2 // 2–8 elements → 1–3 word upperBits
-	start := uint64(rng.Int64N(globalMax - int64(count)*stride + 1))
-	ef := NewEliasFano(count, start+(count-1)*stride)
-	for j := uint64(0); j < count; j++ {
-		ef.AddOffset(start + j*stride)
+// buildDoubleEF constructs a DoubleEliasFano with n+1 buckets using random deltas.
+func buildDoubleEF(n int) *DoubleEliasFano {
+	cumKeys := make([]uint64, n+1)
+	position := make([]uint64, n+1)
+	for i := 1; i <= n; i++ {
+		cumKeys[i] = cumKeys[i-1] + uint64(rand.IntN(8)+1)
+		position[i] = position[i-1] + uint64(rand.IntN(16)+1)
 	}
-	ef.Build()
+	var ef DoubleEliasFano
+	ef.Build(cumKeys, position)
+	return &ef
+}
 
-	targets := make([]uint64, numEFs)
-	for i := range targets {
-		targets[i] = uint64(rng.Int64N(globalMax + 1))
-	}
-
+// BenchmarkDoubleGet2 measures DoubleEliasFano.Get2 with random access over 1M buckets.
+func BenchmarkDoubleGet2(b *testing.B) {
+	const n = 1 << 20
+	ef := buildDoubleEF(n)
+	indices := rand.Perm(n)
 	b.ResetTimer()
 	b.ReportAllocs()
-	n := 0
+	var sink uint64
+	i := 0
 	for b.Loop() {
-		_, _ = ef.Seek(targets[n%numEFs])
-		n++
+		c, p := ef.Get2(uint64(indices[i%n]))
+		sink += c + p
+		i++
 	}
+	_ = sink
+}
+
+// BenchmarkDoubleGet3 measures DoubleEliasFano.Get3 with random access over 1M buckets.
+func BenchmarkDoubleGet3(b *testing.B) {
+	const n = 1 << 20
+	ef := buildDoubleEF(n)
+	indices := rand.Perm(n)
+	b.ResetTimer()
+	b.ReportAllocs()
+	var sink uint64
+	i := 0
+	for b.Loop() {
+		c, cn, p := ef.Get3(uint64(indices[i%n]))
+		sink += c + cn + p
+		i++
+	}
+	_ = sink
 }

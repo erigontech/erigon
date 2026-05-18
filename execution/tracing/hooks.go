@@ -20,13 +20,10 @@
 package tracing
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -49,9 +46,10 @@ type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
-	GetRefund() mdgas.MdGas
+	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
@@ -72,7 +70,7 @@ type VMContext struct {
 // It contains the block as well as consensus related information.
 type BlockEvent struct {
 	Block     *types.Block
-	TD        *big.Int
+	TD        *uint256.Int
 	Finalized *types.Header
 	Safe      *types.Header
 }

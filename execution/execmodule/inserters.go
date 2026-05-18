@@ -18,11 +18,14 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -48,8 +51,12 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	sd := e.currentContext
 	if sd == nil {
 		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
+		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+			}
+			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
 		e.lock.Lock()
 		e.currentContext = sd
@@ -78,7 +85,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
 
-		var parentTd *big.Int
+		var parentTd *uint256.Int
 		height := header.Number.Uint64()
 		if height > 0 {
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
@@ -87,14 +94,17 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		} else {
-			parentTd = big.NewInt(0)
+			parentTd = new(uint256.Int)
 		}
 
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height, e.logger)
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
+		var td uint256.Int
+		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, header.Hash())
+		}
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}

@@ -94,11 +94,15 @@ const (
 	SelfdestructRefundGas uint64 = 24000 // Refunded following a selfdestruct operation.
 	MemoryGas             uint64 = 3     // Times the address of the (highest referenced byte in memory + 1). NOTE: referencing happens on read, write and in instructions such as RETURN and CALL.
 
-	TxDataNonZeroGasFrontier  uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
-	TxDataNonZeroGasEIP2028   uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
-	TxAccessListAddressGas    uint64 = 2400 // Per address specified in EIP 2930 access list
-	TxAccessListStorageKeyGas uint64 = 1900 // Per storage key specified in EIP 2930 access list
-	TxTotalCostFloorPerToken  uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxDataNonZeroGasFrontier        uint64 = 68   // Per byte of data attached to a transaction that is not equal to zero. NOTE: Not payable on data of calls between transactions.
+	TxDataNonZeroGasEIP2028         uint64 = 16   // Per byte of non zero data attached to a transaction after EIP 2028 (part in Istanbul)
+	TxAccessListAddressGas          uint64 = 2400 // Per address specified in EIP 2930 access list
+	TxAccessListStorageKeyGas       uint64 = 1900 // Per storage key specified in EIP 2930 access list
+	TxTotalCostFloorPerToken        uint64 = 10   // Per token of calldata in a transaction, as a minimum the txn must pay (EIP-7623)
+	TxTotalCostFloorPerTokenEIP7976 uint64 = 16   // Per token of calldata floor cost (EIP-7976, reused by EIP-7981)
+	TxAccessListAddressBytes        uint64 = 20   // Byte length of an access list address (EIP-7981)
+	TxAccessListStorageKeyBytes     uint64 = 32   // Byte length of an access list storage key (EIP-7981)
+	TxStandardTokensPerByte         uint64 = 4    // Tokens per byte for EIP-7976 / EIP-7981 floor calculation
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
@@ -209,15 +213,22 @@ const (
 	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
 
 	// EIP-8037: State Creation Gas Cost Increase
-	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
-	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
-	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
-	CreateGasEIP8037                = CallValueTransferGas
-	Create2GasEIP8037               = CallValueTransferGas
-	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
-	PerAuthBaseCostEIP8037          = 7_500
-	StateBytesNewAccount            = 112 // bytes per new account creation
-	StateBytesAuthBase              = 23  // bytes per authorization base cost
+	CreateGasEIP8037        = CallValueTransferGas // spec: "9000, assuming same as GAS_CALL_VALUE"
+	Create2GasEIP8037       = CallValueTransferGas
+	SstoreSetGasEIP8037     = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
+	PerAuthBaseCostEIP8037  = 7_500
+	StateBytesNewAccount    = 120 // bytes per new account creation
+	StateBytesPerStorageSet = 64  // bytes per new storage slot
+	StateBytesAuthBase      = 23  // bytes per authorization base cost
+	SystemMaxSstoresPerCall = 16  // upper bound on new SSTOREs per system call (matches MAX_WITHDRAWAL_REQUESTS_PER_BLOCK)
+	CostPerStateByte        = 1530
+
+	// Pre-multiplied state-gas costs (StateBytesX * CostPerStateByte) for hot paths.
+	StateGasNewAccount        = StateBytesNewAccount * CostPerStateByte
+	StateGasPerStorageSet     = StateBytesPerStorageSet * CostPerStateByte
+	StateGasAuthBase          = StateBytesAuthBase * CostPerStateByte
+	StateGasNewAccountAndAuth = (StateBytesNewAccount + StateBytesAuthBase) * CostPerStateByte
+	StateGasSystemMaxSstores  = StateBytesPerStorageSet * CostPerStateByte * SystemMaxSstoresPerCall
 )
 
 // EIP-7702: Set EOA account code

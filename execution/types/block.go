@@ -510,12 +510,12 @@ type headerMarshaling struct {
 // RLP encoding.
 func (h *Header) Hash() (hash common.Hash) {
 	if h.mutable {
-		return rlpHash(h)
+		return RlpHash(h)
 	}
 	if hash := h.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash = rlpHash(h)
+	hash = RlpHash(h)
 	h.hash.Store(&hash)
 	return hash
 }
@@ -523,7 +523,7 @@ func (h *Header) Hash() (hash common.Hash) {
 // CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) CalcHash() (hash common.Hash) {
-	hash = rlpHash(h)
+	hash = RlpHash(h)
 	if hashLoaded := h.hash.Load(); hashLoaded != nil {
 		if hashLoaded.Cmp(hash) == 0 {
 			return hash
@@ -1406,7 +1406,7 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
 		return empty.UncleHash
 	}
-	return rlpHash(uncles)
+	return RlpHash(uncles)
 }
 
 func CopyTxs(in Transactions) Transactions {

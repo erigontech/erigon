@@ -24,6 +24,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +37,13 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
@@ -269,11 +272,6 @@ var cmdRunMigrations = &cobra.Command{
 		consensus := strings.Replace(chaindata, "chaindata", "aura", 1)
 		if exists, err := dir.Exist(consensus); err == nil && exists {
 			migrateDB(dbcfg.ConsensusDB, consensus)
-		} else {
-			consensus = strings.Replace(chaindata, "chaindata", "clique", 1)
-			if exists, err := dir.Exist(consensus); err == nil && exists {
-				migrateDB(dbcfg.ConsensusDB, consensus)
-			}
 		}
 		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
 		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
@@ -327,6 +325,7 @@ func init() {
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withStageBase(cmdStageExecReplay)
@@ -607,8 +606,12 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */)
+	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */, exec.NewBlockReadAheader())
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
+
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
@@ -625,7 +628,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	dbg.Exec3Parallel = true
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -675,7 +677,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, false /*experimentalBAL*/)
+		dirs, br, nil, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -982,6 +984,10 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTxLookupCfg(pm, dirs.Tmp, br)
 	if unwind > 0 {
+		if unwind > s.BlockNumber {
+			return errors.New("cannot unwind past 0")
+		}
+
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
 		if err != nil {
@@ -1068,9 +1074,31 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
 			return
 		}
-		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
+		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+		if erigondbDomainStepsInFrozenFile != "" {
+			var v uint64
+			if strings.EqualFold(erigondbDomainStepsInFrozenFile, "inf") {
+				v = config3.UnboundedDomainMerge
+			} else {
+				parsed, perr := strconv.ParseUint(erigondbDomainStepsInFrozenFile, 10, 64)
+				if perr != nil || parsed == 0 {
+					err = fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
+						utils.ErigondbDomainStepsInFrozenFileFlag.Name, erigondbDomainStepsInFrozenFile)
+					return
+				}
+				v = parsed
+			}
+			stepsStr := "Inf"
+			if v != config3.UnboundedDomainMerge {
+				stepsStr = fmt.Sprintf("%d", v)
+			}
+			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+		}
+		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
+		_aggSingleton.SetFrozenBlocksProvider(blockReader)
 
 		g := &errgroup.Group{}
 		g.Go(func() error {
@@ -1145,8 +1173,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 	return _blockReaderSingleton, _blockWriterSingleton
 }
 
-const blockBufferSize = 128
-
 func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
@@ -1216,7 +1242,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		nil,
 		ethconfig.Defaults.Sync,
 		blockReader,
-		blockBufferSize,
+		sentry_multi_client.DefaultBlockBufferSize,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
@@ -1229,7 +1255,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil)
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, engine, vmConfig, sync
 }
@@ -1257,9 +1283,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
 	var rulesConfig any
-	if cc.Clique != nil {
-		rulesConfig = chainspec.CliqueSnapshot
-	} else if cc.Aura != nil {
+	if cc.Aura != nil {
 		rulesConfig = &config.Aura
 	} else if cc.Bor != nil {
 		rulesConfig = cc.Bor

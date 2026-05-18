@@ -28,7 +28,6 @@ import (
 
 var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
-	eestDir    = filepath.Join(".", "execution-spec-tests")
 	rlpTestDir = filepath.Join(legacyDir, "RLPTests")
 	cornersDir = filepath.Join(".", "test-corners")
 )

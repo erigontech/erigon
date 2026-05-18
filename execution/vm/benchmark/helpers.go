@@ -3,7 +3,6 @@
 package benchmark
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -33,7 +32,7 @@ var (
 // cancunConfig returns a chain config with all forks enabled through Cancun.
 func cancunConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(1),
+		ChainID:               uint256.NewInt(1),
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
 		SpuriousDragonBlock:   common.NewUint64(0),
@@ -107,5 +106,6 @@ func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([
 	vmenv := runtime.NewEnv(cfg)
 	rules := vmenv.ChainRules()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil, nil)
-	return vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
+	ret, left, _, err := vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
+	return ret, left, err
 }

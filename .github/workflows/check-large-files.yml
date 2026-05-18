@@ -18,4 +18,15 @@ jobs:
           filter: blob:none
 
       - name: Check for large files in PR
-        run: make check-large-files BASE=${{ github.event.pull_request.base.sha }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: make check-large-files BASE=$BASE_SHA
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

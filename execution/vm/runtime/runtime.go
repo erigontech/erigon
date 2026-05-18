@@ -66,7 +66,7 @@ type Config struct {
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        new(uint64),
 			TangerineWhistleBlock: new(uint64),
 			SpuriousDragonBlock:   new(uint64),
@@ -150,7 +150,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
-	ret, _, err := vmenv.Call(
+	ret, _, _, err := vmenv.Call(
 		sender,
 		contractAsAddress,
 		input,
@@ -204,11 +204,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
-	code, address, leftOverGas, err := vmenv.Create(
+	code, address, leftOverGas, _, err := vmenv.Create(
 		sender,
 		input,
 		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
+		nil,
 		false,
 	)
 	return code, address.Value(), leftOverGas, err
@@ -237,7 +238,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 
 	// Call the code with the given configuration.
-	ret, leftOverGas, err := vmenv.Call(
+	ret, leftOverGas, _, err := vmenv.Call(
 		sender.Address(),
 		address,
 		input,
