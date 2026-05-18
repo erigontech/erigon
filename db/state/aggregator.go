@@ -2293,8 +2293,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
-				a.logger.Debug("[snapshots] buildFiles: step not fully committed", "step", step, "committedTxNum", committedTxNum, "need", (uint64(step)+1)*a.StepSize())
-				break
+				break // step not fully committed yet — wait for execution to catch up
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {
