@@ -1657,6 +1657,7 @@ func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pr
 		// yet retired, or cap prevents collation). Exit to let execution
 		// continue and retry next cycle.
 		if stepsInDB >= prevSteps && prevSteps > 0 {
+			a.logger.Warn("[agg] CollateAndPrune: no progress, exiting", "stepsInDB", fmt.Sprintf("%.2f", stepsInDB), "prevSteps", fmt.Sprintf("%.2f", prevSteps))
 			return nil
 		}
 		prevSteps = stepsInDB
@@ -1685,6 +1686,18 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 	stepsInDB, err := a.StepsInDB(ctx, db)
 	if err != nil {
 		return err
+	}
+	if stepsInDB > 2 {
+		a.logger.Debug("[agg] stepsInDB>2: potential reasons",
+			"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
+			"produce", a.produce,
+			"buildingFiles", a.buildingFiles.Load(),
+			"mergingFiles", a.mergingFiles.Load(),
+			"maxCollationTxNum", a.maxCollationTxNum.Load(),
+			"endTxNumMinimax", a.EndTxNumMinimax(),
+			"stepSize", a.StepSize(),
+			"reorgBlockDepth", a.reorgBlockDepth,
+		)
 	}
 	if stepsInDB <= 1.5 {
 		// Still run one prune pass for any already-collated data.
@@ -2106,7 +2119,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	if !a.produce {
-		a.logger.Debug("[snapshots] buildFiles: produce=false")
+		a.logger.Warn("[snapshots] buildFiles: produce=false")
 		close(fin)
 		return fin
 	}
@@ -2125,6 +2138,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
+	a.logger.Debug("[snapshots] buildFiles: goroutine started", "step", step, "txNum", txNum)
 
 	a.wg.Add(1)
 	go func() {
@@ -2184,6 +2198,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
+			a.logger.Debug("[snapshots] buildFiles: step not yet in DB", "step", step, "lastInDB", lastInDB)
 			close(fin)
 			return
 		}
@@ -2231,6 +2246,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if cap := a.maxCollationTxNum.Load(); cap > 0 {
 			maxStep := kv.Step(cap / a.StepSize())
 			if lastInDB > maxStep {
+				a.logger.Debug("[snapshots] buildFiles: lastInDB capped by maxCollationTxNum", "lastInDB", lastInDB, "maxStep", maxStep, "cap", cap)
 				lastInDB = maxStep
 			}
 		}
@@ -2245,6 +2261,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// The highest step S where (S+1)*stepSize <= flushedTxNum
 			safeStep := kv.Step(flushedTxNum/stepSize) - 1
 			if flushedTxNum >= stepSize && lastInDB > safeStep {
+				a.logger.Debug("[snapshots] buildFiles: lastInDB capped by flushed commitment", "lastInDB", lastInDB, "safeStep", safeStep, "flushedTxNum", flushedTxNum)
 				lastInDB = safeStep
 			}
 		}
@@ -2279,7 +2296,8 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
-				break // step not fully committed yet — wait for execution to catch up
+				a.logger.Debug("[snapshots] buildFiles: step not fully committed", "step", step, "committedTxNum", committedTxNum, "need", (uint64(step)+1)*a.StepSize())
+				break
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {
 				if errors.Is(err, errStepNotReady) {

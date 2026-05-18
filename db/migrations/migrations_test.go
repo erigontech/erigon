@@ -39,8 +39,8 @@ func TestApplyWithInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -54,8 +54,8 @@ func TestApplyWithInit(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -73,7 +73,7 @@ func TestApplyWithInit(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	var applied map[string][]byte
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
@@ -89,7 +89,7 @@ func TestApplyWithInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -105,15 +105,15 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -135,7 +135,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -153,7 +153,7 @@ func TestApplyWithoutInit(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
@@ -171,8 +171,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -186,8 +186,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
@@ -201,7 +201,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 
 	var applied map[string][]byte
@@ -219,7 +219,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	require.NoError(err)
 
 	// apply again
-	err = migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err = migrator.Apply(db, migrationsDB, "", "", logger)
 	require.NoError(err)
 	err = migrationsDB.View(t.Context(), func(tx kv.Tx) error {
 		applied2, err := AppliedMigrations(tx, false)
@@ -268,7 +268,7 @@ func TestValidation(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.ErrorIs(err, ErrMigrationNonUniqueName)
 
 	var applied map[string][]byte
@@ -296,7 +296,7 @@ func TestCommitCallRequired(t *testing.T) {
 	migrator := NewMigrator(dbcfg.ChainDB)
 	migrator.Migrations = m
 	logger := log.New()
-	err := migrator.Apply(db, migrationsDB, "", "", logger)
+	_, err := migrator.Apply(db, migrationsDB, "", "", logger)
 	require.ErrorIs(err, ErrMigrationCommitNotCalled)
 
 	var applied map[string][]byte
