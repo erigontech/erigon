@@ -383,7 +383,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorKVI)
 					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = d.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -510,7 +510,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, h.FileVersion.AccessorVI)
 					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = h.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
@@ -588,7 +588,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, ii.FileVersion.AccessorEFI)
 					}
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.index, err = ii.openHashMapAccessor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good

@@ -1,7 +1,6 @@
 package fusefilter
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -155,6 +154,9 @@ func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen
 }
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
+	if r.m == nil || r.inner == nil {
+		return 0
+	}
 	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
 	copy(cpy, r.inner.Fingerprints)
 	r.inner.Fingerprints = cpy
@@ -302,21 +304,11 @@ func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	if len(r.m) == 0 {
 		return 0
 	}
-	base := unsafe.Pointer(&r.m[0])
-	clone := bytes.Clone(r.m)
+	var res datasize.ByteSize
 	for i := range r.shards {
-		s := &r.shards[i]
-		if s.inner == nil || len(s.inner.Fingerprints) == 0 {
-			continue
-		}
-		off := uintptr(unsafe.Pointer(&s.inner.Fingerprints[0])) - uintptr(base)
-		ln := len(s.inner.Fingerprints)
-		s.inner.Fingerprints = clone[off : off+uintptr(ln)]
-		s.keepInMem = true
+		res += r.shards[i].ForceInMem()
 	}
-	r.m = clone
-	r.keepInMem = true
-	return datasize.ByteSize(len(clone))
+	return res
 }
 
 // MadvWillNeed hints to the OS that all shard blobs will be accessed.
