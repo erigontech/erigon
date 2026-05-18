@@ -497,7 +497,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	// tool / explicit --experimental.always-generate-changesets flag).
 	// Without the guard, the flag still controls *generation* but every
 	// generated changeset is pruned 96 blocks later, defeating the point.
-	log.Warn("[dbg] a", "s.ForwardProgress", s.ForwardProgress, " cfg.syncCfg.MaxReorgDepth", cfg.syncCfg.MaxReorgDepth, "s.CurrentSyncCycle.IsInitialCycle", s.CurrentSyncCycle.IsInitialCycle)
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
