@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -238,18 +237,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var source ReadSource
 
 	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, source, _, err = versionedRead(so.db, so.address, StoragePath, key, false, u256.N0,
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			var value uint256.Int
-			if s != nil && !s.deleted {
-				value, commited = s.GetState(key)
-			}
-			return value, nil
-		})
-
+	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
 	if err != nil {
 		return false, err
 	}

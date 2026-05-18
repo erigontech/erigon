@@ -605,16 +605,7 @@ func (sdb *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 		return u256.Num0, false, nil
 	}
 
-	balance, source, _, err := versionedRead(sdb, addr, BalancePath, accounts.NilKey, false, uint256.Int{},
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			if s != nil && !s.deleted {
-				return s.Balance(), nil
-			}
-			return uint256.Int{}, nil
-		})
+	balance, source, _, err := readBalance(sdb, addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetBalance %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &balance)
@@ -635,14 +626,7 @@ func (sdb *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
 		return 0, nil
 	}
 
-	nonce, _, _, err := versionedRead(sdb, addr, NoncePath, accounts.NilKey, false, 0,
-		func(v uint64) uint64 { return v },
-		func(s *stateObject) (uint64, error) {
-			if s != nil && !s.deleted {
-				return s.Nonce(), nil
-			}
-			return 0, nil
-		})
+	nonce, _, _, err := readNonce(sdb, addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetNonce %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, nonce)
@@ -694,17 +678,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			return so.code, nil
 		}
 	}
-	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
-		func(v []byte) []byte {
-			return v
-		},
-		func(s *stateObject) ([]byte, error) {
-			if s != nil && !s.deleted {
-				code, err := s.Code()
-				return code, err
-			}
-			return nil, nil
-		})
+	code, source, _, err := readCode(sdb, addr, commited)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		if err != nil {
@@ -749,47 +723,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		return len(code), nil
 	}
 
-	size, source, _, err := versionedRead(sdb, addr, CodeSizePath, accounts.NilKey, false, 0,
-		func(v int) int { return v },
-		func(s *stateObject) (int, error) {
-			if s == nil || s.deleted {
-				return 0, nil
-			}
-			if s.code != nil {
-				return len(s.code), nil
-			}
-			if s.data.CodeHash.IsEmpty() {
-				return 0, nil
-			}
-			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
-			}
-			var readStart time.Time
-			if dbg.KVReadLevelledMetrics {
-				readStart = time.Now()
-			}
-			// Geth pattern: load full code on first touch, populate
-			// stateObject.code so subsequent same-addr EXTCODESIZE /
-			// EXTCODEHASH / CALL within this tx hit the s.code branch
-			// above instead of re-entering the reader. With BAL prefetch
-			// the bytes are already in cache.StateCache, so this is
-			// effectively a hashmap probe + slice assignment.
-			code, codeErr := sdb.stateReader.ReadAccountCode(addr)
-			l := len(code)
-			if codeErr == nil && code != nil {
-				s.code = code
-			}
-			err := codeErr
-			if dbg.KVReadLevelledMetrics {
-				sdb.codeReadDuration += time.Since(readStart)
-				sdb.codeReadCount++
-			}
-			sdb.stateReader.SetTrace(false, "")
-			if err != nil {
-				return l, err
-			}
-			return l, err
-		})
+	size, source, _, err := readCodeSize(sdb, addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetCodeSize (%s) %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, size)
@@ -811,14 +745,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 		return stateObject.data.CodeHash, nil
 	}
 
-	hash, _, _, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, accounts.NilCodeHash,
-		func(v accounts.CodeHash) accounts.CodeHash { return v },
-		func(s *stateObject) (accounts.CodeHash, error) {
-			if s == nil || s.deleted {
-				return accounts.NilCodeHash, nil
-			}
-			return s.data.CodeHash, nil
-		})
+	hash, _, _, err := readCodeHash(sdb, addr)
 	return hash, err
 }
 
@@ -877,17 +804,7 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, false, u256.N0,
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			var value uint256.Int
-			if s != nil && !s.deleted {
-				value, _ = s.GetState(key)
-			}
-			return value, nil
-		})
+	versionedValue, source, _, err := readState(sdb, addr, key)
 
 	if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
@@ -899,17 +816,7 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	versionedValue, source, _, err := versionedRead(sdb, addr, StoragePath, key, true, u256.N0,
-		func(v uint256.Int) uint256.Int {
-			return v
-		},
-		func(s *stateObject) (uint256.Int, error) {
-			var value uint256.Int
-			if s != nil && !s.deleted {
-				return s.GetCommittedState(key)
-			}
-			return value, nil
-		})
+	versionedValue, source, _, err := readCommittedState(sdb, addr, key)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%x\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, &versionedValue)
@@ -919,21 +826,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key account
 }
 
 func (sdb *IntraBlockState) HasSelfdestructed(addr accounts.Address) (bool, error) {
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false,
-		func(v bool) bool { return v },
-		func(s *stateObject) (bool, error) {
-			if s == nil {
-				return false, nil
-			}
-			if s.deleted {
-				return false, nil
-			}
-			if s.createdContract {
-				return false, nil
-			}
-			return s.selfdestructed, nil
-		})
-
+	destructed, _, _, err := readSelfDestruct(sdb, addr)
 	return destructed, err
 }
 
@@ -1059,8 +952,7 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 		return nil, UnknownSource, UnknownVersion, nil
 	}
 
-	readAccount, source, version, err := versionedRead(sdb, addr, AddressPath, accounts.NilKey, false, nil,
-		func(v *accounts.Account) *accounts.Account { return v }, nil)
+	readAccount, source, version, err := readAccount(sdb, addr)
 
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
@@ -1097,7 +989,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	version := readVersion
 	source := readSource
 
-	balance, bsource, bversion, err := versionedRead(sdb, addr, BalancePath, accounts.NilKey, false, account.Balance, nil, nil)
+	balance, bsource, bversion, err := refreshBalance(sdb, addr, account.Balance)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1117,7 +1009,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
-	nonce, nsource, nversion, err := versionedRead(sdb, addr, NoncePath, accounts.NilKey, false, account.Nonce, nil, nil)
+	nonce, nsource, nversion, err := refreshNonce(sdb, addr, account.Nonce)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1137,7 +1029,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
-	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Incarnation, nil, nil)
+	incarnation, isource, iversion, err := refreshIncarnation(sdb, addr, account.Incarnation)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1157,7 +1049,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
-	codeHash, csource, cversion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, account.CodeHash, nil, nil)
+	codeHash, csource, cversion, err := refreshCodeHash(sdb, addr, account.CodeHash)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1416,14 +1308,7 @@ func (sdb *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error
 		return 0, nil
 	}
 
-	incarnation, _, _, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, 0,
-		func(v uint64) uint64 { return v },
-		func(s *stateObject) (uint64, error) {
-			if s != nil && !s.deleted {
-				return s.data.Incarnation, nil
-			}
-			return 0, nil
-		})
+	incarnation, _, _, err := readIncarnation(sdb, addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetIncarnation %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, incarnation)
@@ -1558,7 +1443,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			// Check if code changed (e.g. EIP-7702 authorization set/cleared
 			// the delegation prefix). Clear the cached code so the next
 			// Code() call reads fresh from the stateReader.
-			codeHash, _, chVersion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, so.data.CodeHash, nil, nil)
+			codeHash, _, chVersion, err := refreshCodeHash(sdb, addr, so.data.CodeHash)
 			if err != nil {
 				return nil, err
 			}
@@ -1610,13 +1495,13 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 
 	if readAccount == nil {
 		if sdb.versionMap != nil {
-			readAccount, accountSource, accountVersion, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
+			readAccount, accountSource, accountVersion, err = refreshAccount(sdb, addr)
 
 			if readAccount == nil || err != nil {
 				return nil, err
 			}
 
-			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
+			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
 
 			if destructed || err != nil {
 				so := stateObjectPool.Get().(*stateObject)
@@ -1669,7 +1554,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 		}
 
-		code, _, _, err = versionedRead[[]byte](sdb, addr, CodePath, accounts.NilKey, false, nil, nil, nil)
+		code, _, _, err = refreshCode(sdb, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -1801,8 +1686,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		if readAccount != nil {
 			account := readAccount
 
-			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false,
-				func(v bool) bool { return v }, nil)
+			destructed, _, _, err := refreshSelfDestruct(sdb, addr)
 
 			if err != nil {
 				return err
