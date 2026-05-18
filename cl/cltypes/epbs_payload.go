@@ -514,8 +514,12 @@ func (s *SignedExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 }
 
 func (s *SignedExecutionPayloadEnvelope) Clone() clonable.Clonable {
+	var message *ExecutionPayloadEnvelope
+	if s.Message != nil {
+		message = s.Message.Clone().(*ExecutionPayloadEnvelope)
+	}
 	return &SignedExecutionPayloadEnvelope{
-		Message:   s.Message.Clone().(*ExecutionPayloadEnvelope),
+		Message:   message,
 		Signature: s.Signature,
 		beaconCfg: s.beaconCfg,
 	}

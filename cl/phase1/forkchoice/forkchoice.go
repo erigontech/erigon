@@ -958,6 +958,7 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	if len(f.pendingELPayloads) >= maxPendingELPayloads {
 		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
 		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
+		f.pendingELPayloads[len(f.pendingELPayloads)-1] = PendingELPayload{}
 		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
 	}
 	f.pendingELPayloads = append(f.pendingELPayloads, PendingELPayload{

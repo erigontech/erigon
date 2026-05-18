@@ -48,11 +48,10 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 		return
 	}
 
-	// Pre-compute state and PTC per unique blockRoot to avoid redundant GetState + GetPTC
-	// calls for every attesting validator (PtcSize can be 512).
+	// Pre-compute PTC per unique blockRoot to avoid redundant state lookups
+	// for every attesting validator (PtcSize can be 512).
 	type cachedPTC struct {
-		state *state.CachingBeaconState
-		ptc   []uint64
+		ptc []uint64
 	}
 	ptcCache := make(map[common.Hash]*cachedPTC)
 
@@ -66,32 +65,60 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 
 		cached, ok := ptcCache[blockRoot]
 		if !ok {
-			blockState, err := f.forkGraph.GetState(blockRoot, true)
+			blockState, err := f.forkGraph.GetState(blockRoot, false)
 			if err != nil || blockState == nil {
-				continue
-			}
-			ptc, err := blockState.GetPTC(data.Slot)
-			if err != nil {
 				continue
 			}
 			if data.Slot != blockState.Slot() {
 				continue
 			}
-			cached = &cachedPTC{state: blockState, ptc: ptc}
+			ptc, ok := readPTCFromWindow(blockState, data.Slot)
+			if !ok {
+				continue
+			}
+			cached = &cachedPTC{ptc: ptc}
 			ptcCache[blockRoot] = cached
 		}
 
-		indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
-		if err != nil {
+		if payloadAttestation.AggregationBits == nil {
 			continue
 		}
 
-		attestingIndices := indexedPayloadAttestation.AttestingIndices
-		for j := 0; j < attestingIndices.Length(); j++ {
-			idx := attestingIndices.Get(j)
-			f.applyPayloadAttestationVote(idx, data, blockRoot, cached.ptc)
+		for j, validatorIndex := range cached.ptc {
+			if payloadAttestation.AggregationBits.GetBitAt(j) {
+				f.applyPayloadAttestationVote(validatorIndex, data, blockRoot, cached.ptc)
+			}
 		}
 	}
+}
+
+func readPTCFromWindow(s *state.CachingBeaconState, slot uint64) ([]uint64, bool) {
+	cfg := s.BeaconConfig()
+	epoch := state.GetEpochAtSlot(cfg, slot)
+	stateEpoch := s.Slot() / cfg.SlotsPerEpoch
+	if epoch+1 < stateEpoch || epoch > stateEpoch+1 {
+		return nil, false
+	}
+
+	slotInEpoch := slot % cfg.SlotsPerEpoch
+	var index uint64
+	if stateEpoch > 0 && epoch == stateEpoch-1 {
+		index = slotInEpoch
+	} else {
+		index = (epoch-stateEpoch+1)*cfg.SlotsPerEpoch + slotInEpoch
+	}
+
+	ptcWindow := s.GetPtcWindow()
+	if ptcWindow == nil || index >= uint64(ptcWindow.Length()) {
+		return nil, false
+	}
+
+	vec := ptcWindow.Get(int(index))
+	ptc := make([]uint64, vec.Length())
+	for i := 0; i < vec.Length(); i++ {
+		ptc[i] = vec.Get(i)
+	}
+	return ptc, true
 }
 
 // applyPayloadAttestationVote updates PTC vote tracking for a single validator.

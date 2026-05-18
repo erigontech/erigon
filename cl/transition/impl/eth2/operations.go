@@ -752,8 +752,14 @@ func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltyp
 // ProcessExecutionPayloadEnvelope processes the execution payload envelope for the Gloas fork.
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: signed envelope or envelope message is nil")
+	}
 	envelope := signedEnvelope.Message
 	payload := envelope.Payload
+	if payload == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: envelope has nil payload")
+	}
 
 	// Verify signature
 	if I.FullValidation {
@@ -807,6 +813,9 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 
 	// Verify consistency with the committed bid
 	committedBid := s.GetLatestExecutionPayloadBid()
+	if committedBid == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: state has no latest execution payload bid")
+	}
 	if envelope.BuilderIndex != committedBid.BuilderIndex {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: builder_index %d != committed bid builder_index %d", envelope.BuilderIndex, committedBid.BuilderIndex)
 	}
@@ -848,7 +857,13 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 
 	// Verify consistency with expected withdrawals
 	payloadWithdrawals := payload.Withdrawals
+	if payloadWithdrawals == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: payload has nil withdrawals")
+	}
 	expectedWithdrawals := s.GetPayloadExpectedWithdrawals()
+	if expectedWithdrawals == nil {
+		return errors.New("ProcessExecutionPayloadEnvelope: state has nil expected withdrawals")
+	}
 	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash payload withdrawals: %w", err)
