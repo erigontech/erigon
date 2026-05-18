@@ -242,9 +242,9 @@ func TestEth66Messages(t *testing.T) {
 
 // TestBlockAccessListsPacket66RoundTrip verifies the eth/71 (EIP-8159) BAL
 // exchange packet types encode and decode losslessly at every cardinality that
-// matters in production: nil, empty list, single RLP-empty-list ("not available"
-// or "genuinely empty BAL"), and a multi-entry response with heterogeneous
-// payloads.
+// matters in production: nil, empty list, single RLP-empty-list (the
+// "genuinely empty BAL" sentinel under the post-#11553 spec), and a multi-entry
+// response with heterogeneous payloads.
 func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 	const reqID uint64 = 0x12345678
 
@@ -260,7 +260,7 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode stub BAL: %v", err)
 	}
-	emptyRLPList := common.FromHex("c0") // EIP-8159: empty list = "not available" OR "genuinely empty"
+	emptyRLPList := common.FromHex("c0") // EIP-8159 (post-#11553): 0xc0 = "genuinely empty BAL" (0x80 = "not available")
 
 	t.Run("GetBlockAccessLists", func(t *testing.T) {
 		cases := [][]common.Hash{
@@ -297,9 +297,9 @@ func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 		cases := [][]rlp.RawValue{
 			nil,
 			{},
-			{emptyRLPList},           // single "not available / empty" entry
+			{emptyRLPList},           // single "genuinely empty BAL" entry
 			{bal},                    // single populated BAL
-			{bal, emptyRLPList, bal}, // mixed — some available, one not
+			{bal, emptyRLPList, bal}, // mixed — populated and genuinely-empty BALs
 		}
 		for i, bals := range cases {
 			msg := BlockAccessListsPacket66{RequestId: reqID, BlockAccessListsPacket: bals}
