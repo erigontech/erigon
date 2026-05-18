@@ -2108,8 +2108,6 @@ func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
 	a.frozenBlocks = p
 }
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
-	log.Warn("[dbg] BuildFilesInBackground", "stack", dbg.Stack())
-
 	return a.buildFilesInBackground(txNum, true)
 }
 
