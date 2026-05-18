@@ -937,7 +937,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if err != nil {
 				continue
 			}
-			if (!auth.ChainID.IsZero() && auth.ChainID.ToBig().Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
 			data.Reset()
