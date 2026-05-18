@@ -114,7 +114,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
 	p.pubsub, err = pubsub.NewGossipSub(ctx, host, p.pubsubOptions(cfg.BeaconConfig)...)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	// udpv5
@@ -124,17 +124,17 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	p.udpv5, err = NewUDPv5Listener(ctx, cfg, discCfg, logger)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	// connect to bootnodes
 	if err := p.connectToBootnodes(ctx, discCfg); err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	// setup ENR
 	if err := p.setupENR(); err != nil {
-		return nil, err
+		panic(err)
 	}
 	go p.updateENR()
 	go p.peerMonitor(ctx)

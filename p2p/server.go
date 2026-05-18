@@ -407,15 +407,15 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	srv.peerOpDone = make(chan struct{})
 
 	if err := srv.setupLocalNode(); err != nil {
-		return err
+		panic(err)
 	}
 	if srv.ListenAddr != "" {
 		if err := srv.setupListening(srv.quitCtx); err != nil {
-			return err
+			panic(err)
 		}
 	}
 	if err := srv.setupDiscovery(srv.quitCtx); err != nil {
-		return err
+		panic(err)
 	}
 	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
@@ -557,11 +557,6 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			srv.discv5, err = discover.ListenV5(conn, srv.localnode, cfg)
 		}
 		if err != nil {
-			// Clean up v4 if v5 setup fails.
-			if srv.discv4 != nil {
-				srv.discv4.Close()
-				srv.discv4 = nil
-			}
 			return err
 		}
 	}
