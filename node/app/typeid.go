@@ -224,7 +224,7 @@ func TypeIdOf(govalue interface{}) TypeId {
 		return nil
 	}
 
-	if gotype.Kind() == reflect.Ptr {
+	if gotype.Kind() == reflect.Pointer {
 		gotype = gotype.Elem()
 	}
 
@@ -264,24 +264,24 @@ func (ti *GoTypeId) AssignableTo(typeId TypeId) bool {
 		if Trace {
 			fmt.Printf("Go Type Assign %v->%v (%v)\n", thisType, assignableType,
 				thisType.AssignableTo(assignableType) ||
-					(thisType.Kind() == reflect.Ptr && (assignableType.Kind() != reflect.Ptr &&
-						thisType.AssignableTo(reflect.PtrTo(assignableType)))) ||
-					((assignableType.Kind() == reflect.Ptr || assignableType.Kind() == reflect.Interface) &&
-						(thisType.Kind() != reflect.Ptr && reflect.PtrTo(thisType).AssignableTo(assignableType))))
+					(thisType.Kind() == reflect.Pointer && (assignableType.Kind() != reflect.Pointer &&
+						thisType.AssignableTo(reflect.PointerTo(assignableType)))) ||
+					((assignableType.Kind() == reflect.Pointer || assignableType.Kind() == reflect.Interface) &&
+						(thisType.Kind() != reflect.Pointer && reflect.PointerTo(thisType).AssignableTo(assignableType))))
 		}
 
 		if thisType.AssignableTo(assignableType) {
 			return true
 		}
 
-		if thisType.Kind() == reflect.Ptr {
-			return (assignableType.Kind() != reflect.Ptr &&
-				thisType.AssignableTo(reflect.PtrTo(assignableType)))
+		if thisType.Kind() == reflect.Pointer {
+			return (assignableType.Kind() != reflect.Pointer &&
+				thisType.AssignableTo(reflect.PointerTo(assignableType)))
 		}
 
-		if assignableType.Kind() == reflect.Ptr || assignableType.Kind() == reflect.Interface {
-			return (thisType.Kind() != reflect.Ptr &&
-				reflect.PtrTo(thisType).AssignableTo(assignableType))
+		if assignableType.Kind() == reflect.Pointer || assignableType.Kind() == reflect.Interface {
+			return (thisType.Kind() != reflect.Pointer &&
+				reflect.PointerTo(thisType).AssignableTo(assignableType))
 		}
 	}
 
@@ -332,7 +332,7 @@ func (info *typeInfo) LocalType() reflect.Type {
 func TypeIdValues(typeIds interface{}) []TypeId {
 	s := reflect.ValueOf(typeIds)
 
-	if s.Kind() == reflect.Ptr {
+	if s.Kind() == reflect.Pointer {
 		s = s.Elem()
 	}
 
