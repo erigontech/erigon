@@ -22,6 +22,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/log/v3"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -58,9 +60,11 @@ type ForkNode struct {
 }
 
 const (
-	checkpointsPerCache = 1024
-	allowedCachedStates = 8
-	queueCacheSize      = 128
+	checkpointsPerCache        = 1024
+	allowedCachedStates        = 8
+	queueCacheSize             = 128
+	pendingELPayloadsShrinkCap = 256 // drain releases the backing array when cap exceeds this
+	maxPendingELPayloads       = 1024
 )
 
 type randaoDelta struct {
@@ -951,6 +955,11 @@ func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorS
 func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
+	if len(f.pendingELPayloads) >= maxPendingELPayloads {
+		log.Warn("addPendingELPayload: dropping oldest pending EL payload", "queueLen", len(f.pendingELPayloads))
+		copy(f.pendingELPayloads, f.pendingELPayloads[1:])
+		f.pendingELPayloads = f.pendingELPayloads[:len(f.pendingELPayloads)-1]
+	}
 	f.pendingELPayloads = append(f.pendingELPayloads, PendingELPayload{
 		Block:    block,
 		Envelope: envelope,
@@ -962,7 +971,17 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()
-	payloads := f.pendingELPayloads
-	f.pendingELPayloads = nil
-	return payloads
+	if len(f.pendingELPayloads) == 0 {
+		return nil
+	}
+	if cap(f.pendingELPayloads) > pendingELPayloadsShrinkCap {
+		result := f.pendingELPayloads
+		f.pendingELPayloads = nil
+		return result
+	}
+	result := make([]PendingELPayload, len(f.pendingELPayloads))
+	copy(result, f.pendingELPayloads)
+	clear(f.pendingELPayloads)
+	f.pendingELPayloads = f.pendingELPayloads[:0]
+	return result
 }

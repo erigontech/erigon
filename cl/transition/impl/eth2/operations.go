@@ -513,6 +513,9 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 // [New in Gloas:EIP7732]
 func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
 	signedBid := block.GetBody().GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("processExecutionPayloadBid: signed bid or bid message is nil")
+	}
 	bid := signedBid.Message
 	builderIndex := bid.BuilderIndex
 	amount := bid.Value
@@ -727,6 +730,9 @@ func (I *impl) ProcessParentExecutionPayload(s abstract.BeaconState, block cltyp
 // [New in Gloas:EIP7732]
 func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (bool, error) {
 	builders := s.GetBuilders()
+	if builders == nil || signedBid.Message.BuilderIndex >= uint64(builders.Len()) {
+		return false, fmt.Errorf("builder index %d out of range", signedBid.Message.BuilderIndex)
+	}
 	builder := builders.Get(int(signedBid.Message.BuilderIndex))
 
 	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, state.Epoch(s))

@@ -66,7 +66,7 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 
 		cached, ok := ptcCache[blockRoot]
 		if !ok {
-			blockState, err := f.forkGraph.GetState(blockRoot, false)
+			blockState, err := f.forkGraph.GetState(blockRoot, true)
 			if err != nil || blockState == nil {
 				continue
 			}

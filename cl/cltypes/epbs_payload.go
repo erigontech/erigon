@@ -412,7 +412,7 @@ type ExecutionPayloadEnvelope struct {
 
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
 	return &ExecutionPayloadEnvelope{
-		Payload:               NewEth1Block(clparams.BellatrixVersion, cfg),
+		Payload:               NewEth1Block(clparams.GloasVersion, cfg),
 		ExecutionRequests:     NewExecutionRequests(cfg),
 		BuilderIndex:          0,
 		BeaconBlockRoot:       common.Hash{},
@@ -468,14 +468,18 @@ func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
-	return &ExecutionPayloadEnvelope{
-		Payload:               e.Payload,
-		ExecutionRequests:     e.ExecutionRequests,
-		BuilderIndex:          e.BuilderIndex,
-		BeaconBlockRoot:       e.BeaconBlockRoot,
-		ParentBeaconBlockRoot: e.ParentBeaconBlockRoot,
-		beaconCfg:             e.beaconCfg,
+	cloned := NewExecutionPayloadEnvelope(e.beaconCfg)
+	if e.Payload == nil {
+		return cloned
 	}
+	encoded, err := e.EncodeSSZ(nil)
+	if err != nil {
+		return cloned
+	}
+	if err := cloned.DecodeSSZ(encoded, int(e.Payload.Version())); err != nil {
+		return cloned
+	}
+	return cloned
 }
 
 // SignedExecutionPayloadEnvelope represents a signed execution payload envelope.
