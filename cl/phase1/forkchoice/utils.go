@@ -206,15 +206,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return nil, err
 	}
 	if baseState == nil {
-		// Checkpoint root not in fork graph (e.g. it predates the anchor
-		// after checkpoint sync). Fall back to the anchor state which is
-		// at the same or a nearby epoch and always available on disk.
-		baseState, err = f.forkGraph.GetState(f.forkGraph.AnchorRoot(), true)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if baseState == nil {
 		return nil, errors.New("getCheckpointState: baseState not found in graph")
 	}
 	// By default use the no change encoding to signal that there is no future epoch here.
