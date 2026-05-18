@@ -3469,12 +3469,28 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			}
 		}
 
+		// Only emit post-SD defaults when this TX created a new contract
+		// (CREATE/CREATE2). A value-transfer resurrect (no CreateContractPath)
+		// inherits the pre-SD account fields via the versionMap last-write-wins
+		// chain — that matches GenerateChain's accumulate-across-txs behaviour
+		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
+		// against that canonical state (TestSelfDestructReceive).
+		hasCreateContract := false
+		for _, w := range writes {
+			if w.Address == addr && w.Path == state.CreateContractPath {
+				if v, ok := w.Val.(bool); ok && v {
+					hasCreateContract = true
+					break
+				}
+			}
+		}
+
 		// For each missing field, try versionMap then stateReader.
 		for _, path := range []state.AccountPath{state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath} {
 			if fields != nil && fields[path] {
 				continue // already in output
 			}
-			if sdEarlier {
+			if sdEarlier && hasCreateContract {
 				var val any
 				switch path {
 				case state.BalancePath:
