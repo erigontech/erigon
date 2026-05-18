@@ -16,56 +16,11 @@
 
 package migrations
 
-import (
-	"context"
-	"fmt"
-
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
-)
-
-// domainLargeValuesMinMajor is the first DBSchemaVersion.Major that uses the
-// LargeValues two-table indirect layout (Code/RCache/Commitment domains:
+// domainLargeValuesLayout wipes chaindata when its schema major version is below 8.
+// v8 introduced the LargeValues two-table indirect layout (Code/RCache/Commitment:
 // keysTable DupSort `bareKey -> invStep+seqID` + valsTable plain `seqID -> value`).
-// A pre-v8 chaindata cannot be migrated in place — its values reference seqIDs
-// that don't exist on the old layout. Re-syncing from snapshots is the only safe path.
-const domainLargeValuesMinMajor uint32 = 8
-
+// The old layout cannot be migrated in place; re-syncing from snapshots is the only safe path.
 var domainLargeValuesLayout = Migration{
-	Name: "domain_large_values_layout",
-	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
-		tx, err := db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-
-		major, _, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
-		if err != nil {
-			return fmt.Errorf("domain_large_values_layout: %w", err)
-		}
-
-		if err := BeforeCommit(tx, nil, true); err != nil {
-			return err
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-
-		if !ok || major >= domainLargeValuesMinMajor {
-			return nil
-		}
-
-		chaindataPath := db.Path()
-		logger.Warn("[migration] chaindata predates domain LargeValues layout — wiping; live state will be re-synced from snapshots",
-			"db_major", major, "min_major", domainLargeValuesMinMajor, "path", chaindataPath)
-		db.Close()
-		if err := dir.RemoveAll(chaindataPath); err != nil {
-			return fmt.Errorf("domain_large_values_layout: remove %s: %w", chaindataPath, err)
-		}
-		return errDBWiped
-	},
+	Name:                 "domain_large_values_layout",
+	WipeDataIfMajorBelow: 8,
 }
