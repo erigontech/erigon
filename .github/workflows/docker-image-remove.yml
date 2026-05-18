@@ -29,7 +29,7 @@ jobs:
 
       - name: Run API Call
         env:
-          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          TOKEN: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
           DOCKER_IMAGE_TAG: ${{ inputs.docker_image_tag }}
         run: |
           output_code=$(curl --write-out %{http_code} --output curl-output.log \
