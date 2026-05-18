@@ -191,6 +191,54 @@ func (s *PerPathReadSet) get(addr accounts.Address, path AccountPath, key accoun
 	return nil, false
 }
 
+// scan visits every entry in the read set.  Iteration order is path-major
+// (Address, Balance, ..., Storage) but otherwise non-deterministic across
+// addresses within a path.  Caller returns false to stop early.
+func (s *PerPathReadSet) scan(fn func(vr *VersionedRead) bool) bool {
+	for _, m := range []map[accounts.Address]*VersionedRead{
+		s.address, s.balance, s.nonce, s.incarnation,
+		s.selfDestruct, s.createContract,
+		s.code, s.codeHash, s.codeSize,
+	} {
+		for _, vr := range m {
+			if !fn(vr) {
+				return false
+			}
+		}
+	}
+	for _, inner := range s.storage {
+		for _, vr := range inner {
+			if !fn(vr) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// scanAddr visits every entry under addr (all paths).  Returns the number of
+// entries visited.
+func (s *PerPathReadSet) scanAddr(addr accounts.Address, fn func(vr *VersionedRead)) int {
+	n := 0
+	for _, m := range []map[accounts.Address]*VersionedRead{
+		s.address, s.balance, s.nonce, s.incarnation,
+		s.selfDestruct, s.createContract,
+		s.code, s.codeHash, s.codeSize,
+	} {
+		if vr, ok := m[addr]; ok {
+			fn(vr)
+			n++
+		}
+	}
+	if inner, ok := s.storage[addr]; ok {
+		for _, vr := range inner {
+			fn(vr)
+			n++
+		}
+	}
+	return n
+}
+
 // PerPathWriteSet is the cell-pipeline target shape for versionedWrites.
 // Symmetric with PerPathReadSet — see that type for rationale.
 type PerPathWriteSet struct {
@@ -304,6 +352,181 @@ func (s *PerPathWriteSet) get(addr accounts.Address, path AccountPath, key accou
 		return vw, ok
 	}
 	return nil, false
+}
+
+// hasAddr reports whether any path has an entry for addr.
+func (s *PerPathWriteSet) hasAddr(addr accounts.Address) bool {
+	if _, ok := s.address[addr]; ok {
+		return true
+	}
+	if _, ok := s.balance[addr]; ok {
+		return true
+	}
+	if _, ok := s.nonce[addr]; ok {
+		return true
+	}
+	if _, ok := s.incarnation[addr]; ok {
+		return true
+	}
+	if _, ok := s.selfDestruct[addr]; ok {
+		return true
+	}
+	if _, ok := s.createContract[addr]; ok {
+		return true
+	}
+	if _, ok := s.code[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeHash[addr]; ok {
+		return true
+	}
+	if _, ok := s.codeSize[addr]; ok {
+		return true
+	}
+	if _, ok := s.storage[addr]; ok {
+		return true
+	}
+	return false
+}
+
+// addrs returns the union of all addresses that have at least one entry.
+// Iteration order across the union is non-deterministic — caller sorts
+// before use if determinism matters.
+func (s *PerPathWriteSet) addrs() map[accounts.Address]struct{} {
+	out := map[accounts.Address]struct{}{}
+	for _, m := range []map[accounts.Address]*VersionedWrite{
+		s.address, s.balance, s.nonce, s.incarnation,
+		s.selfDestruct, s.createContract,
+		s.code, s.codeHash, s.codeSize,
+	} {
+		for a := range m {
+			out[a] = struct{}{}
+		}
+	}
+	for a := range s.storage {
+		out[a] = struct{}{}
+	}
+	return out
+}
+
+// scanAddr visits every write under addr (all paths).
+func (s *PerPathWriteSet) scanAddr(addr accounts.Address, fn func(vw *VersionedWrite)) {
+	for _, m := range []map[accounts.Address]*VersionedWrite{
+		s.address, s.balance, s.nonce, s.incarnation,
+		s.selfDestruct, s.createContract,
+		s.code, s.codeHash, s.codeSize,
+	} {
+		if vw, ok := m[addr]; ok {
+			fn(vw)
+		}
+	}
+	if inner, ok := s.storage[addr]; ok {
+		for _, vw := range inner {
+			fn(vw)
+		}
+	}
+}
+
+// scan visits every write entry.  Iteration order is path-major.
+func (s *PerPathWriteSet) scan(fn func(vw *VersionedWrite) bool) bool {
+	for _, m := range []map[accounts.Address]*VersionedWrite{
+		s.address, s.balance, s.nonce, s.incarnation,
+		s.selfDestruct, s.createContract,
+		s.code, s.codeHash, s.codeSize,
+	} {
+		for _, vw := range m {
+			if !fn(vw) {
+				return false
+			}
+		}
+	}
+	for _, inner := range s.storage {
+		for _, vw := range inner {
+			if !fn(vw) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (s *PerPathWriteSet) delAddr(addr accounts.Address) {
+	delete(s.address, addr)
+	delete(s.balance, addr)
+	delete(s.nonce, addr)
+	delete(s.incarnation, addr)
+	delete(s.selfDestruct, addr)
+	delete(s.createContract, addr)
+	delete(s.code, addr)
+	delete(s.codeHash, addr)
+	delete(s.codeSize, addr)
+	delete(s.storage, addr)
+}
+
+func (s *PerPathWriteSet) del(addr accounts.Address, path AccountPath, key accounts.StorageKey) {
+	switch path {
+	case AddressPath:
+		delete(s.address, addr)
+	case BalancePath:
+		delete(s.balance, addr)
+	case NoncePath:
+		delete(s.nonce, addr)
+	case IncarnationPath:
+		delete(s.incarnation, addr)
+	case SelfDestructPath:
+		delete(s.selfDestruct, addr)
+	case CreateContractPath:
+		delete(s.createContract, addr)
+	case CodePath:
+		delete(s.code, addr)
+	case CodeHashPath:
+		delete(s.codeHash, addr)
+	case CodeSizePath:
+		delete(s.codeSize, addr)
+	case StoragePath:
+		if inner := s.storage[addr]; inner != nil {
+			delete(inner, key)
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+			}
+		}
+	}
+}
+
+func (s *PerPathWriteSet) updateValU256(addr accounts.Address, path AccountPath, key accounts.StorageKey, val uint256.Int) {
+	if vw, ok := s.get(addr, path, key); ok {
+		vw.ValU256 = val
+	}
+}
+
+func (s *PerPathWriteSet) updateValU64(addr accounts.Address, path AccountPath, val uint64) {
+	if vw, ok := s.get(addr, path, accounts.NilKey); ok {
+		vw.ValU64 = val
+	}
+}
+
+func (s *PerPathWriteSet) updateValBool(addr accounts.Address, path AccountPath, val bool) {
+	if vw, ok := s.get(addr, path, accounts.NilKey); ok {
+		vw.ValBool = val
+	}
+}
+
+func (s *PerPathWriteSet) updateValBytes(addr accounts.Address, path AccountPath, val []byte) {
+	if vw, ok := s.get(addr, path, accounts.NilKey); ok {
+		vw.ValBytes = val
+	}
+}
+
+func (s *PerPathWriteSet) updateValHash(addr accounts.Address, path AccountPath, val accounts.CodeHash) {
+	if vw, ok := s.get(addr, path, accounts.NilKey); ok {
+		vw.ValHash = val
+	}
+}
+
+func (s *PerPathWriteSet) updateValInt(addr accounts.Address, path AccountPath, val int) {
+	if vw, ok := s.get(addr, path, accounts.NilKey); ok {
+		vw.ValInt = val
+	}
 }
 
 func (a ReadSet) Merge(b ReadSet) ReadSet {

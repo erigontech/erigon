@@ -122,9 +122,7 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	assert.True(t, bal.IsZero(), "non-commited balance read past selfdestruct returns zero")
 
 	// SelfDestructPath dep must be recorded in readSet.
-	reads, ok := ibs.versionedReads[addr]
-	require.True(t, ok, "readSet entry for addr must exist")
-	_, ok = reads[AccountKey{Path: SelfDestructPath, Key: accounts.NilKey}]
+	_, ok := ibs.versionedReads.get(addr, SelfDestructPath, accounts.NilKey)
 	assert.True(t, ok, "SelfDestructPath dependency must be recorded")
 }
 
@@ -274,9 +272,7 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	assert.True(t, v2.IsZero())
 
 	// readSet must hold the StoragePath entry.
-	reads, ok := ibs.versionedReads[addr]
-	require.True(t, ok, "readSet entry for addr must exist after a storage read")
-	_, ok = reads[AccountKey{Path: StoragePath, Key: key}]
+	_, ok := ibs.versionedReads.get(addr, StoragePath, key)
 	assert.True(t, ok, "StoragePath read must be recorded")
 }
 
@@ -301,9 +297,7 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	assert.True(t, got.IsZero(), "unwritten slot reads zero after Incarnation rewrite")
 
 	// IncarnationPath dep must be recorded.
-	reads, ok := ibs.versionedReads[addr]
-	require.True(t, ok, "readSet entry for addr must exist")
-	_, ok = reads[AccountKey{Path: IncarnationPath, Key: accounts.NilKey}]
+	_, ok := ibs.versionedReads.get(addr, IncarnationPath, accounts.NilKey)
 	assert.True(t, ok, "IncarnationPath dependency must be recorded")
 }
 
@@ -387,25 +381,22 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	// Each refresh* path that ran in refreshVersionedAccount with
 	// no versionMap entry should have recorded its defaultV (the
 	// account's field) into the readSet.  Verify:
-	reads, ok := ibs.versionedReads[addr]
-	require.True(t, ok, "readSet entry for addr must exist")
-
-	balRead, ok := reads[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
+	balRead, ok := ibs.versionedReads.get(addr, BalancePath, accounts.NilKey)
 	require.True(t, ok, "BalancePath read must be recorded")
 	assert.Equal(t, *uint256.NewInt(1234), balRead.ValU256,
 		"recorded BalancePath value must be the refresh defaultV (currentBalance), not zero")
 
-	nonceRead, ok := reads[AccountKey{Path: NoncePath, Key: accounts.NilKey}]
+	nonceRead, ok := ibs.versionedReads.get(addr, NoncePath, accounts.NilKey)
 	require.True(t, ok, "NoncePath read must be recorded")
 	assert.Equal(t, uint64(7), nonceRead.ValU64,
 		"recorded NoncePath value must be the refresh defaultV (currentNonce), not zero")
 
-	incRead, ok := reads[AccountKey{Path: IncarnationPath, Key: accounts.NilKey}]
+	incRead, ok := ibs.versionedReads.get(addr, IncarnationPath, accounts.NilKey)
 	require.True(t, ok, "IncarnationPath read must be recorded")
 	assert.Equal(t, uint64(3), incRead.ValU64,
 		"recorded IncarnationPath value must be the refresh defaultV (currentIncarnation), not zero")
 
-	chRead, ok := reads[AccountKey{Path: CodeHashPath, Key: accounts.NilKey}]
+	chRead, ok := ibs.versionedReads.get(addr, CodeHashPath, accounts.NilKey)
 	require.True(t, ok, "CodeHashPath read must be recorded")
 	assert.Equal(t, accounts.InternCodeHash([32]byte{0xab}), chRead.ValHash,
 		"recorded CodeHashPath value must be the refresh defaultV (currentCodeHash), not zero")
@@ -489,8 +480,7 @@ func TestVersionedRead_E2_MapReadDifferentVersionPanics(t *testing.T) {
 
 	// Manually seed readSet with a stale version (TxIndex 1) so that the
 	// pr.Version != vr.Version branch fires.
-	ibs.versionedReads = ReadSet{}
-	ibs.versionedReads.Set(VersionedRead{
+	ibs.recordVR(VersionedRead{
 		Address: addr,
 		Path:    BalancePath,
 		Key:     accounts.NilKey,
@@ -552,8 +542,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
 	// Seed a stale readSet entry at a lower version.
-	ibs.versionedReads = ReadSet{}
-	ibs.versionedReads.Set(VersionedRead{
+	ibs.recordVR(VersionedRead{
 		Address: addr,
 		Path:    BalancePath,
 		Key:     accounts.NilKey,

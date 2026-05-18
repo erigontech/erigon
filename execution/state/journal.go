@@ -237,31 +237,31 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 		if s.versionMap != nil {
 			if ch.wasCommited {
 				if trace {
-					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
+					if v, ok := s.versionedWrites.get(ch.account, SelfDestructPath, accounts.NilKey); ok {
 						sd := v.ValBool
 						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
-					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+					if v, ok := s.versionedWrites.get(ch.account, BalancePath, accounts.NilKey); ok {
 						val := v.ValU256
 						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
 				}
-				s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
-				s.versionedWrites.Delete(ch.account, AccountKey{Path: SelfDestructPath})
+				s.versionedWrites.del(ch.account, BalancePath, accounts.NilKey)
+				s.versionedWrites.del(ch.account, SelfDestructPath, accounts.NilKey)
 			} else {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, SelfDestructPath, accounts.NilKey); ok {
 					if trace {
 						sd := v.ValBool
 						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
-					s.versionedWrites.UpdateValBool(ch.account, AccountKey{Path: SelfDestructPath}, ch.prev)
+					s.versionedWrites.updateValBool(ch.account, SelfDestructPath, ch.prev)
 				}
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, BalancePath, accounts.NilKey); ok {
 					val := v.ValU256
 					if trace {
 						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
-					s.versionedWrites.UpdateValU256(ch.account, AccountKey{Path: BalancePath}, ch.prevbalance)
+					s.versionedWrites.updateValU256(ch.account, BalancePath, accounts.NilKey, ch.prevbalance)
 				}
 			}
 		}
@@ -304,19 +304,19 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, BalancePath, accounts.NilKey); ok {
 					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: BalancePath})
+			s.versionedWrites.del(ch.account, BalancePath, accounts.NilKey)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
+			if v, ok := s.versionedWrites.get(ch.account, BalancePath, accounts.NilKey); ok {
 				if trace {
 					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
-				s.versionedWrites.UpdateValU256(ch.account, AccountKey{Path: BalancePath}, ch.prev)
+				s.versionedWrites.updateValU256(ch.account, BalancePath, accounts.NilKey, ch.prev)
 			}
 		}
 	}
@@ -367,19 +367,19 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, NoncePath, accounts.NilKey); ok {
 					n := v.ValU64
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: NoncePath})
+			s.versionedWrites.del(ch.account, NoncePath, accounts.NilKey)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
+			if v, ok := s.versionedWrites.get(ch.account, NoncePath, accounts.NilKey); ok {
 				if trace {
 					n := v.ValU64
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
-				s.versionedWrites.UpdateValU64(ch.account, AccountKey{Path: NoncePath}, ch.prev)
+				s.versionedWrites.updateValU64(ch.account, NoncePath, ch.prev)
 			}
 		}
 	}
@@ -410,36 +410,36 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, CodeHashPath, accounts.NilKey); ok {
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.ValHash, ch.prevhash)
 				}
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, CodePath, accounts.NilKey); ok {
 					_, cs := printCode(v.ValBytes)
 					_, ps := printCode(ch.prevcode)
 					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeSizePath})
+			s.versionedWrites.del(ch.account, CodeHashPath, accounts.NilKey)
+			s.versionedWrites.del(ch.account, CodePath, accounts.NilKey)
+			s.versionedWrites.del(ch.account, CodeSizePath, accounts.NilKey)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
+			if v, ok := s.versionedWrites.get(ch.account, CodePath, accounts.NilKey); ok {
 				if trace {
 					_, cs := printCode(v.ValBytes)
 					_, ps := printCode(ch.prevcode)
 					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
 				}
-				s.versionedWrites.UpdateValBytes(ch.account, AccountKey{Path: CodePath}, ch.prevcode)
+				s.versionedWrites.updateValBytes(ch.account, CodePath, ch.prevcode)
 			}
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
+			if v, ok := s.versionedWrites.get(ch.account, CodeHashPath, accounts.NilKey); ok {
 				if trace {
 					h := v.ValHash
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, h, ch.prevhash)
 				}
-				s.versionedWrites.UpdateValHash(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
+				s.versionedWrites.updateValHash(ch.account, CodeHashPath, ch.prevhash)
 			}
-			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
-				s.versionedWrites.UpdateValInt(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
+			if _, ok := s.versionedWrites.get(ch.account, CodeSizePath, accounts.NilKey); ok {
+				s.versionedWrites.updateValInt(ch.account, CodeSizePath, len(ch.prevcode))
 			}
 		}
 	}
@@ -467,19 +467,19 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
-				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
+				if v, ok := s.versionedWrites.get(ch.account, StoragePath, ch.key); ok {
 					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %x: %x -> %x\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
 			}
-			s.versionedWrites.Delete(ch.account, AccountKey{Path: StoragePath, Key: ch.key})
+			s.versionedWrites.del(ch.account, StoragePath, ch.key)
 		} else {
-			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: StoragePath, Key: ch.key}]; ok {
+			if v, ok := s.versionedWrites.get(ch.account, StoragePath, ch.key); ok {
 				if trace {
 					val := v.ValU256
 					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
-				s.versionedWrites.UpdateValU256(ch.account, AccountKey{Path: StoragePath, Key: ch.key}, ch.prevalue)
+				s.versionedWrites.updateValU256(ch.account, StoragePath, ch.key, ch.prevalue)
 			}
 		}
 	}

@@ -189,25 +189,20 @@ type IntraBlockState struct {
 
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
-	// at the block level
-	versionMap      *VersionMap
-	versionedWrites WriteSet
-	versionedReads  ReadSet
-	// E.1.b cell-pipeline target shape — per-path typed maps populated
-	// in parallel with the legacy WriteSet / ReadSet maps.  Readers move
-	// to these in E.2 (where the perf win lands by skipping the
-	// AccountKey{Path,Key} allocation + collapsing non-storage paths to
-	// single-level lookups); E.3 drops the legacy maps.
-	versionedWritesByPath PerPathWriteSet
-	versionedReadsByPath  PerPathReadSet
-	accountReadDuration   time.Duration
-	accountReadCount      int64
-	storageReadDuration   time.Duration
-	storageReadCount      int64
-	codeReadDuration      time.Duration
-	codeReadCount         int64
-	version               int
-	dep                   int
+	// at the block level.  Per-path typed maps (Commit E) — single-level
+	// lookups for non-storage paths; AccountKey{Path,Key} struct
+	// allocation gone from the probe hot path.
+	versionMap          *VersionMap
+	versionedWrites     PerPathWriteSet
+	versionedReads      PerPathReadSet
+	accountReadDuration time.Duration
+	accountReadCount    int64
+	storageReadDuration time.Duration
+	storageReadCount    int64
+	codeReadDuration    time.Duration
+	codeReadCount       int64
+	version             int
+	dep                 int
 }
 
 // Create a new state from a given trie
@@ -285,7 +280,7 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 }
 
 func (sdb *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
-	_, ok := sdb.versionedWrites[addr][AccountKey{path, key}]
+	_, ok := sdb.versionedWrites.get(addr, path, key)
 	return ok
 }
 
@@ -384,12 +379,13 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.accessList.Reset()
 	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
-	// Do not clear the maps in place — result.TxIn / result.TxOut may still
-	// reference them from a prior execution (used by finalize in another
-	// goroutine). Setting to nil lets the GC collect the old maps once all
-	// references are dropped, while the next execution lazily allocates fresh ones.
-	sdb.versionedReads = nil
-	sdb.versionedWrites = nil
+	// Zero the per-path maps in place — result.TxIn / result.TxOut hold
+	// boundary-type copies (ReadSet / VersionedWrites slice) built by
+	// VersionedReads()/VersionedWrites() at end of tx, so no live external
+	// reference points at the per-path maps.  Maps inside the struct are
+	// lazily realloc'd by set() on first use.
+	sdb.versionedReads = PerPathReadSet{}
+	sdb.versionedWrites = PerPathWriteSet{}
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0
@@ -1195,9 +1191,9 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x codeLen=%d\n",
 					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
 			}
-			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
-			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeHashPath})
-			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeSizePath})
+			sdb.versionedWrites.del(addr, CodePath, accounts.NilKey)
+			sdb.versionedWrites.del(addr, CodeHashPath, accounts.NilKey)
+			sdb.versionedWrites.del(addr, CodeSizePath, accounts.NilKey)
 		} else {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
@@ -2038,11 +2034,9 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if dbg.TraceAccount(addr.Handle()) {
 			var updated *uint256.Int
-			if sdb.versionedWrites != nil {
-				if w, ok := sdb.versionedWrites[addr][AccountKey{Path: BalancePath}]; ok {
-					val := w.ValU256
-					updated = &val
-				}
+			if w, ok := sdb.versionedWrites.get(addr, BalancePath, accounts.NilKey); ok {
+				val := w.ValU256
+				updated = &val
 			}
 			var dirty string
 			if isDirty {
@@ -2064,7 +2058,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	var reverted []accounts.Address
 
-	for addr := range sdb.versionedWrites {
+	for addr := range sdb.versionedWrites.addrs() {
 		if _, isDirty := sdb.stateObjectsDirty[addr]; !isDirty {
 			reverted = append(reverted, addr)
 		}
@@ -2072,7 +2066,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 
 	for _, addr := range reverted {
 		sdb.versionMap.DeleteAll(addr, sdb.txIndex)
-		delete(sdb.versionedWrites, addr)
+		sdb.versionedWrites.delAddr(addr)
 	}
 
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -2083,7 +2077,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 func (sdb *IntraBlockState) TxIO() *VersionedIO {
 	var io VersionedIO
 	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
-	io.RecordReads(version, sdb.versionedReads)
+	io.RecordReads(version, sdb.VersionedReads())
 	io.RecordWrites(version, sdb.VersionedWrites(false))
 	io.RecordAccesses(version, sdb.addressAccess)
 	return &io
@@ -2270,30 +2264,22 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // a state read was performed for gas calculation but the operation
 // was rejected (e.g. CALL with value inside STATICCALL).
 func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
-	if sdb.versionedReads == nil {
-		return
-	}
-	for key, vr := range sdb.versionedReads[addr] {
+	sdb.versionedReads.scanAddr(addr, func(vr *VersionedRead) {
 		vr.internal = true
-		sdb.versionedReads[addr][key] = vr
-	}
+	})
 }
 
 // SnapshotVersionedReadKeys returns the current set of read keys for addr.
 // Used with MarkNewReadsInternal to mark only reads added after the snapshot,
 // preserving pre-existing legitimate reads.
 func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
-	if sdb.versionedReads == nil {
-		return nil
-	}
-	reads := sdb.versionedReads[addr]
-	if len(reads) == 0 {
-		return nil
-	}
-	snapshot := make(map[AccountKey]struct{}, len(reads))
-	for k := range reads {
-		snapshot[k] = struct{}{}
-	}
+	var snapshot map[AccountKey]struct{}
+	sdb.versionedReads.scanAddr(addr, func(vr *VersionedRead) {
+		if snapshot == nil {
+			snapshot = map[AccountKey]struct{}{}
+		}
+		snapshot[AccountKey{Path: vr.Path, Key: vr.Key}] = struct{}{}
+	})
 	return snapshot
 }
 
@@ -2302,16 +2288,12 @@ func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map
 // were recorded on top of earlier legitimate reads — the legitimate ones
 // must remain non-internal so they appear in the block access list.
 func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
-	if sdb.versionedReads == nil {
-		return
-	}
-	for key, vr := range sdb.versionedReads[addr] {
-		if _, existed := before[key]; existed {
-			continue
+	sdb.versionedReads.scanAddr(addr, func(vr *VersionedRead) {
+		if _, existed := before[AccountKey{Path: vr.Path, Key: vr.Key}]; existed {
+			return
 		}
 		vr.internal = true
-		sdb.versionedReads[addr][key] = vr
-	}
+	})
 }
 
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
@@ -2356,36 +2338,17 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 	}
 }
 
-// setVWVal routes the generic-typed val into the path-corresponding typed
-// field on the VersionedWrite. Uses a type switch over val rather than path
-// because the caller of versionWritten passes T statically; this keeps the
-// dispatch driven by the type the consumer chose at the call site.
-// recordVW writes vw into both the legacy WriteSet and the per-path
-// typed maps.  Single canonical entry point for versionedWrites updates;
-// callers that previously did `sdb.versionedWrites.Set(vw)` directly are
-// migrated to this in E.2 so that the per-path maps stay in sync.
-//
-// The dual write currently costs an extra map-set per write (negligible
-// vs the existing legacy 2-level put).  When E.2 lands and readers
-// switch over, the legacy map is removed and this collapses to a single
-// per-path put.
+// recordVW writes vw into the per-path typed map.  Single canonical entry
+// point for versionedWrites updates.
 func (sdb *IntraBlockState) recordVW(vw VersionedWrite) {
-	if sdb.versionedWrites == nil {
-		sdb.versionedWrites = WriteSet{}
-	}
-	sdb.versionedWrites.Set(vw)
 	vwCopy := vw
-	sdb.versionedWritesByPath.set(&vwCopy)
+	sdb.versionedWrites.set(&vwCopy)
 }
 
 // recordVR mirrors recordVW for versionedReads.
 func (sdb *IntraBlockState) recordVR(vr VersionedRead) {
-	if sdb.versionedReads == nil {
-		sdb.versionedReads = ReadSet{}
-	}
-	sdb.versionedReads.Set(vr)
 	vrCopy := vr
-	sdb.versionedReadsByPath.set(&vrCopy)
+	sdb.versionedReads.set(&vrCopy)
 }
 
 // setVWVal dual-populates VersionedWrite's legacy Val* field AND the new
@@ -2466,21 +2429,17 @@ func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path Accoun
 }
 
 func (sdb *IntraBlockState) versionedWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) (VersionedWrite, bool) {
-	if sdb.versionMap == nil || sdb.versionedWrites == nil {
+	if sdb.versionMap == nil {
 		return VersionedWrite{}, false
 	}
-
-	v, ok := sdb.versionedWrites[addr][AccountKey{Path: path, Key: key}]
-
+	v, ok := sdb.versionedWrites.get(addr, path, key)
 	if !ok {
 		return VersionedWrite{}, false
 	}
-
 	if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
 		return VersionedWrite{}, false
 	}
-
-	return v, ok
+	return *v, ok
 }
 
 func (sdb *IntraBlockState) HadInvalidRead() bool {
@@ -2503,13 +2462,24 @@ func (sdb *IntraBlockState) Version() Version {
 	}
 }
 
+// VersionedReads returns a boundary-typed snapshot of the in-flight
+// per-path read set, used by RecordReads / merge / inspection callers
+// that work against the legacy ReadSet map shape.
 func (sdb *IntraBlockState) VersionedReads() ReadSet {
-	return sdb.versionedReads
+	var out ReadSet
+	sdb.versionedReads.scan(func(vr *VersionedRead) bool {
+		if out == nil {
+			out = ReadSet{}
+		}
+		out.Set(*vr)
+		return true
+	})
+	return out
 }
 
 func (sdb *IntraBlockState) ResetVersionedIO() {
-	sdb.versionedReads = nil
-	sdb.versionedWrites = nil
+	sdb.versionedReads = PerPathReadSet{}
+	sdb.versionedWrites = PerPathWriteSet{}
 	sdb.dep = UnknownDep
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
@@ -2517,7 +2487,7 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (sdb *IntraBlockState) ResetVersionedReads() {
-	sdb.versionedReads = nil
+	sdb.versionedReads = PerPathReadSet{}
 }
 
 // VersionedWrites returns the current versioned write set if this block
@@ -2525,55 +2495,55 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // after the block execution is completed and non dirty writes (due to reversions)
 // will already have been cleaned in MakeWriteSet
 func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
-	var writes VersionedWrites
+	// Group per-addr first; the per-addr post-pass needs to inspect all
+	// writes for an address before deciding what to emit (selfdestruct
+	// filtering and dirty pruning are both per-addr decisions).
+	byAddr := map[accounts.Address][]*VersionedWrite{}
+	sdb.versionedWrites.scan(func(vw *VersionedWrite) bool {
+		byAddr[vw.Address] = append(byAddr[vw.Address], vw)
+		return true
+	})
 
-	if sdb.versionedWrites != nil {
-		writes = make(VersionedWrites, 0, sdb.versionedWrites.Len())
-
-		for addr, vwrites := range sdb.versionedWrites {
-			if checkDirty {
-				if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-					for _, v := range vwrites {
-						sdb.versionMap.Delete(v.Address, v.Path, v.Key, sdb.txIndex, false)
-					}
-					continue
+	writes := make(VersionedWrites, 0)
+	for addr, vwrites := range byAddr {
+		if checkDirty {
+			if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
+				for _, v := range vwrites {
+					sdb.versionMap.Delete(v.Address, v.Path, v.Key, sdb.txIndex, false)
 				}
+				continue
 			}
+		}
 
-			// First pass: detect whether this account was selfdestructed in
-			// the current TX. We must do this before filtering because vwrites
-			// is a map and iteration order is non-deterministic — folding the
-			// detection into the filter loop would drop storage writes that
-			// happened to iterate before the SelfDestructPath entry.
-			var selfDestructed bool
-			for _, v := range vwrites {
-				if v.Path == SelfDestructPath && v.ValBool {
-					selfDestructed = true
-					break
-				}
+		// First pass: detect whether this account was selfdestructed in
+		// the current TX. We must do this before filtering because the
+		// scan order is non-deterministic — folding the detection into
+		// the filter loop would drop storage writes that happened to
+		// iterate before the SelfDestructPath entry.
+		var selfDestructed bool
+		for _, v := range vwrites {
+			if v.Path == SelfDestructPath && v.ValBool {
+				selfDestructed = true
+				break
 			}
+		}
 
-			// Second pass: if selfdestructed, keep only SelfDestructPath,
-			// BalancePath (the BAL needs residual balance from EIP-7708 case 2),
-			// IncarnationPath (so resurrection txs find the prior incarnation),
-			// and StoragePath (the calculator needs explicit per-slot DELETE
-			// entries since it can't use DomainDelPrefix). NoncePath and CodePath
-			// are dropped because selfdestruct resets them.
-			appends := make(VersionedWrites, 0, len(vwrites))
-			for _, v := range vwrites {
-				v := v // local copy for pointer
-				if !selfDestructed ||
-					v.Path == SelfDestructPath ||
-					v.Path == BalancePath ||
-					v.Path == IncarnationPath ||
-					v.Path == StoragePath {
-					appends = append(appends, &v)
-				}
+		// Second pass: if selfdestructed, keep only SelfDestructPath,
+		// BalancePath (the BAL needs residual balance from EIP-7708 case 2),
+		// IncarnationPath (so resurrection txs find the prior incarnation),
+		// and StoragePath (the calculator needs explicit per-slot DELETE
+		// entries since it can't use DomainDelPrefix). NoncePath and CodePath
+		// are dropped because selfdestruct resets them.
+		for _, v := range vwrites {
+			if !selfDestructed ||
+				v.Path == SelfDestructPath ||
+				v.Path == BalancePath ||
+				v.Path == IncarnationPath ||
+				v.Path == StoragePath {
+				writes = append(writes, v)
 			}
-			writes = append(writes, appends...)
 		}
 	}
-
 	return writes
 }
 

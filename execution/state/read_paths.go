@@ -247,7 +247,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	if !commited {
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			if res.Status() == MVReadResultDone {
-				if pr, prOK := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; prOK {
+				if pr, prOK := s.versionedReads.get(addr, path, key); prOK {
 					if vr.Version.TxIndex > destructedVersion.TxIndex && vr.Version != pr.Version {
 						if vr.Version.TxIndex > s.dep {
 							s.dep = vr.Version.TxIndex
@@ -257,7 +257,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 								s.blockNum, s.txIndex, s.version,
 								pr.Version.TxIndex, pr.Version.Incarnation,
 								vr.Version.TxIndex, vr.Version.Incarnation,
-								addr, AccountKey{path, key}, valueStringFromVR(&pr))
+								addr, AccountKey{path, key}, valueStringFromVR(pr))
 						}
 						s.recordVR(vr)
 						panic(ErrDependency)
@@ -280,15 +280,15 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	switch res.Status() {
 	case MVReadResultDone:
 		vr.Source = MapRead
-		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
+		if pr, ok := s.versionedReads.get(addr, path, key); ok {
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n",
 						s.blockNum, s.txIndex, s.version, MapRead, res.DepString(),
-						addr, AccountKey{path, key}, valueStringFromVR(&pr))
+						addr, AccountKey{path, key}, valueStringFromVR(pr))
 				}
 				r.outcome = outcomeReadSetHit
-				r.pr = &pr
+				r.pr = pr
 				r.source = MapRead
 				r.version = vr.Version
 				return
@@ -338,16 +338,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		panic(ErrDependency)
 
 	case MVReadResultNone:
-		if vreads := s.versionedReads; !commited && vreads != nil {
-			if pr, ok := vreads[addr][AccountKey{Path: path, Key: key}]; ok {
+		if !commited {
+			if pr, ok := s.versionedReads.get(addr, path, key); ok {
 				if pr.Version == vr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n",
 							s.blockNum, s.txIndex, s.version, ReadSetRead,
-							addr, AccountKey{path, key}, valueStringFromVR(&pr))
+							addr, AccountKey{path, key}, valueStringFromVR(pr))
 					}
 					r.outcome = outcomeReadSetHit
-					r.pr = &pr
+					r.pr = pr
 					r.source = ReadSetRead
 					r.version = pr.Version
 					return
@@ -357,7 +357,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						_, accSource, accVersion, _ := readAccountInternal(s, addr)
 						if accSource == pr.Source && accVersion == pr.Version {
 							r.outcome = outcomeReadSetHit
-							r.pr = &pr
+							r.pr = pr
 							r.source = ReadSetRead
 							r.version = pr.Version
 							return
