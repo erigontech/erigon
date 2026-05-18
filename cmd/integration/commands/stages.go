@@ -324,7 +324,7 @@ func init() {
 	withBlock(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
-	withChainTipMode(cmdStageExec)
+	withLimit(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -632,7 +632,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dbg.Exec3Parallel = true // default for integration tool
 	}
 	if syncCfg.ChainTipMode() && noCommit {
-		return errors.New("chain-tip mode (--sync.loop.block.limit=1) cannot work with --no-commit")
+		return errors.New("--limit=1 cannot be combined with --no-commit")
 	}
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {

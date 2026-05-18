@@ -227,13 +227,6 @@ func withTraceFlags(cmd *cobra.Command) {
 	withWorkers(cmd)
 }
 
-func withChainTipMode(cmd *cobra.Command) {
-	var chainTip bool
-	cmd.Flags().BoolVar(&chainTip, "sync.mode.chaintip", false, "Alias for --sync.loop.block.limit=1: every block commits and generates diffs/changesets.")
-	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		if chainTip {
-			syncCfg.LoopBlockLimit = 1
-		}
-		return nil
-	}
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, "limit", 0, "max blocks per iteration; 1 = chain-tip mode")
 }

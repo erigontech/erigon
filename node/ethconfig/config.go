@@ -297,7 +297,4 @@ type Sync struct {
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }
 
-// ChainTipMode reports whether the config is set to chain-tip mode
-// (LoopBlockLimit==1). In that mode initialCycle is forced false on every FCU
-// and ProcessFrozenBlocks is skipped.
 func (s Sync) ChainTipMode() bool { return s.LoopBlockLimit == 1 }

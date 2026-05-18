@@ -115,7 +115,7 @@ var (
 
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
-		Usage: "Sets the maximum number of blocks to process per loop iteration. Value 1 forces chain-tip sync mode (initialCycle=false on every FCU, ProcessFrozenBlocks skipped). Note: all LoopBlockLimit consumers use this value literally, so header insertion and backward block download are also capped to 1 per iteration.",
+		Usage: "max blocks per sync loop iteration; 1 = chain-tip mode",
 		Value: 5_000,
 	}
 
