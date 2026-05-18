@@ -790,7 +790,15 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
+	key := scope.peekStorageKey()
+	if v, ok := scope.lookupSlot(key); ok {
+		*loc = v
+		return pc, nil, nil
+	}
+	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), key)
+	if err == nil {
+		scope.storeSlot(key, *loc)
+	}
 	return pc, nil, err
 }
 
@@ -806,7 +814,11 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	key := scope.peekStorageKey()
 	scope.Stack.pop()
 	val := scope.Stack.pop()
-	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
+	err := evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
+	if err == nil {
+		scope.storeSlot(key, val)
+	}
+	return pc, nil, err
 }
 
 func stSstore(_ uint64, scope *CallContext) string {
@@ -1046,6 +1058,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	scope.invalidateSlotCache()
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1119,6 +1132,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	scope.invalidateSlotCache()
 
 	if err != nil {
 		temp.Clear()
@@ -1170,6 +1184,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	scope.invalidateSlotCache()
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1212,6 +1227,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	scope.invalidateSlotCache()
 	if err != nil {
 		temp.Clear()
 	} else {

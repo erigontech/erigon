@@ -92,6 +92,14 @@ type CallContext struct {
 	cachedKeyTable  [internTableSize]internStorageKeyEntry
 	cachedAddrTable [internTableSize]internAddressEntry
 
+	// Frame-local slot cache for parallel-exec SLOAD reaccess optimisation.
+	// Direct-mapped, indexed by the first uint64 of the interned key's value.
+	// Storage address is implicit (constant per CallContext = Contract.Address).
+	// Populated by opSload, written-through by opSstore, invalidated wholesale
+	// after any CALL-family op that may have mutated this frame's storage
+	// (delegate-call / call-code re-entry into this address).
+	slotCache [slotCacheSize]frameSlotEntry
+
 	Stack    Stack
 	Contract Contract
 }
@@ -101,6 +109,11 @@ type CallContext struct {
 // hot keys/addresses; collisions on the first-uint64 index resolve via
 // replacement (correctness preserved by the full-bytes equal check).
 const internTableSize = 16
+
+// slotCacheSize is the size of the frame-local SLOAD reaccess cache.
+// Direct-mapped; collisions on the first-uint64-of-key index resolve via
+// replacement, with a full-key equal check on lookup.
+const slotCacheSize = 8
 
 type internStorageKeyEntry struct {
 	bytes [32]byte
@@ -112,6 +125,12 @@ type internAddressEntry struct {
 	bytes [20]byte
 	addr  accounts.Address
 	valid bool
+}
+
+type frameSlotEntry struct {
+	keyBytes [32]byte
+	value    uint256.Int
+	valid    bool
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -169,6 +188,45 @@ func (ctx *CallContext) peekAddress() accounts.Address {
 	return a
 }
 
+// lookupSlot probes the frame-local slot cache for key. Returns (value,true)
+// on hit. The cache is indexed by the first uint64 of the interned key's
+// hash bytes; collisions resolve via full-bytes-equal verify on the slot.
+func (ctx *CallContext) lookupSlot(key accounts.StorageKey) (uint256.Int, bool) {
+	if key == accounts.NilKey {
+		return uint256.Int{}, false
+	}
+	kb := key.Value()
+	idx := binary.BigEndian.Uint64(kb[:8]) & (slotCacheSize - 1)
+	e := &ctx.slotCache[idx]
+	if e.valid && e.keyBytes == kb {
+		return e.value, true
+	}
+	return uint256.Int{}, false
+}
+
+// storeSlot inserts (or replaces) the cache entry for key.
+func (ctx *CallContext) storeSlot(key accounts.StorageKey, value uint256.Int) {
+	if key == accounts.NilKey {
+		return
+	}
+	kb := key.Value()
+	idx := binary.BigEndian.Uint64(kb[:8]) & (slotCacheSize - 1)
+	e := &ctx.slotCache[idx]
+	e.keyBytes = kb
+	e.value = value
+	e.valid = true
+}
+
+// invalidateSlotCache marks every slot-cache entry as invalid. Called after
+// any opcode that may have caused storage writes to this frame's address
+// (CALL, CALLCODE, DELEGATECALL, CREATE, CREATE2 — see SLOAD reaccess design
+// note). STATICCALL is exempt because it cannot mutate state.
+func (ctx *CallContext) invalidateSlotCache() {
+	for i := range ctx.slotCache {
+		ctx.slotCache[i].valid = false
+	}
+}
+
 var contextPool = sync.Pool{
 	New: func() any {
 		return &CallContext{}
@@ -185,6 +243,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	ctx.stateGas = gas.State
 	ctx.input = input
 	ctx.Contract = contract
+	ctx.invalidateSlotCache()
 	return ctx
 }
 
