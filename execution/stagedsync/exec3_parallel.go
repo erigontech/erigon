@@ -3460,19 +3460,12 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				continue // already in output
 			}
 			if sdEarlier {
-				var val any
-				switch path {
-				case state.BalancePath:
-					val = uint256.Int{}
-				case state.NoncePath:
-					val = uint64(0)
-				case state.IncarnationPath:
-					val = uint64(0)
-				case state.CodeHashPath:
-					val = accounts.EmptyCodeHash
-				}
 				vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
-				vw.SetVal(val)
+				switch path {
+				case state.CodeHashPath:
+					vw.ValHash = accounts.EmptyCodeHash
+				}
+				// Balance/Nonce/Incarnation zero values are the typed-field defaults.
 				filtered = append(filtered, vw)
 				continue
 			}
@@ -3485,38 +3478,25 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			if stateReader != nil {
 				acc, err := stateReader.ReadAccountData(addr)
 				if err == nil {
-					var val any
+					vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
 					if acc != nil {
 						switch path {
 						case state.BalancePath:
-							val = acc.Balance
+							vw.ValU256 = acc.Balance
 						case state.NoncePath:
-							val = acc.Nonce
+							vw.ValU64 = acc.Nonce
 						case state.IncarnationPath:
-							val = acc.Incarnation
+							vw.ValU64 = acc.Incarnation
 						case state.CodeHashPath:
-							val = acc.CodeHash
+							vw.ValHash = acc.CodeHash
 						}
-					} else {
-						// New account — doesn't exist in domain yet.
-						// Emit default values so the commitment sees
-						// a full account (not a delete).
-						switch path {
-						case state.BalancePath:
-							val = uint256.Int{}
-						case state.NoncePath:
-							val = uint64(0)
-						case state.IncarnationPath:
-							val = uint64(0)
-						case state.CodeHashPath:
-							val = accounts.EmptyCodeHash
-						}
+					} else if path == state.CodeHashPath {
+						// New account — typed-field zero values are the
+						// defaults for Balance/Nonce/Incarnation; CodeHash
+						// needs explicit empty.
+						vw.ValHash = accounts.EmptyCodeHash
 					}
-					if val != nil {
-						vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
-						vw.SetVal(val)
-						filtered = append(filtered, vw)
-					}
+					filtered = append(filtered, vw)
 				}
 			}
 		}
@@ -3632,7 +3612,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 				if rr.Incarnation() != incarnation {
 					continue // stale incarnation entry
 				}
-				w.SetVal(val)
+				w.ValU256 = val
 			} else {
 				continue // not written by this TX
 			}
