@@ -1323,6 +1323,7 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		return
 	}
 
+	receiptIdx := 0
 	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
 		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
 		if err != nil {
@@ -1342,16 +1343,17 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		}
 		x := (*types.Receipt)(receipt)
 		txnIdx := int(receipt.TransactionIndex)
-		if txnIdx < 0 || txnIdx != len(res) || txnIdx >= len(transactions) {
-			// RCacheV2 entries are ordered by txNum. If the stored transaction
-			// index does not match that order, this block must be derived instead.
+		if txnIdx < 0 || txnIdx != receiptIdx || txnIdx >= len(transactions) {
+			// RCacheV2 is read in txNum order. The stored transaction index must
+			// match the next receipt position, otherwise derive the block instead.
 			return nil, nil
 		}
 		txn := transactions[txnIdx]
 		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		res = append(res, x)
+		receiptIdx++
 	}
-	if len(res) != len(transactions) {
+	if receiptIdx != len(transactions) {
 		// Block receipt RPCs require the full ordered receipt set.
 		return nil, nil
 	}
