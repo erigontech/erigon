@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -790,8 +791,27 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey())
-	return pc, nil, err
+	addr := scope.Contract.Address()
+	key := scope.peekStorageKey()
+	cacheKey := slotCacheKey{addr: addr, key: key}
+	// Walk the frame chain — every ancestor that has rolled-up entries from
+	// successful child frames carries them down for reuse here.
+	for c := scope; c != nil; c = c.parent {
+		if cell, ok := c.slotCache[cacheKey]; ok {
+			*loc = cell.Value
+			return pc, nil, nil
+		}
+	}
+	val, err := evm.IntraBlockState().GetState(addr, key)
+	if err != nil {
+		return pc, nil, err
+	}
+	if scope.slotCache == nil {
+		scope.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+	}
+	scope.slotCache[cacheKey] = &state.WriteCell[uint256.Int]{Value: val}
+	*loc = val
+	return pc, nil, nil
 }
 
 func stSload(_ uint64, scope *CallContext) string {
@@ -806,7 +826,17 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	key := scope.peekStorageKey()
 	scope.Stack.pop()
 	val := scope.Stack.pop()
-	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
+	addr := scope.Contract.Address()
+	cacheKey := slotCacheKey{addr: addr, key: key}
+	if existing, ok := scope.slotCache[cacheKey]; ok {
+		existing.Value = val
+	} else {
+		if scope.slotCache == nil {
+			scope.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+		}
+		scope.slotCache[cacheKey] = &state.WriteCell[uint256.Int]{Value: val}
+	}
+	return pc, nil, evm.IntraBlockState().SetState(addr, key, val)
 }
 
 func stSstore(_ uint64, scope *CallContext) string {

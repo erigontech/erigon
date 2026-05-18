@@ -1180,3 +1180,76 @@ func ptrToByte(v byte) *byte {
 	b := v
 	return &b
 }
+
+// TestOpSloadHitsLocalSlotCache verifies that opSload returns the cached
+// value when its (addr, key) is present in the current frame's slotCache,
+// without dispatching to IBS GetState.
+func TestOpSloadHitsLocalSlotCache(t *testing.T) {
+	t.Parallel()
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		caller      = accounts.ZeroAddress
+		to          = accounts.InternAddress(common.Address{1})
+		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
+	)
+
+	pc := uint64(0)
+	keyVal := *new(uint256.Int).SetOne()
+	cachedVal := *new(uint256.Int).SetUint64(0xdeadbeef)
+	storageKey := accounts.InternKey(keyVal.Bytes32())
+
+	// Pre-seed the cache.  If opSload doesn't short-circuit on the cache
+	// hit it will dispatch to IBS GetState through a nil IntraBlockState
+	// and panic.
+	callContext.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{
+		{addr: to, key: storageKey}: {Value: cachedVal},
+	}
+
+	callContext.Stack.push(keyVal)
+	if _, _, err := opSload(pc, evm, callContext); err != nil {
+		t.Fatalf("opSload: %v", err)
+	}
+	got := callContext.Stack.peek()
+	if got.Cmp(&cachedVal) != 0 {
+		t.Fatalf("SLOAD cache hit: want %s, got %s", cachedVal.Hex(), got.Hex())
+	}
+}
+
+// TestSlotCacheParentChainWalk verifies that SLOAD in a child frame walks
+// up the parent chain when its own cache misses.
+func TestSlotCacheParentChainWalk(t *testing.T) {
+	t.Parallel()
+	var (
+		evm    = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+		caller = accounts.ZeroAddress
+		to     = accounts.InternAddress(common.Address{1})
+		parent = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
+		child  = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{}), parent: parent}
+	)
+
+	pc := uint64(0)
+	keyVal := *new(uint256.Int).SetOne()
+	cachedVal := *new(uint256.Int).SetUint64(0xc0de)
+	storageKey := accounts.InternKey(keyVal.Bytes32())
+
+	// Seed only the parent's cache.  A nil IBS guarantees that any IBS
+	// fallback would panic, so a passing test proves the chain walk hit
+	// before any fallback was attempted.
+	parent.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{
+		{addr: to, key: storageKey}: {Value: cachedVal},
+	}
+
+	child.Stack.push(keyVal)
+	if _, _, err := opSload(pc, evm, child); err != nil {
+		t.Fatalf("child opSload: %v", err)
+	}
+	got := child.Stack.peek()
+	if got.Cmp(&cachedVal) != 0 {
+		t.Fatalf("child SLOAD via parent walk: want %s, got %s", cachedVal.Hex(), got.Hex())
+	}
+	// Child's own cache should remain empty — the walk doesn't populate the
+	// local frame; only an SSTORE in the child or a later IBS fetch does.
+	if len(child.slotCache) != 0 {
+		t.Fatalf("child slotCache should stay empty on parent-walk hit, got len=%d", len(child.slotCache))
+	}
+}

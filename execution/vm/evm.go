@@ -94,6 +94,13 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
+	// currentCallContext is the running frame's CallContext.  Used by Run
+	// to thread the parent pointer onto a freshly-allocated child frame so
+	// SLOAD can walk up the call-frame chain and a successful return can
+	// roll the child's slot cache up into the parent's.  Nil at the
+	// outermost frame.
+	currentCallContext *CallContext
+
 	stateGasConsumed   uint64 // total state gas charged during tx execution (restored on depth>0 revert, kept on depth-0)
 	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 	revertedSpillGas   uint64 // state gas that spilled to regular and was restored on depth-0 revert

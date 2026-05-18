@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -92,8 +93,39 @@ type CallContext struct {
 	cachedKeyTable  [internTableSize]internStorageKeyEntry
 	cachedAddrTable [internTableSize]internAddressEntry
 
+	// Frame-local slot cache (per project_frame_local_slot_cache_with_rollup.md).
+	// Holds *WriteCell[uint256.Int] pointers so the cache shape matches the
+	// cell-pipeline endpoint: same WriteCell type that lives in versionMap
+	// and (eventually) SharedDomains.  SLOAD reaccess within the same frame
+	// reads cell.Value and skips the versionedReadCore + GetState chain.
+	// SSTORE replaces the cache entry with the new cell so the next SLOAD
+	// sees the post-write value without re-probing.
+	//
+	// Lifetime: per-CallContext.  Lookup walks up the parent chain via
+	// CallContext.parent.  On normal return, the child's cache merges into
+	// the parent's (rollup, pointer assignment).  On revert (error return),
+	// the child's cache is discarded.  Both happen in Run's deferred
+	// finaliser before put().
+	//
+	// ibs.SetState remains the source of truth in this iteration so gas
+	// accounting (gasSStore reads current value via ibs.GetState) and
+	// tracer paths keep working unchanged; eliding ibs.SetState is a
+	// follow-up that needs gasSStore/tracer-hook plumbing changes.
+	slotCache map[slotCacheKey]*state.WriteCell[uint256.Int]
+
+	// parent is the CallContext that invoked this frame.  Used by SLOAD to
+	// walk up the chain when the local cache misses, and by Run's deferred
+	// finaliser to roll the child's cache up into the parent on success.
+	// Nil at the outermost frame.
+	parent *CallContext
+
 	Stack    Stack
 	Contract Contract
+}
+
+type slotCacheKey struct {
+	addr accounts.Address
+	key  accounts.StorageKey
 }
 
 // internTableSize is the size of the direct-mapped intern caches on each
@@ -197,6 +229,12 @@ func (c *CallContext) put() {
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	c.cachedKey = accounts.NilKey
 	c.cachedAddr = accounts.NilAddress
+	// Clear the frame-local slot cache.  clear() preserves the map's
+	// backing allocation for reuse on the next CallContext.Get from
+	// the pool — cheaper than nil-and-realloc.
+	if c.slotCache != nil {
+		clear(c.slotCache)
+	}
 	contextPool.Put(c)
 }
 
@@ -451,6 +489,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
+
+	// Push this frame onto evm.currentCallContext and link the parent so
+	// opSload's chain walk can reach ancestor caches and the deferred
+	// rollup can find the parent.
+	callContext.parent = evm.currentCallContext
+	evm.currentCallContext = callContext
+
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if debug && err != nil {
@@ -461,6 +506,26 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}
+		// Slot-cache rollup: on a normal return (no error), the child's
+		// reads + writes propagate into the parent's cache so the parent
+		// inherits a warm view of the post-call storage.  Pointer copy —
+		// the same *WriteCell[T] travels from child to parent.  On any
+		// error (REVERT, OOG, stack-underflow, etc.) the snapshot
+		// mechanism in the caller's opCall rewinds IBS state, and the
+		// child's cache is discarded — parent's cache is unchanged.
+		if err == nil && callContext.parent != nil && len(callContext.slotCache) > 0 {
+			parentCache := callContext.parent.slotCache
+			if parentCache == nil {
+				parentCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+				callContext.parent.slotCache = parentCache
+			}
+			for k, cell := range callContext.slotCache {
+				parentCache[k] = cell
+			}
+		}
+		// Pop this frame.
+		evm.currentCallContext = callContext.parent
+		callContext.parent = nil
 		// this function must execute _after_: the `CaptureState` needs the stacks before
 		callContext.put()
 		if restoreReadonly {
