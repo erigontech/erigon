@@ -502,6 +502,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// initialCycle reflects "not at chain tip" — derived from isSynced so the
 	// stage prune budget downstream matches the actual sync state, not just
 	// the LoopBlockLimit chunking decision.
+	// TODO: rename initialCycle → atTip (with inverted polarity) across the
+	// stage/prune APIs so the naming matches the semantic.
 	initialCycle := !isSynced
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
