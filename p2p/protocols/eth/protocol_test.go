@@ -241,10 +241,10 @@ func TestEth66Messages(t *testing.T) {
 }
 
 // TestBlockAccessListsPacket66RoundTrip verifies the eth/71 (EIP-8159) BAL
-// exchange packet types encode and decode losslessly at every cardinality that
-// matters in production: nil, empty list, single RLP-empty-list (the
-// "genuinely empty BAL" sentinel under the post-#11553 spec), and a multi-entry
-// response with heterogeneous payloads.
+// exchange packet types encode and decode losslessly across the entry shapes
+// covered here: nil, empty list, the "genuinely empty BAL" sentinel (0xc0,
+// per post-#11553 spec), populated BAL bytes, and a multi-entry mix. The
+// "not available" sentinel (0x80) is not exercised by this test.
 func TestBlockAccessListsPacket66RoundTrip(t *testing.T) {
 	const reqID uint64 = 0x12345678
 
