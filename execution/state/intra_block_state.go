@@ -190,17 +190,24 @@ type IntraBlockState struct {
 	// Versioned storage used for parallel tx processing, versions
 	// are maintaned across transactions until they are reset
 	// at the block level
-	versionMap          *VersionMap
-	versionedWrites     WriteSet
-	versionedReads      ReadSet
-	accountReadDuration time.Duration
-	accountReadCount    int64
-	storageReadDuration time.Duration
-	storageReadCount    int64
-	codeReadDuration    time.Duration
-	codeReadCount       int64
-	version             int
-	dep                 int
+	versionMap      *VersionMap
+	versionedWrites WriteSet
+	versionedReads  ReadSet
+	// E.1.b cell-pipeline target shape — per-path typed maps populated
+	// in parallel with the legacy WriteSet / ReadSet maps.  Readers move
+	// to these in E.2 (where the perf win lands by skipping the
+	// AccountKey{Path,Key} allocation + collapsing non-storage paths to
+	// single-level lookups); E.3 drops the legacy maps.
+	versionedWritesByPath PerPathWriteSet
+	versionedReadsByPath  PerPathReadSet
+	accountReadDuration   time.Duration
+	accountReadCount      int64
+	storageReadDuration   time.Duration
+	storageReadCount      int64
+	codeReadDuration      time.Duration
+	codeReadCount         int64
+	version               int
+	dep                   int
 }
 
 // Create a new state from a given trie
@@ -2360,6 +2367,34 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 // field on the VersionedWrite. Uses a type switch over val rather than path
 // because the caller of versionWritten passes T statically; this keeps the
 // dispatch driven by the type the consumer chose at the call site.
+// recordVW writes vw into both the legacy WriteSet and the per-path
+// typed maps.  Single canonical entry point for versionedWrites updates;
+// callers that previously did `sdb.versionedWrites.Set(vw)` directly are
+// migrated to this in E.2 so that the per-path maps stay in sync.
+//
+// The dual write currently costs an extra map-set per write (negligible
+// vs the existing legacy 2-level put).  When E.2 lands and readers
+// switch over, the legacy map is removed and this collapses to a single
+// per-path put.
+func (sdb *IntraBlockState) recordVW(vw VersionedWrite) {
+	if sdb.versionedWrites == nil {
+		sdb.versionedWrites = WriteSet{}
+	}
+	sdb.versionedWrites.Set(vw)
+	vwCopy := vw
+	sdb.versionedWritesByPath.set(&vwCopy)
+}
+
+// recordVR mirrors recordVW for versionedReads.
+func (sdb *IntraBlockState) recordVR(vr VersionedRead) {
+	if sdb.versionedReads == nil {
+		sdb.versionedReads = ReadSet{}
+	}
+	sdb.versionedReads.Set(vr)
+	vrCopy := vr
+	sdb.versionedReadsByPath.set(&vrCopy)
+}
+
 // setVWVal dual-populates VersionedWrite's legacy Val* field AND the new
 // Cell* pointer per Path-type.  Transitional migration: readers
 // progressively switch from vw.ValU256 to vw.CellU256.Value, until all
