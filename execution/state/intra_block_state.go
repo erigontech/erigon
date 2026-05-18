@@ -2534,13 +2534,20 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 		// and StoragePath (the calculator needs explicit per-slot DELETE
 		// entries since it can't use DomainDelPrefix). NoncePath and CodePath
 		// are dropped because selfdestruct resets them.
+		// Each emitted entry is a fresh value-copy of the per-path map's
+		// pointer.  Boundary callers (FlushVersionedWrites, parallel-exec
+		// result.TxOut) expect a frozen snapshot — subsequent in-tx activity
+		// (journal revert updateValX, RevertChanges delAddr) would otherwise
+		// alias the slice through the per-path pointers and corrupt the
+		// caller's snapshot.
 		for _, v := range vwrites {
 			if !selfDestructed ||
 				v.Path == SelfDestructPath ||
 				v.Path == BalancePath ||
 				v.Path == IncarnationPath ||
 				v.Path == StoragePath {
-				writes = append(writes, v)
+				vCopy := *v
+				writes = append(writes, &vCopy)
 			}
 		}
 	}
