@@ -837,11 +837,11 @@ func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64)
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		return false
-	}
 	if cfg.syncCfg.ChainTipMode() {
 		return true
+	}
+	if blockNum < cfg.blockReader.FrozenBlocks() {
+		return false
 	}
 	// Generate changesets for blocks within the reorg window of the batch end,
 	// so the node can handle reorgs at the tip.
