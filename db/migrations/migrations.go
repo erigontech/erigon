@@ -181,10 +181,7 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 // Returns (0, false, nil) when no version record exists yet.
 func readMajorVersion(db kv.RoDB) (major uint32, ok bool, err error) {
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		var minor, patch uint32
-		major, minor, patch, ok, err = rawdb.ReadDBSchemaVersion(tx)
-		_ = minor
-		_ = patch
+		major, _, _, ok, err = rawdb.ReadDBSchemaVersion(tx)
 		return err
 	})
 	return major, ok, err
