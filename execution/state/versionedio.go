@@ -63,6 +63,249 @@ const (
 
 type ReadSet map[accounts.Address]map[AccountKey]VersionedRead
 
+// PerPathReadSet is the cell-pipeline target shape for versionedReads:
+// per-path typed maps that hold *VersionedRead pointers directly,
+// eliminating the AccountKey{Path,Key} struct allocation on every probe
+// and collapsing non-storage paths to single-level lookups.  The legacy
+// ReadSet map type remains the source-of-truth during the E.1
+// transition; readers move to PerPathReadSet in E.2 (where the perf
+// win lands).  E.3 drops the legacy map and the VersionedRead struct
+// outside of serialisation boundaries.
+//
+// All maps are lazily allocated on first write.
+type PerPathReadSet struct {
+	address        map[accounts.Address]*VersionedRead
+	balance        map[accounts.Address]*VersionedRead
+	nonce          map[accounts.Address]*VersionedRead
+	incarnation    map[accounts.Address]*VersionedRead
+	selfDestruct   map[accounts.Address]*VersionedRead
+	createContract map[accounts.Address]*VersionedRead
+	code           map[accounts.Address]*VersionedRead
+	codeHash       map[accounts.Address]*VersionedRead
+	codeSize       map[accounts.Address]*VersionedRead
+	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedRead
+}
+
+// set inserts vr into the appropriate per-path map.  Mirrors ReadSet.Set
+// for the typed path.
+func (s *PerPathReadSet) set(vr *VersionedRead) {
+	switch vr.Path {
+	case AddressPath:
+		if s.address == nil {
+			s.address = map[accounts.Address]*VersionedRead{}
+		}
+		s.address[vr.Address] = vr
+	case BalancePath:
+		if s.balance == nil {
+			s.balance = map[accounts.Address]*VersionedRead{}
+		}
+		s.balance[vr.Address] = vr
+	case NoncePath:
+		if s.nonce == nil {
+			s.nonce = map[accounts.Address]*VersionedRead{}
+		}
+		s.nonce[vr.Address] = vr
+	case IncarnationPath:
+		if s.incarnation == nil {
+			s.incarnation = map[accounts.Address]*VersionedRead{}
+		}
+		s.incarnation[vr.Address] = vr
+	case SelfDestructPath:
+		if s.selfDestruct == nil {
+			s.selfDestruct = map[accounts.Address]*VersionedRead{}
+		}
+		s.selfDestruct[vr.Address] = vr
+	case CreateContractPath:
+		if s.createContract == nil {
+			s.createContract = map[accounts.Address]*VersionedRead{}
+		}
+		s.createContract[vr.Address] = vr
+	case CodePath:
+		if s.code == nil {
+			s.code = map[accounts.Address]*VersionedRead{}
+		}
+		s.code[vr.Address] = vr
+	case CodeHashPath:
+		if s.codeHash == nil {
+			s.codeHash = map[accounts.Address]*VersionedRead{}
+		}
+		s.codeHash[vr.Address] = vr
+	case CodeSizePath:
+		if s.codeSize == nil {
+			s.codeSize = map[accounts.Address]*VersionedRead{}
+		}
+		s.codeSize[vr.Address] = vr
+	case StoragePath:
+		if s.storage == nil {
+			s.storage = map[accounts.Address]map[accounts.StorageKey]*VersionedRead{}
+		}
+		inner := s.storage[vr.Address]
+		if inner == nil {
+			inner = map[accounts.StorageKey]*VersionedRead{}
+			s.storage[vr.Address] = inner
+		}
+		inner[vr.Key] = vr
+	}
+}
+
+// get probes the per-path map for path.  Returns (*VersionedRead, true)
+// on hit.  Single-level lookup for non-storage paths; two-level for
+// StoragePath where Key is the slot identifier.
+func (s *PerPathReadSet) get(addr accounts.Address, path AccountPath, key accounts.StorageKey) (*VersionedRead, bool) {
+	switch path {
+	case AddressPath:
+		vr, ok := s.address[addr]
+		return vr, ok
+	case BalancePath:
+		vr, ok := s.balance[addr]
+		return vr, ok
+	case NoncePath:
+		vr, ok := s.nonce[addr]
+		return vr, ok
+	case IncarnationPath:
+		vr, ok := s.incarnation[addr]
+		return vr, ok
+	case SelfDestructPath:
+		vr, ok := s.selfDestruct[addr]
+		return vr, ok
+	case CreateContractPath:
+		vr, ok := s.createContract[addr]
+		return vr, ok
+	case CodePath:
+		vr, ok := s.code[addr]
+		return vr, ok
+	case CodeHashPath:
+		vr, ok := s.codeHash[addr]
+		return vr, ok
+	case CodeSizePath:
+		vr, ok := s.codeSize[addr]
+		return vr, ok
+	case StoragePath:
+		inner := s.storage[addr]
+		if inner == nil {
+			return nil, false
+		}
+		vr, ok := inner[key]
+		return vr, ok
+	}
+	return nil, false
+}
+
+// PerPathWriteSet is the cell-pipeline target shape for versionedWrites.
+// Symmetric with PerPathReadSet — see that type for rationale.
+type PerPathWriteSet struct {
+	address        map[accounts.Address]*VersionedWrite
+	balance        map[accounts.Address]*VersionedWrite
+	nonce          map[accounts.Address]*VersionedWrite
+	incarnation    map[accounts.Address]*VersionedWrite
+	selfDestruct   map[accounts.Address]*VersionedWrite
+	createContract map[accounts.Address]*VersionedWrite
+	code           map[accounts.Address]*VersionedWrite
+	codeHash       map[accounts.Address]*VersionedWrite
+	codeSize       map[accounts.Address]*VersionedWrite
+	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite
+}
+
+func (s *PerPathWriteSet) set(vw *VersionedWrite) {
+	switch vw.Path {
+	case AddressPath:
+		if s.address == nil {
+			s.address = map[accounts.Address]*VersionedWrite{}
+		}
+		s.address[vw.Address] = vw
+	case BalancePath:
+		if s.balance == nil {
+			s.balance = map[accounts.Address]*VersionedWrite{}
+		}
+		s.balance[vw.Address] = vw
+	case NoncePath:
+		if s.nonce == nil {
+			s.nonce = map[accounts.Address]*VersionedWrite{}
+		}
+		s.nonce[vw.Address] = vw
+	case IncarnationPath:
+		if s.incarnation == nil {
+			s.incarnation = map[accounts.Address]*VersionedWrite{}
+		}
+		s.incarnation[vw.Address] = vw
+	case SelfDestructPath:
+		if s.selfDestruct == nil {
+			s.selfDestruct = map[accounts.Address]*VersionedWrite{}
+		}
+		s.selfDestruct[vw.Address] = vw
+	case CreateContractPath:
+		if s.createContract == nil {
+			s.createContract = map[accounts.Address]*VersionedWrite{}
+		}
+		s.createContract[vw.Address] = vw
+	case CodePath:
+		if s.code == nil {
+			s.code = map[accounts.Address]*VersionedWrite{}
+		}
+		s.code[vw.Address] = vw
+	case CodeHashPath:
+		if s.codeHash == nil {
+			s.codeHash = map[accounts.Address]*VersionedWrite{}
+		}
+		s.codeHash[vw.Address] = vw
+	case CodeSizePath:
+		if s.codeSize == nil {
+			s.codeSize = map[accounts.Address]*VersionedWrite{}
+		}
+		s.codeSize[vw.Address] = vw
+	case StoragePath:
+		if s.storage == nil {
+			s.storage = map[accounts.Address]map[accounts.StorageKey]*VersionedWrite{}
+		}
+		inner := s.storage[vw.Address]
+		if inner == nil {
+			inner = map[accounts.StorageKey]*VersionedWrite{}
+			s.storage[vw.Address] = inner
+		}
+		inner[vw.Key] = vw
+	}
+}
+
+func (s *PerPathWriteSet) get(addr accounts.Address, path AccountPath, key accounts.StorageKey) (*VersionedWrite, bool) {
+	switch path {
+	case AddressPath:
+		vw, ok := s.address[addr]
+		return vw, ok
+	case BalancePath:
+		vw, ok := s.balance[addr]
+		return vw, ok
+	case NoncePath:
+		vw, ok := s.nonce[addr]
+		return vw, ok
+	case IncarnationPath:
+		vw, ok := s.incarnation[addr]
+		return vw, ok
+	case SelfDestructPath:
+		vw, ok := s.selfDestruct[addr]
+		return vw, ok
+	case CreateContractPath:
+		vw, ok := s.createContract[addr]
+		return vw, ok
+	case CodePath:
+		vw, ok := s.code[addr]
+		return vw, ok
+	case CodeHashPath:
+		vw, ok := s.codeHash[addr]
+		return vw, ok
+	case CodeSizePath:
+		vw, ok := s.codeSize[addr]
+		return vw, ok
+	case StoragePath:
+		inner := s.storage[addr]
+		if inner == nil {
+			return nil, false
+		}
+		vw, ok := inner[key]
+		return vw, ok
+	}
+	return nil, false
+}
+
 func (a ReadSet) Merge(b ReadSet) ReadSet {
 	if a == nil && b == nil {
 		return nil
