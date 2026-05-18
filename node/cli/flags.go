@@ -18,7 +18,6 @@ package cli
 
 import (
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -91,26 +90,6 @@ var (
 		Name:  "prune.distance.blocks",
 		Usage: `Keep block history for the latest N blocks (default: everything)`,
 	}
-	// mTLS flags
-	TLSFlag = cli.BoolFlag{
-		Name:  "tls",
-		Usage: "Enable TLS handshake",
-	}
-	TLSCertFlag = cli.StringFlag{
-		Name:  "tls.cert",
-		Usage: "Specify certificate",
-		Value: "",
-	}
-	TLSKeyFlag = cli.StringFlag{
-		Name:  "tls.key",
-		Usage: "Specify key file",
-		Value: "",
-	}
-	TLSCACertFlag = cli.StringFlag{
-		Name:  "tls.cacert",
-		Usage: "Specify certificate authority",
-		Value: "",
-	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
@@ -150,11 +129,6 @@ var (
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
-	}
-
-	HealthCheckFlag = cli.BoolFlag{
-		Name:  "healthcheck",
-		Usage: "Enable grpc health check",
 	}
 
 	HTTPReadTimeoutFlag = cli.DurationFlag{
@@ -234,7 +208,23 @@ var (
 	}
 )
 
+// BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
+// entry point for flag-to-config mapping — it calls utils.SetEthConfig internally
+// and then applies the remaining flags defined in this package.
+//
+// After this function returns, the config is fully populated from CLI flags.
+func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+// Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
@@ -272,7 +262,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
 		sizeVal := datasize.ByteSize(0)
 		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = sizeVal
 	}
@@ -329,53 +319,73 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
-	pruneMode := f.String(PruneModeFlag.Name, PruneModeFlag.DefaultText, PruneModeFlag.Usage)
-	pruneBlockDistance := f.Uint64(PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value, PruneBlocksDistanceFlag.Usage)
-	pruneDistance := f.Uint64(PruneDistanceFlag.Name, PruneDistanceFlag.Value, PruneDistanceFlag.Usage)
+	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
+	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
+	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
 
-	var distance, blockDistance uint64 = math.MaxUint64, math.MaxUint64
-	if pruneBlockDistance != nil {
-		blockDistance = *pruneBlockDistance
-	}
-	if pruneDistance != nil {
-		distance = *pruneDistance
-	}
-
-	mode, err := prune.FromCli(*pruneMode, distance, blockDistance)
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 
 	cfg.Prune = mode
 
-	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
-		err := cfg.BatchSize.UnmarshalText([]byte(*v))
+	if v := cobraStringValueOrDefault(f, BatchSizeFlag.Name, BatchSizeFlag.Value); v != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(v))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
-	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
+	if v := cobraStringValueOrDefault(f, EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value); v != "" {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
-		err := size.UnmarshalText([]byte(*v))
+		err := size.UnmarshalText([]byte(v))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
 
-	cfg.StateStream = true
-	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
-		cfg.StateStream = false
-	}
-	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
-		cfg.ExperimentalBAL = *v
-	}
+	cfg.StateStream = !cobraBoolValueOrDefault(f, StateStreamDisableFlag.Name, StateStreamDisableFlag.Value)
+	cfg.ExperimentalBAL = cobraBoolValueOrDefault(f, ExperimentalBALFlag.Name, ExperimentalBALFlag.Value)
 
-	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {
+	if cobraBoolValueOrDefault(f, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value) {
 		cfg.ChaosMonkey = true
 	}
+}
+
+func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetString(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetBool(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
 }
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
@@ -447,6 +457,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
+		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
@@ -534,9 +546,9 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit
 	}
-	if ctx.Bool(TLSFlag.Name) {
-		certFile := ctx.String(TLSCertFlag.Name)
-		keyFile := ctx.String(TLSKeyFlag.Name)
+	if ctx.Bool(utils.TLSFlag.Name) {
+		certFile := ctx.String(utils.TLSCertFlag.Name)
+		keyFile := ctx.String(utils.TLSKeyFlag.Name)
 		if certFile == "" {
 			log.Warn("Could not establish TLS grpc: missing certificate")
 			return
@@ -547,7 +559,7 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
-		cfg.TLSCACert = ctx.String(TLSCACertFlag.Name)
+		cfg.TLSCACert = ctx.String(utils.TLSCACertFlag.Name)
 	}
-	cfg.HealthCheck = ctx.Bool(HealthCheckFlag.Name)
+	cfg.HealthCheck = ctx.Bool(utils.HealthCheckFlag.Name)
 }

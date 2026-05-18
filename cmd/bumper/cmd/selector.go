@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -25,6 +25,10 @@ type SelectorModel struct {
 	confirmMode    bool
 	canceled       bool
 	domainTypesMap map[string]string
+
+	width      int
+	height     int
+	viewOffset int
 }
 
 // NewSelectorModel initializes based on include/exclude lists
@@ -64,6 +68,9 @@ func (m *SelectorModel) Init() tea.Cmd { return nil }
 
 func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -77,6 +84,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursorCol > 0 {
 				m.cursorCol--
 				m.cursorRow = 0
+				m.viewOffset = 0
 			}
 		case "right", "l":
 			if m.confirmMode {
@@ -86,6 +94,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.cursorCol < 1 {
 				m.cursorCol++
 				m.cursorRow = 0
+				m.viewOffset = 0
 			}
 		case "up", "k":
 			if m.confirmMode {
@@ -94,6 +103,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.cursorRow > 0 {
 				m.cursorRow--
+				m.clampViewOffset()
 			}
 		case "down", "j":
 			if m.confirmMode {
@@ -104,6 +114,7 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				maxRow := m.columnLength() - 1
 				if m.cursorRow < maxRow {
 					m.cursorRow++
+					m.clampViewOffset()
 				}
 			}
 		case "enter", " ":
@@ -124,12 +135,54 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *SelectorModel) View() string {
+// availableListHeight returns how many list rows fit in the current terminal.
+// header: margin-top(1) + content(1) + margin-bottom(1) + extra \n(1) = 4 lines
+// footer: blank line(1) + confirm/hint line(1) = 2 lines; plus 1 safety margin
+func (m *SelectorModel) availableListHeight() int {
+	if m.height == 0 {
+		return 999
+	}
+	avail := m.height - 7
+	if avail < 1 {
+		avail = 1
+	}
+	return avail
+}
+
+func (m *SelectorModel) clampViewOffset() {
+	avail := m.availableListHeight()
+	if m.cursorRow < m.viewOffset {
+		m.viewOffset = m.cursorRow
+	}
+	if m.cursorRow >= m.viewOffset+avail {
+		m.viewOffset = m.cursorRow - avail + 1
+	}
+	maxOffset := m.columnLength() - avail
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.viewOffset > maxOffset {
+		m.viewOffset = maxOffset
+	}
+	if m.viewOffset < 0 {
+		m.viewOffset = 0
+	}
+}
+
+func (m *SelectorModel) View() tea.View {
 	header := "←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm"
 	var s strings.Builder
 	s.WriteString(lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n")
+
+	avail := m.availableListHeight()
 	maxRows := max(len(m.domains), len(m.exts))
-	for i := 0; i < maxRows; i++ {
+	start := m.viewOffset
+	end := start + avail
+	if end > maxRows {
+		end = maxRows
+	}
+
+	for i := start; i < end; i++ {
 		left := "   "
 		if m.cursorCol == 0 && m.cursorRow == i && !m.confirmMode {
 			left = "> "
@@ -171,7 +224,9 @@ func (m *SelectorModel) View() string {
 	} else {
 		s.WriteString("(Tab to switch to OK/Cancel)\n")
 	}
-	return s.String()
+	v := tea.NewView(s.String())
+	v.AltScreen = true
+	return v
 }
 
 func (m *SelectorModel) toggleCurrent() {

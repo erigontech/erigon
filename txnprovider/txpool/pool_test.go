@@ -82,12 +82,30 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 			TipCap: *uint256.NewInt(tip),
 			FeeCap: *uint256.NewInt(feeCap),
 		},
+		// One placeholder auth tuple so Txn.GetAuthorizations() length matches
+		// the AuthAndNonces the test will set: the pool reads the on-tx list
+		// for gas billing and the non-empty check (validateTx).
+		Authorizations: []types.Authorization{{}},
 	}
 	return &TxnSlot{
 		Txn:      txn,
 		Nonce:    nonce,
 		SenderID: senderID,
 	}
+}
+
+func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
+	tx, err := coreDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, addr[:], value, txNum, nil))
+	require.NoError(t, sd.Flush(ctx, tx))
+	sd.Close()
+	require.NoError(t, tx.Commit())
 }
 
 func TestNonceFromAddress(t *testing.T) {
@@ -99,7 +117,7 @@ func TestNonceFromAddress(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -412,10 +430,10 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	authLen := rlp.U64Len(chainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(0) // nonce
-	require.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
-	require.NoError(t, rlp.EncodeOptionalAddress(&pubKey, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(0, data, b[:]))
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(chainID, data, b[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&pubKey, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(0, data, b[:]))
 
 	// Prepare hash data exactly as before
 	hashData := []byte{params.SetCodeMagicPrefix}
@@ -449,7 +467,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotNil(pool)
 	var stateVersionID uint64 = 0
@@ -552,7 +570,7 @@ func TestReverseNonces(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -667,7 +685,7 @@ func TestTxnPoke(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -881,7 +899,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
-			cache := kvcache.NewDummy()
+			cache := kvcache.NewSimple()
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
@@ -919,7 +937,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			view, err := cache.View(ctx, tx)
 			asrt.NoError(err)
 			pool.blockGasLimit.Store(30_000_000)
-			reason := pool.validateTx(txn, false, view)
+			reason, err := pool.validateTx(txn, false, view)
+			asrt.NoError(err)
 
 			if reason != test.expected {
 				t.Errorf("expected %v, got %v", test.expected, reason)
@@ -937,7 +956,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -996,8 +1015,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
 	copier.Copy(&chainConfig, testforks.Forks["Prague"])
-	chainConfig.ChainID = maxUint256.ToBig()
-	cache := kvcache.NewDummy()
+	chainConfig.ChainID = maxUint256
+	cache := kvcache.NewSimple()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
@@ -1030,8 +1049,93 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	view, err := cache.View(ctx, tx)
 	require.NoError(t, err)
 
-	result := pool.validateTx(txn, false /* isLocal */, view)
+	result, err := pool.validateTx(txn, false /* isLocal */, view)
+	require.NoError(t, err)
 	assert.Equal(t, txpoolcfg.Success, result)
+}
+
+func TestValidateTxReturnsSenderInfoError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 1)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
+	logger := log.New()
+
+	pool, err := New(ctx, ch, nil, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	require.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
+
+	var badAddr [20]byte
+	badAddr[0] = 1
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+
+	txn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	txn.IDHash[0] = 0xaa
+	var txns TxnSlots
+	txns.Append(txn, badAddr[:], true)
+
+	require.NoError(t, pool.senders.registerNewSenders(&txns, logger))
+
+	tx, err := coreDB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	view, err := cache.View(ctx, tx)
+	require.NoError(t, err)
+
+	reason, err := pool.validateTx(txn, true, view)
+	require.Error(t, err)
+	require.Equal(t, txpoolcfg.ErrGetSenderInfo, reason)
+	require.ErrorContains(t, err, "validateTx: sender info")
+	require.ErrorContains(t, err, "idHash=aa")
+	require.ErrorContains(t, err, "senderID=1")
+}
+
+func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 1)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cache := kvcache.New(kvcache.DefaultCoherentConfig)
+	logger := log.New()
+
+	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	require.NoError(t, err)
+	pool.blockGasLimit.Store(30_000_000)
+
+	var badAddr [20]byte
+	badAddr[0] = 1
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+
+	var goodAddr [20]byte
+	goodAddr[0] = 2
+	goodAcc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 1,
+	}
+	writeTestSenderState(t, ctx, coreDB, logger, goodAddr, accounts3.SerialiseV3(&goodAcc), 1)
+
+	badTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	badTxn.IDHash[0] = 1
+	goodTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	goodTxn.IDHash[0] = 2
+
+	var txns TxnSlots
+	txns.Append(badTxn, badAddr[:], true)
+	txns.Append(goodTxn, goodAddr[:], true)
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.ErrGetSenderInfo, txpoolcfg.Success}, reasons)
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
 }
 
 // Blob gas price bump + other requirements to replace existing txns in the pool
@@ -1274,7 +1378,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 
 	key, err := crypto.GenerateKey()
 	require.NoError(err)
-	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID.ToBig()), key)
+	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID), key)
 	require.NoError(err)
 	dt := &wrapper.Tx.DynamicFeeTransaction
 	v, r, s := signedTx.RawSignatureValues()
@@ -1477,6 +1581,110 @@ func TestBlobSlots(t *testing.T) {
 	}
 }
 
+// TestOsakaProofShapeMismatchDiscardsCompletely verifies that when Osaka activates,
+// pre-Osaka-shape blob transactions are fully discarded by best() — not just removed
+// from the Pending sub-pool. This ensures totalBlobsInPool and byHash are cleaned up,
+// so new Osaka-shaped blob transactions can be admitted.
+func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	require := require.New(t)
+
+	ch := make(chan Announcements, 5)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	cfg.TotalBlobPoolLimit = 2 // tight limit: one 2-blob txn fills it
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	// Fund one account
+	var addr [20]byte
+	addr[0] = 1
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:       0,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        math.MaxUint64,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	require.NoError(err)
+
+	// Step 1: Add a pre-Osaka-shape blob txn (2 blobs, 2 proofs — one per blob).
+	blobTxn := makeBlobTxn()
+	blobTxn.IDHash[0] = 33
+	blobTxn.Nonce = 0
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
+	}
+
+	// Sanity: pool has 2 blobs and 1 pending txn.
+	require.Equal(uint64(2), pool.totalBlobsInPool.Load())
+	require.Equal(1, pool.pending.Len())
+
+	// Step 2: Simulate Osaka activation.
+	pool.isPostOsaka.Store(true)
+
+	// Step 3: Trigger best() via PeekBest — it will detect the proof-shape mismatch
+	// and should fully discard the pre-Osaka txn.
+	var txnsRlp TxnsRlp
+	_, err = pool.PeekBest(ctx, 10, &txnsRlp, 0)
+	require.NoError(err)
+
+	// Step 4: Verify the pre-Osaka txn was fully discarded.
+	require.Equal(0, pool.pending.Len(), "txn must be removed from pending")
+	require.Equal(uint64(0), pool.totalBlobsInPool.Load(), "blob counter must be decremented to 0")
+	_, inByHash := pool.byHash[string(blobTxn.IDHash[:])]
+	require.False(inByHash, "txn must be removed from byHash")
+
+	// Step 5: A valid Osaka-shaped blob txn must now be admittable (not rejected
+	// with BlobPoolOverflow), proving the counters were properly cleaned up.
+	chainID := testforks.Forks["Cancun"].ChainID
+	osakaRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, 2)
+	parseCtx := NewTxnParseContext(*chainID)
+	parseCtx.WithSender(false)
+	var osakaSlot TxnSlot
+	_, err = parseCtx.ParseTransaction(osakaRlp, 0, &osakaSlot, nil, false, true, nil)
+	require.NoError(err)
+	osakaSlot.IDHash[0] = 34
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&osakaSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
+	}
+}
+
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -1493,7 +1701,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
-	chainID := uint256.MustFromBig(testforks.Forks["Osaka"].ChainID)
+	chainID := testforks.Forks["Osaka"].ChainID
 	rawTxn := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, params.MaxBlobsPerTxn)
 
 	parseCtx := NewTxnParseContext(*chainID)
@@ -1601,7 +1809,7 @@ func TestGasLimitChanged(t *testing.T) {
 	db := memdb.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 	var stateVersionID uint64 = 0
@@ -1680,7 +1888,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotEqual(pool, nil)
 
@@ -1740,7 +1948,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)
@@ -1768,7 +1976,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	cfg.MaxNonceGap = 64 // explicit, same as default
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 	require.NotNil(pool)
 
@@ -1853,7 +2061,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 		cfg2 := txpoolcfg.DefaultConfig
 		cfg2.MaxNonceGap = 10 // small gap for this test
 		pool2, err := New(ctx, ch2, db2, coreDB2, cfg2, kvcache.New(kvcache.DefaultCoherentConfig),
-			chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+			chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		acc2 := accounts3.Account{
@@ -1926,8 +2134,8 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
 
-	// DummyCache reads directly from the DB — avoids coherence-version coupling.
-	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewDummy(), chain.TestChainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	// SimpleCache — avoids coherence-version coupling.
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	req.NoError(err)
 	req.NotNil(pool)
 
@@ -1936,7 +2144,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	h0 := gointerfaces.ConvertHashToH256([32]byte{})
 
 	// writeAccount writes addr1 to coreDB at the given nonce so that senders.info
-	// (which reads from the DB when using DummyCache) returns the expected value.
+	// (which reads from cache if present, otherwise from the DB) returns the expected value.
 	writeAccount := func(nonce, txNum uint64) {
 		tx, werr := coreDB.BeginTemporalRw(ctx)
 		req.NoError(werr)
@@ -2019,4 +2227,116 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	pending, _, queued := pool.CountContent()
 	asrt.Equal(0, pending, "T2 must be evicted: on-chain nonce=2 > T2.nonce=1")
 	asrt.Equal(0, queued, "no queued txns expected")
+}
+
+// TestQueuedTxnPromotedAfterStaleAddLocal reproduces the failure mode observed
+// on the kurtosis assertoor_regular_test in CI run 25366656375: a transaction
+// added via AddLocalTxns gets misclassified into queued because senders.info
+// returned the previous block's sender nonce, and then stays queued forever
+// because no subsequent block touches that sender on-chain.
+//
+// Background: PR #20195 (pre-commit dispatch + overlay-aware RPC) lets an RPC
+// client see a receipt — and submit the next-nonce tx — before the txpool has
+// processed the dispatched StateChangeBatch. PR #20515 narrowed but did not
+// close the resulting race: AddLocalTxns can still capture a cacheView whose
+// SimpleCache lookups return the pre-block sender nonce. With NoNonceGaps
+// unset, the new tx lands in queued. The only mechanism that re-evaluates a
+// queued sender's bits is `addTxnsOnNewBlock`'s sendersWithChangedState loop,
+// which depends on the sender appearing in stateChanges. If the sender's only
+// outstanding tx is the misclassified one, its on-chain state never changes
+// again and the tx is stuck (until the dormancy sweep evicts it).
+//
+// Scenario:
+//  1. addr1 starts at on-chain nonce=0; OnNewBlock seeds the SimpleCache.
+//  2. The chain advances addr1 to nonce=1 but the pool has not yet received
+//     the corresponding StateChangeBatch. Modeled directly: write the new
+//     on-chain state to the DB while the SimpleCache still holds nonce=0
+//     from the seed batch — same observable conditions as the production
+//     race when AddLocalTxns reads the cache before cache.OnNewBlock fires.
+//  3. AddLocalTxns adds a nonce=1 tx. The cache hit returns nonce=0,
+//     NoNonceGaps stays unset, the tx lands in queued.
+//  4. A subsequent block arrives whose stateChanges does NOT touch addr1.
+//  5. Assert: the queued tx has been re-evaluated against current state
+//     (DB returns nonce=1) and promoted to pending.
+//
+// Today step 5 fails: addr1 is not in sendersWithChangedState for the new
+// block, no onSenderStateChange call fires, and the tx stays queued.
+func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+
+	// SimpleCache matches the in-process embedded RPC daemon configuration in
+	// node/eth/backend.go and the cache the production failure was observed on.
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewSimple(), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	// 1) Bootstrap addr1 at nonce=0 in both DB and SimpleCache.
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// 2) Chain advances addr1 to nonce=1 (a tx from addr1 mined) but the pool
+	// has not yet processed the StateChangeBatch for that block. The DB now
+	// reflects the new on-chain state; the SimpleCache still holds nonce=0.
+	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(1), 1)
+
+	// 3) AddLocalTxns runs in this race window. The SimpleCache hit returns
+	// the stale nonce=0, so the nonce=1 tx is misclassified into queued.
+	txn := newTestTxnSlot(1, 0, 300_000, 300_000, 100_000)
+	txn.IDHash[0] = 1
+	var slots TxnSlots
+	slots.Append(txn, addr1[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+	for _, r := range reasons {
+		asrt.Equal(txpoolcfg.Success, r, r.String())
+	}
+	pending, _, queued := pool.CountContent()
+	asrt.Equal(0, pending, "race outcome: tx misclassified into queued, not pending")
+	asrt.Equal(1, queued, "race outcome: tx misclassified into queued")
+
+	// 4) Next block: stateChanges does NOT contain addr1. The sender's only
+	// outstanding tx is the stuck queued one, so its on-chain state hasn't
+	// changed since the block in step 2.
+	h2 := gointerfaces.ConvertHashToH256([32]byte{2})
+	block2Change := &remoteproto.StateChangeBatch{
+		StateVersionId: 2, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 2, BlockHash: h2}},
+	}
+	req.NoError(pool.OnNewBlock(ctx, block2Change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// 5) The queued tx must have been re-evaluated against current state
+	// (DB returns nonce=1) and promoted to pending.
+	pending, _, queued = pool.CountContent()
+	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
+	asrt.Equal(0, queued, "queued must be empty after promotion")
 }

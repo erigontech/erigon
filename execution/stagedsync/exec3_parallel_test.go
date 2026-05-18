@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type OpType int
@@ -524,11 +523,10 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -589,7 +587,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 
 	applyResults := make(chan applyResult, 1000)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
 
 	// TODO get results back
 
@@ -648,11 +646,10 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 				db:          db,
 			},
 			doms:   domains,
-			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
+		workerCount: runtime.NumCPU() - 1,
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -706,7 +703,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			txExecutor: txExecutor{
 				cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
 				doms:   domains,
-				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 				logger: logger,
 			},
 			workerCount: runtime.NumCPU() - 1,
@@ -920,6 +917,12 @@ func BenchmarkLessConflicts(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -953,6 +956,12 @@ func BenchmarkLessConflictsWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -976,6 +985,12 @@ func BenchmarkMoreConflicts(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -1009,6 +1024,12 @@ func BenchmarkMoreConflictsWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -1032,6 +1053,12 @@ func BenchmarkRandomTx(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
@@ -1065,6 +1092,12 @@ func BenchmarkRandomTxWithMetadata(b *testing.B) {
 	numReads := []int{100, 200}
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		rng := rand.New(rand.NewSource(0))
@@ -1088,6 +1121,12 @@ func BenchmarkTxWithLongTailRead(b *testing.B) {
 	numReads := []int{20, 100, 200}
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
+	if testing.Short() {
+		totalTxs = totalTxs[:1]
+		numReads = numReads[:1]
+		numWrites = numWrites[:1]
+		numNonIO = numNonIO[:1]
+	}
 
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {

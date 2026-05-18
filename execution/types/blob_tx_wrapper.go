@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -77,7 +76,7 @@ func (li BlobKzgs) payloadSize() int {
 }
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	for _, cmtmt := range li {
@@ -119,7 +118,7 @@ func (li KZGProofs) payloadSize() int {
 }
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	for _, proof := range li {
@@ -164,7 +163,7 @@ func (blobs Blobs) payloadSize() int {
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	for _, blob := range blobs {
@@ -276,7 +275,7 @@ func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
 func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
 func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
 func (txw *BlobTxWrapper) GetTipCap() *uint256.Int  { return txw.Tx.GetTipCap() }
-func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
 	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int { return txw.Tx.GetFeeCap() }
@@ -312,7 +311,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
 
-func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
+func (txw *BlobTxWrapper) SigningHash(chainID *uint256.Int) common.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
 
@@ -397,15 +396,15 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	return
 }
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	payloadSize := txw.payloadSize()
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	bw := bytes.Buffer{}
@@ -432,6 +431,43 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	}
 	return nil
 }
+
+// ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
+// wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
+// Returns the re-encoded wrapped transaction bytes.
+// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
+	kzgCtx := libkzg.Ctx()
+
+	cellProofs := make(KZGProofs, 0, len(txw.Blobs)*int(goethkzg.CellsPerExtBlob))
+	for i := range txw.Blobs {
+		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&txw.Blobs[i]), 4)
+		if err != nil {
+			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
+		}
+		for _, p := range &proofs {
+			cellProofs = append(cellProofs, KZGProof(p))
+		}
+	}
+
+	// Mutate in-place for marshalling, then restore.
+	origVersion := txw.WrapperVersion
+	origProofs := txw.Proofs
+	txw.WrapperVersion = 1
+	txw.Proofs = cellProofs
+
+	var buf bytes.Buffer
+	err := txw.MarshalBinaryWrapped(&buf)
+
+	txw.WrapperVersion = origVersion
+	txw.Proofs = origProofs
+
+	if err != nil {
+		return nil, fmt.Errorf("marshal converted wrapper: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }

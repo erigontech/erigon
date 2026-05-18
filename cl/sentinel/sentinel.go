@@ -183,6 +183,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		ConnectedF: s.onConnection,
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
+			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
 			s.peers.RemovePeer(peerId)
 		},
 	})
@@ -192,7 +193,6 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	//go s.forkWatcher()
-	//go s.observeBandwidth(s.ctx)
 
 	return s.LocalNode(), nil
 }
@@ -276,7 +276,7 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	enrStr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.p2p.Host().Addrs()))
 	for _, addr := range s.p2p.Host().Addrs() {
-		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
+		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/p2p/%s", addr.String(), pid))
 	}
 	discoveryAddresses = []string{}
 

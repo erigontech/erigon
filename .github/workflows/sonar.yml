@@ -2,22 +2,12 @@ name: SonarCloud
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - 'release/**'
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - '.github/workflows/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - '.github/workflows/**'
+  workflow_call:
+    inputs:
+      cache-warming-only:
+        description: "Compile test binaries only; skip test execution (for cache warming runs)"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -25,14 +15,6 @@ defaults:
 
 jobs:
   sonar:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
     runs-on: ubuntu-24.04
 
     steps:
@@ -50,18 +32,34 @@ jobs:
           filter: ''
           submodules: true
           lfs: tests
+          cleanup-space: true
           ramdisk: true
 
       - name: Run tests with coverage
+        if: '!inputs.cache-warming-only'
         env:
           SKIP_FLAKY_TESTS: 'true'
         run: make test-sonar-coverage
 
+      - name: Build test binaries (cache warming)
+        if: inputs.cache-warming-only
+        run: go test -run=^$ -cover ./...
+
       - name: SonarCloud scan
-        uses: SonarSource/sonarqube-scan-action@v7
+        if: '!inputs.cache-warming-only'
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

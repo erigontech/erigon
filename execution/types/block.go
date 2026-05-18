@@ -179,10 +179,10 @@ func (h *Header) EncodingSize() int {
 func (h *Header) EncodeRLP(w io.Writer) error {
 	encodingSize := h.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// Prefix
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -239,13 +239,13 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeUint256(h.Number, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.GasLimit, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasUsed, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.GasUsed, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.Time, w, b[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
@@ -253,7 +253,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if len(h.AuRaSeal) > 0 {
-		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(h.AuRaStep, w, b[:]); err != nil {
 			return err
 		}
 		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
@@ -293,12 +293,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BlobGasUsed != nil {
-		if err := rlp.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.BlobGasUsed, w, b[:]); err != nil {
 			return err
 		}
 	}
 	if h.ExcessBlobGas != nil {
-		if err := rlp.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.ExcessBlobGas, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -334,7 +334,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.SlotNumber != nil {
-		if err := rlp.EncodeInt(*h.SlotNumber, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.SlotNumber, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -374,13 +374,13 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&h.Number); err != nil {
 		return fmt.Errorf("read Number: %w", err)
 	}
-	if h.GasLimit, err = s.Uint(); err != nil {
+	if h.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if h.GasUsed, err = s.Uint(); err != nil {
+	if h.GasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasUsed: %w", err)
 	}
-	if h.Time, err = s.Uint(); err != nil {
+	if h.Time, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Time: %w", err)
 	}
 	if h.Extra, err = s.Bytes(); err != nil {
@@ -392,7 +392,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
-		if h.AuRaStep, err = s.Uint(); err != nil {
+		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
 		if h.AuRaSeal, err = s.Bytes(); err != nil {
@@ -431,7 +431,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var blobGasUsed uint64
-	if blobGasUsed, err = s.Uint(); err != nil {
+	if blobGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
 	h.BlobGasUsed = &blobGasUsed
@@ -441,7 +441,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var excessBlobGas uint64
-	if excessBlobGas, err = s.Uint(); err != nil {
+	if excessBlobGas, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
 	h.ExcessBlobGas = &excessBlobGas
@@ -481,7 +481,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var slotNumber uint64
-	if slotNumber, err = s.Uint(); err != nil {
+	if slotNumber, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
 	h.SlotNumber = &slotNumber
@@ -510,12 +510,12 @@ type headerMarshaling struct {
 // RLP encoding.
 func (h *Header) Hash() (hash common.Hash) {
 	if h.mutable {
-		return rlpHash(h)
+		return RlpHash(h)
 	}
 	if hash := h.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash = rlpHash(h)
+	hash = RlpHash(h)
 	h.hash.Store(&hash)
 	return hash
 }
@@ -523,7 +523,7 @@ func (h *Header) Hash() (hash common.Hash) {
 // CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) CalcHash() (hash common.Hash) {
-	hash = rlpHash(h)
+	hash = RlpHash(h)
 	if hashLoaded := h.hash.Load(); hashLoaded != nil {
 		if hashLoaded.Cmp(hash) == 0 {
 			return hash
@@ -701,6 +701,9 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
+	// BlockAccessList holds the RLP-encoded block access list for Amsterdam+
+	// blocks.  Nil for pre-Amsterdam blocks.
+	BlockAccessList []byte
 }
 
 func (r RawBlock) EncodingSize() int {
@@ -808,14 +811,14 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := rlp.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
 	for _, txn := range rb.Transactions {
@@ -891,11 +894,11 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -976,10 +979,10 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -1180,7 +1183,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(rlp.ListSize(size))
+	bb.size.Store(uint64(rlp.ListLen(int(size))))
 
 	// decode header
 	var h Header
@@ -1236,10 +1239,10 @@ func (bb *Block) EncodingSize() int {
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Header
@@ -1403,7 +1406,7 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
 		return empty.UncleHash
 	}
-	return rlpHash(uncles)
+	return RlpHash(uncles)
 }
 
 func CopyTxs(in Transactions) Transactions {
@@ -1516,7 +1519,7 @@ func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 }
 
 func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
-	if err := rlp.EncodeStructSizePrefix(_len, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(_len, w, b); err != nil {
 		return err
 	}
 	for _, item := range arr {

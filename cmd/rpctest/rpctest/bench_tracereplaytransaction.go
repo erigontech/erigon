@@ -17,46 +17,27 @@
 package rpctest
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 )
 
 func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) error {
 	setRoutes(erigonUrl, gethUrl)
 
-	var rec *bufio.Writer
-	if recordFile != "" {
-		f, err := os.Create(recordFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFile, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+	rec, errs, cleanup, err := openWriters(recordFile, errorFile)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFile != "" {
-		ferr, err := os.Create(errorFile)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFile, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer cleanup()
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
 	for bn := blockFrom; bn < blockTo; bn++ {
-		var b EthBlockByNumber
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
-		if res.Err != nil {
-			return fmt.Errorf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, false, nil)
+		if err != nil {
+			return err
 		}
-		if b.Error != nil {
-			return fmt.Errorf("retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
+		if skip {
+			continue
 		}
 		for _, txn := range b.Result.Transactions {
 

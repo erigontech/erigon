@@ -109,7 +109,7 @@ func TestEvictionInUnexpectedOrder(t *testing.T) {
 }
 
 func TestEviction(t *testing.T) {
-	require, ctx := require.New(t), context.Background()
+	require, ctx := require.New(t), t.Context()
 	cfg := DefaultCoherentConfig
 	cfg.CacheSize = 21
 	cfg.NewBlockWait = 0
@@ -176,7 +176,7 @@ func TestAPI(t *testing.T) {
 	require := require.New(t)
 
 	// Create a context with timeout for the entire test
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	c := New(DefaultCoherentConfig)
@@ -444,8 +444,8 @@ func TestAPI(t *testing.T) {
 		fmt.Printf("done4: \n")
 	}()
 	// TODO: Used in other places too cant modify this.
-	// err := db.View(context.Background(), func(tx kv.Tx) error {
-	// 	_, err := AssertCheckValues(context.Background(), tx, c)
+	// err := db.View(t.Context(), func(tx kv.Tx) error {
+	// 	_, err := AssertCheckValues(t.Context(), tx, c)
 	// 	require.NoError(err)
 	// 	return nil
 	// })
@@ -519,7 +519,7 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 
 func TestCode(t *testing.T) {
 	t.Skip("TODO: use state reader/writer instead of Put()")
-	require, ctx := require.New(t), context.Background()
+	require, ctx := require.New(t), t.Context()
 	c := New(DefaultCoherentConfig)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	k1, k2 := [20]byte{1}, [20]byte{2}

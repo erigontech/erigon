@@ -4,6 +4,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -102,11 +103,11 @@ func (t *LogTracer) captureLog(address common.Address, topics []common.Hash, dat
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
-		BlockNumber: t.blockNumber,
+		BlockNumber: hexutil.Uint64(t.blockNumber),
 		BlockHash:   t.blockHash,
 		TxHash:      t.txHash,
-		TxIndex:     t.txIdx,
-		Index:       uint(t.count),
+		TxIndex:     hexutil.Uint(t.txIdx),
+		Index:       hexutil.Uint(t.count),
 	})
 	t.count++
 }

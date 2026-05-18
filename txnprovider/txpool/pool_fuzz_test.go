@@ -248,25 +248,25 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
 	buf[0] = DynamicFeeTxnType
 	p := 1
-	p += rlp.EncodeListPrefix(dataLen, buf[p:])
-	p += rlp.EncodeU64(1, buf[p:]) //chainID
-	p += rlp.EncodeU64(slot.Nonce, buf[p:])
+	p += rlp.EncodeListPrefixToBuf(dataLen, buf[p:])
+	p += rlp.EncodeU64ToBuf(1, buf[p:]) //chainID
+	p += rlp.EncodeU64ToBuf(slot.Nonce, buf[p:])
 	bb := bytes.NewBuffer(buf[p:p])
 	_ = tip.EncodeRLP(bb)
 	p += rlp.Uint256Len(tip)
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = feeCap.EncodeRLP(bb)
 	p += rlp.Uint256Len(feeCap)
-	p += rlp.EncodeU64(0, buf[p:])            //gas
-	p += rlp.EncodeString2([]byte{}, buf[p:]) //destrination addr
+	p += rlp.EncodeU64ToBuf(0, buf[p:])           //gas
+	p += rlp.EncodeStringToBuf([]byte{}, buf[p:]) //destrination addr
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = value.EncodeRLP(bb)
 	p += rlp.Uint256Len(value)
-	p += rlp.EncodeString2(data, buf[p:]) //data
-	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
-	p += rlp.EncodeU64(1, buf[p:])        //v
-	p += rlp.EncodeU64(1, buf[p:])        //r
-	p += rlp.EncodeU64(1, buf[p:])        //s
+	p += rlp.EncodeStringToBuf(data, buf[p:])  //data
+	p += rlp.EncodeListPrefixToBuf(0, buf[p:]) // access list
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        //v
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        //r
+	p += rlp.EncodeU64ToBuf(1, buf[p:])        //s
 	_ = p
 	return buf
 }
@@ -334,7 +334,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		cfg := txpoolcfg.DefaultConfig
 		sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		err = pool.start(ctx)
@@ -560,7 +560,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(p2pReceived, TxnSlots{}, "after_flush")
 		checkNotify(p2pReceived, TxnSlots{}, "after_flush")
 
-		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		p2, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
 		p2.senders = pool.senders // senders are not persisted

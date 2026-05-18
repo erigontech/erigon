@@ -63,6 +63,9 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	if overrides.Withdrawals != nil {
 		return errors.New(`block override "withdrawals" is not supported for this RPC method`)
 	}
+	if overrides.BlockHash != nil {
+		return errors.New(`block override "blockHash" is not supported for this RPC method`)
+	}
 	if overrides.Number != nil {
 		context.BlockNumber = overrides.Number.Uint64()
 	}

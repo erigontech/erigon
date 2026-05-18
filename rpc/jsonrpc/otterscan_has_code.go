@@ -43,7 +43,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 		return false, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return false, err
 	}

@@ -47,6 +47,11 @@ type CaplinConfig struct {
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
+	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
+	// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH (4096 * 32 = 131072, ~18 days).
+	// Increase for DA oracle nodes or rollups that need longer history; decrease only if disk is constrained
+	// and spec compliance for column serving is not required.
+	ColumnKeepSlots uint64
 	// Network related config
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node
@@ -61,6 +66,10 @@ type CaplinConfig struct {
 	CustomConfigPath       string
 	CustomGenesisStatePath string
 
+	// Dev validator (embedded VC for --chain=dev)
+	DevValidatorSeed  string // deterministic BLS key seed; empty = disabled
+	DevValidatorCount int    // number of validators (default 64)
+
 	// Network stuff
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
@@ -70,6 +79,7 @@ type CaplinConfig struct {
 	SubscribeAllTopics          bool
 	MaxPeerCount                uint64
 	EnableUPnP                  bool
+	CaplinNAT                   string // NAT mode for Caplin P2P (extip:<IP>|stun|upnp|pmp|none)
 	MaxInboundTrafficPerPeer    datasize.ByteSize
 	MaxOutboundTrafficPerPeer   datasize.ByteSize
 	AdptableTrafficRequirements bool
@@ -78,6 +88,7 @@ type CaplinConfig struct {
 	// Beacon API router configuration
 	BeaconAPIRouter beacon_router_configuration.RouterConfiguration
 
+	LocalDiscovery bool
 	BootstrapNodes []string
 	StaticPeers    []string
 
@@ -86,7 +97,7 @@ type CaplinConfig struct {
 }
 
 func (c CaplinConfig) IsDevnet() bool {
-	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != ""
+	return c.CustomConfigPath != "" || c.CustomGenesisStatePath != "" || c.DevValidatorSeed != ""
 }
 
 func (c CaplinConfig) HaveInvalidDevnetParams() bool {
@@ -555,6 +566,9 @@ type BeaconChainConfig struct {
 	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
 	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
 	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
+	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
+	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -576,6 +590,8 @@ type BeaconChainConfig struct {
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
+	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas (Glamsterdam).
+	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas (Glamsterdam).
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -674,6 +690,17 @@ type BeaconChainConfig struct {
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
+
+	// Gloas
+	ChurnLimitQuotientGloas         uint64     `yaml:"CHURN_LIMIT_QUOTIENT_GLOAS" spec:"true" json:"CHURN_LIMIT_QUOTIENT_GLOAS,string"`                 // ChurnLimitQuotientGloas replaces ChurnLimitQuotient for balance churn calculation in GLOAS+.
+	ConsolidationChurnLimitQuotient uint64     `yaml:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT" spec:"true" json:"CONSOLIDATION_CHURN_LIMIT_QUOTIENT,string"` // ConsolidationChurnLimitQuotient is the independent quotient for consolidation churn in GLOAS+.
+	BuilderWithdrawalPrefix         ConfigByte `yaml:"-" json:"-"`
+	PtcSize                         uint64     `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`                                                     // PtcSize is the number of validators in the Payload Timeliness Committee (preset: 512 mainnet, 16 minimal).
+	MaxPayloadAttestations          uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
+	BuilderRegistryLimit            uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
+	BuilderPendingWithdrawalsLimit  uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
+	MaxBuildersPerWithdrawalsSweep  uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
+	MinBuilderWithdrawabilityDelay  uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -706,6 +733,12 @@ func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
 	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
 }
 
+// SyncCommitteeAggregationBitsSize returns the byte length of the aggregation bits
+// in a sync committee Contribution: SyncCommitteeSize / SyncCommitteeSubnetCount / 8.
+func (b *BeaconChainConfig) SyncCommitteeAggregationBitsSize() int {
+	return int(b.SyncCommitteeSize) / int(b.SyncCommitteeSubnetCount) / 8
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -719,6 +752,7 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.DenebForkEpoch,
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
+		b.GloasForkEpoch,
 	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
@@ -748,6 +782,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
 	return fvs
 }
 
@@ -881,6 +916,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainApplicationMask:             utils.Uint32ToBytes4(0x00000001),
 	DomainApplicationBuilder:          utils.Uint32ToBytes4(0x00000001),
 	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
+	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
+	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
+	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -904,6 +942,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x07000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -999,6 +1039,17 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+
+	// Gloas
+	ChurnLimitQuotientGloas:         1 << 15,
+	ConsolidationChurnLimitQuotient: 1 << 16,
+	BuilderWithdrawalPrefix:         0x03,
+	PtcSize:                         512,
+	MaxPayloadAttestations:          4,
+	BuilderRegistryLimit:            1 << 40,
+	BuilderPendingWithdrawalsLimit:  1 << 20,
+	MaxBuildersPerWithdrawalsSweep:  1 << 14,
+	MinBuilderWithdrawabilityDelay:  64,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -1014,6 +1065,18 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 
+	// Detect PRESET_BASE to use the correct base config.
+	// The minimal preset has different SSZ vector sizes, committee sizes, etc.
+	var presetProbe struct {
+		PresetBase string `yaml:"PRESET_BASE"`
+	}
+	if err := yaml.Unmarshal(b, &presetProbe); err != nil {
+		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if presetProbe.PresetBase == "minimal" {
+		ApplyMinimalPreset(beaconCfg)
+	}
+
 	// setup beacon chain config
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
@@ -1025,6 +1088,55 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
 	return *beaconCfg, *networkConfig, nil
+}
+
+// ApplyMinimalPreset overrides the mainnet base config with values from the
+// Ethereum consensus-specs "minimal" preset. Only fields that differ from
+// mainnet are changed. Reference:
+// https://github.com/ethereum/consensus-specs/tree/dev/presets/minimal
+func ApplyMinimalPreset(cfg *BeaconChainConfig) {
+	cfg.PresetBase = "minimal"
+
+	// Phase0 preset differences
+	cfg.SecondsPerSlot = 6
+	cfg.TargetCommitteeSize = 4
+	cfg.MaxCommitteesPerSlot = 4
+	cfg.ShuffleRoundCount = 10
+	cfg.MinGenesisActiveValidatorCount = 64
+	cfg.Eth1FollowDistance = 16
+	cfg.SlotsPerEpoch = 8
+	cfg.SlotsPerHistoricalRoot = 64
+	cfg.EpochsPerHistoricalVector = 64
+	cfg.EpochsPerSlashingsVector = 64
+	cfg.EpochsPerEth1VotingPeriod = 4
+	cfg.GenesisDelay = 300
+
+	// Altair preset differences
+	cfg.SyncCommitteeSize = 32
+	cfg.EpochsPerSyncCommitteePeriod = 8
+
+	// Capella preset differences
+	cfg.MaxWithdrawalsPerPayload = 4
+	cfg.MaxValidatorsPerWithdrawalsSweep = 16
+
+	// Electra preset differences
+	cfg.PendingPartialWithdrawalsLimit = 64
+	cfg.PendingConsolidationsLimit = 64
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 2
+
+	// Electra preset differences
+	cfg.PendingPartialWithdrawalsLimit = 64
+	cfg.PendingConsolidationsLimit = 64
+	cfg.MaxPendingPartialsPerWithdrawalsSweep = 2
+
+	// Phase0 preset differences (rewards/penalties that differ from mainnet)
+	cfg.InactivityPenaltyQuotient = 33554432
+	cfg.MinSlashingPenaltyQuotient = 64
+	cfg.ProportionalSlashingMultiplier = 2
+
+	// Gloas preset differences
+	cfg.PtcSize = 16
+	cfg.MaxBuildersPerWithdrawalsSweep = 16
 }
 
 func sepoliaConfig() BeaconChainConfig {
@@ -1195,7 +1307,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x04000064
 	cfg.ElectraForkEpoch = 1337856
 	cfg.ElectraForkVersion = 0x05000064
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1714688
 	cfg.FuluForkVersion = 0x06000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
@@ -1276,7 +1388,7 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
@@ -1296,7 +1408,7 @@ func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersi
 		return b.ProportionalSlashingMultiplier
 	case AltairVersion:
 		return b.ProportionalSlashingMultiplierAltair
-	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion:
+	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion:
 		return b.ProportionalSlashingMultiplierBellatrix
 	default:
 		panic("not implemented")
@@ -1315,7 +1427,7 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1356,7 +1468,7 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	switch version {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxEffectiveBalance
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxEffectiveBalanceElectra
 	default:
 		panic("invalid version")
@@ -1367,7 +1479,7 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxBlobsPerBlock
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
@@ -1377,7 +1489,7 @@ func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int 
 	switch v {
 	case DenebVersion:
 		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return int(b.MaxRequestBlobSidecarsElectra)
 	}
 	panic("invalid version")
@@ -1387,7 +1499,7 @@ func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.BlobSidecarSubnetCount
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
@@ -1409,6 +1521,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1429,6 +1543,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }
@@ -1504,10 +1620,5 @@ func EmbeddedSupported(networkId uint64) bool {
 }
 
 func SupportBackfilling(networkId uint64) bool {
-	return networkId == chainspec.MainnetChainID ||
-		networkId == chainspec.SepoliaChainID ||
-		networkId == chainspec.GnosisChainID ||
-		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID ||
-		networkId == chainspec.BloatnetNetworkID
+	return EmbeddedSupported(networkId)
 }

@@ -4,14 +4,16 @@
 # then restores chaindata on exit. Used by both CI and local developers.
 #
 # Usage:
-#   run_rpc_tests_local.sh [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR]
+#   run_rpc_tests_local.sh [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR] [--skip-backup] [--commitment-history]
 #
 # Options:
-#   --datadir DIR      Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)
-#   --chain CHAIN      mainnet (default) or gnosis
-#   --workspace DIR    Directory for rpc-tests clone (default: auto temp dir, deleted on exit)
-#   --result-dir DIR   Directory to save test results (default: auto temp dir, kept on failure)
-#   --backup-dir DIR   Directory for chaindata backup (default: auto temp dir, deleted on exit)
+#   --datadir DIR          Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)
+#   --chain CHAIN          mainnet (default) or gnosis
+#   --workspace DIR        Directory for rpc-tests clone (default: auto temp dir, deleted on exit)
+#   --result-dir DIR       Directory to save test results (default: auto temp dir, kept on failure)
+#   --backup-dir DIR       Directory for chaindata backup (default: auto temp dir, deleted on exit)
+#   --skip-backup          Skip chaindata backup/restore (use when datadir is ephemeral/disposable)
+#   --commitment-history   Include tests requiring commitment history (erigon.request-commitment-history=true)
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,15 +25,19 @@ DATADIR="${ERIGON_REFERENCE_DATA_DIR:-}"
 WORKSPACE=""
 RESULT_DIR=""
 BACKUP_DIR_OPT=""
+SKIP_BACKUP=false
+RPC_COMMITMENT_HISTORY=false
 
 usage() {
-  echo "Usage: $0 [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR]"
+  echo "Usage: $0 [--datadir DIR] [--chain CHAIN] [--workspace DIR] [--result-dir DIR] [--backup-dir DIR] [--skip-backup] [--commitment-history]"
   echo
-  echo "  --datadir DIR      Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)"
-  echo "  --chain CHAIN      mainnet (default) or gnosis"
-  echo "  --workspace DIR    Directory for rpc-tests clone (default: auto temp dir)"
-  echo "  --result-dir DIR   Directory to save test results (default: auto temp dir)"
-  echo "  --backup-dir DIR   Directory for chaindata backup (default: auto temp dir)"
+  echo "  --datadir DIR          Path to synced Erigon datadir (or set ERIGON_REFERENCE_DATA_DIR)"
+  echo "  --chain CHAIN          mainnet (default) or gnosis"
+  echo "  --workspace DIR        Directory for rpc-tests clone (default: auto temp dir)"
+  echo "  --result-dir DIR       Directory to save test results (default: auto temp dir)"
+  echo "  --backup-dir DIR       Directory for chaindata backup (default: auto temp dir)"
+  echo "  --skip-backup          Skip chaindata backup/restore (use when datadir is ephemeral/disposable)"
+  echo "  --commitment-history   Include tests requiring commitment history (erigon.request-commitment-history=true)"
   exit 1
 }
 
@@ -42,6 +48,8 @@ while [[ $# -gt 0 ]]; do
     --workspace)   WORKSPACE="$2";    shift 2 ;;
     --result-dir)  RESULT_DIR="$2";   shift 2 ;;
     --backup-dir)  BACKUP_DIR_OPT="$2"; shift 2 ;;
+    --skip-backup)        SKIP_BACKUP=true;          shift ;;
+    --commitment-history) RPC_COMMITMENT_HISTORY=true; shift ;;
     *) echo "Unknown argument: $1"; usage ;;
   esac
 done
@@ -88,10 +96,13 @@ cleanup() {
     mv "$BACKUP_DIR/chaindata" "$DATADIR/chaindata"
   fi
   if $OWN_BACKUP_DIR && [ -n "$BACKUP_DIR" ]; then
-    rmdir "$BACKUP_DIR" 2>/dev/null || true
+    rm -rf "$BACKUP_DIR"
   fi
   if $OWN_WORKSPACE && [ -n "$WORKSPACE" ]; then
     rm -rf "$WORKSPACE"
+  fi
+  if $OWN_RESULT_DIR && [ -n "$RESULT_DIR" ]; then
+    rm -rf "$RESULT_DIR"
   fi
 }
 trap cleanup EXIT
@@ -113,9 +124,11 @@ if [ -z "$RESULT_DIR" ]; then
   OWN_RESULT_DIR=true
 fi
 
-echo "Backing up chaindata..."
-cp -r "$DATADIR/chaindata" "$BACKUP_DIR/chaindata"
-BACKUP_NEEDED=true
+if ! $SKIP_BACKUP; then
+  echo "Backing up chaindata..."
+  cp -r "$DATADIR/chaindata" "$BACKUP_DIR/chaindata"
+  BACKUP_NEEDED=true
+fi
 
 echo "Running migrations..."
 "$BUILD_BIN/integration" run_migrations --datadir "$DATADIR" --chain "$CHAIN"
@@ -128,7 +141,7 @@ mkdir -p "$RESULT_DIR"
 RPC_DAEMON_PID=$!
 
 echo "Waiting for port 8545..."
-for i in {1..30}; do
+for _ in {1..30}; do
   if nc -z localhost 8545 2>/dev/null; then
     echo "Port 8545 is open"
     break
@@ -142,7 +155,7 @@ fi
 
 echo "Running RPC integration tests (chain=$CHAIN)..."
 set +e
-"$TEST_SCRIPT" "$WORKSPACE" "$RESULT_DIR"
+RPC_COMMITMENT_HISTORY=$RPC_COMMITMENT_HISTORY "$TEST_SCRIPT" "$WORKSPACE" "$RESULT_DIR"
 TEST_EXIT=$?
 set -e
 

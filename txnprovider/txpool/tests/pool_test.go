@@ -18,7 +18,6 @@ package tests
 
 import (
 	"fmt"
-	"math/big"
 	"testing"
 	"time"
 
@@ -84,7 +83,7 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 					},
 					GasPrice: *uint256.NewInt(1),
 				},
-				*types.LatestSignerForChainID(big.NewInt(1337)),
+				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
 			require.NoError(t, err)
@@ -158,7 +157,7 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 				},
 				GasPrice: *uint256.NewInt(1),
 			},
-			*types.LatestSignerForChainID(big.NewInt(1337)),
+			*types.LatestSignerForChainID(uint256.NewInt(1337)),
 			pkey1,
 		)
 		require.NoError(t, err)
@@ -227,7 +226,7 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 					},
 					GasPrice: *uint256.NewInt(1),
 				},
-				*types.LatestSignerForChainID(big.NewInt(1337)),
+				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
 			require.NoError(t, err)
@@ -310,7 +309,7 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 				},
 				GasPrice: *uint256.NewInt(1),
 			},
-			*types.LatestSignerForChainID(big.NewInt(1337)),
+			*types.LatestSignerForChainID(uint256.NewInt(1337)),
 			pkey1,
 		)
 		require.NoError(t, err)

@@ -56,7 +56,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err %v", err)
 	}
-	signer := types.LatestSignerForChainID(big.NewInt(1))
+	signer := types.LatestSignerForChainID(uint256.NewInt(1))
 	txn, err := types.SignTx(unsignedTx, *signer, privateKeyECDSA)
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -121,8 +121,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
-	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
-	exeRes, err := st.TransitionDb(false, false)
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()))
+	exeRes, err := st.Execute(false, false)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}

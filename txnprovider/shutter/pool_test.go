@@ -22,6 +22,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -291,7 +293,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
 			txnprovider.WithTxnIdsFilter(txnsIdFilter),
-			txnprovider.WithGasTarget(gasLimit),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(gasLimit, math.MaxUint64, math.MaxUint64)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes1, 1)
@@ -300,7 +302,7 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 			txnprovider.WithBlockTime(handle.nextBlockTime),
 			txnprovider.WithParentBlockNum(handle.nextBlockNum-1),
 			txnprovider.WithTxnIdsFilter(txnsIdFilter),
-			txnprovider.WithGasTarget(gasLimit),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(gasLimit, math.MaxUint64, math.MaxUint64)),
 		)
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
@@ -907,7 +909,7 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 		},
 		GasPrice: *uint256.NewInt(555),
 	}
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
 	require.NoError(t, err)
 	var signedTxnBuf bytes.Buffer
@@ -937,7 +939,7 @@ func MockEncryptedBlobTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) t
 	senderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(senderPrivKey.PublicKey)
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	txn := types.MakeV1WrappedBlobTxn(chainId)
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
 	require.NoError(t, err)

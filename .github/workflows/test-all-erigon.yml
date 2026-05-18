@@ -1,21 +1,8 @@
 name: All tests
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  schedule:
-    - cron: '20 16 * * *' # daily at 16:20 UTC 😙🤌
   workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:
@@ -23,17 +10,6 @@ defaults:
 
 jobs:
   tests-mac-linux:
-    concurrency:
-      # concurrency group: there can be at most one running and one pending job in a
-      # concurrency group at any time. So for commits on main/release, we use different
-      # concurrency group per commit; for other branches, we use a branch-level CG.
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
-        }}
-      cancel-in-progress: true
     strategy:
       matrix:
         os:
@@ -41,9 +17,9 @@ jobs:
           - macos-15
           - windows-2025
         include:
-          # eest_blockchain tests take ~1190s on the GitHub-hosted windows-2025
-          # runner (right at the 20m limit). Give Windows extra headroom to avoid
-          # marginal timeouts while keeping Linux/macOS at the tighter 20m.
+          # Windows GitHub-hosted runners run noticeably slower than Linux for
+          # this suite; give them extra headroom to avoid marginal timeouts
+          # while keeping Linux/macOS at the tighter 20m.
           - os: windows-2025
             test_timeout: 30m
             skip_execution_tests: 'true'
@@ -99,4 +75,11 @@ jobs:
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
-
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

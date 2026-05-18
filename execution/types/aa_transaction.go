@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -106,21 +106,8 @@ func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }
 
-func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *AccountAbstractionTransaction) GetFeeCap() *uint256.Int {
@@ -194,7 +181,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	return hash
 }
 
-func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx *AccountAbstractionTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
 		chainID,
 		tx.NonceKey, tx.Nonce,
@@ -268,10 +255,10 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode envelope size
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -289,7 +276,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -301,7 +288,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 
@@ -311,7 +298,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		senderAddress = &senderValue
 
 	}
-	if err := rlp.EncodeOptionalAddress(senderAddress, w, b); err != nil {
+	if err := EncodeOptionalAddress(senderAddress, w, b); err != nil {
 		return err
 	}
 
@@ -319,7 +306,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
 		return err
 	}
 
@@ -327,7 +314,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
 		return err
 	}
 
@@ -351,24 +338,24 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.ValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.ValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PaymasterValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PaymasterValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PostOpGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PostOpGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -377,7 +364,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations
@@ -404,7 +391,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
 
@@ -417,7 +404,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -425,7 +412,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 
@@ -452,19 +439,19 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.ValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PaymasterValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.PaymasterValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PostOpGasLimit, err = s.Uint(); err != nil {
+	if tx.PostOpGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
@@ -485,8 +472,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -505,7 +492,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:              data,
 		AuthorizationsLen: uint64(len(tx.Authorizations)),
 		AccessListLen:     uint64(len(tx.AccessList)),
@@ -514,6 +501,9 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		IsEIP2028:         rules.IsIstanbul,
 		IsEIP3860:         hasEIP3860,
 		IsEIP7623:         rules.IsPrague,
+		IsEIP7976:         rules.IsAmsterdam,
+		IsEIP7981:         rules.IsAmsterdam,
+		IsEIP8037:         rules.IsAmsterdam,
 		IsAATxn:           true,
 	})
 
@@ -569,7 +559,7 @@ func (tx *AccountAbstractionTransaction) PaymasterPostOp(paymasterContext []byte
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Message, error) {
+func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *uint256.Int) (*Message, error) {
 	zeroAddress := common.Address{}
 	if tx.Paymaster == nil || bytes.Equal(zeroAddress[:], tx.Paymaster[:]) {
 		return nil, nil
@@ -599,7 +589,7 @@ func (tx *AccountAbstractionTransaction) PaymasterFrame(chainID *big.Int) (*Mess
 	}, nil
 }
 
-func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *big.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
+func (tx *AccountAbstractionTransaction) ValidationFrame(chainID *uint256.Int, deploymentGasUsed uint64, rules *chain.Rules, hasEIP3860 bool) (*Message, error) {
 	signingHash := tx.SigningHash(chainID)
 	txAbiEncoding, err := tx.AbiEncode()
 	if err != nil {

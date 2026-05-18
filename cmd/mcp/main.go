@@ -252,7 +252,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	}
 
 	// Create the typed JSON-RPC APIs — same path as rpcdaemon.
-	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader)
+	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
 
 	// Extract the EthAPI, ErigonAPI, OtterscanAPI from the API list.
 	var (

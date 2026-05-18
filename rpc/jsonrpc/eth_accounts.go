@@ -58,12 +58,13 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNumber); err != nil {
 		tx.Rollback()
 		return nil, nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		tx.Rollback()
 		return nil, nil, err
@@ -172,12 +173,13 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	err = rpchelper.CheckBlockExecuted(stateTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

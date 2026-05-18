@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/chain"
@@ -57,6 +58,7 @@ type Task interface {
 
 	Version() state.Version
 	VersionMap() *state.VersionMap
+	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) state.VersionedWrites
 	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
@@ -74,6 +76,7 @@ type Task interface {
 	BlockTime() uint64
 	BlockGasLimit() uint64
 	BlockRoot() common.Hash
+	BlockHeader() *types.Header
 
 	Rules() *chain.Rules
 
@@ -111,6 +114,12 @@ type TxResult struct {
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
 	AccessedAddresses state.AccessSet
+
+	// CollectorWrites holds collector-format writes (all 4 account fields per
+	// address) produced by MakeWriteSet during worker execution. Used by the
+	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
+	// adjustments are applied directly to these writes.
+	CollectorWrites state.VersionedWrites
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -147,7 +156,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLogIndex uint32) (*types.Receipt, error) {
 	logIndex := firstLogIndex
 	for i := range r.Logs {
-		r.Logs[i].Index = uint(logIndex)
+		r.Logs[i].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 
@@ -166,7 +175,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	for _, l := range receipt.Logs {
 		l.TxHash = receipt.TxHash
-		l.BlockNumber = blockNum
+		l.BlockNumber = hexutil.Uint64(blockNum)
 		l.BlockHash = receipt.BlockHash
 	}
 	if r.ExecutionResult.Failed() {
@@ -230,6 +239,10 @@ type TxTask struct {
 	signer       *types.Signer
 	dependencies []int
 	rules        *chain.Rules
+
+	// BlockStateCache holds pre-block account state for stable committed reads.
+	// Shared across all tasks in the same block. Set by the parallel executor.
+	BlockStateCache *state.BlockStateCache
 }
 
 func (t *TxTask) compare(other Task) int {
@@ -339,6 +352,10 @@ func (t *TxTask) BlockRoot() common.Hash {
 	return t.Header.Root
 }
 
+func (t *TxTask) BlockHeader() *types.Header {
+	return t.Header
+}
+
 func (t *TxTask) BlockTime() uint64 {
 	if t.Header == nil {
 		return 0
@@ -400,6 +417,10 @@ func (t *TxTask) Dependencies() []int {
 
 func (t *TxTask) VersionMap() *state.VersionMap {
 	return nil
+}
+
+func (t *TxTask) GetBlockStateCache() *state.BlockStateCache {
+	return t.BlockStateCache
 }
 
 func (t *TxTask) VersionedReads(ibs *state.IntraBlockState) state.ReadSet {
@@ -646,7 +667,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -1027,7 +1048,8 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	if q.resultCh == nil {
 		return q.results.Len() == 0, nil
 	} else if q.closed && len(q.resultCh) == 0 {
-		close(q.resultCh)
+		// Don't close(resultCh) — Add() may be sending on it outside the lock.
+		// Nil the reference so consumers know we're done; the channel is GC'd.
 		q.resultCh = nil
 		return q.results.Len() == 0, nil
 	}
@@ -1042,7 +1064,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			if next.isNil() {
 				if q.closed && len(q.resultCh) == 0 {
-					close(q.resultCh)
 					q.resultCh = nil
 					return q.results.Len() == 0, nil
 				}
@@ -1050,7 +1071,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			heap.Push(q.results, next)
 			if q.closed && len(q.resultCh) == 0 {
-				close(q.resultCh)
 				q.resultCh = nil
 				return false, nil
 			}
@@ -1096,11 +1116,9 @@ func (q *PriorityQueue[T]) Close() {
 		return
 	}
 	q.closed = true
-
-	if len(q.resultCh) == 0 {
-		close(q.resultCh)
-		q.resultCh = nil
-	}
+	// Don't close resultCh here — Add() may be concurrently sending on it
+	// outside the lock.  Drain() will nil the reference when it detects
+	// closed && empty, and the channel will be GC'd.
 }
 
 func (q *PriorityQueue[T]) Len() (l int) {

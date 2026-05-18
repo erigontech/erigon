@@ -163,15 +163,13 @@ func (bs *BlobStore) Prune() error {
 	}
 
 	currentSlot := bs.ethClock.GetCurrentSlot()
+	if currentSlot <= bs.slotsKept {
+		return nil
+	}
 	currentSlot -= bs.slotsKept
 	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
-	var startPrune uint64
-	minSlotsForBlobSidecarRequest := bs.beaconChainConfig.MinSlotsForBlobsSidecarsRequest()
-	if currentSlot >= minSlotsForBlobSidecarRequest {
-		startPrune = currentSlot - minSlotsForBlobSidecarRequest
-	}
 	// delete all the folders that are older than slotsKept
-	for i := startPrune; i < currentSlot; i += subdivisionSlot {
+	for i := uint64(0); i < currentSlot; i += subdivisionSlot {
 		bs.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
 	}
 	return nil

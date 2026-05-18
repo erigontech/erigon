@@ -109,8 +109,10 @@ func ReadNextSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.SyncCo
 	if len(v) == 0 {
 		return nil, nil
 	}
-	committee = &solid.SyncCommittee{}
-	copy(committee[:], v)
+	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
+	if err = committee.DecodeSSZ(v, 0); err != nil {
+		return nil, err
+	}
 	return
 }
 
@@ -123,8 +125,10 @@ func ReadCurrentSyncCommittee(getFn GetValFn, slot uint64) (committee *solid.Syn
 	if len(v) == 0 {
 		return nil, nil
 	}
-	committee = &solid.SyncCommittee{}
-	copy(committee[:], v)
+	committee = solid.NewSyncCommitteeWithSize(len(v)/48 - 1)
+	if err = committee.DecodeSSZ(v, 0); err != nil {
+		return nil, err
+	}
 	return
 }
 

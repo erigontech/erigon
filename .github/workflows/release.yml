@@ -18,6 +18,8 @@ env:
   DOCKERFILE_PATH: "Dockerfile"
   LABEL_DESCRIPTION: "Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
+permissions: {}
+
 on:
   workflow_dispatch:
     inputs:
@@ -54,10 +56,12 @@ on:
 jobs:
 
   build-release:
+    permissions:
+      contents: read  # github.token used in curl to check existing GitHub release
     #runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
     timeout-minutes: 60
-    name: Create git tag, build and publish Release Artifacts
+    name: Build and publish Release Artifacts
     outputs:
       commit-id: ${{ steps.getCommitId.outputs.id }}
       short-commit-id: ${{ steps.getCommitId.outputs.short_commit_id }}
@@ -96,7 +100,7 @@ jobs:
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
 
-      - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
+      - name: Check if tag ${{ inputs.release_version }} already exists
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -106,10 +110,7 @@ jobs:
             echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
             exit 1
           else
-            echo "OK: tag ${RELEASE_VERSION} does not exists. Proceeding."
-            git tag ${RELEASE_VERSION}
-            git push origin ${RELEASE_VERSION}
-            echo; echo "Git TAG ${RELEASE_VERSION} created and pushed."
+            echo "OK: tag ${RELEASE_VERSION} does not exist. Proceeding."
           fi
 
       - name: Create sub-directories, get commit id, etc
@@ -127,29 +128,71 @@ jobs:
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           echo "parsed_version=$(echo ${RELEASE_VERSION} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
 
+      - name: Filter BINARIES to those available in the checked-out branch's Makefile
+        run: |
+          cd erigon
+          # Collect all targets available via COMMANDS in the Makefile, plus 'erigon' which is always present
+          AVAILABLE_TARGETS=$(grep '^COMMANDS +=' Makefile | awk '{print $3}' | tr '\n' ' ')
+          AVAILABLE_TARGETS="erigon $AVAILABLE_TARGETS"
+          echo "Makefile targets available: $AVAILABLE_TARGETS"
+
+          FILTERED=""
+          for bin in $BINARIES; do
+            if echo " $AVAILABLE_TARGETS " | grep -qw "$bin"; then
+              FILTERED="$FILTERED $bin"
+            else
+              echo "Skipping '$bin': no Makefile target in this branch"
+            fi
+          done
+          FILTERED="${FILTERED# }"
+          echo "Filtered BINARIES: $FILTERED"
+          echo "BINARIES=$FILTERED" >> $GITHUB_ENV
+
       - name: Validate release version against db/version/app.go
         if: ${{ ! inputs.disable_version_check }}
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           cd erigon
-          APP_VERSION=$(awk '
+
+          APP_BASE=$(awk '
             /Major\s*=/{major=$3}
             /Minor\s*=/{minor=$3}
             /Micro\s*=/{micro=$3}
             END{printf "%s.%s.%s", major, minor, micro}
           ' db/version/app.go)
-          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
+          APP_MODIFIER=$(awk '/Modifier\s*=/{gsub(/["[:space:]]/, "", $3); print $3}' db/version/app.go)
 
-          echo "Version from db/version/app.go: ${APP_VERSION}"
-          echo "Version from workflow input: ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
+          INPUT_FULL=$(echo "${RELEASE_VERSION}" | sed 's/^v//')
+          INPUT_BASE=$(echo "${INPUT_FULL}" | cut -d'-' -f1)
+          INPUT_PRE=$(echo "${INPUT_FULL}" | grep -oE '\-.+' | sed 's/^-//' || true)
 
-          if [ "${APP_VERSION}" != "${INPUT_VERSION}" ]; then
-            echo "ERROR: release_version (${RELEASE_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
+          echo "app.go base version : ${APP_BASE}"
+          echo "app.go Modifier     : ${APP_MODIFIER:-<empty>}"
+          echo "Input base version  : ${INPUT_BASE}"
+          echo "Input pre-release   : ${INPUT_PRE:-<none>}"
+
+          # Level 1 (hard): Major.Minor.Micro must match exactly
+          if [ "${APP_BASE}" != "${INPUT_BASE}" ]; then
+            echo "ERROR: Major.Minor.Micro mismatch: app.go=${APP_BASE}, input=${INPUT_BASE}"
             exit 1
           fi
+          echo "OK: base version matches."
 
-          echo "OK: release_version matches db/version/app.go."
+          # Level 2 (soft): Modifier alignment — warns but never blocks,
+          # unless a non-dev Modifier is set and clearly wrong.
+          if [ "${APP_MODIFIER}" = "dev" ]; then
+            echo "::warning::Modifier in app.go is 'dev' — binary will report ${APP_BASE}-dev. Update Modifier in db/version/app.go before release for accurate --version output."
+          elif [ -z "${APP_MODIFIER}" ]; then
+            if [ -n "${INPUT_PRE}" ]; then
+              echo "::warning::Releasing pre-release ${RELEASE_VERSION} but Modifier is empty in app.go — binary will report ${APP_BASE}. Consider setting Modifier=\"${INPUT_PRE}\" in db/version/app.go."
+            fi
+          elif [ "${APP_MODIFIER}" != "${INPUT_PRE}" ]; then
+            echo "ERROR: Modifier mismatch: app.go Modifier='${APP_MODIFIER}', input pre-release='${INPUT_PRE:-<none>}'"
+            exit 1
+          else
+            echo "OK: Modifier matches pre-release suffix."
+          fi
 
       - name: Login to Docker Hub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
@@ -250,7 +293,7 @@ jobs:
           echo "=== All artifacts verified OK ==="
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -259,7 +302,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -268,7 +311,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -303,7 +346,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
@@ -363,7 +406,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
@@ -374,18 +417,24 @@ jobs:
   build-debian-pkg:
     name: Debian packages
     needs: [ build-release, test-release ]
-    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # (because 'cancelled' does not match the 'failure' substring in the test-release check).
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
       - name: Download amd64v2 artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
@@ -472,7 +521,7 @@ jobs:
           echo "=== All debian packages verified OK ==="
 
       - name: Upload artifact amd64.deb
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
@@ -481,7 +530,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact arm64.deb
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
         with:
           name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
           path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
@@ -492,10 +541,18 @@ jobs:
 
   publish-docker-image:
     needs: [ build-release, test-release ]
-    if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
+    permissions:
+      contents: read  # actions/checkout without custom token
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # (because 'cancelled' does not match the 'failure' substring in the test-release check).
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      !contains(needs.test-release.result, 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    name: Docker image        
+    name: Docker image
 
     steps:
 
@@ -540,7 +597,14 @@ jobs:
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
-    if: always() && contains(needs.build-release.result, 'success') && contains(needs.build-debian-pkg.result, 'success') && contains(needs.publish-docker-image.result, 'success')
+    # !cancelled() short-circuits the job when the operator cancels the workflow.
+    # Without it, always() lets this job dispatch onto a runner even after a cancel
+    # in the window between all upstreams finishing as 'success' and this job starting.
+    if: >-
+      !cancelled() &&
+      contains(needs.build-release.result, 'success') &&
+      contains(needs.build-debian-pkg.result, 'success') &&
+      contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     name: Publish release notes
@@ -549,38 +613,38 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+      uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
       with:
-        app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+        client-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
         repositories: "erigon"
 
     - name: Download linux/arm64 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
@@ -616,6 +680,27 @@ jobs:
         fi
         echo "=== All artifacts verified OK ==="
 
+    - name: Checkout git repository ${{ env.APP_REPO }} at release commit
+      if: ${{ inputs.perform_release && inputs.release_version != '' }}
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ env.APP_REPO }}
+        fetch-depth: 1
+        ref: ${{ needs.build-release.outputs.commit-id }}
+        path: 'erigon'
+        token: ${{ steps.generate_token.outputs.token }}
+
+    - name: Create and push git tag ${{ inputs.release_version }}
+      if: ${{ inputs.perform_release && inputs.release_version != '' }}
+      env:
+        RELEASE_VERSION: ${{ inputs.release_version }}
+        BUILD_COMMIT: ${{ needs.build-release.outputs.commit-id }}
+      run: |
+        cd erigon
+        git tag "${RELEASE_VERSION}" "${BUILD_COMMIT}"
+        git push origin "${RELEASE_VERSION}"
+        echo "Git TAG ${RELEASE_VERSION} created and pushed at ${BUILD_COMMIT}."
+
     - name: Publish draft of the Release notes with assets in case perform_release is set
       if: ${{ inputs.perform_release }}
       env:
@@ -623,7 +708,6 @@ jobs:
         GH_REPO: ${{ github.repository }}
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
-        GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo "Artifact $archive compressed"; done
@@ -631,56 +715,74 @@ jobs:
         echo "=== Artifacts to be published ==="
         ls -lah *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
         echo "=================================="
-        set +e
-        gh release create \
-          --target ${GITHUB_RELEASE_TARGET} \
+        # --target is omitted: --verify-tag requires the tag to already exist
+        # (created above at the build commit), and GitHub ignores target_commitish
+        # for existing tags.
+        if gh release create \
+          --verify-tag \
           --draft=true \
           --title "${RELEASE_VERSION}" \
           --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${DOCKER_TAGS}<br><br>... coming soon<br>" \
           "${RELEASE_VERSION}" \
-          *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
-        GH_EXIT=$?
-        set -e
-        if [ $GH_EXIT -ne 0 ]; then
-          echo "::warning::gh release create failed (exit ${GH_EXIT}). All artifacts are ready — publish manually using the instructions below."
+          *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt; then
+          echo "Release draft created successfully."
+          # Best-effort: the release is already created, so a transient view
+          # failure must not fail the job and trigger the tag rollback.
+          gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }} || true
+        else
+          echo "::warning::gh release create failed. All artifacts are ready — publish manually using the instructions below."
           echo ""
           echo "=== MANUAL RELEASE INSTRUCTIONS ==="
+          echo "NOTE: the just-pushed tag ${RELEASE_VERSION} will be removed by the rollback job."
+          echo "      The command below recreates it at the verified build commit via --target."
+          echo ""
           echo "Ensure you have a GitHub token with 'contents: write' permission, then run:"
           echo ""
           echo "  cd dist"
           echo "  gh release create \\"
           echo "    --repo ${{ env.APP_REPO }} \\"
-          echo "    --target ${GITHUB_RELEASE_TARGET} \\"
+          echo "    --target ${{ needs.build-release.outputs.commit-id }} \\"
           echo "    --draft=true \\"
           echo "    --title \"${RELEASE_VERSION}\" \\"
           echo "    \"${RELEASE_VERSION}\" \\"
-          echo "    *.tar.gz *.deb"
+          echo "    *.tar.gz *.deb \\"
+          echo "    ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
           echo ""
           echo "Checksums file: ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
           echo "=== END MANUAL INSTRUCTIONS ==="
-        else
-          echo "Release draft created successfully."
-          gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }}
+          # Exit non-zero so the In-case-of-failure rollback removes the
+          # just-pushed tag.
+          exit 1
         fi
 
 
+
   In-case-of-failure:
-    name: "In case of failure: remove remote git tag pointing to the new version."
+    name: "Rollback: remove remote git tag if release did not publish successfully"
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
+    # Run only when publish-release actually ran and did not succeed (failure
+    # or cancellation). Excluding 'skipped' keeps the rollback from firing
+    # when an upstream job (e.g. the tag-already-exists pre-flight in
+    # build-release) failed before publish-release had a chance to push the
+    # tag — otherwise we would delete a pre-existing remote tag.
     if: >-
       always() &&
       inputs.perform_release &&
-      contains(needs.build-release.result, 'success') &&
-      (
-        contains(needs.test-release.result, 'failure') ||
-        contains(needs.build-debian-pkg.result, 'failure') ||
-        contains(needs.publish-docker-image.result, 'failure') ||
-        contains(needs.publish-release.result, 'failure')
-      )
+      inputs.release_version != '' &&
+      needs.publish-release.result != 'success' &&
+      needs.publish-release.result != 'skipped'
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
+      - name: Generate GitHub App token for git operations
+        id: generate_token_rollback
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3  ## v3.1.1
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -688,9 +790,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.checkout_ref }}
           path: 'erigon'
+          token: ${{ steps.generate_token_rollback.outputs.token }}
 
-      - name: Rollback - remove git tag ${{ inputs.release_version }}
-        if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+      - name: Rollback - remove git tag ${{ inputs.release_version }} if it exists on remote
         run: |
           cd erigon
-          git push -d origin ${RELEASE_VERSION}
+          if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
+            echo "Tag ${RELEASE_VERSION} exists on remote — removing."
+            git push -d origin "${RELEASE_VERSION}"
+            echo "Tag ${RELEASE_VERSION} removed."
+          else
+            echo "Tag ${RELEASE_VERSION} not present on remote — nothing to rollback."
+          fi

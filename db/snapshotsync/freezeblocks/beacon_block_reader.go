@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var buffersPool = sync.Pool{
@@ -53,9 +54,15 @@ type BeaconSnapshotReader interface {
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error)
 	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error)
-	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
+	// ReadBeaconBlockBodyBySlot reads a block without full execution payload data (no transactions/
+	// withdrawals). Works for both pre- and post-GLOAS blocks. Use ReadBlockBySlot when full EL
+	// data is needed.
+	ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 
 	FrozenSlots() uint64
+	// CacheBlockBody caches a recently produced block's execution body so it can
+	// be returned immediately before the EL commits to its database.
+	CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 type beaconSnapshotReader struct {
@@ -71,6 +78,12 @@ func NewBeaconSnapshotReader(snapshots *CaplinSnapshots, eth1Getter snapshot_for
 
 func (r *beaconSnapshotReader) FrozenSlots() uint64 {
 	return r.sn.BlocksAvailable()
+}
+
+func (r *beaconSnapshotReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	if r.eth1Getter != nil {
+		r.eth1Getter.CacheBody(blockNumber, transactions, withdrawals)
+	}
 }
 
 func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
@@ -135,7 +148,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
-func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	view := r.sn.View()
 	defer view.Close()
 
@@ -194,13 +207,10 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlindedBlockFromSnapshot(reader, r.cfg)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
 }
 
 func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	if r.eth1Getter == nil {
-		return nil, nil
-	}
 	view := r.sn.View()
 	defer view.Close()
 
@@ -213,7 +223,8 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 
 	var buf []byte
-	if *slot > r.sn.BlocksAvailable() {
+	// When no snapshots are available (BlocksAvailable==0) or slot exceeds snapshot range, read from DB.
+	if r.sn.BlocksAvailable() == 0 || *slot > r.sn.BlocksAvailable() {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 		if err != nil {
 			return nil, err
@@ -303,7 +314,7 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 		return nil, nil
 	}
 
-	h, _, _, err := r.sn.ReadHeader(*slot)
+	h, _, _, err := r.sn.ReadHeader(*slot, tx)
 	// Use pooled buffers and readers to avoid allocations.
 	return h, err
 }

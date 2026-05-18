@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/erigontech/erigon/cl/p2p"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -78,6 +79,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
+	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -139,6 +141,45 @@ func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
 		}).Open(ctx)
 }
 
+// upgradeGenesisState applies sequential fork upgrades to bring a genesis state from
+// actualVersion to targetVersion. This is needed when the genesis tool produces SSZ at
+// an older fork (e.g. Fulu) but the beacon config expects a newer fork at epoch 0 (e.g. GLOAS).
+func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVersion) error {
+	for v := from + 1; v <= to; v++ {
+		switch v {
+		case clparams.AltairVersion:
+			if err := s.UpgradeToAltair(); err != nil {
+				return err
+			}
+		case clparams.BellatrixVersion:
+			if err := s.UpgradeToBellatrix(); err != nil {
+				return err
+			}
+		case clparams.CapellaVersion:
+			if err := s.UpgradeToCapella(); err != nil {
+				return err
+			}
+		case clparams.DenebVersion:
+			if err := s.UpgradeToDeneb(); err != nil {
+				return err
+			}
+		case clparams.ElectraVersion:
+			if err := s.UpgradeToElectra(); err != nil {
+				return err
+			}
+		case clparams.FuluVersion:
+			if err := s.UpgradeToFulu(); err != nil {
+				return err
+			}
+		case clparams.GloasVersion:
+			if err := s.UpgradeToGloas(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
@@ -169,8 +210,31 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		}
 		genesisState = state.New(beaconConfig)
 
-		if err := genesisState.DecodeSSZ(stateBytes, int(beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch))); err != nil {
-			return fmt.Errorf("could not decode genesis state: %s", err)
+		// Detect actual state version from fork.current_version embedded in the SSZ bytes.
+		// SSZ layout: genesis_time(8) + genesis_validators_root(32) + slot(8) + fork.previous_version(4) → offset 52.
+		// External genesis tools (e.g. ethpandaops) may not yet support the latest fork, so the
+		// SSZ could be at an older version (e.g. Fulu) even when the config expects GLOAS at epoch 0.
+		targetVersion := beaconConfig.GetCurrentStateVersion(beaconConfig.GenesisEpoch)
+		actualVersion := targetVersion
+		const forkCurrentVersionOffset = 52
+		if len(stateBytes) >= forkCurrentVersionOffset+4 {
+			var forkVersion common.Bytes4
+			copy(forkVersion[:], stateBytes[forkCurrentVersionOffset:forkCurrentVersionOffset+4])
+			if entry, ok := beaconConfig.ForkVersionSchedule[forkVersion]; ok {
+				actualVersion = entry.StateVersion
+			}
+		}
+
+		if err := genesisState.DecodeSSZ(stateBytes, int(actualVersion)); err != nil {
+			return fmt.Errorf("could not decode genesis state (detected version %s): %s", actualVersion, err)
+		}
+
+		// If the genesis SSZ is at an older fork version than expected, apply sequential upgrades.
+		if actualVersion < targetVersion {
+			log.Info("[Caplin] Upgrading genesis state to target fork", "from", actualVersion, "to", targetVersion)
+			if err := upgradeGenesisState(genesisState, actualVersion, targetVersion); err != nil {
+				return fmt.Errorf("could not upgrade genesis state from %s to %s: %s", actualVersion, targetVersion, err)
+			}
 		}
 	} else {
 		networkConfig, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)
@@ -229,6 +293,17 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 
+	// Write the genesis beacon block to the index DB before the sentinel and fork
+	// choice are created. This ensures the genesis block is available when peers
+	// ask for it via beacon_blocks_by_root (otherwise we return empty and get banned).
+	// Previously this only ran for dev mode, but Kurtosis devnets also start from
+	// genesis and need the block written early.
+	if state != nil && state.Slot() == 0 {
+		if err := writeDevGenesisBeaconBlock(ctx, state, beaconConfig, indexDB); err != nil {
+			return fmt.Errorf("write genesis beacon block: %w", err)
+		}
+	}
+
 	caplinOptions := []CaplinOption{}
 	if config.BeaconAPIRouter.Builder {
 		if config.RelayUrlExist() {
@@ -242,6 +317,9 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	if eth1Getter != nil {
 		eth1Getter.SetBeaconChainConfig(beaconConfig)
+	}
+	if engineWithCfg, ok := engine.(*execution_client.ExecutionClientEngine); ok {
+		engineWithCfg.SetBeaconChainConfig(beaconConfig)
 	}
 
 	ctx, cn := context.WithCancel(ctx)
@@ -260,6 +338,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	csn := freezeblocks.NewCaplinSnapshots(freezeCfg, beaconConfig, dirs, logger)
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
+	epbsPool := pool.NewEpbsPool()
 	pool := pool.NewOperationsPool(beaconConfig)
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
@@ -282,7 +361,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -294,17 +373,32 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
-	p2p, err := p2p.NewP2Pmanager(ctx, &p2p.P2PConfig{
-		IpAddr:     config.CaplinDiscoveryAddr,
-		Port:       int(config.CaplinDiscoveryPort),
-		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP: config.EnableUPnP,
+
+	// Parse --caplin.nat into a NAT interface so both P2P managers advertise the correct
+	// external IP in discv5 ENR and libp2p multiaddrs (needed for Docker/NAT deployments).
+	var caplinNAT p2pnat.Interface
+	if config.CaplinNAT != "" {
+		var natErr error
+		caplinNAT, natErr = p2pnat.Parse(config.CaplinNAT)
+		if natErr != nil {
+			return fmt.Errorf("invalid --caplin.nat option %q: %w", config.CaplinNAT, natErr)
+		}
+	}
+
+	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
+		IpAddr:         config.CaplinDiscoveryAddr,
+		Port:           int(config.CaplinDiscoveryPort),
+		TCPPort:        uint(config.CaplinDiscoveryTCPPort),
+		EnableUPnP:     config.EnableUPnP,
+		NAT:            caplinNAT,
+		LocalDiscovery: config.LocalDiscovery,
 		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
-		NetworkConfig: networkConfig,
-		BeaconConfig:  beaconConfig,
-		TmpDir:        dirs.Tmp,
+		NetworkConfig:      networkConfig,
+		BeaconConfig:       beaconConfig,
+		TmpDir:             dirs.Tmp,
+		SubscribeAllTopics: config.SubscribeAllTopics,
 		//EnableBlocks:                 true,
 		//ActiveIndicies: uint64(len(activeIndicies)),
 		MaxPeerCount: config.MaxPeerCount,
@@ -315,31 +409,45 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:                       config.CaplinDiscoveryAddr,
-		Port:                         int(config.CaplinDiscoveryPort),
-		TCPPort:                      uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP:                   config.EnableUPnP,
+		P2PConfig: clp2p.P2PConfig{
+			IpAddr:             config.CaplinDiscoveryAddr,
+			Port:               int(config.CaplinDiscoveryPort),
+			TCPPort:            uint(config.CaplinDiscoveryTCPPort),
+			EnableUPnP:         config.EnableUPnP,
+			NAT:                caplinNAT,
+			LocalDiscovery:     config.LocalDiscovery,
+			NetworkConfig:      networkConfig,
+			BeaconConfig:       beaconConfig,
+			TmpDir:             dirs.Tmp,
+			MaxPeerCount:       config.MaxPeerCount,
+			SubscribeAllTopics: config.SubscribeAllTopics,
+		},
 		MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
 		SubscribeAllTopics:           config.SubscribeAllTopics,
-		NetworkConfig:                networkConfig,
-		BeaconConfig:                 beaconConfig,
-		TmpDir:                       dirs.Tmp,
 		EnableBlocks:                 true,
 		ActiveIndicies:               uint64(len(activeIndicies)),
-		MaxPeerCount:                 config.MaxPeerCount,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
 		Creds:   creds,
-		InitialStatus: &cltypes.Status{
-			ForkDigest:     forkDigest,
-			FinalizedRoot:  state.FinalizedCheckpoint().Root,
-			FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-			HeadSlot:       state.FinalizedCheckpoint().Epoch * beaconConfig.SlotsPerEpoch,
-			HeadRoot:       state.FinalizedCheckpoint().Root,
-		},
+		InitialStatus: func() *cltypes.Status {
+			// Use the fork choice anchor root (actual genesis block root) instead of
+			// state.FinalizedCheckpoint().Root which is 0x00..00 at genesis.
+			// IMPORTANT: HeadSlot must be 0 (matching the genesis anchor slot) so that
+			// head_root and head_slot are consistent. Setting head_slot to the clock
+			// slot while head_root is the genesis root causes Lighthouse to penalize
+			// us for head_root/head_slot mismatch (-20 score, eventually banned).
+			anchorRoot := forkChoice.AnchorRoot()
+			return &cltypes.Status{
+				ForkDigest:     forkDigest,
+				FinalizedRoot:  anchorRoot,
+				FinalizedEpoch: forkChoice.FinalizedCheckpoint().Epoch,
+				HeadSlot:       0,
+				HeadRoot:       anchorRoot,
+			}
+		}(),
 	}, ethClock, forkChoice, columnStorage, peerDasState, p2p, logger)
 	if err != nil {
 		return err
@@ -349,14 +457,16 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
-	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager)
-	forkChoice.InitPeerDas(peerDas) // hack init
+	gossipManager.SetPeerBanner(beaconRpc)
+	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
+	forkChoice.InitPeerDas(peerDas)   // hack init
+	peerDas.SetForkChoice(forkChoice) // [New in Gloas:EIP7732] Set forkChoice for GLOAS kzg_commitments lookup
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
 	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
-	dataColumnSidecarService := services.NewDataColumnSidecarService(beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
+	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
 	syncContributionService := services.NewSyncContributionService(syncedDataManager, beaconConfig, syncContributionPool, ethClock, emitters, batchSignatureVerifier, validatorParameters, false)
@@ -365,6 +475,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
+	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
+	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
@@ -380,6 +494,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		voluntaryExitService,
 		blsToExecutionChangeService,
 		proposerSlashingService,
+		executionPayloadService,
+		payloadAttestationService,
+		proposerPreferencesService,
+		executionPayloadBidService,
 	)
 
 	{
@@ -498,6 +616,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			gossipManager,
 			true,
 			peerDas,
+			epbsPool,
+			executionPayloadBidService,
+			payloadAttestationService,
+			proposerPreferencesService,
 		)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
@@ -519,7 +641,6 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		csn,
 		rcsn,
 		dirs,
-		config.LoopBlockLimit,
 		config,
 		syncedDataManager,
 		emitters,

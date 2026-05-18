@@ -1,20 +1,7 @@
 name: Consensus spec
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:
@@ -37,6 +24,16 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v4
+        with:
+          # Only cache the .tar.gz; the extracted dir is recreated by
+          # tools/test-fixtures.sh on each run from the cached tarball.
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
+
       - name: test-integration-caplin
         run: |
           cd cl/spectest
@@ -48,6 +45,15 @@ jobs:
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true
 
   tests-windows:
     strategy:
@@ -64,6 +70,14 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
+      - name: Cache cl_mainnet tarball
+        uses: actions/cache@v4
+        with:
+          path: test-fixtures-cache/cl_mainnet.tar.gz
+          key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-cl-${{ runner.os }}-
+
       - name: test-integration-caplin
         run: |
           cd cl/spectest && make tests
@@ -71,3 +85,12 @@ jobs:
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

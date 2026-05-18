@@ -21,7 +21,7 @@ inputs:
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
-    default: 'false'
+    default: 'true'
   build-cache-extra-key:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
@@ -81,6 +81,11 @@ runs:
         echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
         echo "TMP=D:/tmp" >> "$GITHUB_ENV"
         echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
+
+    - name: Enable long paths on Windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: git config --global core.longpaths true
 
     - name: Enable git debug tracing
       if: ${{ runner.debug }}
@@ -153,21 +158,20 @@ runs:
       shell: bash
       run: |
         time git lfs pull --include='execution/tests/test-corners/**'
-        cd execution/tests/execution-spec-tests
-        # The eest-fixtures submodule contains many more LFS JSON files
-        # (benchmarks, devnet fixtures, stTimeConsuming, etc.) that the
-        # tests don't need. This filter is intentionally selective — it
-        # cannot be simplified to *.json without pulling all of them.
-        time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json,blockchain_tests_devnet/for_amsterdam/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests_devnet/for_amsterdam/cancun/eip4844_blobs/*.json'
 
     - name: Install git-restore-mtime
       shell: bash
       run: |
-        curl -sL https://raw.githubusercontent.com/MestreLion/git-tools/main/git-restore-mtime -o "$RUNNER_TEMP/git-restore-mtime"
-        chmod +x "$RUNNER_TEMP/git-restore-mtime"
+        if ! curl -sfL https://raw.githubusercontent.com/MestreLion/git-tools/main/git-restore-mtime -o "$RUNNER_TEMP/git-restore-mtime"; then
+          echo "::warning::Failed to download git-restore-mtime (rate-limited?), skipping mtime restore"
+          echo "SKIP_MTIME=true" >> "$GITHUB_ENV"
+        else
+          chmod +x "$RUNNER_TEMP/git-restore-mtime"
+        fi
         echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
     - name: Restore fixture mtimes for Go test caching
+      if: ${{ env.SKIP_MTIME != 'true' }}
       shell: bash
       run: |
         # Go's test cache keys include stat metadata (mtime+size) for every

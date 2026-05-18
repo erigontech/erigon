@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -224,14 +225,18 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return out, err
+	}
+	defer c.Close()
 	if begin > 0 {
-		fromTxNum, err = txNumsReader.Min(context.Background(), tx, begin)
+		fromTxNum, err = txNumsReader.MinWithCursor(context.Background(), tx, c, begin)
 		if err != nil {
 			return out, err
 		}
 	}
-
-	toTxNum, err = txNumsReader.Max(context.Background(), tx, end)
+	toTxNum, err = txNumsReader.MaxWithCursor(context.Background(), tx, c, end)
 	if err != nil {
 		return out, err
 	}
@@ -286,14 +291,18 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
 
+	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
-		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, rangeLimit)
+		return nil, &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("%s: %d", errExceedBlockRange, rangeLimit),
+		}
 	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
+	topicMap := types.BuildTopicMap(crit.Topics)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -354,23 +363,17 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					return logs, err
 				}
 
-				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+				borLogs = borLogs.FilterWithTopicMap(addrMap, topicMap, 0)
 
 				for _, filteredLog := range borLogs {
 					if maxResults != 0 && len(logs) >= maxResults {
-						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+						return nil, &rpc.InvalidParamsError{
+							Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
+						}
 					}
 					logs = append(logs, &types.ErigonLog{
-						Address:     filteredLog.Address,
-						Topics:      filteredLog.Topics,
-						Data:        filteredLog.Data,
-						BlockNumber: filteredLog.BlockNumber,
-						TxHash:      filteredLog.TxHash,
-						TxIndex:     filteredLog.TxIndex,
-						BlockHash:   filteredLog.BlockHash,
-						Index:       filteredLog.Index,
-						Removed:     filteredLog.Removed,
-						Timestamp:   header.Time,
+						Log:       *filteredLog,
+						Timestamp: hexutil.Uint64(header.Time),
 					})
 				}
 			}
@@ -379,6 +382,17 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+
+		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
+			for _, filteredLog := range r.Logs.FilterWithTopicMap(addrMap, topicMap, 0) {
+				if maxResults != 0 && len(logs) >= maxResults {
+					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults)}
+				}
+				logs = append(logs, &types.ErigonLog{Log: *filteredLog, Timestamp: hexutil.Uint64(header.Time)})
+			}
+			continue
+		}
+
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -394,23 +408,17 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
+		filtered := r.Logs.FilterWithTopicMap(addrMap, topicMap, 0)
 
 		for _, filteredLog := range filtered {
 			if maxResults != 0 && len(logs) >= maxResults {
-				return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+				return nil, &rpc.InvalidParamsError{
+					Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
+				}
 			}
 			logs = append(logs, &types.ErigonLog{
-				Address:     filteredLog.Address,
-				Topics:      filteredLog.Topics,
-				Data:        filteredLog.Data,
-				BlockNumber: filteredLog.BlockNumber,
-				TxHash:      filteredLog.TxHash,
-				TxIndex:     filteredLog.TxIndex,
-				BlockHash:   filteredLog.BlockHash,
-				Index:       filteredLog.Index,
-				Removed:     filteredLog.Removed,
-				Timestamp:   header.Time,
+				Log:       *filteredLog,
+				Timestamp: hexutil.Uint64(header.Time),
 			})
 		}
 	}
@@ -488,12 +496,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
+	overlayTx := api.filters.WithOverlay(tx)
+
 	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -516,7 +526,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -549,7 +559,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var txnIndex = int(txNum - txNumMin - 1)
 
-	txn, err := api._blockReader.TxnByIdxInBlock(ctx, tx, header.Number.Uint64(), txnIndex)
+	txn, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {
 		return nil, err
 	}

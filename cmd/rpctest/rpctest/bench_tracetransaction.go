@@ -17,35 +17,19 @@
 package rpctest
 
 import (
-	"bufio"
 	"fmt"
-	"os"
 )
 
 func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFrom uint64, blockTo uint64, recordFileName string, errorFileName string) error {
 	fmt.Println("BenchTraceTransaction: fromBlock:", blockFrom, ", blockTo:", blockTo)
 
 	setRoutes(erigonUrl, gethUrl)
-	var rec *bufio.Writer
-	if recordFileName != "" {
-		f, err := os.Create(recordFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for recording: %v\n", recordFileName, err)
-		}
-		defer f.Close()
-		rec = bufio.NewWriter(f)
-		defer rec.Flush()
+
+	rec, errs, cleanup, err := openWriters(recordFileName, errorFileName)
+	if err != nil {
+		return err
 	}
-	var errs *bufio.Writer
-	if errorFileName != "" {
-		ferr, err := os.Create(errorFileName)
-		if err != nil {
-			return fmt.Errorf("Cannot create file %s for error output: %v\n", errorFileName, err)
-		}
-		defer ferr.Close()
-		errs = bufio.NewWriter(ferr)
-		defer errs.Flush()
-	}
+	defer cleanup()
 
 	var resultsCh chan CallResult = nil
 	if !needCompare {
@@ -56,7 +40,6 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 
 	reqGen := &RequestGenerator{}
 
-	var res CallResult
 	var nBlocks = 0
 	var nTransactions = 0
 
@@ -65,38 +48,16 @@ func BenchTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blockFro
 			fmt.Println("Processing Block: ", bn)
 		}
 		nBlocks++
-		var erigonBlock EthBlockByNumber
 
-		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &erigonBlock)
-		if res.Err != nil {
-			return fmt.Errorf("retrieve block (Erigon) %d: %v", blockFrom, res.Err)
+		b, skip, err := fetchBlock(reqGen, bn, needCompare, rec)
+		if err != nil {
+			return err
 		}
-		if erigonBlock.Error != nil {
-			return fmt.Errorf("retrieving block (Erigon): %d %s", erigonBlock.Error.Code, erigonBlock.Error.Message)
-		}
-
-		if needCompare {
-			var otherBlock EthBlockByNumber
-
-			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &otherBlock)
-			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
-			}
-			if otherBlock.Error != nil {
-				return fmt.Errorf("Error retrieving block (geth): %d %s\n", otherBlock.Error.Code, otherBlock.Error.Message)
-			}
-			if !compareBlocks(&erigonBlock, &otherBlock) {
-				if rec != nil {
-					fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
-					rec.Flush()
-					continue
-				} else {
-					return fmt.Errorf("block %d has different fields\n", bn)
-				}
-			}
+		if skip {
+			continue
 		}
 
-		for idx, txn := range erigonBlock.Result.Transactions {
+		for idx, txn := range b.Result.Transactions {
 			if idx%30 != 0 {
 				continue
 			}

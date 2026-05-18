@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -20,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type blockReadAheader struct {
+type BlockReadAheader struct {
 	// keeps some caches for block themselves
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
@@ -28,9 +30,10 @@ type blockReadAheader struct {
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
+	warmWg  sync.WaitGroup
 }
 
-func newBlockReadAheader() *blockReadAheader {
+func NewBlockReadAheader() *BlockReadAheader {
 	headers, err := lru.New[common.Hash, *types.Header](4)
 	if err != nil {
 		panic(err)
@@ -43,16 +46,14 @@ func newBlockReadAheader() *blockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	return &blockReadAheader{
+	return &BlockReadAheader{
 		headers: headers,
 		bodies:  bodies,
 		senders: senders,
 	}
 }
 
-var globalReadAheader = newBlockReadAheader()
-
-func (bra *blockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
+func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
 	blockHash := header.Hash()
 	bra.headers.Add(blockHash, header)
 	bra.bodies.Add(blockHash, body)
@@ -61,31 +62,46 @@ func (bra *blockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, h
 		if !bra.warming.CompareAndSwap(false, true) {
 			return
 		}
-		go bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+		bra.warmWg.Add(1)
+		go func() {
+			defer bra.warmWg.Done()
+			bra.warmBody(ctx, db, header, body, 8) // use 8 workers for warming
+		}()
 	}
 }
 
-func (bra *blockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
+// WaitForWarmup blocks until any in-flight warmBody goroutine finishes or
+// the context is cancelled. Call before closing the database to avoid
+// waitTxsAllDoneOnClose hangs.
+func (bra *BlockReadAheader) WaitForWarmup(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		bra.warmWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	if _, ok := bra.bodies.Get(blockHash); !ok {
 		return
 	}
 	bra.senders.Add(blockHash, common.Copy(senders))
 }
 
-func AddHeaderAndBodyToGlobalReadAheader(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
-	globalReadAheader.AddHeaderAndBody(ctx, db, header, body)
-}
-
-func AddSendersToGlobalReadAheader(senders []byte, blockHash common.Hash) {
-	globalReadAheader.AddSenders(senders, blockHash)
-}
-
 // warmBody warms state for all transactions in a body using multiple workers.
 // It reads: To accounts, To account code, To account storage from access lists,
 // and block-level access lists. Each worker creates its own transaction.
 // Only one warmBody can run at a time - concurrent calls are no-ops.
-func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
+func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
 	defer bra.warming.Store(false)
+
+	if !dbg.ReadAhead {
+		return
+	}
 
 	if workers <= 0 {
 		workers = 1
@@ -243,24 +259,20 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 	wg.Wait()
 }
 
-func WarmBodyFromGlobalReadAheader(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, workers int) {
-	globalReadAheader.warmBody(ctx, db, header, body, workers)
+func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*types.Body, bool) {
+	return bra.bodies.Get(blockHash)
 }
 
-func ReadBodyWithTransactionsFromGlobalReadAheader(blockHash common.Hash) (*types.Body, bool) {
-	return globalReadAheader.bodies.Get(blockHash)
-}
-
-func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Block, bool) {
-	header, ok := globalReadAheader.headers.Get(blockHash)
+func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {
+	header, ok := bra.headers.Get(blockHash)
 	if header == nil || !ok {
 		return nil, false
 	}
-	body, ok := globalReadAheader.bodies.Get(blockHash)
+	body, ok := bra.bodies.Get(blockHash)
 	if body == nil || !ok {
 		return nil, false
 	}
-	senders, ok := globalReadAheader.senders.Get(blockHash)
+	senders, ok := bra.senders.Get(blockHash)
 	if len(senders) == 0 || !ok {
 		return nil, false
 	}

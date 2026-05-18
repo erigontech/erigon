@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -50,19 +51,24 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 )
 
-var branchPrefixFlag string
+var (
+	branchPrefixFlag string
+	txnumFlag        uint64
+)
 
 // visualize command flags
 var (
@@ -89,11 +95,11 @@ var (
 )
 
 func init() {
-
 	// commitment branch
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
 	withConfig(commitmentBranchCmd)
+	commitmentBranchCmd.Flags().Uint64Var(&txnumFlag, "txnum", 0, "txnum to read as of")
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
 
@@ -110,6 +116,10 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withYes(cmdCommitmentRebuild)
+	withClearCommitment(cmdCommitmentRebuild)
+	withResume(cmdCommitmentRebuild)
+	withNoHistory(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -146,7 +156,6 @@ func init() {
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
 	rootCmd.AddCommand(commitmentCmd)
-
 }
 
 var commitmentCmd = &cobra.Command{
@@ -161,9 +170,13 @@ var commitmentBranchCmd = &cobra.Command{
 	Long: `Opens the commitment domain from a given datadir and reads the branch data
 for the specified prefix. The prefix should be provided as hex nibbles.
 
+Use --txnum to read the state as of a specific txnum  (historical read via GetAsOf).
+Without --txnum, reads the latest state.
+
 Examples:
   integration commitment branch --chain=mainnet --datadir ~/data/eth-mainnet --prefix aa
   integration commitment branch --datadir /path/to/datadir --prefix 0a1b
+  integration commitment branch --datadir /path/to/datadir --prefix 0a1b --txnum 1000000
   integration commitment branch --datadir /path/to/datadir  # reads root (empty prefix)`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -190,29 +203,37 @@ Examples:
 			return
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-		if err != nil {
-			logger.Error("Failed to create shared domains", "error", err)
-			return
-		}
-		defer sd.Close()
-		// Use LatestStateReader to read from the commitment domain.
-		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
-		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
-		if err := readBranch(commitmentReader, prefix, logger); err != nil {
-			logger.Error("Failed to read branch", "error", err)
-			return
+		stepSize := tx.Debug().StepSize()
+		if txnumFlag > 0 {
+			fmt.Printf("(asOfTxNum: %d)\n", txnumFlag)
+			reader := commitmentdb.NewHistoryStateReader(tx, txnumFlag)
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
+		} else {
+			// Latest state read
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				logger.Error("Failed to create shared domains", "error", err)
+				return
+			}
+			defer sd.Close()
+			reader := commitmentdb.NewLatestStateReader(tx, sd)
+			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
+				logger.Error("Failed to read branch", "error", err)
+				return
+			}
 		}
 	},
 }
 
-func readBranch(stateReader *commitmentdb.LatestStateReader, prefix []byte, logger interface {
+func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
-	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+	compactKey := nibbles.HexToCompact(prefix)
+	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
 	}
@@ -258,6 +279,13 @@ var cmdCommitmentRebuild = &cobra.Command{
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if clearCommitment && resume {
+		return errors.New("--clear-commitment and --resume are mutually exclusive")
+	}
+	if noHistory && clearCommitment {
+		return errors.New("--no-history and --clear-commitment are mutually exclusive")
+	}
+
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
@@ -266,27 +294,91 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer rwTx.Rollback()
 
-	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
-		return err
-	}
-
-	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := statecfg.Schema.CommitmentDomain
-	for _, tn := range sconf.Tables() {
-		log.Info("Clearing", "table", tn)
-		if err := rwTx.ClearTable(tn); err != nil {
-			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+	if !clearCommitment {
+		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("max tx num is not populated; run: integration stage_headers --reset --datadir=<dir> --chain=<chain>")
 		}
 	}
-	if err := rwTx.Commit(); err != nil {
+
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(rwTx)
+	if err != nil {
 		return err
+	}
+	if commitmentHistoryEnabled {
+		statecfg.EnableHistoricalCommitment()
+	}
+
+	if resume && !commitmentHistoryEnabled && !noHistory {
+		logger.Info("[commitment_rebuild] commitment history not enabled in DB; resuming in --no-history mode")
+		noHistory = true
+	}
+
+	withHistory := false
+	if noHistory {
+		// --no-history explicitly requested: skip history regeneration entirely
+		withHistory = false
+	} else if commitmentHistoryEnabled {
+		if clearCommitment || resume || yes {
+			withHistory = true
+		} else {
+			fmt.Print("commitment history is enabled. Rebuild with history? (yes/no): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
+			switch resp {
+			case "y", "yes":
+				withHistory = true
+			case "n", "no":
+			default:
+				return fmt.Errorf("invalid response %q: expected yes or no", resp)
+			}
+		}
+	}
+
+	if !resume {
+		// remove all existing state commitment snapshots
+		// when not rebuilding with history, only delete domain files (preserve existing history/index)
+		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
+			Dirs:                   dirs,
+			RemoveLatest:           false,
+			PromptUserBeforeDelete: !yes,
+			DryRun:                 false,
+			StepRange:              "0-999999",
+			OnlyDomain:             !withHistory,
+			DomainNames:            []string{kv.CommitmentDomain.String()},
+		}); err != nil {
+			return err
+		}
+
+		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+		sconf := statecfg.Schema.CommitmentDomain
+		for _, tn := range sconf.Tables() {
+			log.Info("Clearing", "table", tn)
+			if err := rwTx.ClearTable(tn); err != nil {
+				return fmt.Errorf("failed to clear table %s: %w", tn, err)
+			}
+		}
+		if err := rwTx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		rwTx.Rollback()
+	}
+
+	if clearCommitment {
+		log.Info("Commitment data removed from DB and state files deleted")
+		return nil
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -297,11 +389,18 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
-		return err
+	if withHistory {
+		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
+			return err
+		}
+	} else {
+		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -521,11 +620,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
+	stepSize := tx.Debug().StepSize()
 
 	startTime := time.Now()
 	for i, key := range keys {
 		lookupStart := time.Now()
-		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, config3.DefaultStepSize)
+		val, _, err := commitmentReader.Read(kv.CommitmentDomain, key, stepSize)
 		durations[i] = time.Since(lookupStart)
 
 		if err != nil {
@@ -578,7 +678,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 
 	// Convert hex nibbles to compact bytes for commitment lookup
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 
 	seed := benchHistorySeed
 	if seed == 0 {
@@ -654,7 +754,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
 	}
-	var allStats = allFileStats
+	allStats := allFileStats
 	if mdbxStats != nil {
 		allStats = append(allStats, *mdbxStats)
 	}
@@ -668,6 +768,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 // benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
 func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
 	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
+	stepSize := tx.Debug().StepSize()
 
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()
@@ -712,7 +813,7 @@ func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyF
 			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 			lookupStart := time.Now()
-			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -798,6 +899,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
 	// The reader has logic to determine whether to look in snapshots or MDBX
 	durations := make([]time.Duration, 0, sampleCount)
+	stepSize := tx.Debug().StepSize()
 
 	benchStart := time.Now()
 	for _, txNum := range sampledTxNums {
@@ -805,7 +907,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
 
 		lookupStart := time.Now()
-		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, stepSize)
 		elapsed := time.Since(lookupStart)
 
 		if err != nil {
@@ -1277,7 +1379,7 @@ func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
 }
 
 func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.TreeMap {
-	var TreeMap = []opts.TreeMapNode{
+	TreeMap := []opts.TreeMapNode{
 		{Name: "prefixes"},
 		{Name: "values"},
 	}
@@ -1336,14 +1438,16 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#777",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							UpperLabel: &opts.UpperLabel{Show: opts.Bool(true)},
 						},
 						{ // Level
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#666",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							Emphasis: &opts.Emphasis{
 								ItemStyle: &opts.ItemStyle{BorderColor: "#555"},
 							},
@@ -1389,7 +1493,7 @@ function (info) {
     for (var i = 1; i < treePathInfo.length; i++) {
         treePath.push(treePathInfo[i].name);
     }
-    
+
     return [
         '<div class="tooltip-title" style="color: white;">' + formatUtil.encodeHTML(treePath.join('/')) + '</div>',
 				'<span style="color: white;">Disk Usage: ' + result + '</span>',

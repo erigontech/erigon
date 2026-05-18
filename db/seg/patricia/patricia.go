@@ -352,6 +352,23 @@ type Match struct {
 
 type Matches []Match
 
+func deduplicateMatches(matches Matches) Matches {
+	if len(matches) < 2 {
+		return matches
+	}
+	slices.SortFunc(matches, func(i, j Match) int { return cmp.Compare(i.Start, j.Start) })
+	lastEnd := matches[0].End
+	j := 1
+	for _, m := range matches[1:] {
+		if m.End > lastEnd {
+			matches[j] = m
+			lastEnd = m.End
+			j++
+		}
+	}
+	return matches[:j]
+}
+
 // MatchFinder is the original implementation kept for validation purposes.
 // It's used in fuzz tests to compare results with MatchFinder2.
 type MatchFinder struct {
@@ -373,6 +390,7 @@ type MatchFinder2 struct {
 	sa         []int32
 	lcp        []int32
 	inv        []int32
+	saisBuf    []int32
 	headLen    int
 	tailLen    int
 	side       int // 0, 1, or 2 (if side is not determined yet)
@@ -566,7 +584,7 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 	} else {
 		mf2.sa = mf2.sa[:n]
 	}
-	if err := sais.Sais(data, mf2.sa); err != nil {
+	if err := sais.Sais(data, mf2.sa, &mf2.saisBuf); err != nil {
 		panic(err)
 	}
 	if cap(mf2.inv) < n {
@@ -685,26 +703,7 @@ func (mf2 *MatchFinder2) FindLongestMatches(data []byte) []Match {
 			//fmt.Printf("Added new Match: [%d-%d] [%x]\n", m.Start, m.End, data[m.Start:m.End])
 		}
 	}
-	//fmt.Printf("before sorting %d matches\n", len(mf2.matches))
-	if len(mf2.matches) < 2 {
-		return mf2.matches
-	}
-	slices.SortFunc(mf2.matches, func(i, j Match) int { return cmp.Compare(i.Start, j.Start) })
-
-	lastEnd := mf2.matches[0].End
-	j := 1
-	for i, m := range mf2.matches {
-		if i > 0 {
-			if m.End > lastEnd {
-				if i != j {
-					mf2.matches[j] = m
-				}
-				lastEnd = m.End
-				j++
-			}
-		}
-	}
-	return mf2.matches[:j]
+	return deduplicateMatches(mf2.matches)
 }
 
 func (mf2 *MatchFinder2) Current() ([]byte, int) {

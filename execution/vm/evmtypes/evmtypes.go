@@ -66,8 +66,9 @@ type TxContext struct {
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
 	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-	BlockGasUsed         uint64 // Gas used for block limit accounting - see EIP-7778
-	MaxGasUsed           uint64
+	BlockRegularGasUsed  uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	BlockStateGasUsed    uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)

@@ -23,23 +23,26 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sync"
 
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -68,13 +71,21 @@ type Filters struct {
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
 
+	// latestSD is the local fallback for the most recent SharedDomains.
+	// When events is non-nil (embedded mode), LatestSD() reads directly from
+	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
+	latestSD atomic.Pointer[execctx.SharedDomains]
+	events   *shards.Events
+
 	config FiltersConfig
 }
 
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger, events *shards.Events) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -90,6 +101,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
 		config:             config,
+		events:             events,
 	}
 
 	go func() {
@@ -422,13 +434,15 @@ func (ff *Filters) SubscribePendingLogs(size int) (<-chan types.Logs, PendingLog
 }
 
 // UnsubscribePendingLogs unsubscribes from pending logs using the given subscription ID.
-func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) bool {
 	ch, ok := ff.pendingLogsSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingLogsSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingBlock subscribes to pending blocks and returns a channel to receive the blocks
@@ -441,13 +455,15 @@ func (ff *Filters) SubscribePendingBlock(size int) (<-chan *types.Block, Pending
 }
 
 // UnsubscribePendingBlock unsubscribes from pending blocks using the given subscription ID.
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	ch, ok := ff.pendingBlockSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingBlockSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
@@ -551,7 +567,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]common.Hash{}
+		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
 		for _, topics := range criteria.Topics {
 			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
@@ -563,9 +579,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 					break
 				}
 			}
-			if len(allowedTopicsRow) > 0 {
-				allowedTopics = append(allowedTopics, allowedTopicsRow)
-			}
+			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
+			allowedTopics = append(allowedTopics, allowedTopicsRow)
 		}
 		f.topicsOriginal = allowedTopics
 	}
@@ -721,6 +736,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
+
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 		v.Send(&header)
 		return nil
@@ -767,16 +783,11 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			// Calculate the number of logs to remove
 			excessLogs := len(st) + 1 - maxLogs
-			if excessLogs > 0 {
-				if excessLogs >= len(st) {
-					// If excessLogs is greater than or equal to the length of st, remove all
-					st = []*types.Log{}
-				} else {
-					// Otherwise, remove the oldest logs
-					st = st[excessLogs:]
-				}
+			if excessLogs >= len(st) {
+				st = []*types.Log{}
+			} else {
+				st = st[excessLogs:]
 			}
 		}
 
@@ -789,11 +800,7 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	res, ok := ff.logsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.logsStores.Delete(id)
 }
 
 // AddPendingBlock adds a pending block header to the store associated with the given subscription ID.
@@ -805,16 +812,11 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
 		if maxHeaders > 0 && len(st)+1 > maxHeaders {
-			// Calculate the number of headers to remove
 			excessHeaders := len(st) + 1 - maxHeaders
-			if excessHeaders > 0 {
-				if excessHeaders >= len(st) {
-					// If excessHeaders is greater than or equal to the length of st, remove all
-					st = []*types.Header{}
-				} else {
-					// Otherwise, remove the oldest headers
-					st = st[excessHeaders:]
-				}
+			if excessHeaders >= len(st) {
+				st = []*types.Header{}
+			} else {
+				st = st[excessHeaders:]
 			}
 		}
 
@@ -827,11 +829,7 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 // ReadPendingBlocks reads pending block headers from the store associated with the given subscription ID.
 // It returns the block headers and a boolean indicating whether the headers were found.
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	res, ok := ff.pendingHeadsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.pendingHeadsStores.Delete(id)
 }
 
 // AddPendingTxs adds pending transactions to the store associated with the given subscription ID.
@@ -856,16 +854,11 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Calculate how many transactions need to be removed
 			excessTxs := len(flatSt) + len(txs) - maxTxs
-			if excessTxs > 0 {
-				if excessTxs >= len(flatSt) {
-					// If excessTxs is greater than or equal to the length of flatSt, remove all
-					flatSt = []types.Transaction{}
-				} else {
-					// Otherwise, remove the oldest transactions
-					flatSt = flatSt[excessTxs:]
-				}
+			if excessTxs >= len(flatSt) {
+				flatSt = []types.Transaction{}
+			} else {
+				flatSt = flatSt[excessTxs:]
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch
@@ -881,9 +874,52 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 // ReadPendingTxs reads pending transactions from the store associated with the given subscription ID.
 // It returns the transactions and a boolean indicating whether the transactions were found.
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	res, ok := ff.pendingTxsStores.Delete(id)
-	if !ok {
-		return res, false
+	return ff.pendingTxsStores.Delete(id)
+}
+
+// LatestSD returns the most recent SharedDomains published via Events,
+// or nil if none is available (either no background commit in progress
+// or the commit has completed).
+// In embedded mode, reads directly from Events.LatestSD() which is updated
+// synchronously in PublishOverlay — no channel delay.
+func (ff *Filters) LatestSD() *execctx.SharedDomains {
+	if ff.events != nil {
+		return ff.events.LatestSD()
 	}
-	return res, true
+	return ff.latestSD.Load()
+}
+
+// WithOverlay returns a read view backed by the latest block overlay if one
+// is available, otherwise returns the given tx unchanged. The read view uses
+// the overlay's in-memory data for table lookups, falling back to the caller's tx
+// for data not in the overlay.
+// Safe to call on a nil receiver.
+func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
+}
+
+// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
+// avoiding repeated type assertions at callsites that need temporal access.
+func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
 }

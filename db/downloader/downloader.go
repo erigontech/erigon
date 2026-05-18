@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var debugWebseed = false
@@ -114,6 +115,21 @@ type Downloader struct {
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
+
+	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
+	// Set via SetENRUpdater after P2P is available.
+	enrUpdater func(enr.ChainToml)
+
+	// nodeSourceFn lazily resolves the P2P node source for chain.toml discovery.
+	// Returns nil if P2P is not yet available. Called each discovery iteration.
+	nodeSourceFn func() NodeSource
+
+	// peerManager synchronizes torrent peers with the DevP2P peer set.
+	peerManager *TorrentPeerManager
+
+	// manifestReady is closed after the first successful P2P manifest discovery.
+	// Non-nil only when --snap.p2p-manifest is enabled.
+	manifestReady chan struct{}
 }
 
 type AggStats struct {
@@ -385,6 +401,101 @@ func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 }
 
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
+
+// SetENRUpdater sets the callback used to advertise chain.toml info-hash via discv5 ENR.
+// Should be called after P2P servers are available.
+func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.enrUpdater = fn
+}
+
+// PublishLocalChainToml generates chain.toml from local torrents + preverified registry,
+// builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
+// derived from the preverified registry's ExpectBlocks.
+// It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
+func (d *Downloader) PublishLocalChainToml() error {
+	d.lock.RLock()
+	updater := d.enrUpdater
+	d.lock.RUnlock()
+
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, updater); err != nil {
+		return err
+	}
+
+	// Seed the chain.toml torrent so other nodes can download it by info-hash.
+	if err := d.seedChainTomlTorrent(); err != nil {
+		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+	}
+	return nil
+}
+
+// seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
+func (d *Downloader) seedChainTomlTorrent() error {
+	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
+	if err != nil {
+		return fmt.Errorf("loading chain.toml torrent: %w", err)
+	}
+	t, _, err := d.torrentClient.AddTorrentSpec(spec)
+	if err != nil {
+		return fmt.Errorf("adding chain.toml torrent: %w", err)
+	}
+	// Verify we have the data and can seed it.
+	if !t.Complete().Bool() {
+		t.DownloadAll()
+	}
+	return nil
+}
+
+// SetNodeSourceFn sets a lazy resolver for the P2P node source.
+// The function is called each discovery iteration, returning nil if P2P isn't ready yet.
+func (d *Downloader) SetNodeSourceFn(fn func() NodeSource) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.nodeSourceFn = fn
+}
+
+// EnableP2PManifest enables P2P manifest mode. When enabled, the snapshot stage
+// will wait for the first chain.toml discovery before building download requests.
+func (d *Downloader) EnableP2PManifest() {
+	d.manifestReady = make(chan struct{})
+}
+
+// ManifestReady returns a channel that is closed after the first successful P2P
+// manifest discovery. Returns nil if P2P manifest mode is not enabled.
+func (d *Downloader) ManifestReady() <-chan struct{} {
+	return d.manifestReady
+}
+
+// StartChainTomlDiscovery launches the background chain.toml discovery loop.
+// It discovers chain.toml from P2P peers and either merges new entries (acquiring mode)
+// or verifies against local entries (verify mode after initial sync).
+func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName string) {
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.chainTomlDiscoveryLoop(ctx, networkName)
+	}()
+}
+
+// StartTorrentPeerManager launches the background torrent peer manager that
+// synchronizes torrent peers with the DevP2P peer set.
+func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
+	d.lock.RLock()
+	fn := d.nodeSourceFn
+	d.lock.RUnlock()
+
+	if fn == nil {
+		return
+	}
+
+	d.peerManager = NewTorrentPeerManager(d.torrentClient, fn, d.logger)
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.peerManager.Run(ctx)
+	}()
+}
 
 // Check snapshot data looks right.
 func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
@@ -691,7 +802,19 @@ func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedS
 	if err != nil {
 		return
 	}
-	return wait(ctx)
+	if err = wait(ctx); err != nil {
+		return
+	}
+
+	// After downloads complete, regenerate chain.toml with all available torrents.
+	// Only republish when P2P manifest mode is opt-in (matches the gate in backend.go);
+	// manifestReady is non-nil iff EnableP2PManifest was called by the backend.
+	if d.manifestReady != nil {
+		if pubErr := d.PublishLocalChainToml(); pubErr != nil {
+			d.logger.Warn("[Downloader] failed to publish chain.toml after download", "err", pubErr)
+		}
+	}
+	return
 }
 
 // Starts downloading, returns a function to wait for completion. Wait or err are returned. Wait
@@ -1006,7 +1129,7 @@ func (d *Downloader) addedFirstDownloader(
 				// Should this error be returned instead?
 				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
 			}
-		} else {
+		} else if !errors.Is(err, context.Canceled) {
 			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
 		}
 	}
@@ -1273,6 +1396,9 @@ func (d *Downloader) PeerID() []byte {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
+// TorrentPort returns the local port the torrent client is listening on.
+func (d *Downloader) TorrentPort() int { return d.torrentClient.LocalPort() }
+
 // For the downloader only.
 func openMdbx(
 	ctx context.Context,
@@ -1323,18 +1449,14 @@ func newTorrentClient(
 		}
 	}()
 
-	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
-	cfg.TrackerDialContext = dnsResolver.DialContext
+	dnsDialer := downloadercfg.NewTTLDNSDialer()
+	cfg.TrackerDialContext = dnsDialer.DialContext
 
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		err = fmt.Errorf("creating torrent client: %w", err)
 		return
 	}
-
-	go func() {
-		dnsResolver.Run(ctx)
-	}()
 
 	return
 }

@@ -54,7 +54,7 @@ func TestSendRawTransaction(t *testing.T) {
 	require.NoError(err)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
@@ -95,7 +95,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	require.NoError(err)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, txPool, nil)
 	// Enable unprotected txs flag
 	api.AllowUnprotectedTxs = true

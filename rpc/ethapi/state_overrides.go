@@ -116,5 +116,18 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 		}
 	}
 
-	return ibs.FinalizeTx(rules, state.NewNoopWriter())
+	// Disable EIP-161 empty-account removal when finalizing state overrides.
+	// FinalizeTx with a NoopWriter commits dirty storage into originStorage
+	// (needed for correct SSTORE gas), but EIP-161 would also mark any account
+	// that becomes empty (nonce=0, code=0x, balance=0) as deleted in the IBS —
+	// even though the deletion is never written to the DB.  That spurious
+	// deleted=true flag causes IntraBlockState.HasStorage to short-circuit to
+	// false before reaching the state reader, breaking EIP-7610 collision
+	// detection in multi-block eth_simulateV1 when a prior simulated block
+	// deployed a contract at the overridden address.
+	// State overrides are simulation-only mutations and must not trigger
+	// consensus rules like EIP-161.
+	noEIP161Rules := *rules
+	noEIP161Rules.IsSpuriousDragon = false
+	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
 }

@@ -14,12 +14,15 @@ import (
 )
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
-	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+	curEpoch := c.ethClock.GetCurrentEpoch()
+	if curEpoch < c.beaconConfig.FuluForkEpoch {
 		return nil
 	}
 
+	// Use current epoch's version for decoding (supports Fulu and GLOAS)
+	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := &cltypes.ColumnSidecarsByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
@@ -37,6 +40,11 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		}
 		return nil
 	})
+
+	// Consume additional rate-limit tokens: slots × columns per slot, capped at config max.
+	if cost := min(int(req.Count)*req.Columns.Length(), int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
 
 	curSlot := c.ethClock.GetCurrentSlot()
 
@@ -115,20 +123,32 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
-	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+	curEpoch := c.ethClock.GetCurrentEpoch()
+	if curEpoch < c.beaconConfig.FuluForkEpoch {
 		return nil
 	}
 
+	// Use current epoch's version for decoding (supports Fulu and GLOAS)
+	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(c.beaconConfig.MaxRequestBlocksDeneb))
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 	if req.Len() > int(c.beaconConfig.MaxRequestBlocksDeneb) {
 		return errors.New("request is too large")
 	}
 
+	// Consume additional rate-limit tokens: sum of column counts across all roots.
+	totalColumns := 0
+	for i := 0; i < req.Len(); i++ {
+		totalColumns += req.Get(i).Columns.Length()
+	}
+	if cost := min(totalColumns, int(c.beaconConfig.MaxRequestDataColumnSidecars)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	curSlot := c.ethClock.GetCurrentSlot()
-	curEpoch := curSlot / c.beaconConfig.SlotsPerEpoch
+	curEpoch = curSlot / c.beaconConfig.SlotsPerEpoch
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {

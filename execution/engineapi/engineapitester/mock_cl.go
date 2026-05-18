@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -56,19 +57,21 @@ type MockCl struct {
 	genesis               common.Hash
 	state                 *MockClState
 	blockListener         *shutter.BlockListener
+	chainConfig           *chain.Config
 }
 
 type stateChangesClient interface {
 	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
-func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonRpcClient, stateChangesClient stateChangesClient, genesis *types.Block, opts ...MockClOption) *MockCl {
+func NewMockCl(ctx context.Context, logger log.Logger, elClient *engineapi.JsonRpcClient, stateChangesClient stateChangesClient, genesis *types.Block, chainConfig *chain.Config, opts ...MockClOption) *MockCl {
 	mcl := &MockCl{
 		logger:                logger,
 		engineApiClient:       elClient,
 		blockListener:         shutter.NewBlockListener(logger, stateChangesClient),
 		suggestedFeeRecipient: genesis.Coinbase(),
 		genesis:               genesis.Hash(),
+		chainConfig:           chainConfig,
 		state: &MockClState{
 			ParentElBlock:     genesis.Hash(),
 			ParentElTimestamp: genesis.Time(),
@@ -146,13 +149,21 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
 		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
-		SlotNumber:            (*hexutil.Uint64)(&slotNumber),
+	}
+	if cl.chainConfig.AmsterdamTime != nil {
+		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
 	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes)
+			var r *enginetypes.ForkChoiceUpdatedResponse
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes)
+			} else {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+			}
 			if err != nil {
 				return nil, "", err
 			}
@@ -167,7 +178,15 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	// get the newly built block
 	newPayload, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
+			var r *enginetypes.GetPayloadResponse
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
+			} else if cl.chainConfig.OsakaTime != nil {
+				r, err = cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+			} else {
+				r, err = cl.engineApiClient.GetPayloadV4(ctx, *fcuRes.PayloadId)
+			}
 			if err != nil {
 				return nil, "", err
 			}
@@ -193,7 +212,13 @@ func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*engi
 	}
 	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
+			var r *enginetypes.PayloadStatus
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
+			} else {
+				r, err = cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
+			}
 			if err != nil {
 				return nil, "", err
 			}
@@ -211,7 +236,13 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 	}
 	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil)
+			var r *enginetypes.ForkChoiceUpdatedResponse
+			var err error
+			if cl.chainConfig.AmsterdamTime != nil {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil)
+			} else {
+				r, err = cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+			}
 			if err != nil {
 				return nil, "", err
 			}

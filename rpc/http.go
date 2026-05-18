@@ -238,6 +238,45 @@ func (t *httpServerConn) RemoteAddr() string {
 // SetWriteDeadline does nothing and always returns nil.
 func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 
+// httpOverloadedKey signals that the inner DB gate (kv.ErrReadTxLimitExceeded) rejected this request.
+// ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
+type httpOverloadedKey struct{}
+
+// httpFlusherContextKey carries a gzip-activation hook for the current request.
+// It must only be set by the gzip middleware (not by a generic http.Flusher check),
+// so that it is absent when gzip is disabled and cannot prematurely commit HTTP headers.
+type httpFlusherContextKey struct{}
+
+// WithGzipStreamingHook stores hook in ctx so that runMethod will call it before
+// writing the first byte of a streamable response, switching the gzip middleware from
+// one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
+func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
+	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
+}
+
+func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
+	flag := new(bool)
+	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag
+}
+
+// SetOverloadedFlag marks the current HTTP request as DB-overloaded.
+func SetOverloadedFlag(ctx context.Context) {
+	if flag, _ := ctx.Value(httpOverloadedKey{}).(*bool); flag != nil {
+		*flag = true
+	}
+}
+
+// overloadedBody is precomputed; id is null because the request has not been parsed yet.
+var overloadedBody = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"` + ErrMsgServerOverloaded + `"}}` + "\n")
+
+// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for the outer admission gate.
+func WriteOverloadedResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write(overloadedBody)
+}
+
 // ServeHTTP serves JSON-RPC requests over HTTP.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Permit dumb empty requests for remote health-checks (AWS)
@@ -264,6 +303,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connInfo.HTTP.UserAgent = r.Header.Get("User-Agent")
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
+	ctx, overloaded := withOverloadedFlag(ctx)
+	// Note: the gzip-streaming hook (httpFlusherContextKey) is injected by the gzip
+	// middleware via WithGzipStreamingHook, not here, to avoid prematurely committing
+	// HTTP headers when gzip is disabled.
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -295,9 +338,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
+		return
 	}
 
 	if !s.disableStreaming {
+		// If the inner DB gate rejected the request, the JSON-RPC error body is already
+		// buffered in the stream. Set 503 before flushing so the status is correct.
+		if *overloaded {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
 		stream.Flush()
 	}
 }

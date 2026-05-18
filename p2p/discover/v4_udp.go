@@ -452,16 +452,16 @@ func (t *UDPv4) loop() {
 		}
 		// Start the timer so it fires when the next pending reply has expired.
 		now := time.Now()
-		for el := plist.Front(); el != nil; el = el.Next() {
-			nextTimeout = el.Value.(*replyMatcher)
-			if dist := nextTimeout.deadline.Sub(now); dist < 2*respTimeout {
+		for p, el := range iterList[*replyMatcher](plist) {
+			nextTimeout = p
+			if dist := p.deadline.Sub(now); dist < 2*respTimeout {
 				timeout.Reset(dist)
 				return
 			}
 			// Remove pending replies whose deadline is too far in the
 			// future. These can occur if the system clock jumped
 			// backwards after the deadline was assigned.
-			nextTimeout.errc <- errClockWarp
+			p.errc <- errClockWarp
 			plist.Remove(el)
 		}
 		nextTimeout = nil
@@ -484,8 +484,7 @@ func (t *UDPv4) loop() {
 
 		case r := <-t.gotreply:
 			var matched bool // whether any replyMatcher considered the reply acceptable.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
+			for p, el := range iterList[*replyMatcher](plist) {
 				if p.from == r.from && p.ptype == r.data.Kind() && p.ip == r.ip {
 					ok, requestDone := p.callback(r.data)
 					matched = matched || ok
@@ -505,8 +504,7 @@ func (t *UDPv4) loop() {
 			nextTimeout = nil
 
 			// Notify and remove callbacks whose deadline is in the past.
-			for el := plist.Front(); el != nil; el = el.Next() {
-				p := el.Value.(*replyMatcher)
+			for p, el := range iterList[*replyMatcher](plist) {
 				if now.After(p.deadline) || now.Equal(p.deadline) {
 					p.errc <- errTimeout
 					plist.Remove(el)
@@ -551,20 +549,21 @@ func (t *UDPv4) readLoop(unhandled chan<- ReadPacket) {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("[p2p] Temporary UDP read error", "err", err)
+			t.log.Trace("[p2p] Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permanent errors.
 			if !errors.Is(err, io.EOF) {
-				t.log.Debug("[p2p] UDP read error", "err", err)
+				t.log.Trace("[p2p] UDP read error", "err", err)
 			}
 			return
 		}
 		if err := t.handlePacket(from, buf[:nbytes]); err != nil && unhandled == nil {
-			t.log.Debug("[p2p] Bad discv4 packet", "addr", from, "err", err)
+			t.log.Trace("[p2p] Bad discv4 packet", "addr", from, "err", err)
 		} else if err != nil && unhandled != nil {
+			p := ReadPacket{bytes.Clone(buf[:nbytes]), from}
 			select {
-			case unhandled <- ReadPacket{buf[:nbytes], from}:
+			case unhandled <- p:
 			default:
 			}
 		}

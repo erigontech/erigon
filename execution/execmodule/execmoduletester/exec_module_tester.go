@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -37,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
@@ -52,10 +52,10 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/state/execctx"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	enginehelpers "github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -77,7 +77,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -123,7 +122,7 @@ type ExecModuleTester struct {
 	StreamWg        sync.WaitGroup
 	ReceiveWg       sync.WaitGroup
 	Address         common.Address
-	ForkValidator   *enginehelpers.ForkValidator
+	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
@@ -148,7 +147,7 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil {
+	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
 	if emt.Engine != nil {
@@ -159,6 +158,9 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
+	}
+	if emt.tb == nil && emt.Dirs.DataDir != "" {
+		dir.RemoveAll(emt.Dirs.DataDir)
 	}
 }
 
@@ -277,6 +279,15 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+// WithoutExperimentalBAL disables experimental BAL (and the parallel executor
+// it forces) for tests that exercise patterns the parallel executor doesn't
+// yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
+func WithoutExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = false
+	}
+}
+
 func WithGenesisSpec(gspec *types.Genesis) Option {
 	return func(opts *options) {
 		opts.genesis = gspec
@@ -313,22 +324,43 @@ func WithTxPool() Option {
 	}
 }
 
+func WithEnableDomain(domain kv.Domain) Option {
+	return func(opts *options) {
+		opts.enableDomains = append(opts.enableDomains, domain)
+	}
+}
+
 func WithChainConfig(cfg *chain.Config) Option {
 	return func(opts *options) {
 		opts.chainConfig = cfg
 	}
 }
 
+func WithFcuBackgroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = true
+	}
+}
+
+func WithFcuBackgroundPrune() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundPrune = true
+	}
+}
+
 type options struct {
-	stepSize        *uint64
-	experimentalBAL bool
-	genesis         *types.Genesis
-	chainConfig     *chain.Config
-	key             *ecdsa.PrivateKey
-	engine          rules.Engine
-	pruneMode       *prune.Mode
-	blockBufferSize int
-	withTxPool      bool
+	stepSize            *uint64
+	experimentalBAL     bool
+	genesis             *types.Genesis
+	chainConfig         *chain.Config
+	key                 *ecdsa.PrivateKey
+	engine              rules.Engine
+	pruneMode           *prune.Mode
+	blockBufferSize     int
+	withTxPool          bool
+	enableDomains       []kv.Domain
+	fcuBackgroundCommit bool
+	fcuBackgroundPrune  bool
 }
 
 func applyOptions(opts []Option) options {
@@ -338,7 +370,7 @@ func applyOptions(opts []Option) options {
 		key:             defaultKey,
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
-		chainConfig:     chain.TestChainConfig,
+		chainConfig:     chain.TestChainBerlinConfig,
 		experimentalBAL: false,
 	}
 	for _, o := range opts {
@@ -369,7 +401,7 @@ func applyOptions(opts []Option) options {
 }
 
 // New creates an ExecModuleTester. When called with no options, it uses
-// sensible defaults (TestChainConfig, 1 Ether alloc, ethash.NewFaker, etc.).
+// sensible defaults (TestChainBerlinConfig, 1 Ether alloc, ethash.NewFaker, etc.).
 // Use With* options to customise.
 func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
@@ -385,8 +417,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		panic(err)
 	}
 	if tb != nil {
-		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
-		// produces test names that cause 'file name too long' errors
+		// we can't use tb.TempDir() here because some tests produce names long
+		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
 			dir.RemoveAll(tmpdir)
 		})
@@ -407,8 +439,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
-	cfg.FcuBackgroundPrune = false
-	cfg.FcuBackgroundCommit = false
+	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
+	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -427,6 +459,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		db = temporaltest.NewTestDBWithStepSize(tb, dirs, *opt.stepSize)
 	} else {
 		db = temporaltest.NewTestDB(tb, dirs)
+	}
+
+	// Enable domains before any background goroutines start (e.g. InsertChain
+	// spawns a pipeline that calls agg.OpenFolder concurrently).
+	if len(opt.enableDomains) > 0 {
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		for _, domain := range opt.enableDomains {
+			agg.EnableDomain(domain)
+		}
 	}
 
 	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
@@ -481,7 +522,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
 	if gspec.Config.IsPrague(0) {
-		if err := blockgen.InitPraguePreDeploys(mock.DB, mock.Log); err != nil {
+		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
 			} else {
@@ -503,7 +544,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sentries := []sentryproto.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
+	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td uint256.Int) {}
 	if !cfg.TxPool.Disable {
 		poolCfg := txpoolcfg.DefaultConfig
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServer)
@@ -511,7 +552,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			ctx,
 			poolCfg,
 			mock.DB,
-			kvcache.NewDummy(),
+			kvcache.NewSimple(),
 			sentries,
 			stateChangesClient,
 			func() {}, /* builderNotifyNewTxns */
@@ -534,32 +575,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	latestBlockBuiltStore := builder.NewLatestBlockBuiltStore()
-	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
-		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
-		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, terseLogger)
-		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
-		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
-			logger.Warn("Could not validate block", "err", err)
-			return err
-		}
-		var progress uint64
-		progress, err = stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return err
-		}
-		lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-		if progress < lastNum {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
-		}
-		return nil
-	}
-	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
-	mock.ForkValidator = forkValidator
+	// ForkValidator is created after pipelineStagedSync and PipelineExecutor are ready (below).
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -605,6 +621,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		close(miningCancel)
 	}()
 
+	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
 		mock.Ctx,
 		mock.DB,
@@ -628,6 +645,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			gspec,
 			cfg.Sync,
 			false, /*experimentalBAL*/
+			readAheader,
 		),
 		nil, /*notifier*/
 		&vm.Config{},
@@ -635,6 +653,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		miningCancel,
 		latestBlockBuiltStore,
+		nil, /*sdProvider*/
 		logger,
 	)
 
@@ -643,11 +662,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil, nil),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,
@@ -664,9 +683,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				gspec,
 				cfg.Sync,
 				false, /*experimentalBAL*/
+				readAheader,
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
-			stagedsync.StageFinishCfg(forkValidator),
+			stagedsync.StageFinishCfg(),
 		),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -683,35 +703,46 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, forkValidator, tracer, nil)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil, readAheader)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
+	// Create validation Sync and PipelineExecutor.
+	validationNotifications := shards.NewNotifications(nil)
+	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
+		validationNotifications, mock.BlockReader, blockWriter, logger, readAheader)
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
+
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
+	accum := &execmodule.Accumulation{
+		Accumulator:    mock.Notifications.Accumulator,
+		RecentReceipts: mock.Notifications.RecentReceipts,
+	}
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
 		mock.DB,
-		mock.posStagedSync,
-		forkValidator,
+		pipelineExecutor,
+		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
 		hook,
-		mock.Notifications.Accumulator,
-		mock.Notifications.RecentReceipts,
+		accum,
 		mock.StateCache,
-		mock.Notifications.StateChangesConsumer,
 		logger,
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		readAheader,
 		func() error { return nil },
 	)
+	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -765,7 +796,7 @@ func (emt *ExecModuleTester) EnableLogs() {
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.ExecModule), time.Hour)
+	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
 	defer cancel()
@@ -783,18 +814,14 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	var balEntries []*executionproto.BlockAccessListEntry
+	balMap := make(map[common.Hash][]byte)
 	for i, bal := range chain.BlockAccessLists {
 		if len(bal) > 0 {
 			block := chain.Blocks[i]
-			balEntries = append(balEntries, &executionproto.BlockAccessListEntry{
-				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:     block.NumberU64(),
-				BlockAccessList: bal,
-			})
+			balMap[block.Hash()] = bal
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balEntries); err != nil {
+	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
 		return err
 	}
 
@@ -805,7 +832,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		return err
 	}
 
-	if status != executionproto.ExecutionStatus_Success {
+	if status != execmodule.ExecutionStatusSuccess {
 		if verr != nil {
 			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
 		}

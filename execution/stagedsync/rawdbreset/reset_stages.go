@@ -20,8 +20,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -174,15 +175,26 @@ var stateBuckets = []string{
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
+	kv.TblPruningValsProg,
 	kv.ChangeSets3,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
+	// Delete the progress entries rather than writing 0. SeekCommitment
+	// (commitment_context.go) distinguishes "stage never executed" (entry
+	// absent) from "stage executed up to block 0" (entry present with value 0):
+	// the latter returns txNum = TxNums.Max(0) = 1 to skip re-executing
+	// genesis. Writing 0 here would conflate "reset back to the start" with
+	// "block 0 already done" — SeekCommitment then returns (1, 0), the exec
+	// loop starts at block 1, and the block-0 init task that re-applies the
+	// genesis allocation never runs. This breaks `stage_exec --reset` →
+	// `stage_exec` from-0 sync (parallel-exec drops genesis-allocated
+	// addresses that no subsequent block touches; see #21138).
 	for _, stage := range stagesList {
-		if err := stages.SaveStageProgress(tx, stage, 0); err != nil {
+		if err := tx.Delete(kv.SyncStageProgress, []byte(stage)); err != nil {
 			return err
 		}
-		if err := stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
+		if err := tx.Delete(kv.SyncStageProgress, []byte("prune_"+string(stage))); err != nil {
 			return err
 		}
 	}
@@ -234,11 +246,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
-			td := big.NewInt(0)
+			var td uint256.Int
 			blockNumBytes := make([]byte, 8)
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				td.Add(td, header.Difficulty.ToBig())
+				if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
+					return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
+				}
 				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
 				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
 				if blockNum > blocksAvailable {

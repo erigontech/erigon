@@ -86,7 +86,7 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	}
 	updateAttestedPeriod := cfg.SyncCommitteePeriod(attestedBlock.Block.Slot)
 
-	update := cltypes.NewLightClientUpdate(block.Version())
+	update := cltypes.NewLightClientUpdate(block.Version(), cfg)
 	update.AttestedHeader, err = BlockToLightClientHeader(attestedBlock)
 	if err != nil {
 		return nil, err
@@ -133,6 +133,10 @@ func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightC
 	h := cltypes.NewLightClientHeader(block.Version())
 	h.Beacon = block.SignedBeaconBlockHeader().Header
 	if block.Version() < clparams.CapellaVersion {
+		return h, nil
+	}
+	// [Modified in Gloas:EIP7732] ExecutionPayload not in BeaconBody for GLOAS blocks
+	if block.Version() >= clparams.GloasVersion || block.Block.Body.ExecutionPayload == nil {
 		return h, nil
 	}
 	var err error
