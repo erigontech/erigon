@@ -628,10 +628,12 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+type codeAccessTracker interface {
+	OnCodeAccess(accounts.Address, []byte)
+}
+
 func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := sdb.stateReader.(interface {
-		OnCodeAccess(accounts.Address, []byte)
-	}); ok {
+	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
 		hook.OnCodeAccess(addr, code)
 	}
 }

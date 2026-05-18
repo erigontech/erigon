@@ -50,6 +50,8 @@ type RecordingState struct {
 	AccessedCode     map[common.Address][]byte // all code seen during execution
 	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
 
+	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
+
 	// In-memory state overlay (writes)
 	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value=deleted
 	storageOverlay map[common.Address]map[common.Hash]uint256.Int
@@ -418,6 +420,7 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	if len(code) > 0 {
 		s.AccessedCode[address.Value()] = code
+		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
 	}
 }
 
@@ -455,10 +458,12 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 // debug_executionWitness responses, matching Geth's output format.
 func marshalWitnessHeader(h *types.Header) map[string]any {
 	m := ethapi.RPCMarshalHeader(h)
-	delete(m, "size")
 
 	// Geth always emits these optional fields as null when absent.
-	for _, field := range []string{"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"} {
+	nullFields := []string{
+		"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
+
+	for _, field := range nullFields {
 		if _, ok := m[field]; !ok {
 			m[field] = nil
 		}
@@ -471,6 +476,7 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 	} else {
 		m["balHash"] = nil
 	}
+	delete(m, "size")
 
 	return m
 }
@@ -487,9 +493,15 @@ type ExecutionWitnessResult struct {
 	// Always includes the parent block header; also includes any blocks accessed via BLOCKHASH.
 	Headers []map[string]any `json:"headers,omitempty"`
 
-	// rawHeaders holds the typed headers for internal use (stateless re-execution).
-	// Not serialized to JSON.
-	rawHeaders []*types.Header
+	// lookup map for BLOCKHASH opcode, not serialized to JSON
+	headerByNumber map[uint64]*types.Header
+}
+
+func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
+	if header, ok := m.headerByNumber[blockNum]; ok {
+		return header.Hash(), nil
+	}
+	return common.Hash{}, nil
 }
 
 // ExecutionWitness implements debug_executionWitness.
@@ -646,12 +658,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	result := &ExecutionWitnessResult{
 		State: []hexutil.Bytes{},
 		Codes: []hexutil.Bytes{},
+
+		headerByNumber: make(map[uint64]*types.Header),
 	}
 
-	// Collect all accessed keys (reads)
 	readAddresses, readStorageKeys := recordingState.GetAccessedKeys()
-
-	// Collect all modified keys (writes)
 	writeAddresses, writeStorageKeys := recordingState.GetModifiedKeys()
 
 	// Merge read and write addresses into a deduplicated set
@@ -697,7 +708,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		code []byte
 		hash common.Hash
 	}
+
 	allCodesByHash := make(map[common.Hash][]byte)
+	// TODO (awskii): accessedCode is a map addr->code, maybe worth collecting code hashes directly in recordingState.OnCodeAccess to avoid hashing here?
 	for _, code := range accessedCode {
 		if len(code) > 0 {
 			h := crypto.Keccak256Hash(code)
@@ -809,7 +822,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	var collapseSiblingPaths [][]byte
 
 	// Set up split reader: branch data from parent state, plain state from end of block
-	// need withHistory=false to have branch updates written using PutBranch()
+
+	// Set up split reader: commitment from block beginning, plain state from block end
+	// need withHistory=false to have branch updates written using PutBranch() TODO (awskii): withHistory revisit, add another knob to disable writes.
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
@@ -882,12 +897,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Collect headers needed by a stateless verifier:
 	// - always include the parent block header (needed to anchor the pre-state root)
 	// - include any additional blocks accessed via the BLOCKHASH opcode
-	seenBlockNums := make(map[uint64]struct{})
 	addHeader := func(bn uint64) error {
-		if _, seen := seenBlockNums[bn]; seen {
+		if _, seen := result.headerByNumber[bn]; seen {
 			return nil
 		}
-		seenBlockNums[bn] = struct{}{}
+
 		h, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
 		if err != nil {
 			return fmt.Errorf("failed to load header for block %d: %w", bn, err)
@@ -895,8 +909,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		if h == nil {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
-		result.rawHeaders = append(result.rawHeaders, h)
 		result.Headers = append(result.Headers, marshalWitnessHeader(h))
+		result.headerByNumber[h.Number.Uint64()] = h
+
 		return nil
 	}
 
@@ -1645,20 +1660,6 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
 	})
 
-	// Build header lookup map from result.rawHeaders for BLOCKHASH opcode
-	headerByNumber := make(map[uint64]*types.Header)
-	for _, h := range result.rawHeaders {
-		headerByNumber[h.Number.Uint64()] = h
-	}
-
-	// Create getHashFn that uses the headers from the witness
-	getHashFn := func(n uint64) (common.Hash, error) {
-		if header, ok := headerByNumber[n]; ok {
-			return header.Hash(), nil
-		}
-		return common.Hash{}, nil
-	}
-
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
 	header := block.Header()
@@ -1667,7 +1668,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
 	coinbase := accounts.InternAddress(header.Coinbase)
-	blockCtx := protocol.NewEVMBlockContext(header, getHashFn, nil, coinbase, chainConfig)
+	blockCtx := protocol.NewEVMBlockContext(header, result.getHashFn, nil, coinbase, chainConfig)
 	blockRules := blockCtx.Rules(chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
