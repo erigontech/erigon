@@ -601,7 +601,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// is updated in handleCommitResult when results are consumed.
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(0, 0, 0, stepsInDb, lastProgress)
+		pe.LogCommitments(0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -663,9 +663,7 @@ func (pe *parallelExecutor) LogExecution() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitments(committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas.Add(int64(committedGas))
-	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
 	pe.progress.LogCommitments(pe.rs.StateV3, pe, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {

@@ -313,7 +313,7 @@ func ExecV3(ctx context.Context,
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
