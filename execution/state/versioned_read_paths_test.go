@@ -341,6 +341,100 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 	assert.True(t, bal.IsZero(), "empty reader storage fallback returns zero")
 }
 
+// G.4 — refresh path: the legacy readStorage==nil branch for
+// BalancePath/NoncePath/CodeHashPath/IncarnationPath records the
+// caller-supplied defaultV (the "current" account field) into the
+// versionedReads ReadSet, with vr.Source = StorageRead.  ValidateVersion
+// and tiebreaker logic depend on the RECORDED value matching what
+// downstream tx readers will see — recording the typed zero instead of
+// the caller's currentBalance is a behavioral divergence that breaks
+// integration tests (wrong trie root in execution/engineapi).
+//
+// This test calls refreshVersionedAccount-style scenarios by going
+// through getVersionedAccount which triggers refreshBalance/refreshNonce/
+// refreshCodeHash/refreshIncarnation with the storage-read account's
+// fields as defaultV.  Asserts that subsequent reads through the
+// versionedReads ReadSet see the same typed defaultV that the legacy
+// code recorded.
+func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
+	t.Parallel()
+
+	// emptyReader returns nil account — refreshVersionedAccount won't
+	// run for nil-account paths.  We need a reader that returns a
+	// non-nil account so refreshVersionedAccount's per-field refresh*
+	// calls run with non-zero defaultV.
+	r := &refreshReader{
+		account: &accounts.Account{
+			Balance:     *uint256.NewInt(1234),
+			Nonce:       7,
+			Incarnation: 3,
+			CodeHash:    accounts.InternCodeHash([32]byte{0xab}),
+		},
+	}
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(r, mvhm)
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xa4})
+
+	// Reading the balance triggers getStateObject → getVersionedAccount
+	// → refreshVersionedAccount → refreshBalance/refreshNonce/...
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.Equal(t, *uint256.NewInt(1234), bal,
+		"GetBalance returns the storage-read account's balance after refresh")
+
+	// Each refresh* path that ran in refreshVersionedAccount with
+	// no versionMap entry should have recorded its defaultV (the
+	// account's field) into the readSet.  Verify:
+	reads, ok := ibs.versionedReads[addr]
+	require.True(t, ok, "readSet entry for addr must exist")
+
+	balRead, ok := reads[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
+	require.True(t, ok, "BalancePath read must be recorded")
+	assert.Equal(t, *uint256.NewInt(1234), balRead.ValU256,
+		"recorded BalancePath value must be the refresh defaultV (currentBalance), not zero")
+
+	nonceRead, ok := reads[AccountKey{Path: NoncePath, Key: accounts.NilKey}]
+	require.True(t, ok, "NoncePath read must be recorded")
+	assert.Equal(t, uint64(7), nonceRead.ValU64,
+		"recorded NoncePath value must be the refresh defaultV (currentNonce), not zero")
+
+	incRead, ok := reads[AccountKey{Path: IncarnationPath, Key: accounts.NilKey}]
+	require.True(t, ok, "IncarnationPath read must be recorded")
+	assert.Equal(t, uint64(3), incRead.ValU64,
+		"recorded IncarnationPath value must be the refresh defaultV (currentIncarnation), not zero")
+
+	chRead, ok := reads[AccountKey{Path: CodeHashPath, Key: accounts.NilKey}]
+	require.True(t, ok, "CodeHashPath read must be recorded")
+	assert.Equal(t, accounts.InternCodeHash([32]byte{0xab}), chRead.ValHash,
+		"recorded CodeHashPath value must be the refresh defaultV (currentCodeHash), not zero")
+}
+
+// refreshReader returns a fixed account for ReadAccountData and zero/empty
+// for everything else.  Used by TestVersionedRead_G4 to exercise the
+// refresh path with non-zero typed defaultVs.
+type refreshReader struct {
+	account *accounts.Account
+}
+
+func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return r.account, nil
+}
+func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
+	return r.account, nil
+}
+func (r *refreshReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	return uint256.Int{}, false, nil
+}
+func (r *refreshReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
+func (r *refreshReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
+func (r *refreshReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
+func (r *refreshReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
+func (r *refreshReader) SetTrace(bool, string)                                   {}
+func (r *refreshReader) Trace() bool                                             { return false }
+func (r *refreshReader) TracePrefix() string                                     { return "" }
+
 // C.2: revival via NoncePath rewrite at a higher TxIdx than the SD.
 func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	t.Parallel()

@@ -1047,7 +1047,6 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 	)
 }
 
-
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
 	inputs   []versionedReadSet

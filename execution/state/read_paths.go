@@ -388,21 +388,22 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 
 		// skipStorage: callers that don't want a storage fallback (the
-		// refresh* wrappers + AddressPath internal callers).  Record the
-		// VR for ValidateVersion and return.  Preserves the legacy
+		// refresh* wrappers + AddressPath internal callers).  Signal to
+		// the wrapper to record a VR for ValidateVersion with the
+		// caller-supplied typed defaultV (the wrapper has the typed
+		// value; the core does not).  Preserves the legacy
 		// readStorage==nil semantics (versionedio.go:1280-1302 in the
-		// generic versionedRead).
+		// generic versionedRead) where setVRVal(&vr, defaultV) writes
+		// the typed Val before s.versionedReads.Set(vr).
 		if skipStorage {
-			if !commited && path != CodePath {
-				vr.Source = StorageRead
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(vr)
-			}
 			r.outcome = outcomeReturnDefault
 			r.source = UnknownSource
 			r.version = UnknownVersion
+			if !commited && path != CodePath {
+				vr.Source = StorageRead
+				r.vrSkel = vr
+				r.recordVR = true
+			}
 			return r
 		}
 
@@ -479,9 +480,15 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		return acc, r.source, r.version, nil
 	default:
-		// outcomeReturnDefault / outcomeReturnZero / outcomeStorageRead /
-		// outcomeLegacyStorage: no in-memory tier hit.  AddressPath
-		// callers (sibling-revival check) treat as nil.
+		// outcomeReturnDefault from the skipStorage branch may carry
+		// recordVR=true.  The AddressPath defaultV is nil, which is the
+		// zero-value of r.vrSkel.ValAcc — record as-is.
+		if r.recordVR {
+			if s.versionedReads == nil {
+				s.versionedReads = ReadSet{}
+			}
+			s.versionedReads.Set(r.vrSkel)
+		}
 		return nil, r.source, r.version, nil
 	}
 }
@@ -536,7 +543,9 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 
 // refreshBalance is the in-memory-only variant used by
 // refreshVersionedAccount.  Returns currentBalance on miss; does not
-// record the read or perform a storage fallback.
+// perform a storage fallback.  When the core signals recordVR (the
+// legacy readStorage==nil path), records vr with currentBalance as the
+// typed defaultV — matches setVRVal(&vr, defaultV) in legacy.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
 	r := versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true)
 	if r.err != nil {
@@ -553,6 +562,13 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 			return currentBalance, UnknownSource, r.version, fmt.Errorf("versionedRead BalancePath: unexpected value type %T", r.mapRes.Value())
 		}
 		return v, r.source, r.version, nil
+	}
+	if r.recordVR {
+		r.vrSkel.ValU256 = currentBalance
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
 	}
 	return currentBalance, r.source, r.version, nil
 }
@@ -620,6 +636,13 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 		}
 		return v, r.source, r.version, nil
 	}
+	if r.recordVR {
+		r.vrSkel.ValU64 = currentNonce
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
+	}
 	return currentNonce, r.source, r.version, nil
 }
 
@@ -686,6 +709,13 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 		}
 		return v, r.source, r.version, nil
 	}
+	if r.recordVR {
+		r.vrSkel.ValU64 = currentIncarnation
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
+	}
 	return currentIncarnation, r.source, r.version, nil
 }
 
@@ -746,6 +776,8 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 }
 
 // refreshCode is the in-memory-only variant for CodePath.
+// CodePath is never recorded via the skipStorage branch in legacy
+// (the `path != CodePath` guard), so no recording on the default case.
 func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource, Version, error) {
 	r := versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true)
 	if r.err != nil {
@@ -875,6 +907,13 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 			return currentHash, UnknownSource, r.version, fmt.Errorf("versionedRead CodeHashPath: unexpected value type %T", r.mapRes.Value())
 		}
 		return v, r.source, r.version, nil
+	}
+	if r.recordVR {
+		r.vrSkel.ValHash = currentHash
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
 	}
 	return currentHash, r.source, r.version, nil
 }
@@ -1101,6 +1140,14 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 		}
 		return v, r.source, r.version, nil
 	}
+	if r.recordVR {
+		// SelfDestructPath defaultV is false, the zero value — already
+		// what r.vrSkel.ValBool holds.  Record as-is.
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
+	}
 	return false, r.source, r.version, nil
 }
 
@@ -1126,6 +1173,13 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 			return nil, UnknownSource, r.version, fmt.Errorf("versionedRead AddressPath: unexpected value type %T", r.mapRes.Value())
 		}
 		return acc, r.source, r.version, nil
+	}
+	if r.recordVR {
+		// AddressPath defaultV is nil — r.vrSkel.ValAcc already nil.
+		if s.versionedReads == nil {
+			s.versionedReads = ReadSet{}
+		}
+		s.versionedReads.Set(r.vrSkel)
 	}
 	return nil, r.source, r.version, nil
 }
