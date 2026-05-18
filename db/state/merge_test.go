@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -145,7 +144,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			universalEntity := FromII(d.InvertedIndex.InvIdxCfg.Name)
 			checker.AddDependency(universalEntity, &DependentInfo{
 				entity: universalEntity,
-				filesGetter: func() *btree2.BTreeG[*FilesItem] {
+				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
 				accessors: d.History.Accessors,
@@ -1134,7 +1133,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checker := NewDependencyIntegrityChecker(log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.Name),
-			filesGetter: func() *btree2.BTreeG[*FilesItem] {
+			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,

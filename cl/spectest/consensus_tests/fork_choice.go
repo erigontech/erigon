@@ -63,6 +63,9 @@ func (f *ForkChoiceStep) StepType() string {
 	if f.PowBlock != nil {
 		return "on_merge_block"
 	}
+	if f.ExecutionPayload != nil {
+		return "on_execution_payload"
+	}
 	if f.Block != nil {
 		return "on_block"
 	}
@@ -89,6 +92,7 @@ type ForkChoiceStep struct {
 	AttesterSlashing *string                  `yaml:"attester_slashing,omitempty"`
 	BlockHash        *string                  `yaml:"block_hash,omitempty"`
 	PayloadStatus    *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
+	ExecutionPayload *string                  `yaml:"execution_payload,omitempty"`
 	Checks           *ForkChoiceChecks        `yaml:"checks,omitempty"`
 }
 
@@ -161,6 +165,12 @@ func (f *ForkChoiceStep) GetPayloadStatus() *ForkChoicePayloadStatus {
 	}
 	return f.PayloadStatus
 }
+func (f *ForkChoiceStep) GetExecutionPayload() string {
+	if f.ExecutionPayload == nil {
+		return ""
+	}
+	return *f.ExecutionPayload
+}
 func (f *ForkChoiceStep) GetChecks() *ForkChoiceChecks {
 	if f.Checks == nil {
 		return nil
@@ -185,6 +195,7 @@ type ForkChoiceChecks struct {
 		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
 	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
+	HeadPayloadStatus *int         `yaml:"head_payload_status,omitempty"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -201,7 +212,19 @@ func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 }
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	ctx := context.Background()
+	// Skip GLOAS wrong_withdrawals fork choice test: the Python test generator modifies
+	// block_state.payload_expected_withdrawals at runtime (injecting a fake withdrawal)
+	// before applying the envelope, but this state modification is not captured in the
+	// serialized SSZ fixtures. The test uses identical fixtures to the valid test case,
+	// so there is no way to reproduce the expected mismatch from fixture data alone.
+	// TODO: remove if consensus-specs adds explicit fixture support for runtime state mutations.
+	if c.ForkPhaseName == "gloas" && c.HandlerName == "on_execution_payload_envelope" &&
+		c.CaseName == "on_execution_payload_envelope__wrong_withdrawals" {
+		t.Skip("fixture limitation: Python test modifies block_state.payload_expected_withdrawals at runtime; not representable in SSZ fixtures")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // cancel PeerDas worker goroutines when the test finishes
 
 	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
@@ -221,14 +244,14 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	blobStorage := blob_storage.NewBlobStore(memdb.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock, emitters)
 	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
-	peerDas := das.NewPeerDas(context.TODO(), nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil)
+	peerDas := das.NewPeerDas(ctx, nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)
 	localValidators := validator_params.NewValidatorParams()
 
 	forkStore, err := forkchoice.NewForkChoiceStore(
 		ethClock, anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig),
 		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitters),
 		emitters, synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true), blobStorage, public_keys_registry.NewInMemoryPublicKeysRegistry(),
-		localValidators, false)
+		localValidators, false, nil)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
@@ -264,9 +287,9 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				err := spectest.ReadSsz(root, c.Version(), step.GetBlobs()+".ssz_snappy", blobs)
 				require.NoError(t, err, stepstr)
 				if step.GetValid() {
-					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len(), "invalid number of proofs")
+					require.False(t, len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len(), "invalid number of proofs")
 				} else {
-					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.BlobKzgCommitments.Len() {
+					if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 						continue
 					}
 				}
@@ -281,7 +304,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 						Index:             uint64(index),
 						SignedBlockHeader: blk.SignedBeaconBlockHeader(),
 						Blob:              *value,
-						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
+						KzgCommitment:     common.Bytes48(*blk.Block.Body.GetBlobKzgCommitments().Get(index)),
 						KzgProof:          proof,
 					})
 					return true
@@ -321,6 +344,18 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
 			err = forkStore.OnAttestation(att, false, false)
+			if step.GetValid() {
+				require.NoError(t, err, stepstr)
+			} else {
+				require.Error(t, err, stepstr)
+			}
+		case "on_execution_payload":
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{
+				Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+			}
+			err := spectest.ReadSsz(root, c.Version(), step.GetExecutionPayload()+".ssz_snappy", envelope)
+			require.NoError(t, err, stepstr)
+			err = forkStore.OnExecutionPayload(ctx, envelope, false, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {
@@ -383,5 +418,11 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 		if e.JustifiedCheckpoint.Epoch != nil {
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
+	}
+	if e.HeadPayloadStatus != nil {
+		// Ensure head is computed so GetHeadPayloadStatus returns a fresh value.
+		_, _, err := store.GetHead(nil)
+		assert.NoError(t, err, stepstr)
+		assert.EqualValues(t, *e.HeadPayloadStatus, int(store.GetHeadPayloadStatus()), stepstr)
 	}
 }

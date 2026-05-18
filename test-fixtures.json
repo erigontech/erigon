@@ -5,10 +5,10 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.7.0/fixtures_bal.tar.gz",
-    "sha256": "1b458d1d932e6b5ff4e2ac43882b48a145de5f13d2fb34833162a75e5690d2b5",
-    "size": 786974481,
-    "branch": "devnets/bal/4"
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.1.1/fixtures_bal.tar.gz",
+    "sha256": "181946ec22da60bc5483a8ecb2e7f7dba02ae9c30183e7c02882a9d6a49f6eed",
+    "size": 609842087,
+    "branch": "devnets/bal/7"
   },
   "eest_stable": {
     "url": "https://github.com/ethereum/execution-spec-tests/releases/download/v5.4.0/fixtures_develop.tar.gz",
@@ -16,8 +16,8 @@
     "size": 422845437
   },
   "cl_mainnet": {
-    "url": "https://github.com/ethereum/consensus-spec-tests/releases/download/v1.6.0-alpha.6/mainnet.tar.gz",
-    "sha256": "dc7ee6bb9c84f851b3d96aff9dcf0d77d684bbddd8a04a6c62d9f4cc14a87831",
-    "size": 677742673
+    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.7/mainnet.tar.gz",
+    "sha256": "a96c52b503e1da5305df1c8c09974a2b95a09545cffeea63b440be803059f5d6",
+    "size": 844604385
   }
 }

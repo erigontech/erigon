@@ -26,7 +26,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -52,7 +51,7 @@ type IntraBlockState interface {
 	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
 	Exist(accounts.Address) (bool, error)
-	GetRefund() mdgas.MdGas
+	GetRefund() uint64
 }
 
 // VMContext provides the context for the EVM execution.
