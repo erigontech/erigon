@@ -647,6 +647,43 @@ func (vm *VersionMap) ReadStorage(addr accounts.Address, key accounts.StorageKey
 	return fv.Value, res, true
 }
 
+// ReadStorageCell mirrors ReadStorage but exposes the underlying cell
+// pointer instead of extracting the value.  Used by the cell-based read
+// pipeline to flow typed cells up to consumers (frame-local cache,
+// readSet records) without re-allocating or boxing through ReadResult's
+// any-typed Value.
+func (vm *VersionMap) ReadStorageCell(addr accounts.Address, key accounts.StorageKey, txIdx int) (cell *WriteCell[uint256.Int], res ReadResult, ok bool) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+	if vm == nil {
+		return nil, res, false
+	}
+	vm.mu.RLock()
+	defer vm.mu.RUnlock()
+	e, present := vm.s[addr]
+	if !present {
+		return nil, res, false
+	}
+	cells := e.Storage[key]
+	if cells == nil {
+		return nil, res, false
+	}
+	fk := UnknownDep
+	var fv *WriteCell[uint256.Int]
+	cells.Descend(txIdx-1, func(k int, v *WriteCell[uint256.Int]) bool {
+		fk, fv = k, v
+		return false
+	})
+	if fk == UnknownDep || fv == nil {
+		return nil, res, false
+	}
+	res.depIdx = fk
+	if fv.flag == FlagDone {
+		res.incarnation = fv.incarnation
+	}
+	return fv, res, true
+}
+
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
 	res.depIdx = UnknownDep
 	res.incarnation = -1

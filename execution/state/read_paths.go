@@ -105,8 +105,15 @@ type readPathResult struct {
 	// Source records for typed extraction:
 	vw     *VersionedWrite // outcomeWriteSetHit
 	pr     *VersionedRead  // outcomeReadSetHit
-	mapRes ReadResult      // outcomeMapDone
+	mapRes ReadResult      // outcomeMapDone — generic fallback (value via .Value() any)
 	so     *stateObject    // outcomeStorageRead / outcomeLegacyStorage
+
+	// mapCellU256 is a typed cell pointer set when versionedReadCore took
+	// the StoragePath fast-path (vm.ReadStorageCell).  When non-nil on
+	// outcomeMapDone, wrappers should prefer cell.Value over the any-typed
+	// mapRes.Value().  Stage-3 probe: eliminates the any box on StoragePath
+	// MapDone hits.  Other paths leave this nil and fall back to mapRes.
+	mapCellU256 *WriteCell[uint256.Int]
 
 	// Skeleton VR for the wrapper to complete with the typed Val* and
 	// record via versionedReads.Set when recordVR is true.
@@ -215,7 +222,23 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		}
 	}
 
-	res := s.versionMap.Read(addr, path, key, s.txIndex)
+	// Stage-3 probe: for StoragePath, take the typed cell path that
+	// avoids re-boxing via ReadResult.Value() any.  Other paths use the
+	// generic Read whose ReadResult.value is already the typed value
+	// captured at write time (legacy boxing tolerated for now).
+	var res ReadResult
+	if path == StoragePath {
+		cell, r2, ok := s.versionMap.ReadStorageCell(addr, key, s.txIndex)
+		if ok {
+			res = r2
+			r.mapCellU256 = cell
+		} else {
+			res.depIdx = UnknownDep
+			res.incarnation = -1
+		}
+	} else {
+		res = s.versionMap.Read(addr, path, key, s.txIndex)
+	}
 
 	vr := VersionedRead{
 		Address: addr,
@@ -948,9 +971,15 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 	case outcomeReadSetHit:
 		return r.pr.ValU256, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint256.Int)
-		if !ok {
-			return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+		var v uint256.Int
+		if r.mapCellU256 != nil {
+			v = r.mapCellU256.Value
+		} else {
+			vAny, ok := r.mapRes.Value().(uint256.Int)
+			if !ok {
+				return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+			}
+			v = vAny
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
@@ -999,9 +1028,15 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	case outcomeReadSetHit:
 		return r.pr.ValU256, r.source, r.version, false, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint256.Int)
-		if !ok {
-			return uint256.Int{}, UnknownSource, r.version, false, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+		var v uint256.Int
+		if r.mapCellU256 != nil {
+			v = r.mapCellU256.Value
+		} else {
+			vAny, ok := r.mapRes.Value().(uint256.Int)
+			if !ok {
+				return uint256.Int{}, UnknownSource, r.version, false, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+			}
+			v = vAny
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
@@ -1048,9 +1083,15 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	case outcomeReadSetHit:
 		return r.pr.ValU256, r.source, r.version, nil
 	case outcomeMapDone:
-		v, ok := r.mapRes.Value().(uint256.Int)
-		if !ok {
-			return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+		var v uint256.Int
+		if r.mapCellU256 != nil {
+			v = r.mapCellU256.Value
+		} else {
+			vAny, ok := r.mapRes.Value().(uint256.Int)
+			if !ok {
+				return uint256.Int{}, UnknownSource, r.version, fmt.Errorf("versionedRead StoragePath: unexpected value type %T", r.mapRes.Value())
+			}
+			v = vAny
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
