@@ -842,7 +842,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		return err
 	}
 	if !ok {
-		a.logger.Warn("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
+		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
 		return errStepNotReady
 	}
 	var (
@@ -1684,12 +1684,11 @@ func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.Temporal
 	a.BuildFilesInBackground(toTxNum)
 
 	stepsInDB, err := a.StepsInDB(ctx, db)
-	a.logger.Warn("[agg] CollateAndPruneIfNeeded", "stepsInDB", fmt.Sprintf("%.2f", stepsInDB), "err", err)
 	if err != nil {
 		return err
 	}
 	if stepsInDB > 2 {
-		a.logger.Warn("[agg] stepsInDB>2: potential reasons",
+		a.logger.Debug("[agg] stepsInDB>2: potential reasons",
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDB),
 			"produce", a.produce,
 			"buildingFiles", a.buildingFiles.Load(),
@@ -2127,7 +2126,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 
 	visMin := a.visible.Load().minimaxTxNum
 	if (txNum + 1) <= visMin+a.stepSize.Load() {
-		a.logger.Warn("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
+		a.logger.Debug("[snapshots] buildFiles: not enough data", "txNum", txNum, "visibleMin", visMin, "stepSize", a.stepSize.Load())
 		close(fin)
 		return fin
 	}
@@ -2139,7 +2138,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	step := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-	a.logger.Warn("[snapshots] buildFiles: goroutine started", "step", step, "txNum", txNum)
+	a.logger.Debug("[snapshots] buildFiles: goroutine started", "step", step, "txNum", txNum)
 
 	a.wg.Add(1)
 	go func() {
@@ -2199,7 +2198,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
-			a.logger.Warn("[snapshots] buildFiles: step not yet in DB", "step", step, "lastInDB", lastInDB)
+			a.logger.Debug("[snapshots] buildFiles: step not yet in DB", "step", step, "lastInDB", lastInDB)
 			close(fin)
 			return
 		}
@@ -2247,7 +2246,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		if cap := a.maxCollationTxNum.Load(); cap > 0 {
 			maxStep := kv.Step(cap / a.StepSize())
 			if lastInDB > maxStep {
-				a.logger.Warn("[snapshots] buildFiles: lastInDB capped by maxCollationTxNum", "lastInDB", lastInDB, "maxStep", maxStep, "cap", cap)
+				a.logger.Debug("[snapshots] buildFiles: lastInDB capped by maxCollationTxNum", "lastInDB", lastInDB, "maxStep", maxStep, "cap", cap)
 				lastInDB = maxStep
 			}
 		}
@@ -2262,7 +2261,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 			// The highest step S where (S+1)*stepSize <= flushedTxNum
 			safeStep := kv.Step(flushedTxNum/stepSize) - 1
 			if flushedTxNum >= stepSize && lastInDB > safeStep {
-				a.logger.Warn("[snapshots] buildFiles: lastInDB capped by flushed commitment", "lastInDB", lastInDB, "safeStep", safeStep, "flushedTxNum", flushedTxNum)
+				a.logger.Debug("[snapshots] buildFiles: lastInDB capped by flushed commitment", "lastInDB", lastInDB, "safeStep", safeStep, "flushedTxNum", flushedTxNum)
 				lastInDB = safeStep
 			}
 		}
@@ -2297,7 +2296,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 				}
 			}
 			if !stepFullyCommitted(committedTxNum, step, a.StepSize()) {
-				a.logger.Warn("[snapshots] buildFiles: step not fully committed", "step", step, "committedTxNum", committedTxNum, "need", (uint64(step)+1)*a.StepSize())
+				a.logger.Debug("[snapshots] buildFiles: step not fully committed", "step", step, "committedTxNum", committedTxNum, "need", (uint64(step)+1)*a.StepSize())
 				break
 			}
 			if err := a.buildFiles(a.ctx, step); err != nil {

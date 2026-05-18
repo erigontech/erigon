@@ -36,10 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
-// errDBWiped is returned by a migration's Up when it has closed the DB and
-// removed its directory. Apply reopens via Migrator.ReopenDB and continues.
-var errDBWiped = errors.New("db wiped")
-
 // migrations apply sequentially in order of this array, skips applied migrations
 // it allows - don't worry about merge conflicts and use switch branches
 // see also dbutils.Migrations - it stores context in which each transaction was exectured - useful for bug-reports
@@ -71,6 +67,14 @@ type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
 	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
+
+	// WipeDataIfMajorBelow, when non-zero, makes Apply wipe the target DB's
+	// directory and reopen it when the stored DBSchemaVersion.Major is below
+	// this value. No Up function is called; the migration is purely declarative.
+	// Set this on migrations that introduce a breaking on-disk layout change
+	// that cannot be migrated in place.
+	// Requires Migrator.ReopenDB to be set.
+	WipeDataIfMajorBelow uint32
 }
 
 var (
@@ -173,6 +177,19 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
+// readMajorVersion reads the stored DBSchemaVersion.Major from db.
+// Returns (0, false, nil) when no version record exists yet.
+func readMajorVersion(db kv.RoDB) (major uint32, ok bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		var minor, patch uint32
+		major, minor, patch, ok, err = rawdb.ReadDBSchemaVersion(tx)
+		_ = minor
+		_ = patch
+		return err
+	})
+	return major, ok, err
+}
+
 func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		major, minor, _, ok, err := rawdb.ReadDBSchemaVersion(tx)
@@ -242,66 +259,11 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 		if _, ok := applied[v.Name]; ok {
 			continue
 		}
-
-		callbackCalled := false // commit function must be called if no error, protection against people's mistake
-
-		logger.Info("Apply migration", "name", v.Name)
-		var progress []byte
-		if err := migrationsDB.View(context.Background(), func(tx kv.Tx) (err error) {
-			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
-			return err
-		}); err != nil {
-			return db, fmt.Errorf("migrator.Apply: %w", err)
+		var err error
+		db, err = m.applyOne(db, migrationsDB, v, dirs, logger)
+		if err != nil {
+			return db, err
 		}
-
-		// Each migration gets its own sub-directory inside dirs.Migrations for ETL temp files.
-		dirs.Tmp = filepath.Join(dirs.Migrations, v.Name)
-		dir.MustExist(dirs.Tmp)
-		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
-			if !isDone {
-				if key != nil {
-					// Persist resumable progress in the migrations DB.
-					if err := migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
-						return migTx.Put(kv.Migrations, []byte("_progress_"+v.Name), key)
-					}); err != nil {
-						return err
-					}
-				}
-				return nil
-			}
-			callbackCalled = true
-
-			// Capture the target DB's stage state for bug-report context, then record
-			// the migration as complete in the migrations-tracking DB.
-			stagesProgress, err := json.Marshal(tx)
-			if err != nil {
-				return err
-			}
-			return migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
-				if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
-					return err
-				}
-				return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
-			})
-		}, logger); err != nil {
-			if errors.Is(err, errDBWiped) {
-				if m.ReopenDB == nil {
-					return nil, fmt.Errorf("migrator.Apply: migration %s wiped DB but ReopenDB is not set", v.Name)
-				}
-				newDB, err := m.ReopenDB()
-				if err != nil {
-					return nil, fmt.Errorf("migrator.Apply: reopen after wipe: %w", err)
-				}
-				db = newDB
-			} else {
-				return db, fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
-			}
-		}
-
-		if !callbackCalled {
-			return db, fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
-		}
-		logger.Info("Applied migration", "name", v.Name)
 	}
 	if err := db.Update(context.Background(), rawdb.WriteDBSchemaVersion); err != nil {
 		return db, fmt.Errorf("migrator.Apply: %w", err)
@@ -316,5 +278,95 @@ func (m *Migrator) Apply(db kv.RwDB, migrationsDB kv.RwDB, dataDir, chaindata st
 			kv.DBSchemaVersion.Patch,
 		),
 	)
+	return db, nil
+}
+
+// applyOne runs a single migration v against db, recording completion in migrationsDB.
+// It returns the (possibly replaced) db handle — a wipe migration closes the old handle
+// and opens a fresh one.
+func (m *Migrator) applyOne(db kv.RwDB, migrationsDB kv.RwDB, v Migration, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, error) {
+	logger.Info("Apply migration", "name", v.Name)
+
+	if v.WipeDataIfMajorBelow > 0 {
+		major, versionOK, err := readMajorVersion(db)
+		if err != nil {
+			return db, fmt.Errorf("migrator.applyOne: %w", err)
+		}
+		if versionOK && major < v.WipeDataIfMajorBelow {
+			if m.ReopenDB == nil {
+				return db, fmt.Errorf("migrator.applyOne: migration %s requires ReopenDB", v.Name)
+			}
+			dbPath := db.Path()
+			logger.Warn("[migration] chaindata predates required schema — wiping; state will be re-synced from snapshots",
+				"migration", v.Name, "db_major", major, "min_major", v.WipeDataIfMajorBelow, "path", dbPath)
+			db.Close()
+			if err := dir.RemoveAll(dbPath); err != nil {
+				return nil, fmt.Errorf("migrator.applyOne: wipe %s: %w", dbPath, err)
+			}
+			newDB, err := m.ReopenDB()
+			if err != nil {
+				return nil, fmt.Errorf("migrator.applyOne: reopen after wipe: %w", err)
+			}
+			db = newDB
+		}
+		if err := migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
+			if err := migTx.Put(kv.Migrations, []byte(v.Name), nil); err != nil {
+				return err
+			}
+			return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
+		}); err != nil {
+			return db, fmt.Errorf("migrator.applyOne: record migration %s: %w", v.Name, err)
+		}
+		logger.Info("Applied migration", "name", v.Name)
+		return db, nil
+	}
+
+	callbackCalled := false // commit function must be called if no error, protection against people's mistake
+
+	var progress []byte
+	if err := migrationsDB.View(context.Background(), func(tx kv.Tx) (err error) {
+		progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
+		return err
+	}); err != nil {
+		return db, fmt.Errorf("migrator.applyOne: %w", err)
+	}
+
+	// Each migration gets its own sub-directory inside dirs.Migrations for ETL temp files.
+	dirs.Tmp = filepath.Join(dirs.Migrations, v.Name)
+	dir.MustExist(dirs.Tmp)
+	if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
+		if !isDone {
+			if key != nil {
+				// Persist resumable progress in the migrations DB.
+				if err := migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
+					return migTx.Put(kv.Migrations, []byte("_progress_"+v.Name), key)
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		callbackCalled = true
+
+		// Capture the target DB's stage state for bug-report context, then record
+		// the migration as complete in the migrations-tracking DB.
+		stagesProgress, err := json.Marshal(tx)
+		if err != nil {
+			return err
+		}
+		return migrationsDB.Update(context.Background(), func(migTx kv.RwTx) error {
+			if err := migTx.Put(kv.Migrations, []byte(v.Name), stagesProgress); err != nil {
+				return err
+			}
+			return migTx.Delete(kv.Migrations, []byte("_progress_"+v.Name))
+		})
+	}, logger); err != nil {
+		return db, fmt.Errorf("migrator.applyOne.Up: %s, %w", v.Name, err)
+	}
+
+	if !callbackCalled {
+		return db, fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
+	}
+	logger.Info("Applied migration", "name", v.Name)
 	return db, nil
 }

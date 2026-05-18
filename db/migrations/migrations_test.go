@@ -39,8 +39,8 @@ func TestApplyWithInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -54,8 +54,8 @@ func TestApplyWithInit(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -105,15 +105,15 @@ func TestApplyWithoutInit(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -171,8 +171,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
-			"one",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "one",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				tx, err := db.BeginRw(t.Context())
 				if err != nil {
 					return err
@@ -186,8 +186,8 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 			},
 		},
 		{
-			"two",
-			func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
+			Name: "two",
+			Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) (err error) {
 				t.Fatal("shouldn't been executed")
 				return nil
 			},

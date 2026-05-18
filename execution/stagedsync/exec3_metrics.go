@@ -907,8 +907,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
 			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
 		}...)
-		fmt.Println("[dbg] stepsInDb check", stepsInDb)
-		log.Warn("[dbg] stepsInDb check", "stepsInDb", fmt.Sprintf("%.2f", stepsInDb))
 	}
 
 	if uncommitedGas > 0 {
