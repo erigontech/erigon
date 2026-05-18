@@ -126,41 +126,23 @@ type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDom
 // read-side tx (if separate) and run pruning on a tx of their choosing.
 type PruneFn func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error
 
-// ShouldBreakFn is called after each iteration (after prune, before commit)
-// to check whether the loop should stop early. Return true to break.
+// ShouldBreakFn is an optional callback to stop the loop early (return true).
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
-
-// BeforeIterationFn is called before each pipeline Run (e.g. to set state cache).
-type BeforeIterationFn func(sd *execctx.SharedDomains)
 
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
-	InitialCycle    bool
-	FirstCycle      bool
-	CommitCycle     CommitCycleFn     // required
-	PruneFn         PruneFn           // required — replaces in-loop sync.RunPrune
-	ShouldBreak     ShouldBreakFn     // optional early exit
-	BeforeIteration BeforeIterationFn // optional per-iteration setup
+	InitialCycle bool
+	FirstCycle   bool
+	CommitCycle  CommitCycleFn
+	PruneFn      PruneFn
+	ShouldBreak  ShouldBreakFn // optional
 }
 
-// RunLoop executes the pipeline in a hasMore loop:
-//
-//	for hasMore {
-//	    [BeforeIteration] → sync.Run → RunPrune → [ShouldBreak] → if hasMore { CommitCycle }
-//	}
-//
-// RunPrune runs unconditionally on every iteration (including the last) to
-// match the original stageloop.ProcessFrozenBlocks behaviour. The loop
-// continues until Run returns hasMore=false, ShouldBreak returns true, or
-// an error occurs. The returned tx may differ from the input tx if
-// CommitCycle was called (which returns a fresh tx).
+// RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
+// Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
 	stop := false
 	for hasMore := true; hasMore && !stop; {
-		if cfg.BeforeIteration != nil {
-			cfg.BeforeIteration(sd)
-		}
-
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
@@ -233,7 +215,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
-		FirstCycle:   false,
 		PruneFn: func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},

@@ -500,40 +500,29 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	// Run the forkchoice
 	initialCycle := limitedBigJump
-	firstCycle := false
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
-		InitialCycle:    initialCycle,
-		FirstCycle:      firstCycle,
-		BeforeIteration: nil,
+		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, hasMore bool, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// On the last batch (hasMore=false) the flush+commit+prune is
-			// driven by the post-RunLoop path (runForkchoiceFlushCommit +
-			// runForkchoicePrune below), which also handles fcuBackgroundCommit
-			// and the head-update notifications. Skip the in-loop work here.
-			if !hasMore {
+			// At-tip last batch (!initialCycle): post-RunLoop path handles
+			// flush+commit+prune. In catchup, let the last batch flow through
+			// so it gets the in-loop furious prune treatment too.
+			if !hasMore && !initialCycle {
 				return nil
 			}
-			// Release the old RO snapshot before prune so MDBX can reclaim
-			// retired pages. runForkchoicePrune opens its own RW tx via
-			// CollateAndPruneIfNeeded.
+			// Release the old RO snapshot so MDBX can reclaim retired pages.
 			roTx.Rollback()
-			// In-loop PruneExecutionStage runs on the overlay (RO-backed
-			// MemoryMutation) and silently no-ops. Drain here on a real RW tx.
-			// Force initialCycle=false for in-loop iterations so batched FCU
-			// always uses the furious-prune budget; the last batch skips this
-			// path (the !hasMore guard above) and the post-RunLoop prune below
-			// runs with the real initialCycle value — that handles the
-			// chain-tip scenario.
+			// In-loop PruneExecutionStage no-ops on the overlay; drain here on
+			// a real RW tx. Force initialCycle=false to always use the
+			// furious-prune budget (CollateAndPruneIfNeeded, own RW tx).
 			if _, pruneErr := e.runForkchoicePrune(false); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// Final batch: flush+commit happens in the post-RunLoop path
-			// (see PruneFn comment above). Leave the loop tx unchanged.
-			if !hasMore {
+			// At-tip last batch: post-RunLoop path commits.
+			if !hasMore && !initialCycle {
 				return nil, nil
 			}
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
