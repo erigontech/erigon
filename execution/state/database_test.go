@@ -397,15 +397,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 1 {
-				t.Errorf("expected incarnation 1, got %d", incarnation)
-			}
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -443,15 +434,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 2 {
-				t.Errorf("expected incarnation 2, got %d", incarnation)
-			}
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -473,16 +455,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		}
 		if !bytes.Equal(code, common.FromHex("6005ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", code)
-		}
-
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
-			incarnation, err := st.GetIncarnation(create2address)
-			if err != nil {
-				return err
-			}
-			if incarnation != 4 {
-				t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", incarnation)
-			}
 		}
 		return nil
 	})
@@ -1157,7 +1129,7 @@ func TestWrongIncarnation(t *testing.T) {
 			t.Fatal(errors.New("acc not found"))
 		}
 
-		if acc.Incarnation != state.FirstContractIncarnation {
+		if acc.Incarnation != 0 {
 			t.Fatal("Incorrect incarnation", acc.Incarnation)
 		}
 
@@ -1184,7 +1156,7 @@ func TestWrongIncarnation(t *testing.T) {
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
-		if acc.Incarnation != state.FirstContractIncarnation {
+		if acc.Incarnation != 0 {
 			t.Fatal("Incorrect incarnation", acc.Incarnation)
 		}
 		return nil
@@ -1323,7 +1295,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
-		if acc.Incarnation != state.FirstContractIncarnation {
+		if acc.Incarnation != 0 {
 			t.Fatal("wrong incarnation")
 		}
 		return nil

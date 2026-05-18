@@ -591,26 +591,18 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	accountCopy.Copy(account)
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	// When the original incarnation was higher than the new incarnation
-	// (pre-existing contract destroyed then recreated at a lower incarnation),
-	// emit a SelfDestructPath write first to signal code+storage cleanup before
-	// the new account state is written. applyVersionedWrites detects the presence
-	// of account fields after SelfDestructPath to distinguish cleanup+recreate
-	// from a pure account deletion.
-	needsCleanup := original.Incarnation > accountCopy.Incarnation
-	// Cross-block reincarnation: in the parallel executor, versionedRead
-	// returns a nil account (Incarnation=0) for addresses self-destructed
-	// in a prior block, so the check above misses the cleanup. Blocks are
-	// processed sequentially, so rs.accounts already has the deleted marker
-	// from the prior block's DeleteAccount by the time this runs.
-	if !needsCleanup && accountCopy.Incarnation > 0 {
-		c.rs.accountsMutex.RLock()
-		if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
-			needsCleanup = true
-		}
-		c.rs.accountsMutex.RUnlock()
+	// Cross-block reincarnation: rs.accounts records wasDeleted for addresses
+	// self-destructed in a prior block. Within-block recreates flow through
+	// DeleteAccount (driven by stateObject.recreatedFromDestructed in
+	// updateAccount), so this catches the case where a fresh-IBS worker has
+	// no prior-tx context but the address was already wiped on disk.
+	c.rs.accountsMutex.RLock()
+	wasDel := false
+	if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
+		wasDel = true
 	}
-	if needsCleanup {
+	c.rs.accountsMutex.RUnlock()
+	if wasDel {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
@@ -727,9 +719,9 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	accountCopy.Copy(account)
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	if original.Incarnation > accountCopy.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
-	}
+	// Note: selfdestruct/recreate cleanup is signalled via DeleteAccount
+	// (driven by stateObject.recreatedFromDestructed in updateAccount),
+	// not via an incarnation comparison here.
 
 	// Only emit fields that changed vs `original`. In the parallel executor
 	// `original` comes from the worker's block-origin snapshot (pre-block
@@ -895,15 +887,10 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
-	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
-		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
-			return err
-		}
-		if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
-			return err
-		}
-	}
+	// Note: code+storage cleanup on selfdestruct/recreate now flows through
+	// DeleteAccount (driven by stateObject.selfdestructed or
+	// stateObject.recreatedFromDestructed in updateAccount); no incarnation
+	// comparison is performed here anymore.
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)

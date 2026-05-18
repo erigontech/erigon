@@ -455,7 +455,6 @@ func TestDump(t *testing.T) {
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
 	obj2.SetCode(accounts.InternCodeHash(crypto.HashData([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true)
-	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)

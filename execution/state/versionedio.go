@@ -1026,41 +1026,43 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		var err error
 
 		// For StoragePath, detect contract creation/destruction by a prior tx.
-		// IncarnationPath is written ONLY by CreateAccount (contract creation) and
-		// Selfdestruct — both operations that clear all storage.  When no prior tx
-		// wrote this specific storage slot (MVReadResultNone), but a prior tx DID
-		// write IncarnationPath, the account was created or destroyed in this block
-		// and all unwritten storage slots must be zero.
-		//
-		// Without this check, the read falls through to StorageDomain which may
-		// contain stale data from before a prior block's SELFDESTRUCT (because
-		// Writer.DeleteAccount clears AccountsDomain but NOT StorageDomain).
+		// Both clear all storage, so any slot not explicitly re-written since
+		// must read as zero — otherwise the read falls through to StorageDomain
+		// which may still hold stale data from before the SELFDESTRUCT.
 		if path == StoragePath {
-			incRes := s.versionMap.Read(addr, IncarnationPath, accounts.NilKey, s.txIndex)
-			if incRes.Status() == MVReadResultDone {
+			for _, depPath := range [...]AccountPath{SelfDestructPath, CreateContractPath} {
+				depRes := s.versionMap.Read(addr, depPath, accounts.NilKey, s.txIndex)
+				if depRes.Status() != MVReadResultDone {
+					continue
+				}
+				if depPath == SelfDestructPath {
+					if destructed, ok := depRes.Value().(bool); !ok || !destructed {
+						continue
+					}
+				}
 				var zero T
 				vr.Source = StorageRead
 				vr.Val = zero
 
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (IncarnationPath written by tx %d)\n",
-						s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, incRes.DepIdx())
+					fmt.Printf("%d (%d.%d) RD (%s) %x %s: zero (%s written by tx %d)\n",
+						s.blockNum, s.txIndex, s.version, StorageRead, addr, AccountKey{path, key}, depPath, depRes.DepIdx())
 				}
 
 				if s.versionedReads == nil {
 					s.versionedReads = ReadSet{}
 				}
 				s.versionedReads.Set(vr)
-				// Record dependency on IncarnationPath so that ValidateVersion
+				// Record dependency on the SD/Create marker so ValidateVersion
 				// detects if the creation/destruction is reverted by a re-execution.
-				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
+				depVersion := Version{TxIndex: depRes.DepIdx(), Incarnation: depRes.Incarnation()}
 				s.versionedReads.Set(VersionedRead{
 					Address: addr,
-					Path:    IncarnationPath,
+					Path:    depPath,
 					Key:     accounts.NilKey,
 					Source:  MapRead,
-					Version: incVersion,
-					Val:     incRes.Value(),
+					Version: depVersion,
+					Val:     depRes.Value(),
 				})
 				return zero, StorageRead, UnknownVersion, nil
 			}

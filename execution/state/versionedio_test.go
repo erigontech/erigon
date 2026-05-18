@@ -432,9 +432,9 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 }
 
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
-// that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
-// (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
-// after selfdestruct, and drops NoncePath/CodePath which selfdestruct resets.
+// that IntraBlockState.VersionedWrites retains SelfDestructPath and BalancePath
+// (including non-zero residual balances — EIP-7708 case 2) after selfdestruct,
+// and drops NoncePath/CodePath which selfdestruct resets.
 func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing.T) {
 	t.Parallel()
 
@@ -447,7 +447,7 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
-	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
+	// Selfdestruct: records SelfDestructPath=true and BalancePath=0.
 	destructed, err := ibs.Selfdestruct(addr)
 	require.NoError(t, err)
 	require.True(t, destructed)
@@ -468,7 +468,6 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 
 	// Retained paths.
 	require.True(t, pathSet[SelfDestructPath], "SelfDestructPath must be retained")
-	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be retained")
 	require.True(t, pathSet[BalancePath], "BalancePath (non-zero residual) must be retained")
 
 	// Dropped paths — selfdestruct resets nonce and code, so they must not appear.

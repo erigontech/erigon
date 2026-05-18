@@ -97,11 +97,12 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked selfdestructed it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode       bool // true if the code was updated
-	selfdestructed  bool
-	deleted         bool // true if account was deleted during the lifetime of this object
-	newlyCreated    bool // true if this object was created in the current transaction
-	createdContract bool // true if this object represents a newly created contract
+	dirtyCode               bool // true if the code was updated
+	selfdestructed          bool
+	deleted                 bool // true if account was deleted during the lifetime of this object
+	newlyCreated            bool // true if this object was created in the current transaction
+	createdContract         bool // true if this object represents a newly created contract
+	recreatedFromDestructed bool // true if this object replaces a prior selfdestructed/deleted object at the same address; signals updateAccount to wipe leftover storage+code before writing the new state
 }
 
 // newObject creates a state object from the pool.
@@ -137,6 +138,7 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+	so.recreatedFromDestructed = false
 	stateObjectPool.Put(so)
 }
 
@@ -391,10 +393,6 @@ func (so *stateObject) setBalance(amount uint256.Int) {
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures
 func (so *stateObject) ReturnGas(gas *big.Int) {}
-
-func (so *stateObject) setIncarnation(incarnation uint64) {
-	so.data.SetIncarnation(incarnation)
-}
 
 //
 // Attribute accessors
