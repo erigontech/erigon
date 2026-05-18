@@ -228,5 +228,5 @@ func withTraceFlags(cmd *cobra.Command) {
 }
 
 func withLimit(cmd *cobra.Command) {
-	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, "limit", 0, "max blocks per iteration; 1 = chain-tip mode")
+	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, cli.SyncLoopBlockLimitFlag.Name, cli.SyncLoopBlockLimitFlag.Value, cli.SyncLoopBlockLimitFlag.Usage)
 }
