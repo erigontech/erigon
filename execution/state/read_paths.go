@@ -200,10 +200,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				return
 			}
 			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.ValBool {
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(VersionedRead{
+				s.recordVR(VersionedRead{
 					Address: addr,
 					Path:    SelfDestructPath,
 					Key:     accounts.NilKey,
@@ -262,10 +259,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 								vr.Version.TxIndex, vr.Version.Incarnation,
 								addr, AccountKey{path, key}, valueStringFromVR(&pr))
 						}
-						if s.versionedReads == nil {
-							s.versionedReads = ReadSet{}
-						}
-						s.versionedReads.Set(vr)
+						s.recordVR(vr)
 						panic(ErrDependency)
 					}
 				}
@@ -309,10 +303,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 					vr.Version.TxIndex, vr.Version.Incarnation,
 					addr, AccountKey{path, key})
 			}
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(vr)
+			s.recordVR(vr)
 			panic(ErrDependency)
 		}
 		// CodePath trumped by SelfDestruct at >= DepIdx (E.3a)
@@ -343,10 +334,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 			s.dep = res.DepIdx()
 		}
 		vr.Source = MapRead
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(vr)
+		s.recordVR(vr)
 		panic(ErrDependency)
 
 	case MVReadResultNone:
@@ -391,12 +379,9 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 		if path == StoragePath {
 			if inc, incRes, incOK := s.versionMap.ReadIncarnation(addr, s.txIndex); incOK && incRes.Status() == MVReadResultDone {
 				vr.Source = StorageRead
-				if s.versionedReads == nil {
-					s.versionedReads = ReadSet{}
-				}
-				s.versionedReads.Set(vr)
+				s.recordVR(vr)
 				incVersion := Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()}
-				s.versionedReads.Set(VersionedRead{
+				s.recordVR(VersionedRead{
 					Address: addr,
 					Path:    IncarnationPath,
 					Key:     accounts.NilKey,
@@ -502,10 +487,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		}
 		if r.recordVR {
 			r.vrSkel.ValAcc = acc
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return acc, r.source, r.version, nil
 	default:
@@ -513,10 +495,7 @@ func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.A
 		// recordVR=true.  The AddressPath defaultV is nil, which is the
 		// zero-value of r.vrSkel.ValAcc — record as-is.
 		if r.recordVR {
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return nil, r.source, r.version, nil
 	}
@@ -542,10 +521,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -555,10 +531,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -596,10 +569,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 	}
 	if r.recordVR {
 		r.vrSkel.ValU256 = currentBalance
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return currentBalance, r.source, r.version, nil
 }
@@ -623,10 +593,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 		}
 		if r.recordVR {
 			r.vrSkel.ValU64 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -636,10 +603,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 		}
 		if r.recordVR {
 			r.vrSkel.ValU64 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -671,10 +635,7 @@ func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64
 	}
 	if r.recordVR {
 		r.vrSkel.ValU64 = currentNonce
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return currentNonce, r.source, r.version, nil
 }
@@ -698,10 +659,7 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 		}
 		if r.recordVR {
 			r.vrSkel.ValU64 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -711,10 +669,7 @@ func readIncarnation(s *IntraBlockState, addr accounts.Address) (uint64, ReadSou
 		}
 		if r.recordVR {
 			r.vrSkel.ValU64 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -746,10 +701,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 	if r.recordVR {
 		r.vrSkel.ValU64 = currentIncarnation
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return currentIncarnation, r.source, r.version, nil
 }
@@ -774,10 +726,7 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 		}
 		if r.recordVR {
 			r.vrSkel.ValBytes = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -795,10 +744,7 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 		// the original recorded via copyV; we preserve that.
 		if r.recordVR {
 			r.vrSkel.ValBytes = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -854,10 +800,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		}
 		if r.recordVR {
 			r.vrSkel.ValInt = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -867,10 +810,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 		v := codeSizeFromStateObject(s, r.so, addr)
 		if r.recordVR {
 			r.vrSkel.ValInt = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -899,10 +839,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		}
 		if r.recordVR {
 			r.vrSkel.ValHash = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -914,10 +851,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		}
 		if r.recordVR {
 			r.vrSkel.ValHash = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -950,10 +884,7 @@ func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash acco
 	}
 	if r.recordVR {
 		r.vrSkel.ValHash = currentHash
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return currentHash, r.source, r.version, nil
 }
@@ -983,10 +914,7 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -996,10 +924,7 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -1040,10 +965,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, false, nil
 	case outcomeStorageRead:
@@ -1054,10 +976,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, clean, nil
 	case outcomeLegacyStorage:
@@ -1095,10 +1014,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -1112,10 +1028,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		}
 		if r.recordVR {
 			r.vrSkel.ValU256 = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -1147,10 +1060,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 		}
 		if r.recordVR {
 			r.vrSkel.ValBool = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -1166,10 +1076,7 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 		}
 		if r.recordVR {
 			r.vrSkel.ValBool = v
-			if s.versionedReads == nil {
-				s.versionedReads = ReadSet{}
-			}
-			s.versionedReads.Set(r.vrSkel)
+			s.recordVR(r.vrSkel)
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
@@ -1206,10 +1113,7 @@ func refreshSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadS
 	if r.recordVR {
 		// SelfDestructPath defaultV is false, the zero value — already
 		// what r.vrSkel.ValBool holds.  Record as-is.
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return false, r.source, r.version, nil
 }
@@ -1240,10 +1144,7 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 	}
 	if r.recordVR {
 		// AddressPath defaultV is nil — r.vrSkel.ValAcc already nil.
-		if s.versionedReads == nil {
-			s.versionedReads = ReadSet{}
-		}
-		s.versionedReads.Set(r.vrSkel)
+		s.recordVR(r.vrSkel)
 	}
 	return nil, r.source, r.version, nil
 }

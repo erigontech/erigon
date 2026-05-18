@@ -332,10 +332,7 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	if sdb.versionMap != nil {
 		if inc, incRes, ok := sdb.versionMap.ReadIncarnation(addr, sdb.txIndex); ok && incRes.Status() == MVReadResultDone {
 			// Record IncarnationPath dependency for validation.
-			if sdb.versionedReads == nil {
-				sdb.versionedReads = ReadSet{}
-			}
-			sdb.versionedReads.Set(VersionedRead{
+			sdb.recordVR(VersionedRead{
 				Address: addr,
 				Path:    IncarnationPath,
 				Key:     accounts.NilKey,
@@ -2343,10 +2340,6 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, val T) {
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
-		if sdb.versionedWrites == nil {
-			sdb.versionedWrites = WriteSet{}
-		}
-
 		vw := VersionedWrite{
 			Address: addr,
 			Path:    path,
@@ -2355,7 +2348,7 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 		}
 		setVWVal(&vw, val)
 
-		sdb.versionedWrites.Set(vw)
+		sdb.recordVW(vw)
 
 		if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && (key == accounts.NilKey || traceKey(key)))) {
 			fmt.Printf("%d (%d.%d) WRT %s\n", sdb.blockNum, sdb.txIndex, sdb.version, vw.String())
@@ -2460,10 +2453,6 @@ func setVRVal[T any](vr *VersionedRead, val T) {
 func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val T) {
 	sdb.MarkAddressAccess(addr, true)
 	if sdb.versionMap != nil {
-		if sdb.versionedReads == nil {
-			sdb.versionedReads = ReadSet{}
-		}
-
 		vr := VersionedRead{
 			Address: addr,
 			Path:    path,
@@ -2472,7 +2461,7 @@ func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path Accoun
 			Version: version,
 		}
 		setVRVal(&vr, val)
-		sdb.versionedReads.Set(vr)
+		sdb.recordVR(vr)
 	}
 }
 
