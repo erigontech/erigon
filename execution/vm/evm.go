@@ -358,8 +358,18 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
-		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		// future scenarios.
+		//
+		// Precompile callees are exempt: they have no chain state, so the
+		// "touch" is a no-op for EIP-161 (nothing to clear, nothing to keep)
+		// but the underlying GetOrNewStateObject records an AddressPath read
+		// of the precompile address into the Block-STM read set. With many
+		// concurrent txs invoking the same precompile (e.g. 150M-gas point-
+		// evaluation benchmarks), the first tx's commit invalidates every
+		// other tx's identical read, forcing serial re-execution.
+		if !isPrecompile {
+			evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+		}
 	}
 
 	savedStateGasConsumed := evm.stateGasConsumed
