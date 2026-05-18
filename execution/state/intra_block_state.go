@@ -2360,42 +2360,65 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 // field on the VersionedWrite. Uses a type switch over val rather than path
 // because the caller of versionWritten passes T statically; this keeps the
 // dispatch driven by the type the consumer chose at the call site.
+// setVWVal dual-populates VersionedWrite's legacy Val* field AND the new
+// Cell* pointer per Path-type.  Transitional migration: readers
+// progressively switch from vw.ValU256 to vw.CellU256.Value, until all
+// readers are migrated and the Val* fields can be dropped.  Cells are
+// heap-allocated here in this transitional phase; per-T pool routing
+// (matching versionMap's per-path pools) is a follow-up optimisation
+// once the lifecycle plumbing (pool.Put on revert, transfer on flush)
+// is in place.
 func setVWVal[T any](vw *VersionedWrite, val T) {
 	switch v := any(val).(type) {
 	case uint256.Int:
 		vw.ValU256 = v
+		vw.CellU256 = &WriteCell[uint256.Int]{Value: v}
 	case uint64:
 		vw.ValU64 = v
+		vw.CellU64 = &WriteCell[uint64]{Value: v}
 	case bool:
 		vw.ValBool = v
+		vw.CellBool = &WriteCell[bool]{Value: v}
 	case []byte:
 		vw.ValBytes = v
+		vw.CellBytes = &WriteCell[[]byte]{Value: v}
 	case accounts.CodeHash:
 		vw.ValHash = v
+		vw.CellHash = &WriteCell[accounts.CodeHash]{Value: v}
 	case int:
 		vw.ValInt = v
+		vw.CellInt = &WriteCell[int]{Value: v}
 	case *accounts.Account:
 		vw.ValAcc = v
+		vw.CellAcc = &WriteCell[*accounts.Account]{Value: v}
 	}
 }
 
-// setVRVal mirrors setVWVal for VersionedRead.
+// setVRVal mirrors setVWVal for VersionedRead.  See setVWVal for the
+// cell-migration staging rationale.
 func setVRVal[T any](vr *VersionedRead, val T) {
 	switch v := any(val).(type) {
 	case uint256.Int:
 		vr.ValU256 = v
+		vr.CellU256 = &WriteCell[uint256.Int]{Value: v}
 	case uint64:
 		vr.ValU64 = v
+		vr.CellU64 = &WriteCell[uint64]{Value: v}
 	case bool:
 		vr.ValBool = v
+		vr.CellBool = &WriteCell[bool]{Value: v}
 	case []byte:
 		vr.ValBytes = v
+		vr.CellBytes = &WriteCell[[]byte]{Value: v}
 	case accounts.CodeHash:
 		vr.ValHash = v
+		vr.CellHash = &WriteCell[accounts.CodeHash]{Value: v}
 	case int:
 		vr.ValInt = v
+		vr.CellInt = &WriteCell[int]{Value: v}
 	case *accounts.Account:
 		vr.ValAcc = v
+		vr.CellAcc = &WriteCell[*accounts.Account]{Value: v}
 	}
 }
 

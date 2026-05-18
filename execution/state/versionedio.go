@@ -320,6 +320,13 @@ type VersionedRead struct {
 	// Path-typed payload. Reads via vr.Val() box; reads via the typed field
 	// are zero-alloc. The Storage and Balance paths share ValU256 because
 	// they're both uint256.Int; Nonce and Incarnation share ValU64.
+	//
+	// Cell-migration transitional state: Val* fields are the legacy
+	// source-of-truth; Cell* fields are populated alongside by setVRVal,
+	// pointing at a per-T pooled WriteCell.  Readers migrating from Val*
+	// to Cell*.Value can do so per-site without breaking other readers.
+	// End state: drop Val* and have only Cell* (the cell carries the typed
+	// value, flag, incarnation — matches versionMap's per-path btrees).
 	ValU256  uint256.Int       // BalancePath, StoragePath
 	ValU64   uint64            // NoncePath, IncarnationPath
 	ValBool  bool              // SelfDestructPath, CreateContractPath
@@ -327,6 +334,14 @@ type VersionedRead struct {
 	ValHash  accounts.CodeHash // CodeHashPath
 	ValInt   int               // CodeSizePath
 	ValAcc   *accounts.Account // AddressPath
+
+	CellU256  *WriteCell[uint256.Int]
+	CellU64   *WriteCell[uint64]
+	CellBool  *WriteCell[bool]
+	CellBytes *WriteCell[[]byte]
+	CellHash  *WriteCell[accounts.CodeHash]
+	CellInt   *WriteCell[int]
+	CellAcc   *WriteCell[*accounts.Account]
 }
 
 // Val returns the path-typed value as any, allocating one box per call.
@@ -408,6 +423,20 @@ type VersionedWrite struct {
 	ValHash  accounts.CodeHash
 	ValInt   int
 	ValAcc   *accounts.Account
+
+	// Cell-migration transitional fields — see VersionedRead for the
+	// staging rationale.  Populated alongside the Val* fields by
+	// setVWVal; one is non-nil per Path.  On flush to versionMap the
+	// cell pointer is the natural transfer payload (no copy / re-alloc);
+	// the current FlushVersionedWrites still re-allocates via putCell,
+	// to be optimised once readers have migrated off Val*.
+	CellU256  *WriteCell[uint256.Int]
+	CellU64   *WriteCell[uint64]
+	CellBool  *WriteCell[bool]
+	CellBytes *WriteCell[[]byte]
+	CellHash  *WriteCell[accounts.CodeHash]
+	CellInt   *WriteCell[int]
+	CellAcc   *WriteCell[*accounts.Account]
 }
 
 // Val returns the path-typed value as any, boxing once per call. Prefer
