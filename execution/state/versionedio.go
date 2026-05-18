@@ -748,6 +748,40 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 	var destrcutedVersion Version
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
+		// If the in-memory deletion reflects a prior tx's selfdestruct
+		// (versionMap has SelfDestructPath=true), surface the SD version
+		// instead of UnknownVersion. Returning UnknownVersion here was
+		// causing CreateAccount's synthetic Balance/Incarnation read records
+		// (intra_block_state.go:1864-1865) to be stamped with UnknownVersion
+		// while subsequent reads — via the SD-revival path that falls through
+		// to MVReadResultDone — observed the real (0.0) version, producing a
+		// versionedReads mismatch that panicked tx N+1 on every incarnation
+		// and exhausted the parallel-exec retry budget ("too many incarnations").
+		// Aligning this shortcut with the SD-zero path below removes the
+		// inconsistency.
+		if s.versionMap != nil {
+			sdRes := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
+			if sdRes.Status() == MVReadResultDone {
+				if v, ok := sdRes.value.(bool); ok && v {
+					sdVer := Version{TxIndex: sdRes.DepIdx(), Incarnation: sdRes.Incarnation()}
+					if !commited {
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
+						}
+						s.versionedReads.Set(VersionedRead{
+							Address: addr,
+							Path:    SelfDestructPath,
+							Key:     accounts.NilKey,
+							Source:  MapRead,
+							Version: sdVer,
+							Val:     true,
+						})
+					}
+					var zero T
+					return zero, MapRead, sdVer, nil
+				}
+			}
+		}
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
 		// Revival check: a later write to BalancePath/NoncePath/CodeHashPath
