@@ -195,6 +195,36 @@ func (vr *VersionedRead) SetVal(val any) {
 	}
 }
 
+func ReadAccount(vw *VersionedWrite, vm *VersionMap, txIdx int) (ok bool) {
+	switch vw.Path {
+	case BalancePath:
+		v, rr, found := vm.ReadBalance(vw.Address, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			vw.ValU256 = v
+			return true
+		}
+	case NoncePath:
+		v, rr, found := vm.ReadNonce(vw.Address, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			vw.ValU64 = v
+			return true
+		}
+	case IncarnationPath:
+		v, rr, found := vm.ReadIncarnation(vw.Address, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			vw.ValU64 = v
+			return true
+		}
+	case CodeHashPath:
+		v, rr, found := vm.ReadCodeHash(vw.Address, txIdx)
+		if found && rr.Status() == MVReadResultDone {
+			vw.ValHash = v
+			return true
+		}
+	}
+	return false
+}
+
 func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
 	if writes, ok := s[addr]; ok {
 		delete(writes, key)

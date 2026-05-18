@@ -3355,10 +3355,7 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 			hasStorageWrite[w.Address] = true
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
 			// Account fields: resolve from versionMap to get correct accumulated values.
-			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)
-			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				w.SetVal(rr.Value())
-			}
+			state.ReadAccount(w, vm, txIndex+1)
 			hasAccountWrite[w.Address] = true
 		case state.CodePath:
 			if w.Version.Incarnation != incarnation {
@@ -3479,10 +3476,8 @@ func normalizeWriteSet(writes state.VersionedWrites, vm *state.VersionMap, txInd
 				filtered = append(filtered, vw)
 				continue
 			}
-			rr := vm.Read(addr, path, accounts.NilKey, txIndex+1)
-			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
-				vw.SetVal(rr.Value())
+			vw := &state.VersionedWrite{Address: addr, Path: path, Version: ver}
+			if state.ReadAccount(vw, vm, txIndex+1) {
 				filtered = append(filtered, vw)
 				continue
 			}
@@ -3679,10 +3674,7 @@ func resolveStorageWrites(writes state.VersionedWrites, vm *state.VersionMap, tx
 		case state.BalancePath, state.NoncePath, state.IncarnationPath, state.CodeHashPath:
 			// Resolve account field values from the versionMap.
 			// CollectorWrites may have stale values from speculative execution.
-			rr := vm.Read(w.Address, w.Path, w.Key, txIndex+1)
-			if rr.Status() == state.MVReadResultDone && rr.Value() != nil {
-				w.SetVal(rr.Value())
-			}
+			state.ReadAccount(w, vm, txIndex+1)
 		case state.AddressPath:
 			// AddressPath is a record-level write — skip it.
 			// The commitment calculator uses individual field paths.
