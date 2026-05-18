@@ -356,7 +356,42 @@ func (vr VersionedRead) Val() any {
 }
 
 func (vr VersionedRead) String() string {
-	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val()))
+	return fmt.Sprintf("(%s) %x %s: %s", vr.Source.VersionedString(vr.Version), vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueStringFromVR(&vr))
+}
+
+// valueStringFromVR renders the path-typed value of a VersionedRead without
+// going through vr.Val() (which boxes the typed field through any). Each
+// path branch copies the relevant typed field into a local before any
+// fmt boxing — so the core type's Val* field doesn't escape.
+func valueStringFromVR(vr *VersionedRead) string {
+	switch vr.Path {
+	case AddressPath:
+		acc := vr.ValAcc
+		return fmt.Sprintf("%+v", acc)
+	case BalancePath:
+		num := vr.ValU256
+		return (&num).String()
+	case StoragePath:
+		num := vr.ValU256
+		return fmt.Sprintf("%x", &num)
+	case NoncePath, IncarnationPath:
+		return strconv.FormatUint(vr.ValU64, 10)
+	case CodePath:
+		code := vr.ValBytes
+		l := min(len(code), 40)
+		return hex.EncodeToString(code[0:l])
+	case SelfDestructPath, CreateContractPath:
+		if vr.ValBool {
+			return "true"
+		}
+		return "false"
+	case CodeHashPath:
+		h := vr.ValHash
+		return fmt.Sprintf("%x", h.Value())
+	case CodeSizePath:
+		return strconv.Itoa(vr.ValInt)
+	}
+	return "<unknown-path>"
 }
 
 // VersionedWrite mirrors VersionedRead's union encoding for the write side.
@@ -400,7 +435,40 @@ func (vw VersionedWrite) Val() any {
 }
 
 func (vw VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s (%d.%d)", vw.Address, AccountKey{Path: vw.Path, Key: vw.Key}, valueString(vw.Path, vw.Val()), vw.Version.TxIndex, vw.Version.Incarnation)
+	return fmt.Sprintf("%x %s: %s (%d.%d)", vw.Address, AccountKey{Path: vw.Path, Key: vw.Key}, valueStringFromVW(&vw), vw.Version.TxIndex, vw.Version.Incarnation)
+}
+
+// valueStringFromVW mirrors valueStringFromVR for VersionedWrite. Reads
+// the path-typed field directly; the core type's Val* fields do not escape.
+func valueStringFromVW(vw *VersionedWrite) string {
+	switch vw.Path {
+	case AddressPath:
+		acc := vw.ValAcc
+		return fmt.Sprintf("%+v", acc)
+	case BalancePath:
+		num := vw.ValU256
+		return (&num).String()
+	case StoragePath:
+		num := vw.ValU256
+		return fmt.Sprintf("%x", &num)
+	case NoncePath, IncarnationPath:
+		return strconv.FormatUint(vw.ValU64, 10)
+	case CodePath:
+		code := vw.ValBytes
+		l := min(len(code), 40)
+		return hex.EncodeToString(code[0:l])
+	case SelfDestructPath, CreateContractPath:
+		if vw.ValBool {
+			return "true"
+		}
+		return "false"
+	case CodeHashPath:
+		h := vw.ValHash
+		return fmt.Sprintf("%x", h.Value())
+	case CodeSizePath:
+		return strconv.Itoa(vw.ValInt)
+	}
+	return "<unknown-path>"
 }
 
 func valueString(path AccountPath, value any) string {
@@ -1089,7 +1157,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						}
 
 						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val()))
+							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueStringFromVR(&pr))
 						}
 
 						if s.versionedReads == nil {
@@ -1102,7 +1170,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 
 			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val()))
+				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueStringFromVW(&vw))
 			}
 
 			val := vw.Val().(T)
@@ -1117,7 +1185,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
 				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val()))
+					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueStringFromVR(&pr))
 				}
 
 				return pr.Val().(T), vr.Source, vr.Version, nil
@@ -1181,7 +1249,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
-						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val()))
+						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueStringFromVR(&pr))
 					}
 
 					return pr.Val().(T), ReadSetRead, pr.Version, nil
