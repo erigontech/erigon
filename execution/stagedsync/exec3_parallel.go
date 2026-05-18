@@ -2582,14 +2582,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
+				txTask := be.tasks[tx].Task
+
+				if txn := txTask.Tx(); txn != nil {
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, txn.GetGasLimit(), txTask.Rules().IsAmsterdam); err != nil {
+						return nil, fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)
+					}
+				}
+
 				if err := be.gasPool.ConsumeRegular(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
-
-				txTask := be.tasks[tx].Task
 
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
