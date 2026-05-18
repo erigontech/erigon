@@ -623,21 +623,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 
-			// Block-body validation: reject any tx whose declared gas exceeds
-			// the block's gas limit. geth performs this in core/block_validator.go
-			// ValidateBody; without it, erigon either hits the per-tx fee-cap
-			// check in preCheck first (yielding the wrong exception class for
-			// EEST/Hive mappers calibrated against geth) or executes the tx and
-			// trips the gas-used mismatch downstream. The check lives here, in
-			// the per-block setup, so simulation paths (eth_call, eth_simulateV1,
-			// trace_call) — which bypass executeBlocks entirely — are unaffected.
-			for i, txn := range txs {
-				if txn.GetGasLimit() > header.GasLimit {
-					return fmt.Errorf("%w: block=%d txIdx=%d tx-gas %d > block-gas-limit %d",
-						rules.ErrInvalidBlock, blockNum, i, txn.GetGasLimit(), header.GasLimit)
-				}
-			}
-
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx. The
 			// placeholder here uses execRoTx for the serial path fallback.
