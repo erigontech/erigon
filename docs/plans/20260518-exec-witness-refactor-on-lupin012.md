@@ -325,9 +325,9 @@ Folds `SetCustomHistoryStateReader`, `SeekCommitment` #2, the lupin012 `seekBloc
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add function `detectCollapseSiblings(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock, endTxNum, blockNum, parentNum uint64, expectedBlockRoot common.Hash, accessed *accessedState) (siblingPaths [][]byte, err error)`
-- [ ] add top-of-function comment: `// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior including the seekBlockNum != parentNum guard.`
-- [ ] inside the helper, in exact order:
+- [x] add function `detectCollapseSiblings(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock, endTxNum, blockNum, parentNum uint64, expectedBlockRoot common.Hash, accessed *accessedState) (siblingPaths [][]byte, err error)`
+- [x] add top-of-function comment: `// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior including the seekBlockNum != parentNum guard.`
+- [x] inside the helper, in exact order:
   1. `splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)`
   2. `sdCtx.SetCustomHistoryStateReader(splitStateReader)`
   3. `_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)` — capture `seekBlockNum` and `err`; the first return (txNum) is unused
@@ -347,11 +347,11 @@ Folds `SetCustomHistoryStateReader`, `SeekCommitment` #2, the lupin012 `seekBloc
   10. if `common.Hash(computedRootHash) != expectedBlockRoot`: return `nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)` — preserve missing space before `!=`
   11. `sdCtx.SetCollapseTracer(nil)`
   12. return `siblingPaths, nil`
-- [ ] in `ExecutionWitness`: replace lines 814-860 with `siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx, info.FirstTxNumInBlock, info.EndTxNum, info.BlockNum, info.ParentNum, info.Block.Root(), accessed); if err != nil { return nil, err }`
-- [ ] `git diff` the error strings — grep for `[debug_executionWitness]` before and after refactor; the two collapse-detection strings must match byte-for-byte
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] in `ExecutionWitness`: replace lines 814-860 with `siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx, info.FirstTxNumInBlock, info.EndTxNum, info.BlockNum, info.ParentNum, info.Block.Root(), accessed); if err != nil { return nil, err }`
+- [x] `git diff` the error strings — grep for `[debug_executionWitness]` before and after refactor; the two collapse-detection strings must match byte-for-byte
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 6: Extract `buildWitnessTrie`
 

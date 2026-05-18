@@ -690,53 +690,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return domains.SeekCommitment(ctx, tx)
 	}
 
-	// === STEP 1: Collapse Detection via ComputeCommitment ===
-	// Detect trie node collapses by running the full commitment calculation for this block.
-	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
-	// the remaining child's data must be included in the witness for correct
-	// state root computation during stateless execution.
-	//
-	// We only record sibling paths (without building any witness) in this first step, because the grid
-	// is mutated during ComputeCommitment and would produce incorrect root hashes.
-	var collapseSiblingPaths [][]byte
-
-	// Set up split reader: branch data from parent state, plain state from end of block
-
-	// Set up split reader: commitment from block beginning, plain state from block end
-	// need withHistory=false to have branch updates written using PutBranch() TODO (awskii): withHistory revisit, add another knob to disable writes.
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+		firstTxNumInBlock, endTxNum, blockNum, parentNum,
+		block.Root(), accessed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
+		return nil, err
 	}
-	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
-	// parent block's committed state. Any other position means the history has been pruned
-	// for this block range.
-	if seekBlockNum != parentNum {
-		return nil, fmt.Errorf(
-			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
-				"commitment history may be pruned for this block range",
-			blockNum, seekBlockNum, parentNum)
-	}
-
-	touchAllKeys()
-
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
-		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
-	})
-
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
-	}
-
-	if common.Hash(computedRootHash) != block.Root() {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
-	}
-
-	sdCtx.SetCollapseTracer(nil)
 
 	// === STEP 2: Generate witness for regular keys + siblings from collapses
 	if _, _, err := resetToParentState(); err != nil {
@@ -744,10 +703,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	touchAllKeys()
 
-	if len(collapseSiblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(collapseSiblingPaths))
+	if len(siblingPaths) > 0 {
+		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
 
-		for _, siblingPath := range collapseSiblingPaths {
+		for _, siblingPath := range siblingPaths {
 			compactSiblingPath := commitment.NibblesToString(siblingPath)
 			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
@@ -931,6 +890,62 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	}
 
 	return out
+}
+
+// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
+// commitment for this block against a split reader (commitment from parent state,
+// plain state from end of block) and record every sibling path the trie collapses
+// through. The collected paths are returned so STEP 2 can touch them while building
+// the witness — without those touches, collapsed-sibling data would be missing from
+// the witness and stateless re-execution would diverge from the canonical root.
+//
+// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
+// including the lupin012 seekBlockNum != parentNum guard.
+func detectCollapseSiblings(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	domains *execctx.SharedDomains,
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
+	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
+	expectedBlockRoot common.Hash,
+	accessed *accessedState,
+) (siblingPaths [][]byte, err error) {
+	// Set up split reader: commitment from block beginning, plain state from block end.
+	// withHistory=false so branch updates are written using PutBranch().
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
+	}
+	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
+	// parent block's committed state. Any other position means the history has been pruned
+	// for this block range.
+	if seekBlockNum != parentNum {
+		return nil, fmt.Errorf(
+			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
+				"commitment history may be pruned for this block range",
+			blockNum, seekBlockNum, parentNum)
+	}
+
+	accessed.touchAll(sdCtx)
+
+	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
+		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
+		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	})
+
+	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	if err != nil {
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+	}
+
+	if common.Hash(computedRootHash) != expectedBlockRoot {
+		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+	}
+
+	sdCtx.SetCollapseTracer(nil)
+	return siblingPaths, nil
 }
 
 // resolveWitnessBlock resolves the target block from blockNrOrHash and computes
