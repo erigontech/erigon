@@ -679,17 +679,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return result, nil
 	}
 
-	// Helper to touch all accessed/modified accounts, storage keys, and code keys
-	touchAllKeys := func() {
-		accessed.touchAll(sdCtx)
-	}
-
-	// Helper to reset commitment to parent block state and re-seek
-	resetToParentState := func() (txNum uint64, blockNum uint64, err error) {
-		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
-		return domains.SeekCommitment(ctx, tx)
-	}
-
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
 		block.Root(), accessed)
@@ -697,40 +686,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	// === STEP 2: Generate witness for regular keys + siblings from collapses
-	if _, _, err := resetToParentState(); err != nil {
-		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
-	}
-	touchAllKeys()
-
-	if len(siblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
-
-		for _, siblingPath := range siblingPaths {
-			compactSiblingPath := commitment.NibblesToString(siblingPath)
-			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
-			sdCtx.TouchHashedKey(siblingPath)
-		}
-	}
-
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate witness: %w", err)
+		return nil, err
 	}
-	// pre-state root verification
-	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
-	}
-
-	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
-	// This avoids duplicates that would occur when calling Prove() separately for each key
-	allNodes, err := witnessTrie.RLPEncode()
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
-	}
-	for _, node := range allNodes {
-		result.State = append(result.State, common.Copy(node))
-	}
+	result.State = nodes
 
 	headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
 	if err != nil {
@@ -946,6 +906,59 @@ func detectCollapseSiblings(
 
 	sdCtx.SetCollapseTracer(nil)
 	return siblingPaths, nil
+}
+
+// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
+// against the parent-state reader, touch every accessed key plus the sibling
+// paths collected during collapse detection, then generate the witness trie and
+// RLP-encode it. The pre-state root is verified against expectedParentRoot
+// before the encoded nodes are returned.
+//
+// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+func buildWitnessTrie(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	domains *execctx.SharedDomains,
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
+	firstTxNumInBlock uint64,
+	expectedParentRoot common.Hash,
+	siblingPaths [][]byte,
+	accessed *accessedState,
+) (encodedNodes []hexutil.Bytes, err error) {
+	encodedNodes = []hexutil.Bytes{}
+
+	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
+		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
+	}
+
+	accessed.touchAll(sdCtx)
+
+	if len(siblingPaths) > 0 {
+		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
+		for _, siblingPath := range siblingPaths {
+			compactSiblingPath := commitment.NibblesToString(siblingPath)
+			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
+			sdCtx.TouchHashedKey(siblingPath)
+		}
+	}
+
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate witness: %w", err)
+	}
+	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
+	}
+
+	allNodes, err := witnessTrie.RLPEncode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
+	}
+	for _, node := range allNodes {
+		encodedNodes = append(encodedNodes, common.Copy(node))
+	}
+	return encodedNodes, nil
 }
 
 // resolveWitnessBlock resolves the target block from blockNrOrHash and computes

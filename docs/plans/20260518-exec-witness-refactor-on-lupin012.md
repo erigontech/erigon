@@ -360,10 +360,10 @@ Folds `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibling
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add function `buildWitnessTrie(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock uint64, expectedParentRoot common.Hash, siblingPaths [][]byte, accessed *accessedState) (encodedNodes []hexutil.Bytes, err error)`
-- [ ] add top-of-function comment: `// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.`
-- [ ] **CRITICAL**: pre-initialize `encodedNodes := []hexutil.Bytes{}` at the start of the function — NOT nil. The named return defaults to nil; a zero-node trie would otherwise produce `"state": null` instead of `"state": []` (the field has no `omitempty`).
-- [ ] inside the helper, in exact order:
+- [x] add function `buildWitnessTrie(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, sdCtx *commitment.SharedDomainsCommitmentContext, firstTxNumInBlock uint64, expectedParentRoot common.Hash, siblingPaths [][]byte, accessed *accessedState) (encodedNodes []hexutil.Bytes, err error)` — actual implementation uses `commitmentdb.SharedDomainsCommitmentContext` (same note as Task 5)
+- [x] add top-of-function comment: `// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.`
+- [x] **CRITICAL**: pre-initialize `encodedNodes := []hexutil.Bytes{}` at the start of the function — NOT nil. The named return defaults to nil; a zero-node trie would otherwise produce `"state": null` instead of `"state": []` (the field has no `omitempty`).
+- [x] inside the helper, in exact order:
   1. `sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)`
   2. `if _, _, err := domains.SeekCommitment(ctx, tx); err != nil { return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err) }` — note: re-use the current wording from lupin012's `resetToParentState` closure error wrap
   3. `accessed.touchAll(sdCtx)`
@@ -374,13 +374,13 @@ Folds `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibling
   8. `allNodes, err := witnessTrie.RLPEncode()` — if err: `nil, fmt.Errorf("failed to encode trie nodes: %w", err)`
   9. `for _, node := range allNodes { encodedNodes = append(encodedNodes, common.Copy(node)) }` — `common.Copy` mandatory (drop = memory-reuse bug)
   10. return `encodedNodes, nil`
-- [ ] in `ExecutionWitness`: replace lines 862-895 with `nodes, err := buildWitnessTrie(...); if err != nil { return nil, err }; result.State = nodes`
-- [ ] **delete** `resetToParentState` closure (no longer referenced)
-- [ ] **delete** `touchAllKeys` closure (no longer referenced — was reduced to a one-liner in Task 4)
-- [ ] `git diff` the error strings to confirm preservation
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] in `ExecutionWitness`: replace lines 862-895 with `nodes, err := buildWitnessTrie(...); if err != nil { return nil, err }; result.State = nodes`
+- [x] **delete** `resetToParentState` closure (no longer referenced)
+- [x] **delete** `touchAllKeys` closure (no longer referenced — was reduced to a one-liner in Task 4)
+- [x] `git diff` the error strings to confirm preservation
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 7: Verify acceptance criteria
 
