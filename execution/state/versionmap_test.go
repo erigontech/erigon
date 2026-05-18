@@ -426,6 +426,73 @@ func TestNoBAL_SameSenderTxs_DetectsConflicts(t *testing.T) {
 	}
 }
 
+// TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath reproduces
+// the bug originally fixed by PR #19628 (and patched in #19656): when a prior
+// tx creates an account and a later same-block tx speculatively reads the
+// account as non-existent (AddressPath = StorageRead → nil), the stale read
+// must be invalidated.
+//
+// Under HasBAL + parallel exec, the worker's AddressPath write is filtered
+// out of the per-tx flush (the BAL doesn't list AddressPath, so normalize
+// drops it), so the AddressPath MVReadResultDone branch can't catch the
+// staleness on its own. PRs #19628/#19656 used BalancePath as the cross-check
+// signal — wrong, because BalancePath also fires for ordinary
+// UpdateAccountData on a pre-existing account and for BAL pre-population of
+// any balance-changing tx. That caused the same-sender BAL retry storm we
+// dropped the cross-check to fix.
+//
+// The CORRECT signal is IncarnationPath: it's written only by CreateAccount
+// and SelfDestruct (never by UpdateAccountData, never by BAL pre-pop). This
+// test asserts that when IncarnationPath has a Done entry at a prior txIdx,
+// a same-block AddressPath/StorageRead is invalidated.
+//
+// Status: red until validateRead grows an IncarnationPath cross-check in the
+// path == AddressPath / MVReadResultNone arm.
+func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(99)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	// Simulate the post-flush state after tx 0 creates the account. The
+	// BAL pre-populated BalancePath / NoncePath / CodeHashPath; the worker
+	// additionally flushed IncarnationPath (which BAL doesn't pre-populate)
+	// because CreateAccount writes it. AddressPath was filtered out of the
+	// flush under HasBAL — that's the gap PR #19628 was trying to plug.
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, NoncePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, uint64(0), true)
+	vm.Write(addr, IncarnationPath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, uint64(1), true)
+
+	// Tx 1 speculatively read AddressPath at exec time — vm had no
+	// AddressPath entry, so versionedRead's storage-fallback path
+	// recorded (StorageRead, UnknownVersion) with the pre-block storage
+	// value (nil, since the account didn't exist before this block).
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    AddressPath,
+		Source:  StorageRead,
+		Version: UnknownVersion,
+	})
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(1, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"tx 1: a prior tx wrote IncarnationPath (account created/destroyed); the stale AddressPath storage-read MUST invalidate so the tx re-executes against the post-creation state")
+}
+
 // TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
 // true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
 // AddressPath means a real state change (e.g. account creation) from a
