@@ -357,20 +357,20 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
 		switch {
 		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			updates.TouchPlainKeyDirect(key, commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  uint256.Int{},
 				Nonce:    0,
 				CodeHash: empty.CodeHash,
 			})
 		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			updates.TouchPlainKeyDirect(key, commitment.Update{
 				Flags:    commitment.DeleteUpdate,
 				CodeHash: empty.CodeHash,
 			})
 		default:
 			// Either not Deleted, or Deleted-with-retained-values.
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
+			updates.TouchPlainKeyDirect(key, commitment.Update{
 				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
 				Balance:  acc.Balance,
 				Nonce:    acc.Nonce,
@@ -398,7 +398,7 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 				u.StorageLen = int8(len(vBytes))
 				copy(u.Storage[:], vBytes)
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyDirect(string(composite), u)
 		}
 	}
 }

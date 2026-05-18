@@ -181,7 +181,7 @@ func TestTouchPlainKeyDirect_MatchesSerialized(t *testing.T) {
 
 	// Path 2: direct (calculator path)
 	utDirect := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
-	update := &Update{
+	update := Update{
 		Flags:   BalanceUpdate | NonceUpdate,
 		Balance: acc.Balance,
 		Nonce:   acc.Nonce,
@@ -228,7 +228,7 @@ func TestTouchPlainKeyDirect_Storage(t *testing.T) {
 
 	// Direct path
 	utDirect := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
-	update := &Update{
+	update := Update{
 		Flags:      StorageUpdate,
 		StorageLen: int8(len(val)),
 	}
@@ -265,7 +265,7 @@ func TestTouchPlainKeyDirect_Delete(t *testing.T) {
 	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
 
 	ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
-	ut.TouchPlainKeyDirect(key, &Update{Flags: DeleteUpdate})
+	ut.TouchPlainKeyDirect(key, Update{Flags: DeleteUpdate})
 
 	assert.Equal(t, uint64(1), ut.Size())
 

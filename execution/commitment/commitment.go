@@ -1635,7 +1635,7 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 // serialization/deserialization. Used by the commitment calculator which
 // receives aggregated state changes via channel instead of serialized bytes
 // from DomainPut.
-func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+func (t *Updates) TouchPlainKeyDirect(key string, update Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%d nonce=%d codeHash=%x\n",
 			key, update.Flags, &update.Balance, update.Nonce, update.CodeHash)
@@ -1673,7 +1673,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 				hashedKey: t.hasher(common.ToBytesZeroCopy(key)),
 				update:    new(Update),
 			}
-			*pivot.update = *update
+			*pivot.update = update
 			t.tree.ReplaceOrInsert(pivot)
 			t.treeIdx[key] = pivot
 		}

@@ -767,34 +767,29 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 
 		switch w.Path {
 		case BalancePath:
-			v := w.ValU256
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+			updates.TouchPlainKeyDirect(string(address[:]), commitment.Update{
 				Flags:   commitment.BalanceUpdate,
-				Balance: v,
+				Balance: w.ValU256,
 			})
 		case NoncePath:
-			v := w.ValU64
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+			updates.TouchPlainKeyDirect(string(address[:]), commitment.Update{
 				Flags: commitment.NonceUpdate,
-				Nonce: v,
+				Nonce: w.ValU64,
 			})
 		case CodeHashPath:
-			v := w.ValHash
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+			updates.TouchPlainKeyDirect(string(address[:]), commitment.Update{
 				Flags:    commitment.CodeUpdate,
-				CodeHash: v.Value(),
+				CodeHash: w.ValHash.Value(),
 			})
 		case CodePath:
-			code := w.ValBytes
-			updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+			updates.TouchPlainKeyDirect(string(address[:]), commitment.Update{
 				Flags:    commitment.CodeUpdate,
-				CodeHash: crypto.Keccak256Hash(code),
+				CodeHash: crypto.Keccak256Hash(w.ValBytes),
 			})
 		case SelfDestructPath:
-			// Only emit DeleteUpdate when the account was actually self-destructed.
 			// SelfDestructPath=false means the account is NOT deleted (e.g., resurrection).
-			if destructed := w.ValBool; destructed {
-				updates.TouchPlainKeyDirect(string(address[:]), &commitment.Update{
+			if w.ValBool {
+				updates.TouchPlainKeyDirect(string(address[:]), commitment.Update{
 					Flags: commitment.DeleteUpdate,
 				})
 			}
@@ -803,8 +798,7 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 			composite := make([]byte, 20+32)
 			copy(composite, address[:])
 			copy(composite[20:], keyVal[:])
-			v := w.ValU256
-			vBytes := v.Bytes()
+			vBytes := w.ValU256.Bytes()
 			var u commitment.Update
 			u.StorageLen = int8(len(vBytes))
 			if len(vBytes) == 0 {
@@ -813,7 +807,7 @@ func (writes VersionedWrites) TouchUpdates(updates *commitment.Updates) {
 				u.Flags = commitment.StorageUpdate
 				copy(u.Storage[:], vBytes)
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyDirect(string(composite), u)
 		}
 	}
 }
