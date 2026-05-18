@@ -266,16 +266,16 @@ Env-gated, isolated. The internal `api.chainConfig` re-fetch stays inside (prese
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add method `(api *DebugAPIImpl) verifyWitnessStateless(ctx context.Context, tx kv.TemporalTx, result *ExecutionWitnessResult, block *types.Block, fullEngine rules.Engine) error` containing logic from `rpc/jsonrpc/debug_execution_witness.go:929-946`
-- [ ] keep the `dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)` check inside (helper is a no-op when disabled)
-- [ ] keep the internal `api.chainConfig(ctx, tx)` re-fetch + error wrap: `"failed to get chain config: %w"`
-- [ ] keep `execBlockStatelessly` call + error wrap: `"[debug_executionWitness] stateless block execution failed: %w"`
-- [ ] keep the state-root mismatch error: `"[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x"` (preserve exact spacing/punctuation)
-- [ ] keep the `log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)` call inside — blockNum must come from `block.NumberU64()` (no longer available as local in caller after Task 3)
-- [ ] replace `rpc/jsonrpc/debug_execution_witness.go:929-946` in `ExecutionWitness` with a single call
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] add method `(api *DebugAPIImpl) verifyWitnessStateless(ctx context.Context, tx kv.TemporalTx, result *ExecutionWitnessResult, block *types.Block, fullEngine rules.Engine) error` containing logic from `rpc/jsonrpc/debug_execution_witness.go:929-946`
+- [x] keep the `dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)` check inside (helper is a no-op when disabled)
+- [x] keep the internal `api.chainConfig(ctx, tx)` re-fetch + error wrap: `"failed to get chain config: %w"`
+- [x] keep `execBlockStatelessly` call + error wrap: `"[debug_executionWitness] stateless block execution failed: %w"`
+- [x] keep the state-root mismatch error: `"[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x"` (preserve exact spacing/punctuation)
+- [x] keep the `log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)` call inside — blockNum must come from `block.NumberU64()` (no longer available as local in caller after Task 3)
+- [x] replace `rpc/jsonrpc/debug_execution_witness.go:929-946` in `ExecutionWitness` with a single call
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 3: Add `witnessBlockInfo` + `(api).resolveWitnessBlock`
 
