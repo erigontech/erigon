@@ -64,10 +64,10 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) er
 	return nil
 }
 
-// ResetCanonicalAboveTip clears kv.HeaderCanonical and total-difficulty entries
-// above the snapshot tip and caps Headers/BlockHashes/Bodies/Senders stage
-// progress at the tip. HeadHeaderHash is re-anchored to the canonical hash at
-// the tip when one is recorded.
+// ResetCanonicalAboveTip clears kv.HeaderCanonical entries above the snapshot
+// tip and caps Headers/BlockHashes/Bodies/Senders stage progress at the tip.
+// HeadHeaderHash is re-anchored to the canonical hash at the tip when one is
+// recorded.
 //
 // Motivation: prior to this, ResetState wiped MDBX state-domain tables and
 // the Execution stage progress, but left kv.HeaderCanonical untouched. A
@@ -79,16 +79,22 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) er
 // hand canonical-hash assignment for the post-tip range entirely to the
 // next forkchoice update from the consensus layer.
 //
+// kv.HeaderTD is intentionally NOT truncated: TD records live under both
+// canonical and sidechain hashes at the same height and are consulted by
+// the consensus layer's block-import path (Caplin BlockCollector) when it
+// verifies parent.TD of a not-yet-canonical block. Wiping them by-number
+// across the post-tip range would break that path with
+// "parent's total difficulty not found" until the headers were re-fetched
+// from peers. The stale TD records are independently keyed by hash and do
+// not affect canonical assignment.
+//
 // The function is safe to call when nothing is above the tip: the truncate
-// helpers are a no-op when the table has no keys >= the cursor, and the
+// helper is a no-op when the table has no keys >= the cursor, and the
 // stage-progress writes only run when a stage is observably above the tip.
 func ResetCanonicalAboveTip(ctx context.Context, db kv.TemporalRwDB, frozenBlocks uint64) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := rawdb.TruncateCanonicalHash(tx, frozenBlocks+1, false /* markChainAsBad */); err != nil {
 			return fmt.Errorf("truncate canonical hash above snapshot tip: %w", err)
-		}
-		if err := rawdb.TruncateTd(tx, frozenBlocks+1); err != nil {
-			return fmt.Errorf("truncate TD above snapshot tip: %w", err)
 		}
 
 		if frozenBlocks > 0 {
