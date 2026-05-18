@@ -405,8 +405,8 @@ Folds `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibling
 **Files:**
 - Modify: filesystem only
 
-- [ ] `mkdir -p docs/plans/completed`
-- [ ] `git mv docs/plans/20260518-exec-witness-refactor-on-lupin012.md docs/plans/completed/`
+- [x] `mkdir -p docs/plans/completed`
+- [x] `git mv docs/plans/20260518-exec-witness-refactor-on-lupin012.md docs/plans/completed/`
 
 ## Post-Completion
 
