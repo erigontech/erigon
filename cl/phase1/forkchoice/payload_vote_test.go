@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestReadPTCFromWindow(t *testing.T) {
+func TestGetPTCFromWindow(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
@@ -26,21 +26,21 @@ func TestReadPTCFromWindow(t *testing.T) {
 	}
 	s.SetPtcWindow(ptcWindow)
 
-	ptc, ok := readPTCFromWindow(s, slot)
-	require.True(t, ok)
+	ptc, err := s.GetPTCFromWindow(slot)
+	require.NoError(t, err)
 	require.Equal(t, []uint64{10, 11, 12, 13}, ptc)
 
 	ptc[0] = 99
 	require.Equal(t, uint64(10), ptcWindow.Get(int(windowIndex)).Get(0))
 }
 
-func TestReadPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
+func TestGetPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
 	s.SetSlot(2*cfg.SlotsPerEpoch + 5)
 	s.SetPtcWindow(solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), 4))
 
-	_, ok := readPTCFromWindow(s, 0)
-	require.False(t, ok)
+	_, err := s.GetPTCFromWindow(0)
+	require.Error(t, err)
 }

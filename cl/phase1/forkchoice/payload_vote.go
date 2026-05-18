@@ -72,8 +72,8 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			if data.Slot != blockState.Slot() {
 				continue
 			}
-			ptc, ok := readPTCFromWindow(blockState, data.Slot)
-			if !ok {
+			ptc, err := blockState.GetPTCFromWindow(data.Slot)
+			if err != nil {
 				continue
 			}
 			cached = &cachedPTC{ptc: ptc}
@@ -90,35 +90,6 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			}
 		}
 	}
-}
-
-func readPTCFromWindow(s *state.CachingBeaconState, slot uint64) ([]uint64, bool) {
-	cfg := s.BeaconConfig()
-	epoch := state.GetEpochAtSlot(cfg, slot)
-	stateEpoch := s.Slot() / cfg.SlotsPerEpoch
-	if epoch+1 < stateEpoch || epoch > stateEpoch+1 {
-		return nil, false
-	}
-
-	slotInEpoch := slot % cfg.SlotsPerEpoch
-	var index uint64
-	if stateEpoch > 0 && epoch == stateEpoch-1 {
-		index = slotInEpoch
-	} else {
-		index = (epoch-stateEpoch+1)*cfg.SlotsPerEpoch + slotInEpoch
-	}
-
-	ptcWindow := s.GetPtcWindow()
-	if ptcWindow == nil || index >= uint64(ptcWindow.Length()) {
-		return nil, false
-	}
-
-	vec := ptcWindow.Get(int(index))
-	ptc := make([]uint64, vec.Length())
-	for i := 0; i < vec.Length(); i++ {
-		ptc[i] = vec.Get(i)
-	}
-	return ptc, true
 }
 
 // applyPayloadAttestationVote updates PTC vote tracking for a single validator.
