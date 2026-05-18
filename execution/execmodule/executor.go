@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -48,6 +49,7 @@ type PipelineExecutor struct {
 	validationSync          *stagedsync.Sync
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
+	syncCfg                 ethconfig.Sync
 	logger                  log.Logger
 }
 
@@ -65,6 +67,7 @@ func NewPipelineExecutor(
 	validationSync *stagedsync.Sync,
 	validationNotifications *shards.Notifications,
 	dispatcher *Dispatcher,
+	syncCfg ethconfig.Sync,
 	logger log.Logger,
 ) *PipelineExecutor {
 	return &PipelineExecutor{
@@ -76,6 +79,7 @@ func NewPipelineExecutor(
 		validationSync:          validationSync,
 		validationNotifications: validationNotifications,
 		dispatcher:              dispatcher,
+		syncCfg:                 syncCfg,
 		logger:                  logger,
 	}
 }
@@ -226,8 +230,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
+	isChainTip := pe.syncCfg.IsChainTip()
 	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: !isChainTip,
 		FirstCycle:   false,
 		PruneTimeout: 0,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {

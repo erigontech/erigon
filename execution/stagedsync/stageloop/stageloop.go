@@ -69,10 +69,11 @@ func StageLoop(
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	hook *Hook,
+	syncCfg ethconfig.Sync,
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, syncCfg, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -84,7 +85,7 @@ func StageLoop(
 	}
 
 	logger.Debug("[stageloop] Starting iteration")
-	initialCycle := true
+	initialCycle := !syncCfg.IsChainTip()
 	for {
 		start := time.Now()
 		select {
@@ -133,7 +134,7 @@ func StageLoop(
 	}
 }
 
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, syncCfg ethconfig.Sync, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
 
 	// Snapshot download uses a brief RwTx.
@@ -197,7 +198,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return fmt.Errorf("ProcessFrozenBlocks: init block overlay: %w", err)
 	}
 
-	initialCycle, firstCycle := true, false
+	initialCycle, firstCycle := !syncCfg.IsChainTip(), false
 	for more := true; more; {
 		overlay := doms.BlockOverlay()
 		more, err = sync.Run(doms, overlay, initialCycle, firstCycle)
