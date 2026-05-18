@@ -772,7 +772,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 // With txnsPerBlock=1, fakeFrozenBlocks(N) yields capTxNum=N.
 type fakeFrozenBlocks uint64
 
-func (f fakeFrozenBlocks) FrozenBlocks() uint64            { return uint64(f) }
+func (f fakeFrozenBlocks) FrozenBlocks() uint64              { return uint64(f) }
 func (f fakeFrozenBlocks) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
 
 // Regression for #20701: cap must clamp the loop, not just early-return.
