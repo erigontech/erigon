@@ -25,13 +25,18 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var ErrNilToFieldTx = errors.New("txn: field 'To' can not be 'nil'")
+var (
+	ErrNilToFieldTx                = errors.New("txn: field 'To' can not be 'nil'")
+	ErrBlobTxnEmptyBlobs           = errors.New("blob txn must contain at least one blob versioned hash")
+	ErrBlobTxnInvalidVersionedHash = errors.New("blob txn versioned hash has invalid version byte")
+)
 
 type BlobTx struct {
 	DynamicFeeTransaction
@@ -67,12 +72,24 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
-	var stxTo accounts.Address
-	if stx.To == nil {
-		stxTo = accounts.NilAddress
-	} else {
-		stxTo = accounts.InternAddress(*stx.To)
+	if !rules.IsCancun {
+		return nil, errors.New("BlobTx transactions require Cancun")
 	}
+	// EIP-4844 transaction validity: a blob txn must specify a recipient (no
+	// contract creation), carry at least one versioned hash, and every hash
+	// must start with the KZG version byte.
+	if stx.To == nil {
+		return nil, ErrNilToFieldTx
+	}
+	if len(stx.BlobVersionedHashes) == 0 {
+		return nil, ErrBlobTxnEmptyBlobs
+	}
+	for _, h := range stx.BlobVersionedHashes {
+		if h[0] != kzg.BlobCommitmentVersionKZG {
+			return nil, ErrBlobTxnInvalidVersionedHash
+		}
+	}
+	stxTo := accounts.InternAddress(*stx.To)
 	msg := Message{
 		nonce:            stx.Nonce,
 		gasLimit:         stx.GasLimit,
@@ -86,9 +103,6 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
-	}
-	if !rules.IsCancun {
-		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
 		msg.gasPrice.Set(baseFee)

@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -103,4 +104,60 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	opts.stepSize = s.StepSize
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
 	return opts
+}
+
+type workersCfg struct {
+	mu              sync.Mutex
+	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
+	merge           int  // usually 1
+	collateAndBuild int
+}
+
+func (w *workersCfg) getMerge() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.merge
+}
+
+func (w *workersCfg) setMerge(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.merge = n
+	}
+}
+
+func (w *workersCfg) getCollateAndBuild() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.collateAndBuild
+}
+
+func (w *workersCfg) setCollateAndBuild(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.collateAndBuild = n
+	}
+}
+
+// trySet runs fn under mu only if allowEditing is true.
+func (w *workersCfg) trySet(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		fn()
+	}
+}
+
+func (w *workersCfg) lockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = false
+}
+
+func (w *workersCfg) unlockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = true
 }
