@@ -312,9 +312,7 @@ func (idx *Index) ForceExistenceFilterWillNeed() {
 	}
 	if idx.dataStructureVersion >= 2 {
 		idx.existenceV2.MadvWillNeed()
-		return
 	}
-	return
 }
 
 func (idx *Index) ForceExistenceFilterNormal() {
@@ -328,9 +326,7 @@ func (idx *Index) ForceExistenceFilterNormal() {
 	}
 	if idx.dataStructureVersion >= 2 {
 		idx.existenceV2.MadvNormal()
-		return
 	}
-	return
 }
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
