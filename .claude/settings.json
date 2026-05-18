@@ -1,4 +1,8 @@
 {
+  "worktree": {
+    "bgIsolation": "worktree",
+    "baseRef": "head"
+  },
   "permissions": {
     "allow": [
       "Bash(make test-all:*)",
