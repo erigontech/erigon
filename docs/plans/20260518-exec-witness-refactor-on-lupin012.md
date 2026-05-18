@@ -232,12 +232,14 @@ Each helper documents which seek it triggers in a top-of-function comment.
 
 **Files:** none modified — verification only.
 
-- [ ] from `/Users/awskii/org/wrk/erigon`, create worktree: `git worktree add -b awskii/exec-witness-refactor-on-lupin ../erigon-exec-witness-refactor-lupin lupin012/add_tests_for_debug_executionWitnes`
-- [ ] `cd ../erigon-exec-witness-refactor-lupin`
-- [ ] verify clean tree: `git status` should show no modifications
-- [ ] confirm baseline build + test: `make erigon integration && go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] confirm baseline lint: `make lint` (run until clean)
-- [ ] **test-path coverage sanity check** (one-time): read `rpc/jsonrpc/debug_api_test.go:747` (`TestExecutionWitness`) and verify it (a) calls a block that uses `BLOCKHASH` so `collectAccessedHeaders` non-empty path is exercised, and (b) runs at least one block with `ERIGON_WITNESS_NO_VERIFY` unset so `verifyWitnessStateless` runs the full re-exec. If either is missing, note as ⚠️ in this plan and consider ad-hoc invocation against a synced datadir during Task 7.
+- [x] from `/Users/awskii/org/wrk/erigon`, create worktree: `git worktree add -b awskii/exec-witness-refactor-on-lupin ../erigon-exec-witness-refactor-lupin lupin012/add_tests_for_debug_executionWitnes`
+- [x] `cd ../erigon-exec-witness-refactor-lupin`
+- [x] verify clean tree: `git status` should show no modifications
+- [x] confirm baseline build + test: `make erigon integration && go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1` (all 6 subtests PASS)
+- [x] confirm baseline lint: `make lint` (run until clean — 0 issues)
+- [x] **test-path coverage sanity check** (one-time): read `rpc/jsonrpc/debug_api_test.go:747` (`TestExecutionWitness`) and verify it (a) calls a block that uses `BLOCKHASH` so `collectAccessedHeaders` non-empty path is exercised, and (b) runs at least one block with `ERIGON_WITNESS_NO_VERIFY` unset so `verifyWitnessStateless` runs the full re-exec.
+  - (a) ⚠️ **BLOCKHASH path is NOT exercised by the test fixture.** `cmd/rpcdaemon/rpcdaemontest/test_util.go:127` (`CreateTestExecModule`) generates 13 blocks containing plain ETH transfers and `contracts.Token` operations (Deploy/Mint/Transfer). None of these emit a `BLOCKHASH` opcode, so `accessedBlockHashes` will be empty for every test block; only the parent-header path inside `collectAccessedHeaders` is exercised, not the dedup loop over BLOCKHASH-touched blocks. Consider ad-hoc invocation against a synced datadir during Task 7 to validate the BLOCKHASH dedup path end-to-end.
+  - (b) ✅ **Verification IS exercised.** The test does not set `ERIGON_WITNESS_NO_VERIFY`, and `dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)` defaults to false (`rpc/jsonrpc/debug_execution_witness.go:929`), so `verifyWitnessStateless`'s full re-exec runs for every test block.
 
 ### Task 1: Extract `(api).collectAccessedHeaders`
 
