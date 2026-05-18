@@ -138,13 +138,65 @@ func (s WriteSet) Set(v VersionedWrite) {
 	}
 }
 
-// UpdateVal updates the path-typed value of an existing entry. Returns true
-// if the entry was found. The value is set via VersionedWrite.SetVal which
-// dispatches on the value type to the corresponding typed field.
-func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
+func (s WriteSet) UpdateValU256(addr accounts.Address, key AccountKey, val uint256.Int) bool {
 	if writes, ok := s[addr]; ok {
 		if v, ok := writes[key]; ok {
-			v.SetVal(val)
+			v.ValU256 = val
+			writes[key] = v
+			return true
+		}
+	}
+	return false
+}
+
+func (s WriteSet) UpdateValU64(addr accounts.Address, key AccountKey, val uint64) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.ValU64 = val
+			writes[key] = v
+			return true
+		}
+	}
+	return false
+}
+
+func (s WriteSet) UpdateValBool(addr accounts.Address, key AccountKey, val bool) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.ValBool = val
+			writes[key] = v
+			return true
+		}
+	}
+	return false
+}
+
+func (s WriteSet) UpdateValBytes(addr accounts.Address, key AccountKey, val []byte) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.ValBytes = val
+			writes[key] = v
+			return true
+		}
+	}
+	return false
+}
+
+func (s WriteSet) UpdateValHash(addr accounts.Address, key AccountKey, val accounts.CodeHash) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.ValHash = val
+			writes[key] = v
+			return true
+		}
+	}
+	return false
+}
+
+func (s WriteSet) UpdateValInt(addr accounts.Address, key AccountKey, val int) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.ValInt = val
 			writes[key] = v
 			return true
 		}
