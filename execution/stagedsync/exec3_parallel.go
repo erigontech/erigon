@@ -601,7 +601,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// is updated in handleCommitResult when results are consumed.
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
+		pe.LogCommitments(0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -663,11 +663,9 @@ func (pe *parallelExecutor) LogExecution() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas.Add(int64(committedGas))
-	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
+	pe.progress.LogCommitments(pe.rs.StateV3, pe, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -2089,7 +2087,10 @@ func (result *execResult) finalizeTxSimple(
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			// PostApplyMessage needs an IBS — create a minimal one
+			// Build a tip-credited IBS so PostApplyMessage sees the same
+			// post-tip state the serial path does. The worker skipped tip/burn
+			// credit (noFeeBurnAndTip=true) and its PostApplyMessage call, so
+			// finalize is the sole emitter of EIP-7708 burn logs in parallel.
 			ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
 			ibs.SetTxContext(blockNum, txIndex)
 			if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
@@ -2581,8 +2582,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
-					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
+				if err := be.gasPool.ConsumeRegular(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
+					return nil, fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)
+				}
+				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
+					return nil, fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
 				txTask := be.tasks[tx].Task
