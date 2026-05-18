@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -58,7 +58,64 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	if err := ResetExec(ctx, db); err != nil {
 		return err
 	}
+	if err := ResetCanonicalAboveTip(ctx, db, frozenBlocks); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ResetCanonicalAboveTip clears kv.HeaderCanonical and total-difficulty entries
+// above the snapshot tip and caps Headers/BlockHashes/Bodies/Senders stage
+// progress at the tip. HeadHeaderHash is re-anchored to the canonical hash at
+// the tip when one is recorded.
+//
+// Motivation: prior to this, ResetState wiped MDBX state-domain tables and
+// the Execution stage progress, but left kv.HeaderCanonical untouched. A
+// stale canonical pointer at a height above the snapshot tip — typically a
+// sidechain hash deposited by a successful older forkchoice update whose
+// later replacement reorgs failed on execution and rolled back — survived
+// the reset and steered the subsequent forward catchup back onto the
+// sidechain, re-introducing phantom state. By truncating those entries we
+// hand canonical-hash assignment for the post-tip range entirely to the
+// next forkchoice update from the consensus layer.
+//
+// The function is safe to call when nothing is above the tip: the truncate
+// helpers are a no-op when the table has no keys >= the cursor, and the
+// stage-progress writes only run when a stage is observably above the tip.
+func ResetCanonicalAboveTip(ctx context.Context, db kv.TemporalRwDB, frozenBlocks uint64) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := rawdb.TruncateCanonicalHash(tx, frozenBlocks+1, false /* markChainAsBad */); err != nil {
+			return fmt.Errorf("truncate canonical hash above snapshot tip: %w", err)
+		}
+		if err := rawdb.TruncateTd(tx, frozenBlocks+1); err != nil {
+			return fmt.Errorf("truncate TD above snapshot tip: %w", err)
+		}
+
+		if frozenBlocks > 0 {
+			tipHash, err := rawdb.ReadCanonicalHash(tx, frozenBlocks)
+			if err != nil {
+				return fmt.Errorf("read canonical hash at snapshot tip: %w", err)
+			}
+			if tipHash != (common.Hash{}) {
+				if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
+					return fmt.Errorf("re-anchor HeadHeaderHash to snapshot tip: %w", err)
+				}
+			}
+		}
+
+		for _, st := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
+			progress, err := stages.GetStageProgress(tx, st)
+			if err != nil {
+				return fmt.Errorf("read %s stage progress: %w", st, err)
+			}
+			if progress > frozenBlocks {
+				if err := stages.SaveStageProgress(tx, st, frozenBlocks); err != nil {
+					return fmt.Errorf("save %s stage progress: %w", st, err)
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {

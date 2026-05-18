@@ -71,7 +71,8 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = rawdbreset.ResetState(db, ctx); err != nil {
+		br, _ := blocksIO(db, logger)
+		if err = rawdbreset.ResetState(db, ctx, br.FrozenBlocks()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
