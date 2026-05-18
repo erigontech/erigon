@@ -48,7 +48,6 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode                    bool
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
@@ -229,5 +228,12 @@ func withTraceFlags(cmd *cobra.Command) {
 }
 
 func withChainTipMode(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
+	var chainTip bool
+	cmd.Flags().BoolVar(&chainTip, "sync.mode.chaintip", false, "Alias for --sync.loop.block.limit=1: every block commits and generates diffs/changesets.")
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		if chainTip {
+			syncCfg.LoopBlockLimit = 1
+		}
+		return nil
+	}
 }
