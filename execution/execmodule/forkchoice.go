@@ -520,7 +520,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			roTx.Rollback()
 			// In-loop PruneExecutionStage runs on the overlay (RO-backed
 			// MemoryMutation) and silently no-ops. Drain here on a real RW tx.
-			if _, pruneErr := e.runForkchoicePrune(initialCycle); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+			// Force initialCycle=false for in-loop iterations so batched FCU
+			// always uses the furious-prune budget; the last batch skips this
+			// path (the !hasMore guard above) and the post-RunLoop prune below
+			// runs with the real initialCycle value — that handles the
+			// chain-tip scenario.
+			if _, pruneErr := e.runForkchoicePrune(false); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
