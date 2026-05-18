@@ -386,19 +386,19 @@ Folds `SetHistoryStateReader`, `SeekCommitment` #3, `accessed.touchAll`, sibling
 
 **Files:** none modified — verification only.
 
-- [ ] `ExecutionWitness` is roughly ~130 lines (down from ~440)
-- [ ] grep whole file for `SeekCommitment` (both `domains.SeekCommitment` and `sdCtx.SeekCommitment` forms) — confirm exactly 2 explicit calls remain (one inside `detectCollapseSiblings`, one inside `buildWitnessTrie`); the 3rd is implicit in `NewSharedDomains`
-- [ ] grep for `touchAllKeys` and `resetToParentState` — confirm zero occurrences in the file
-- [ ] grep for preserved debug/log lines — confirm `log.Debug("expected parent root", ...)` still present in `ExecutionWitness`
-- [ ] grep for `SetAccountsToTrace` — confirm the call still exists in `ExecutionWitness`
-- [ ] grep for `ReadDBCommitmentHistoryEnabled` — confirm the precondition still in `ExecutionWitness` (NOT moved into `resolveWitnessBlock`)
-- [ ] grep for `marshalWitnessHeader` — confirm referenced only from `collectAccessedHeaders` (not duplicated)
-- [ ] grep for `common.Copy(` inside the helpers — confirm both Task 5 collapse-tracer and Task 6 RLPEncode loop still use it
-- [ ] grep for `SetDeferBranchUpdates` — confirm called exactly once in `ExecutionWitness`, not in either helper
-- [ ] grep for the lupin012 error strings — confirm `"commitment trie for block %d is at block %d instead of parent %d"` still present inside `detectCollapseSiblings`
-- [ ] full test sweep: `make test-short`
-- [ ] full lint sweep: `make lint` (run twice to confirm stability)
-- [ ] visually inspect `ExecutionWitness` body — should read as: tx → commitment-history guard → resolveWitnessBlock → exec env (inline) → exec block (inline) → collectAccessedState → empty-touch return → commitment setup (inline) → detectCollapseSiblings → buildWitnessTrie → collectAccessedHeaders → verifyWitnessStateless → return
+- [x] `ExecutionWitness` is roughly ~130 lines (down from ~440) — actual 186 lines, larger than the "~130" estimate because the inline `exec env`/`exec block`/`commitment setup` blocks together are ~110 lines of straight-line code. The plan's estimate undercounted these inline regions. Substantial reduction from 440 → 186 (~58% smaller) is the headline result.
+- [x] grep whole file for `SeekCommitment` (both `domains.SeekCommitment` and `sdCtx.SeekCommitment` forms) — confirmed: 2 explicit calls in `ExecutionWitness` call path (line 877 in `detectCollapseSiblings`, line 931 in `buildWitnessTrie`); the 3rd is implicit in `NewSharedDomains`. The 4th occurrence at line 1123 is inside `buildExpectedPostState` (used by `verifyWitnessStateless`'s post-state verification — separate code path, not in scope of the seek-count constraint).
+- [x] grep for `touchAllKeys` and `resetToParentState` — confirmed zero occurrences
+- [x] grep for preserved debug/log lines — `log.Debug("expected parent root", ...)` still present at line 671
+- [x] grep for `SetAccountsToTrace` — call still in `ExecutionWitness` at line 559
+- [x] grep for `ReadDBCommitmentHistoryEnabled` — precondition still inline in `ExecutionWitness` at line 529 (NOT moved into `resolveWitnessBlock`)
+- [x] grep for `marshalWitnessHeader` — only referenced from `collectAccessedHeaders` (line 1039)
+- [x] grep for `common.Copy(` inside the helpers — collapse tracer (line 895) and RLPEncode loop (line 959) both use it
+- [x] grep for `SetDeferBranchUpdates` — called once in `ExecutionWitness` at line 657; the line 1109 occurrence is inside `buildExpectedPostState` (separate function for post-state verification)
+- [x] grep for the lupin012 error strings — `"commitment trie for block %d is at block %d instead of parent %d"` present inside `detectCollapseSiblings` at line 886
+- [x] full test sweep: `make test-short` — all packages PASS
+- [x] full lint sweep: `make lint` (run twice) — 0 issues both runs
+- [x] visually inspect `ExecutionWitness` body — reads as: tx → commitment-history guard → resolveWitnessBlock → exec env (inline) → exec block (inline) → collectAccessedState → result init → commitment setup (inline) → empty-touch return → detectCollapseSiblings → buildWitnessTrie → collectAccessedHeaders → verifyWitnessStateless → return. ⚠️ **Deviation from plan's Solution Overview:** the empty-touch return sits AFTER commitment setup, not before. This is intentional for behavior preservation — the `commitmentStartingTxNum` pruning check (line 673-676) and parent-header existence check (line 663-668) must still error on empty-touch blocks when those preconditions fail. Moving the empty-touch return earlier would silently mask those errors. The Solution Overview pseudocode oversimplified this; current order matches baseline behavior.
 
 ### Task 8: Move plan to completed
 
