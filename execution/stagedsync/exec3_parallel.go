@@ -633,7 +633,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// is updated in handleCommitResult when results are consumed.
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
+		pe.LogCommitments(0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -695,11 +695,9 @@ func (pe *parallelExecutor) LogExecution() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas.Add(int64(committedGas))
-	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
+	pe.progress.LogCommitments(pe.rs.StateV3, pe, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -2663,14 +2661,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
+				txTask := be.tasks[tx].Task
+
+				if txn := txTask.Tx(); txn != nil {
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, txn.GetGasLimit(), txTask.Rules().IsAmsterdam); err != nil {
+						return nil, fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)
+					}
+				}
+
 				if err := be.gasPool.ConsumeRegular(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block regular gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
 				}
 				if err := be.gasPool.ConsumeState(txResult.ExecutionResult.BlockStateGasUsed); err != nil {
 					return be.invalidBlockResult(fmt.Errorf("%w, block=%d: block state gas overflow", rules.ErrInvalidBlock, be.blockNum)), nil
 				}
-
-				txTask := be.tasks[tx].Task
 
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()

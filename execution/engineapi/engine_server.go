@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -516,7 +515,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
+	var td *uint256.Int
 	if newPayload {
 		parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = s.chainRW.GetTd(ctx, parentHash, blockNumber-1)
