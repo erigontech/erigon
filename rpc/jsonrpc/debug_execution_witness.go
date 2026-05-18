@@ -481,6 +481,18 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 	return m
 }
 
+// witnessBlockInfo bundles the inputs that downstream witness-building phases need
+// after resolving the target block: the block itself plus its txnum range and the
+// parent block number. BlockNum is stored as a field (rather than recomputed via
+// Block.NumberU64) because it's referenced in many downstream call sites.
+type witnessBlockInfo struct {
+	Block             *types.Block
+	BlockNum          uint64
+	FirstTxNumInBlock uint64
+	EndTxNum          uint64
+	ParentNum         uint64
+}
+
 // ExecutionWitnessResult is the response format for debug_executionWitness
 type ExecutionWitnessResult struct {
 	// State contains the list of RLP-encoded trie nodes in the witness trie
@@ -522,18 +534,15 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("debug_executionWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	info, err := api.resolveWitnessBlock(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
-
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, fmt.Errorf("block %d not found", blockNum)
-	}
+	blockNum := info.BlockNum
+	block := info.Block
+	firstTxNumInBlock := info.FirstTxNumInBlock
+	endTxNum := info.EndTxNum
+	parentNum := info.ParentNum
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -542,33 +551,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	// Get first txnum of blockNum — this is the exact txnum of the parent block's
-	// final state (before any system txns in this block have been applied).
-	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	// last txnum in block used for commitment calculation and collapsed paths tracing
-	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	endTxNum := lastTxNumInBlock + 1
-	if blockNum == 0 {
-		firstTxNumInBlock = endTxNum
-	}
-
 	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader
-	var parentNum uint64
-	if blockNum == 0 {
-		parentNum = 0
-	} else {
-		parentNum = blockNum - 1
-	}
-	stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -906,6 +890,56 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	return result, nil
+}
+
+// resolveWitnessBlock resolves the target block from blockNrOrHash and computes
+// the txnum range and parent block number used by subsequent witness phases.
+// The genesis block has no parent and zero txns, so firstTxNumInBlock is collapsed
+// to endTxNum and parentNum is forced to 0.
+func (api *DebugAPIImpl) resolveWitnessBlock(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	blockNrOrHash rpc.BlockNumberOrHash,
+) (*witnessBlockInfo, error) {
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+
+	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	endTxNum := lastTxNumInBlock + 1
+	var parentNum uint64
+	if blockNum == 0 {
+		firstTxNumInBlock = endTxNum
+		parentNum = 0
+	} else {
+		parentNum = blockNum - 1
+	}
+
+	return &witnessBlockInfo{
+		Block:             block,
+		BlockNum:          blockNum,
+		FirstTxNumInBlock: firstTxNumInBlock,
+		EndTxNum:          endTxNum,
+		ParentNum:         parentNum,
+	}, nil
 }
 
 // collectAccessedHeaders gathers the headers a stateless verifier needs to anchor

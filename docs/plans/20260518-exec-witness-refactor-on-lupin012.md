@@ -284,13 +284,13 @@ Folds block resolution + txnum-range + parentNum into one helper. **The `commitm
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] declare struct `witnessBlockInfo { Block *types.Block; BlockNum, FirstTxNumInBlock, EndTxNum, ParentNum uint64 }` near `ExecutionWitnessResult`. `BlockNum` is stored as a field (not a method) because `ExecutionWitness` references it many places (logging, `MakeSigner`, `detectCollapseSiblings` arg).
-- [ ] add method `(api *DebugAPIImpl) resolveWitnessBlock(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash) (*witnessBlockInfo, error)` containing logic from `rpc/jsonrpc/debug_execution_witness.go:525-536` (block resolution: `GetBlockNumber` + `blockWithSenders` + nil check) AND `:547-570` (txnum range + parentNum branching). **Excluded** from the helper: lines 538-543 (`chainConfig`, `engine`) and line 571 (`stateReader := state.NewHistoryReaderV3(...)`) — those belong to "build exec env" and stay inline.
-- [ ] inside `resolveWitnessBlock`: call `rpchelper.GetBlockNumber`, then `api.blockWithSenders`, nil-check (`"block %d not found"`), `api._txNumReader.Min` (firstTxNumInBlock), `api._txNumReader.Max` (lastTxNumInBlock); compute `endTxNum = lastTxNumInBlock + 1`; if `blockNum == 0` set `firstTxNumInBlock = endTxNum` AND `parentNum = 0`, else `parentNum = blockNum - 1`. Populate all five fields.
-- [ ] in `ExecutionWitness`: keep `commitmentHistoryEnabled` precondition at the top unchanged; replace lines 525-570 with `info, err := api.resolveWitnessBlock(ctx, tx, blockNrOrHash); if err != nil { return nil, err }`; downstream references switch from local `blockNum` to `info.BlockNum`, `block` to `info.Block`, `firstTxNumInBlock` to `info.FirstTxNumInBlock`, `endTxNum` to `info.EndTxNum`, `parentNum` to `info.ParentNum`.
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] declare struct `witnessBlockInfo { Block *types.Block; BlockNum, FirstTxNumInBlock, EndTxNum, ParentNum uint64 }` near `ExecutionWitnessResult`. `BlockNum` is stored as a field (not a method) because `ExecutionWitness` references it many places (logging, `MakeSigner`, `detectCollapseSiblings` arg).
+- [x] add method `(api *DebugAPIImpl) resolveWitnessBlock(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash) (*witnessBlockInfo, error)` containing logic from `rpc/jsonrpc/debug_execution_witness.go:525-536` (block resolution: `GetBlockNumber` + `blockWithSenders` + nil check) AND `:547-570` (txnum range + parentNum branching). **Excluded** from the helper: lines 538-543 (`chainConfig`, `engine`) and line 571 (`stateReader := state.NewHistoryReaderV3(...)`) — those belong to "build exec env" and stay inline.
+- [x] inside `resolveWitnessBlock`: call `rpchelper.GetBlockNumber`, then `api.blockWithSenders`, nil-check (`"block %d not found"`), `api._txNumReader.Min` (firstTxNumInBlock), `api._txNumReader.Max` (lastTxNumInBlock); compute `endTxNum = lastTxNumInBlock + 1`; if `blockNum == 0` set `firstTxNumInBlock = endTxNum` AND `parentNum = 0`, else `parentNum = blockNum - 1`. Populate all five fields.
+- [x] in `ExecutionWitness`: keep `commitmentHistoryEnabled` precondition at the top unchanged; replace lines 525-570 with `info, err := api.resolveWitnessBlock(ctx, tx, blockNrOrHash); if err != nil { return nil, err }`; downstream references switch from local `blockNum` to `info.BlockNum`, `block` to `info.Block`, `firstTxNumInBlock` to `info.FirstTxNumInBlock`, `endTxNum` to `info.EndTxNum`, `parentNum` to `info.ParentNum`.
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 4: Add `accessedState` + `collectAccessedState`
 
