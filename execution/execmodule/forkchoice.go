@@ -282,7 +282,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 
-	isChainTip := e.syncCfg.IsChainTip()
+	isChainTip := e.syncCfg.ChainTipMode()
 	var limitedBigJump bool
 	limitedBigJumpPadding := uint64(2)
 	if !isChainTip && e.syncCfg.LoopBlockLimit > 0 && fcuHeader.Number.Uint64() > finishProgressBefore {

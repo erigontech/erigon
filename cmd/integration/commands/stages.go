@@ -631,7 +631,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
 		dbg.Exec3Parallel = true // default for integration tool
 	}
-	if syncCfg.IsChainTip() && noCommit {
+	if syncCfg.ChainTipMode() && noCommit {
 		return errors.New("chain-tip mode (--sync.loop.block.limit=1) cannot work with --no-commit")
 	}
 	dirs := datadir.New(datadirCli)
@@ -662,7 +662,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		s = stage(sync, tx, stages.Execution)
 		return nil
 	})
-	if syncCfg.IsChainTip() {
+	if syncCfg.ChainTipMode() {
 		s.CurrentSyncCycle.IsFirstCycle = false
 		s.CurrentSyncCycle.IsInitialCycle = false
 	}
@@ -751,7 +751,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 	doms.SetInMemHistoryReads(false)
 
-	if syncCfg.IsChainTip() {
+	if syncCfg.ChainTipMode() {
 		//if chainTip = true, forced noCommit = false
 		for bn := execProgress; bn < block; bn++ {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
@@ -1194,7 +1194,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	cfg := ethconfig.Defaults
-	if syncCfg.IsChainTip() {
+	if syncCfg.ChainTipMode() {
 		syncCfg.AlwaysGenerateChangesets = true
 		noCommit = false
 	}

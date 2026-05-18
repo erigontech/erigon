@@ -73,7 +73,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if !syncCfg.IsChainTip() {
+	if !syncCfg.ChainTipMode() {
 		if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
 			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
@@ -87,7 +87,7 @@ func StageLoop(
 	}
 
 	logger.Debug("[stageloop] Starting iteration")
-	initialCycle := !syncCfg.IsChainTip()
+	initialCycle := !syncCfg.ChainTipMode()
 	for {
 		start := time.Now()
 		select {

@@ -297,6 +297,7 @@ type Sync struct {
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }
 
-// IsChainTip reports whether LoopBlockLimit==1, which signals that the node
-// should operate in chain-tip mode (one block per FCU, initialCycle=false).
-func (s Sync) IsChainTip() bool { return s.LoopBlockLimit == 1 }
+// ChainTipMode reports whether the config is set to chain-tip mode
+// (LoopBlockLimit==1). In that mode initialCycle is forced false on every FCU
+// and ProcessFrozenBlocks is skipped.
+func (s Sync) ChainTipMode() bool { return s.LoopBlockLimit == 1 }
