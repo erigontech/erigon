@@ -912,7 +912,7 @@ func NewCommitmentState(txNum uint64, blockNum uint64, trieState []byte) *commit
 func (cs *commitmentState) Decode(buf []byte) error {
 	const headerSize = 8 + 8 + 2
 	if len(buf) < headerSize {
-		return fmt.Errorf("invalid commitment state buffer size %d, expected at least %db", len(buf), headerSize)
+		return fmt.Errorf("expected at least %d bytes, got %d", headerSize, len(buf))
 	}
 	pos := 0
 	cs.txNum = binary.BigEndian.Uint64(buf[pos : pos+8])
@@ -921,8 +921,8 @@ func (cs *commitmentState) Decode(buf []byte) error {
 	pos += 8
 	trieStateLen := int(binary.BigEndian.Uint16(buf[pos : pos+2]))
 	pos += 2
-	if len(buf) < pos+trieStateLen {
-		return fmt.Errorf("invalid commitment state buffer size %d, trie state length %d exceeds remaining bytes %d", len(buf), trieStateLen, len(buf)-pos)
+	if len(buf) != pos+trieStateLen {
+		return fmt.Errorf("invalid commitment state payload size: expected %d bytes, got %d", pos+trieStateLen, len(buf))
 	}
 	cs.trieState = make([]byte, trieStateLen)
 	copy(cs.trieState, buf[pos:pos+len(cs.trieState)])

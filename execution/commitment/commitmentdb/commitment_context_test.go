@@ -30,7 +30,6 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.Equal(t, cs.trieState, dec.trieState)
 }
 
-<<<<<<< Updated upstream
 type testStateReader struct {
 	branchData   []byte
 	step         kv.Step
@@ -81,7 +80,8 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
-=======
+}
+
 func Test_DecodeCommitmentState_HeaderTooShort(t *testing.T) {
 	t.Parallel()
 
@@ -90,7 +90,7 @@ func Test_DecodeCommitmentState_HeaderTooShort(t *testing.T) {
 	require.Error(t, err)
 }
 
-func Test_DecodeCommitmentState_TrieStateLengthExceedsBuffer(t *testing.T) {
+func Test_DecodeCommitmentState_TrieStateLengthMismatch(t *testing.T) {
 	t.Parallel()
 
 	buf := make([]byte, 18)
@@ -99,5 +99,15 @@ func Test_DecodeCommitmentState_TrieStateLengthExceedsBuffer(t *testing.T) {
 	var dec commitmentState
 	err := dec.Decode(buf)
 	require.Error(t, err)
->>>>>>> Stashed changes
+}
+
+func Test_DecodeCommitmentState_TrieStateLengthWithTrailingBytes(t *testing.T) {
+	t.Parallel()
+
+	buf := make([]byte, 22)
+	binary.BigEndian.PutUint16(buf[16:18], 2) // declares 2 bytes trie state, but payload has 4 bytes
+
+	var dec commitmentState
+	err := dec.Decode(buf)
+	require.Error(t, err)
 }
