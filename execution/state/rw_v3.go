@@ -933,14 +933,17 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
-	//	return err
-	//}
 	addressValue := address.Value()
+	// Explicit removal of code and storage on SELFDESTRUCT (and EIP-161 empty-account
+	// removal), mirroring what the parallel-exec apply path already does. Previously
+	// the storage wipe relied on the incarnation bump on re-creation; doing it here
+	// up front makes the semantics independent of incarnations.
+	if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
+		return err
+	}
+	if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
+		return err
+	}
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
