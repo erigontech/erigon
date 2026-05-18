@@ -296,3 +296,5 @@ type Sync struct {
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }
+
+func (s Sync) ChainTipMode() bool { return s.LoopBlockLimit == 1 }
