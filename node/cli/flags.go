@@ -115,7 +115,7 @@ var (
 
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
-		Usage: "Sets the maximum number of blocks to process per loop iteration",
+		Usage: "Sets the maximum number of blocks to process per loop iteration. Value 1 forces chain-tip sync mode (initialCycle=false on every FCU).",
 		Value: 5_000,
 	}
 

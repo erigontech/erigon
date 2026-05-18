@@ -296,3 +296,7 @@ type Sync struct {
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
 }
+
+// IsChainTip reports whether LoopBlockLimit==1, which signals that the node
+// should operate in chain-tip mode (one block per FCU, initialCycle=false).
+func (s Sync) IsChainTip() bool { return s.LoopBlockLimit == 1 }
