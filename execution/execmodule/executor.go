@@ -182,7 +182,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	// Closure form: CommitCycle reassigns tx across iterations, so we need
+	// to roll back the current value at function exit, not the original.
+	defer func() { tx.Rollback() }()
 
 	// Run snapshots stage — downloads block files.
 	if err = pe.sync.RunSnapshots(nil, tx); err != nil {
