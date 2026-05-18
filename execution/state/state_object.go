@@ -103,6 +103,7 @@ type stateObject struct {
 	newlyCreated            bool // true if this object was created in the current transaction
 	createdContract         bool // true if this object represents a newly created contract
 	recreatedFromDestructed bool // true if this object replaces a prior selfdestructed/deleted object at the same address; signals updateAccount to wipe leftover storage+code before writing the new state
+	versionMapMarker        bool // true if this object is a synthetic placeholder created by getStateObject to record a cross-tx SelfDestructPath signal (parallel-exec only); never represents a real account that lived in this IBS
 }
 
 // newObject creates a state object from the pool.
@@ -139,6 +140,7 @@ func (so *stateObject) release() {
 	so.newlyCreated = false
 	so.createdContract = false
 	so.recreatedFromDestructed = false
+	so.versionMapMarker = false
 	stateObjectPool.Put(so)
 }
 

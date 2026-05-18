@@ -591,20 +591,13 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	accountCopy.Copy(account)
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	// Cross-block reincarnation: rs.accounts records wasDeleted for addresses
-	// self-destructed in a prior block. Within-block recreates flow through
-	// DeleteAccount (driven by stateObject.recreatedFromDestructed in
-	// updateAccount), so this catches the case where a fresh-IBS worker has
-	// no prior-tx context but the address was already wiped on disk.
-	c.rs.accountsMutex.RLock()
-	wasDel := false
-	if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
-		wasDel = true
-	}
-	c.rs.accountsMutex.RUnlock()
-	if wasDel {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
-	}
+	// Note: SELFDESTRUCT-driven storage wipe flows from the SD tx's own
+	// SelfDestructPath=true write (emitted by DeleteAccount). Subsequent writes
+	// to a previously-destroyed address are not destruction events themselves
+	// — matching the execution-specs model where destroy_account adds to
+	// storage_clears exactly once at SD time. Re-emitting SelfDestructPath
+	// here for every write to a wasDeleted address would cause normalizeWriteSet
+	// to drop the recreated account's fields and corrupt the post-state.
 
 	// Emit complete account state as individual VersionedWrites so that
 	// applyVersionedWrites can reconstruct the full serialised account.

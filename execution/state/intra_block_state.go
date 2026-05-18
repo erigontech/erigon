@@ -316,17 +316,19 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 
 	// In parallel execution mode, check if a prior TX self-destructed or
 	// created a contract at this address — both operations clear all
-	// storage. This mirrors the same check in versionedRead for StoragePath.
+	// storage. A subsequent SelfDestructPath=false (CreateAccount revival)
+	// does NOT bring back the wiped storage; subsequent writes can only
+	// re-add per-slot values via explicit SSTOREs. So the *presence* of
+	// any SelfDestructPath / CreateContractPath entry in the versionMap
+	// — regardless of its current value — proves storage was wiped at
+	// some point in this block, and any slot not explicitly re-written
+	// since must read as zero. This mirrors the spec's per-block
+	// storage_clears semantic (execution-specs/forks/.../state_tracker.py).
 	if sdb.versionMap != nil {
 		for _, path := range [...]AccountPath{SelfDestructPath, CreateContractPath} {
 			res := sdb.versionMap.Read(addr, path, accounts.NilKey, sdb.txIndex)
 			if res.Status() != MVReadResultDone {
 				continue
-			}
-			if path == SelfDestructPath {
-				if destructed, ok := res.Value().(bool); !ok || !destructed {
-					continue
-				}
 			}
 			// Record dependency for validation.
 			if sdb.versionedReads == nil {
@@ -1532,6 +1534,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 				so.address = addr
 				so.selfdestructed = destructed
 				so.deleted = destructed
+				so.versionMapMarker = destructed
 				sdb.setStateObject(addr, so)
 				return nil, err
 			}
@@ -1573,6 +1576,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 					so.address = addr
 					so.selfdestructed = true
 					so.deleted = true
+					so.versionMapMarker = true
 					sdb.setStateObject(addr, so)
 					return nil, nil
 				}
@@ -1648,13 +1652,22 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		sdb.journal.append(createObjectChange{account: addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
-		// If the slot being created replaces a previously-selfdestructed (or
-		// EIP-161-removed) account, the new object's end-of-block write must be
-		// preceded by a DeleteAccount on the writer so the stale storage / code
-		// from the prior incarnation gets wiped. Without this flag the new
-		// stateObject looks alive and updateAccount would only emit
-		// UpdateAccountData, leaving the prior storage in the domain.
-		if previous.selfdestructed || previous.deleted {
+		// recreatedFromDestructed is only needed in the accumulating-IBS path
+		// (blockgen serial: one IBS handles every tx in a block, with per-tx
+		// NoopWriter and end-of-block real Writer). In that path the SD's
+		// real Writer.DeleteAccount fires only at block end, so the IBS must
+		// signal the wipe across the SD-then-recreate-in-same-block boundary
+		// via this flag.
+		//
+		// Skip in the parallel/versionMap path: each worker has a fresh IBS
+		// per tx, and the SD tx's own writeset already drives the apply-time
+		// storage wipe via SelfDestructPath=true. Setting the flag here for
+		// later txs that simply observe a prior-tx SD (markers, value-
+		// transfer-revival) would cause updateAccount → versionedWriteCollector.
+		// DeleteAccount to emit a SECOND SelfDestructPath=true, which
+		// normalizeWriteSet treats as a destruction and drops the recreated
+		// account's fields — corrupting EEST test_recreate's post-state.
+		if sdb.versionMap == nil && !previous.versionMapMarker && (previous.selfdestructed || previous.deleted) {
 			newobj.recreatedFromDestructed = true
 		}
 	}
@@ -1730,21 +1743,34 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// selfdestructed=true is captured and (b) after a REVERT CommitBlock
 			// can still emit DeleteAccount for it.
 			if !destructed {
-				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed {
-					// Accumulated-IBS path (e.g. GenerateChain): stateObjects cache marks the
-					// account as selfdestructed but versionedRead returned false due to the
-					// so.deleted early exit.  Reuse the cached stateObject to preserve the
-					// correct selfdestructed flag.
+				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed && !so.versionMapMarker {
 					previous = so
 					source = accountSource
 					version = accountVersion
 				} else if sdb.versionMap != nil {
-					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
-					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
-					// versionedRead returns false for SelfDestructPath via the early-exit at
-					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
 					if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
 						destructed = true
+					}
+				}
+			}
+
+			// Revival check: in the parallel executor a prior-tx SD's
+			// SelfDestructPath=true is undone by a later-tx Balance/Nonce/
+			// CodeHash write at a STRICTLY higher txIndex (this matches
+			// versionedStateReader.ReadAccountData's revival semantics —
+			// which is exactly why readAccount came back non-nil even though
+			// SelfDestructPath=true is present). Treat such an account as
+			// not-destructed so its current balance carries through into the
+			// new stateObject (matters for value-transfer-recreate plus
+			// later CREATE2: e.g. EEST test_recreate same-block scenarios).
+			if destructed && sdb.versionMap != nil {
+				if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+					sdIdx := res.DepIdx()
+					for _, path := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+						if hi, ok := sdb.versionMap.LatestTxIndex(addr, path, accounts.NilKey, sdb.txIndex); ok && hi > sdIdx {
+							destructed = false
+							break
+						}
 					}
 				}
 			}
@@ -1789,7 +1815,15 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// creation clashes between transactions get detected
 	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
-	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
+	// Only emit SelfDestructPath=false when this CreateAccount is reviving an
+	// account THAT WAS DESTRUCTED IN THIS IBS (real SD via IBS.Selfdestruct).
+	// A versionMapMarker means the SD happened in a prior tx (parallel-exec
+	// cross-tx coordination); we must NOT override its SelfDestructPath=true
+	// in the versionMap — doing so would let a later tx's collision check
+	// fall through to the on-disk storage (which still holds the pre-SD
+	// slots) and erroneously detect a contract-address collision in CREATE2
+	// recreate scenarios. See EEST test_recreate[recreate_on_separate_block_False].
+	if previous == nil || (previous.selfdestructed && !previous.versionMapMarker && !newObj.selfdestructed) {
 		versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
 	}
 

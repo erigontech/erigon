@@ -1026,19 +1026,16 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		var err error
 
 		// For StoragePath, detect contract creation/destruction by a prior tx.
-		// Both clear all storage, so any slot not explicitly re-written since
-		// must read as zero — otherwise the read falls through to StorageDomain
-		// which may still hold stale data from before the SELFDESTRUCT.
+		// The presence of ANY SelfDestructPath / CreateContractPath entry —
+		// regardless of its current value — proves storage was wiped at some
+		// point in this block (a later SelfDestructPath=false revival doesn't
+		// restore wiped slots). Any slot not explicitly re-written since must
+		// read as zero. Mirrors the spec's per-block storage_clears semantic.
 		if path == StoragePath {
 			for _, depPath := range [...]AccountPath{SelfDestructPath, CreateContractPath} {
 				depRes := s.versionMap.Read(addr, depPath, accounts.NilKey, s.txIndex)
 				if depRes.Status() != MVReadResultDone {
 					continue
-				}
-				if depPath == SelfDestructPath {
-					if destructed, ok := depRes.Value().(bool); !ok || !destructed {
-						continue
-					}
 				}
 				var zero T
 				vr.Source = StorageRead
