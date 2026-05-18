@@ -880,7 +880,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NotNil(b)
 }
 
-func TestReadReceiptsCacheV2CacheMissOnInvalidTransactionIndex(t *testing.T) {
+func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -931,7 +931,7 @@ func TestReadReceiptsCacheV2CacheMissOnInvalidTransactionIndex(t *testing.T) {
 	require.Empty(t, rs)
 }
 
-func TestReadReceiptsCacheV2CacheMissOnNonSequentialTransactionIndex(t *testing.T) {
+func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
