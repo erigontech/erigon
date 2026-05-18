@@ -299,24 +299,24 @@ Biggest delta vs PR #21227 — the `SortedCodes` source flips to `accessedCode`.
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] declare struct `accessedState` with 6 fields (`SortedKeys`, `Addresses`, `Storage`, `CodeAddrs`, `SortedCodes`, `CodeReads`) — see "Helper signatures" above for exact shape. `PreCode`, `ModCode`, `AccessedCode` are NOT struct fields — they exist only as locals inside `collectAccessedState`.
-- [ ] **CRITICAL: initialize `out.SortedCodes = []hexutil.Bytes{}` at the start of `collectAccessedState` — NOT nil.** The final shape assigns `result.Codes = accessed.SortedCodes` BEFORE the `if accessed.isEmpty() { return result, nil }` fast path. `Codes` has `json:"codes"` with NO `omitempty`, so nil would emit `"codes": null` for empty-touch blocks — a JSON regression. The current code initializes `Codes: []hexutil.Bytes{}` at the result-struct construction site (line 660); we're moving the empty-slice init into `collectAccessedState` instead.
-- [ ] `SortedKeys` is built for forward-compat but the final shape does NOT assign `result.Keys = accessed.SortedKeys` — `Keys` is intentionally always-null per Geth compat (file line 490-491). Keep `SortedKeys` on the struct for symmetry with PR #21227; document this as vestigial.
-- [ ] add `func (a *accessedState) isEmpty() bool` → `len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0`. Note: does NOT include `CodeReads` or `SortedCodes`.
-- [ ] add `func (a *accessedState) touchAll(sdCtx *commitment.SharedDomainsCommitmentContext)` containing the current `touchAllKeys` closure body (lines 793-806): Accounts → Storage → Code, in that order.
-- [ ] add `func collectAccessedState(rs *RecordingState) *accessedState`:
+- [x] declare struct `accessedState` with 6 fields (`SortedKeys`, `Addresses`, `Storage`, `CodeAddrs`, `SortedCodes`, `CodeReads`) — see "Helper signatures" above for exact shape. `PreCode`, `ModCode`, `AccessedCode` are NOT struct fields — they exist only as locals inside `collectAccessedState`.
+- [x] **CRITICAL: initialize `out.SortedCodes = []hexutil.Bytes{}` at the start of `collectAccessedState` — NOT nil.** The final shape assigns `result.Codes = accessed.SortedCodes` BEFORE the `if accessed.isEmpty() { return result, nil }` fast path. `Codes` has `json:"codes"` with NO `omitempty`, so nil would emit `"codes": null` for empty-touch blocks — a JSON regression. The current code initializes `Codes: []hexutil.Bytes{}` at the result-struct construction site (line 660); we're moving the empty-slice init into `collectAccessedState` instead.
+- [x] `SortedKeys` is built for forward-compat but the final shape does NOT assign `result.Keys = accessed.SortedKeys` — `Keys` is intentionally always-null per Geth compat (file line 490-491). Keep `SortedKeys` on the struct for symmetry with PR #21227; document this as vestigial.
+- [x] add `func (a *accessedState) isEmpty() bool` → `len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0`. Note: does NOT include `CodeReads` or `SortedCodes`.
+- [x] add `func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext)` containing the current `touchAllKeys` closure body (lines 793-806): Accounts → Storage → Code, in that order. (Plan signature listed `commitment.SharedDomainsCommitmentContext`; the type actually lives in `commitmentdb`, so the implementation uses `commitmentdb.SharedDomainsCommitmentContext`.)
+- [x] add `func collectAccessedState(rs *RecordingState) *accessedState`:
   - merge `GetAccessedKeys` + `GetModifiedKeys` → `Addresses`, `Storage`
   - build `SortedKeys`: addresses (`addr.Bytes()`) + composite storage keys (`append(addr.Bytes(), key.Bytes()...)`); final `slices.SortFunc(bytes.Compare)` for determinism
   - locally compute `accessedCode := rs.GetAccessedCode()` → hash-dedup via `allCodesByHash map[common.Hash][]byte` → sort `uniqueCodes []codeWithHash` by `bytes.Compare(a.hash[:], b.hash[:])` → output `SortedCodes` slice. **Preserve the local `codeWithHash` struct exactly as currently in `ExecutionWitness`**.
   - locally compute `preCode := rs.GetPreStateCode()` → build `CodeReads` keyed by `addrHash = crypto.Keccak256Hash(addr.Bytes())`, values wrap `witnesstypes.CodeWithHash{Code: code, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}`
   - locally compute `modCode := rs.GetModifiedCode()` → `CodeAddrs = union(preCode, modCode)` keys
-- [ ] in `ExecutionWitness`: call `accessed := collectAccessedState(recordingState)`; remove the inline keys/codes/allCodeAddrs blocks; rewrite the empty-touch check (line 788) to `accessed.isEmpty()`; rewrite the `touchAllKeys` closure body to a one-liner `accessed.touchAll(sdCtx)` (closure may stay temporarily — Task 6 removes it).
-- [ ] assign `result.Codes = accessed.SortedCodes` instead of the current append loop (lines 727-730).
-- [ ] verify `result.Codes` ordering matches pre-refactor byte-for-byte: deterministic via the final `slices.SortFunc(bytes.Compare)` on `SortedCodes`; map iteration order doesn't matter as long as the sort runs.
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `go test ./rpc/jsonrpc/ -count=1` (full package — largest surface change)
-- [ ] `make lint` until clean
+- [x] in `ExecutionWitness`: call `accessed := collectAccessedState(recordingState)`; remove the inline keys/codes/allCodeAddrs blocks; rewrite the empty-touch check (line 788) to `accessed.isEmpty()`; rewrite the `touchAllKeys` closure body to a one-liner `accessed.touchAll(sdCtx)` (closure may stay temporarily — Task 6 removes it).
+- [x] assign `result.Codes = accessed.SortedCodes` instead of the current append loop (lines 727-730).
+- [x] verify `result.Codes` ordering matches pre-refactor byte-for-byte: deterministic via the final `slices.SortFunc(bytes.Compare)` on `SortedCodes`; map iteration order doesn't matter as long as the sort runs.
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `go test ./rpc/jsonrpc/ -count=1` (full package — largest surface change)
+- [x] `make lint` until clean
 
 ### Task 5: Extract `detectCollapseSiblings`
 
