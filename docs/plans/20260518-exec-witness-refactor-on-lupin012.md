@@ -248,16 +248,16 @@ Lowest-risk leaf — the headers helper. Signature returns `(headers []map[strin
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 
-- [ ] add method `(api *DebugAPIImpl) collectAccessedHeaders(ctx context.Context, tx kv.TemporalTx, parentNum uint64, accessedBlockNums []uint64) (headers []map[string]any, byNumber map[uint64]*types.Header, err error)` containing the logic currently in the `addHeader` closure + driving loop (`rpc/jsonrpc/debug_execution_witness.go:900-925`)
-- [ ] initialize `byNumber = make(map[uint64]*types.Header)` and `headers = []map[string]any{}` (defensive — in practice the parent header is always appended first so the slice is always non-empty after this helper; the `Headers` field is `json:"headers,omitempty"` so nil-vs-empty doesn't affect JSON shape, but non-nil-init keeps downstream callers safe from accidental nil-append edge cases)
-- [ ] add parent header FIRST via internal `addHeader` step
-- [ ] then loop over `accessedBlockNums`, deduping via `byNumber`
-- [ ] each header fetched via `api._blockReader.HeaderByNumber(ctx, tx, bn)`; load failure → `"failed to load header for block %d: %w"`; nil → `"missing header for block %d"`
-- [ ] each kept header passed through `marshalWitnessHeader` for `headers` slice; raw `*types.Header` stored in `byNumber[h.Number.Uint64()]`
-- [ ] in `ExecutionWitness`: replace lines 900-925 with `headers, byNumber, err := api.collectAccessedHeaders(...)`; on success assign `result.Headers = headers` and `result.headerByNumber = byNumber`. The `addHeader` closure can be deleted now.
-- [ ] `make erigon integration`
-- [ ] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
-- [ ] `make lint` until clean
+- [x] add method `(api *DebugAPIImpl) collectAccessedHeaders(ctx context.Context, tx kv.TemporalTx, parentNum uint64, accessedBlockNums []uint64) (headers []map[string]any, byNumber map[uint64]*types.Header, err error)` containing the logic currently in the `addHeader` closure + driving loop (`rpc/jsonrpc/debug_execution_witness.go:900-925`)
+- [x] initialize `byNumber = make(map[uint64]*types.Header)` and `headers = []map[string]any{}` (defensive — in practice the parent header is always appended first so the slice is always non-empty after this helper; the `Headers` field is `json:"headers,omitempty"` so nil-vs-empty doesn't affect JSON shape, but non-nil-init keeps downstream callers safe from accidental nil-append edge cases)
+- [x] add parent header FIRST via internal `addHeader` step
+- [x] then loop over `accessedBlockNums`, deduping via `byNumber`
+- [x] each header fetched via `api._blockReader.HeaderByNumber(ctx, tx, bn)`; load failure → `"failed to load header for block %d: %w"`; nil → `"missing header for block %d"`
+- [x] each kept header passed through `marshalWitnessHeader` for `headers` slice; raw `*types.Header` stored in `byNumber[h.Number.Uint64()]`
+- [x] in `ExecutionWitness`: replace lines 900-925 with `headers, byNumber, err := api.collectAccessedHeaders(...)`; on success assign `result.Headers = headers` and `result.headerByNumber = byNumber`. The `addHeader` closure can be deleted now.
+- [x] `make erigon integration`
+- [x] `go test ./rpc/jsonrpc/ -run TestExecutionWitness -v -count=1`
+- [x] `make lint` until clean
 
 ### Task 2: Extract `(api).verifyWitnessStateless`
 

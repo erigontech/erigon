@@ -894,35 +894,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		result.State = append(result.State, common.Copy(node))
 	}
 
-	// Collect headers needed by a stateless verifier:
-	// - always include the parent block header (needed to anchor the pre-state root)
-	// - include any additional blocks accessed via the BLOCKHASH opcode
-	addHeader := func(bn uint64) error {
-		if _, seen := result.headerByNumber[bn]; seen {
-			return nil
-		}
-
-		h, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
-		if err != nil {
-			return fmt.Errorf("failed to load header for block %d: %w", bn, err)
-		}
-		if h == nil {
-			return fmt.Errorf("missing header for block %d", bn)
-		}
-		result.Headers = append(result.Headers, marshalWitnessHeader(h))
-		result.headerByNumber[h.Number.Uint64()] = h
-
-		return nil
-	}
-
-	if err = addHeader(parentNum); err != nil {
+	headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+	if err != nil {
 		return nil, err
 	}
-	for _, bn := range accessedBlockHashes {
-		if err = addHeader(bn); err != nil {
-			return nil, err
-		}
-	}
+	result.Headers = headers
+	result.headerByNumber = byNumber
 
 	// Optionally verify the witness by re-executing the block statelessly.
 	// Verification doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
@@ -946,6 +923,49 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	return result, nil
+}
+
+// collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
+// pre-state and resolve BLOCKHASH lookups. The parent header is always included
+// first; remaining entries come from blocks accessed via the BLOCKHASH opcode and
+// are deduplicated against the parent and each other via byNumber.
+func (api *DebugAPIImpl) collectAccessedHeaders(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	parentNum uint64,
+	accessedBlockNums []uint64,
+) (headers []map[string]any, byNumber map[uint64]*types.Header, err error) {
+	headers = []map[string]any{}
+	byNumber = make(map[uint64]*types.Header)
+
+	addHeader := func(bn uint64) error {
+		if _, seen := byNumber[bn]; seen {
+			return nil
+		}
+
+		h, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+		if err != nil {
+			return fmt.Errorf("failed to load header for block %d: %w", bn, err)
+		}
+		if h == nil {
+			return fmt.Errorf("missing header for block %d", bn)
+		}
+		headers = append(headers, marshalWitnessHeader(h))
+		byNumber[h.Number.Uint64()] = h
+
+		return nil
+	}
+
+	if err := addHeader(parentNum); err != nil {
+		return nil, nil, err
+	}
+	for _, bn := range accessedBlockNums {
+		if err := addHeader(bn); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return headers, byNumber, nil
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
