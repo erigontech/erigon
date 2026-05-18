@@ -69,22 +69,25 @@ func StageLoop(
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	hook *Hook,
+	syncCfg ethconfig.Sync,
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
-		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
-			return
-		}
+	if !syncCfg.ChainTipMode() {
+		if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
+			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
+				return
+			}
 
-		logger.Error("Staged Sync", "err", err)
-		if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-			logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			logger.Error("Staged Sync", "err", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			}
 		}
 	}
 
 	logger.Debug("[stageloop] Starting iteration")
-	initialCycle := true
+	initialCycle := !syncCfg.ChainTipMode()
 	for {
 		start := time.Now()
 		select {
