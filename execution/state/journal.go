@@ -238,7 +238,8 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			if ch.wasCommited {
 				if trace {
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val(), &ch.prev)
+						sd := v.ValBool
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
 						val := v.ValU256
@@ -250,7 +251,8 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			} else {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
 					if trace {
-						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val(), &ch.prev)
+						sd := v.ValBool
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, sd, &ch.prev)
 					}
 					s.versionedWrites.UpdateValBool(ch.account, AccountKey{Path: SelfDestructPath}, ch.prev)
 				}
@@ -366,14 +368,16 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val(), ch.prev)
+					n := v.ValU64
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
 			}
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: NoncePath})
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: NoncePath}]; ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val(), ch.prev)
+					n := v.ValU64
+					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, n, ch.prev)
 				}
 				s.versionedWrites.UpdateValU64(ch.account, AccountKey{Path: NoncePath}, ch.prev)
 			}
@@ -429,7 +433,8 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			}
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				if trace {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val(), ch.prevhash)
+					h := v.ValHash
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, h, ch.prevhash)
 				}
 				s.versionedWrites.UpdateValHash(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
 			}
