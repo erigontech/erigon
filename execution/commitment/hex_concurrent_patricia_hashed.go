@@ -181,7 +181,7 @@ func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 
 func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
 	p.root.SetCapture(capture)
-	recorder := p.root.capture
+	recorder := p.root.captureRecorder()
 	for i := range p.mounts {
 		p.mounts[i].setCaptureRecorder(recorder)
 	}

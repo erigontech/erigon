@@ -26,6 +26,7 @@ import (
 	"io"
 	"math/bits"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -61,11 +62,7 @@ type trieDebugRecorder struct {
 }
 
 func newTrieDebugRecorder(capture []string) *trieDebugRecorder {
-	recorder := &trieDebugRecorder{}
-	if capture != nil {
-		recorder.lines = append([]string{}, capture...)
-	}
-	return recorder
+	return &trieDebugRecorder{lines: slices.Clone(capture)}
 }
 
 func (r *trieDebugRecorder) Append(line string) {
@@ -2984,6 +2981,10 @@ func (hph *HexPatriciaHashed) SetCapture(capture []string) {
 
 func (hph *HexPatriciaHashed) setCaptureRecorder(recorder *trieDebugRecorder) {
 	hph.capture = recorder
+}
+
+func (hph *HexPatriciaHashed) captureRecorder() *trieDebugRecorder {
+	return hph.capture
 }
 
 func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
