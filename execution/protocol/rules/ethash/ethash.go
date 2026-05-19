@@ -156,13 +156,27 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	cleanup := true
+	var mem mmap.MMap
+	defer func() {
+		if !cleanup {
+			return
+		}
+		if mem != nil {
+			_ = mem.Unmap()
+		}
+		if dump != nil {
+			_ = dump.Close()
+		}
+		_ = os.Remove(temp)
+	}()
 	if err = dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
 		return nil, nil, nil, err
 	}
 	// Memory map the file for writing and fill it with the generator
-	mem, buffer, err := memoryMapFile(dump, true)
+	buffer := []uint32(nil)
+	mem, buffer, err = memoryMapFile(dump, true)
 	if err != nil {
-		dump.Close()
 		return nil, nil, nil, err
 	}
 	copy(buffer, dumpMagic)
@@ -173,12 +187,15 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	if err := mem.Unmap(); err != nil {
 		return nil, nil, nil, err
 	}
+	mem = nil
 	if err := dump.Close(); err != nil {
 		return nil, nil, nil, err
 	}
+	dump = nil
 	if err := os.Rename(temp, path); err != nil {
 		return nil, nil, nil, err
 	}
+	cleanup = false
 	return memoryMap(path, lock)
 }
 
