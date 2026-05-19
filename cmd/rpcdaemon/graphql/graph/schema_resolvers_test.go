@@ -18,10 +18,49 @@ package graph
 
 import (
 	"context"
+	"math"
+	"math/big"
 	"testing"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc"
 )
+
+type mockGraphQLAPI struct {
+	getAccountInfo func(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (string, uint64, string, error)
+}
+
+func (m mockGraphQLAPI) GetBlockDetails(context.Context, rpc.BlockNumber) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m mockGraphQLAPI) GetBlockDetailsByHash(context.Context, common.Hash) (map[string]any, error) {
+	return nil, nil
+}
+
+func (m mockGraphQLAPI) GetLatestBlockNumber(context.Context) (uint64, error) {
+	return 0, nil
+}
+
+func (m mockGraphQLAPI) GetChainID(context.Context) (*big.Int, error) {
+	return big.NewInt(1), nil
+}
+
+func (m mockGraphQLAPI) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (string, uint64, string, error) {
+	if m.getAccountInfo != nil {
+		return m.getAccountInfo(ctx, address, blockNumber)
+	}
+	return "0x0", 0, "0x", nil
+}
+
+func (m mockGraphQLAPI) GetAccountStorage(context.Context, common.Address, string, rpc.BlockNumber) (string, error) {
+	return "0x0", nil
+}
+
+func (m mockGraphQLAPI) GetBlockNumberForTx(context.Context, common.Hash) (uint64, bool, error) {
+	return 0, false, nil
+}
 
 // TestBlockResolver_Account_InvalidAddress verifies that a malformed address
 // string is rejected before any GraphQL API call is made.
@@ -56,6 +95,188 @@ func TestNewAccountAtBlock(t *testing.T) {
 	}
 	if acc.BlockNum != 42 {
 		t.Errorf("expected BlockNum=42, got %d", acc.BlockNum)
+	}
+}
+
+func TestBlockResolverLogsAppliesFilter(t *testing.T) {
+	block := &model.Block{
+		Logs: []*model.Log{
+			{
+				Index:   0,
+				Account: &model.Account{Address: "0x1111111111111111111111111111111111111111"},
+				Topics: []string{
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				},
+			},
+			{
+				Index:   1,
+				Account: &model.Account{Address: "0x2222222222222222222222222222222222222222"},
+				Topics: []string{
+					"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				},
+			},
+		},
+	}
+
+	resolver := &blockResolver{&Resolver{}}
+	logs, err := resolver.Logs(context.Background(), block, model.BlockFilterCriteria{
+		Addresses: []string{"0x1111111111111111111111111111111111111111"},
+		Topics: [][]string{
+			{"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+	if logs[0].Index != 0 {
+		t.Fatalf("expected first log to match, got index %d", logs[0].Index)
+	}
+}
+
+func TestBlockResolverLogsTopicWildcardDoesNotRequireTopicPosition(t *testing.T) {
+	block := &model.Block{
+		Logs: []*model.Log{
+			{
+				Index: 0,
+				Topics: []string{
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				},
+			},
+		},
+	}
+
+	resolver := &blockResolver{&Resolver{}}
+	logs, err := resolver.Logs(context.Background(), block, model.BlockFilterCriteria{
+		Topics: [][]string{
+			{"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 log, got %d", len(logs))
+	}
+}
+
+func TestBlockResolverLogsFallsBackToFlattenTransactionsWhenLogsNil(t *testing.T) {
+	block := &model.Block{
+		Logs: nil,
+		Transactions: []*model.Transaction{
+			{
+				Logs: []*model.Log{
+					{Index: 7},
+				},
+			},
+		},
+	}
+
+	resolver := &blockResolver{&Resolver{}}
+	logs, err := resolver.Logs(context.Background(), block, model.BlockFilterCriteria{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("expected 1 flattened log, got %d", len(logs))
+	}
+	if logs[0].Index != 7 {
+		t.Fatalf("expected flattened log index 7, got %d", logs[0].Index)
+	}
+}
+
+func TestTransactionResolverFromUsesRequestedBlock(t *testing.T) {
+	const address = "0x1111111111111111111111111111111111111111"
+
+	var gotAddress common.Address
+	var gotBlock rpc.BlockNumber
+
+	resolver := &transactionResolver{&Resolver{
+		GraphQLAPI: mockGraphQLAPI{
+			getAccountInfo: func(_ context.Context, addr common.Address, blockNumber rpc.BlockNumber) (string, uint64, string, error) {
+				gotAddress = addr
+				gotBlock = blockNumber
+				return "0x10", 7, "0x6000", nil
+			},
+		},
+	}}
+
+	tx := &model.Transaction{From: model.NewAccountAtBlock(12)}
+	tx.From.Address = address
+	targetBlock := uint64(99)
+
+	account, err := resolver.From(context.Background(), tx, &targetBlock)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotAddress != common.HexToAddress(address) {
+		t.Fatalf("expected address %s, got %s", address, gotAddress)
+	}
+	if gotBlock != rpc.BlockNumber(targetBlock) {
+		t.Fatalf("expected block %d, got %d", targetBlock, gotBlock)
+	}
+	if account.BlockNum != targetBlock {
+		t.Fatalf("expected result block %d, got %d", targetBlock, account.BlockNum)
+	}
+}
+
+func TestLogResolverAccountFallsBackToEmbeddedBlock(t *testing.T) {
+	const address = "0x3333333333333333333333333333333333333333"
+
+	var gotBlock rpc.BlockNumber
+
+	resolver := &logResolver{&Resolver{
+		GraphQLAPI: mockGraphQLAPI{
+			getAccountInfo: func(_ context.Context, _ common.Address, blockNumber rpc.BlockNumber) (string, uint64, string, error) {
+				gotBlock = blockNumber
+				return "0x20", 3, "0x6001", nil
+			},
+		},
+	}}
+
+	logEntry := &model.Log{Account: model.NewAccountAtBlock(55)}
+	logEntry.Account.Address = address
+
+	account, err := resolver.Account(context.Background(), logEntry, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotBlock != rpc.BlockNumber(55) {
+		t.Fatalf("expected embedded block 55, got %d", gotBlock)
+	}
+	if account.BlockNum != 55 {
+		t.Fatalf("expected result block 55, got %d", account.BlockNum)
+	}
+}
+
+func TestTransactionResolverFromRejectsOverflowRequestedBlock(t *testing.T) {
+	const address = "0x1111111111111111111111111111111111111111"
+
+	called := false
+	resolver := &transactionResolver{&Resolver{
+		GraphQLAPI: mockGraphQLAPI{
+			getAccountInfo: func(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
+				called = true
+				return "0x10", 7, "0x6000", nil
+			},
+		},
+	}}
+
+	tx := &model.Transaction{From: model.NewAccountAtBlock(12)}
+	tx.From.Address = address
+	overflow := uint64(math.MaxInt64) + 1
+
+	_, err := resolver.From(context.Background(), tx, &overflow)
+	if err == nil {
+		t.Fatal("expected overflow error, got nil")
+	}
+	if called {
+		t.Fatal("expected resolver to reject overflow before GetAccountInfo call")
 	}
 }
 

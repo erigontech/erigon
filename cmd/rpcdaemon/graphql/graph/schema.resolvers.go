@@ -8,6 +8,7 @@ package graph
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
@@ -18,7 +19,9 @@ import (
 
 // Storage is the resolver for the storage field.
 func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot string) (string, error) {
-	panic("not implemented: Storage - storage")
+	addr := common.HexToAddress(obj.Address)
+	blockNumber := rpc.BlockNumber(obj.BlockNum)
+	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, blockNumber)
 }
 
 // TransactionAt is the resolver for the transactionAt field.
@@ -31,7 +34,21 @@ func (r *blockResolver) TransactionAt(ctx context.Context, obj *model.Block, ind
 
 // Logs is the resolver for the logs field.
 func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model.BlockFilterCriteria) ([]*model.Log, error) {
-	panic("not implemented: Logs - logs")
+	logs := obj.Logs
+	if logs == nil {
+		logs = flattenBlockLogs(obj.Transactions)
+	}
+	if len(logs) == 0 {
+		return []*model.Log{}, nil
+	}
+
+	filtered := make([]*model.Log, 0, len(logs))
+	for _, log := range logs {
+		if blockLogMatchesFilter(log, filter) {
+			filtered = append(filtered, log)
+		}
+	}
+	return filtered, ctx.Err()
 }
 
 // Account is the resolver for the account field.
@@ -50,6 +67,15 @@ func (r *blockResolver) Call(ctx context.Context, obj *model.Block, data model.C
 // EstimateGas is the resolver for the estimateGas field.
 func (r *blockResolver) EstimateGas(ctx context.Context, obj *model.Block, data model.CallData) (uint64, error) {
 	panic("not implemented: EstimateGas - estimateGas")
+}
+
+// Miner is the resolver for the miner field.
+func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Miner, block)
+	if account != nil || err != nil {
+		return account, err
+	}
+	return nil, fmt.Errorf("block miner is unavailable")
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -80,10 +106,16 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	if number != nil {
 		bNum, err := strconv.ParseUint(*number, 10, 64)
 		if err == nil {
+			if bNum > uint64(math.MaxInt64) {
+				return nil, fmt.Errorf("block number %d exceeds max supported value", bNum)
+			}
 			blockNumber = rpc.BlockNumber(bNum)
 		} else {
 			bNum, err := hexutil.DecodeUint64(*number)
 			if err == nil {
+				if bNum > uint64(math.MaxInt64) {
+					return nil, fmt.Errorf("block number %d exceeds max supported value", bNum)
+				}
 				blockNumber = rpc.BlockNumber(bNum)
 			} else {
 				return nil, fmt.Errorf("invalid block number: %s", *number)
@@ -104,8 +136,11 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 }
 
 // Blocks is the resolver for the blocks field.
-func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]*model.Block, error) {
-	fromBlockNumber := from
+func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
+	if from == nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+	fromBlockNumber := *from
 
 	var toBlockNumber uint64
 	if to != nil {
@@ -211,18 +246,30 @@ func (r *queryResolver) ChainID(ctx context.Context) (string, error) {
 
 // From is the resolver for the from field.
 func (r *transactionResolver) From(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
-	if obj.From == nil {
-		return nil, nil
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.From, block)
+	if account != nil || err != nil {
+		return account, err
 	}
-	return r.resolveAccountAtBlock(ctx, obj.From.Address, obj.Block.Number, block)
+	return nil, fmt.Errorf("transaction sender is unavailable")
 }
 
 // To is the resolver for the to field.
 func (r *transactionResolver) To(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
-	if obj.To == nil {
-		return nil, nil
+	return r.resolveAccountAtRequestedBlock(ctx, obj.To, block)
+}
+
+// Account is the resolver for the account field.
+func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64) (*model.Account, error) {
+	account, err := r.resolveAccountAtRequestedBlock(ctx, obj.Account, block)
+	if account != nil || err != nil {
+		return account, err
 	}
-	return r.resolveAccountAtBlock(ctx, obj.To.Address, obj.Block.Number, block)
+	return nil, fmt.Errorf("log account is unavailable")
+}
+
+// CreatedContract is the resolver for the createdContract field.
+func (r *transactionResolver) CreatedContract(ctx context.Context, obj *model.Transaction, block *uint64) (*model.Account, error) {
+	return r.resolveAccountAtRequestedBlock(ctx, obj.CreatedContract, block)
 }
 
 // Account returns AccountResolver implementation.
@@ -237,11 +284,15 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Log returns LogResolver implementation.
+func (r *Resolver) Log() LogResolver { return &logResolver{r} }
+
 // Transaction returns TransactionResolver implementation.
 func (r *Resolver) Transaction() TransactionResolver { return &transactionResolver{r} }
 
 type accountResolver struct{ *Resolver }
 type blockResolver struct{ *Resolver }
+type logResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type transactionResolver struct{ *Resolver }

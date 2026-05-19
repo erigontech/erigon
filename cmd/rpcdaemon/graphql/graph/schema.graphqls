@@ -14,6 +14,16 @@ scalar Long
 # Either a string or an unsigned int
 scalar BlockNum
 
+directive @goField(
+  forceResolver: Boolean
+  name: String
+  omittable: Boolean
+  type: String
+  autoBindGetterHaser: Boolean
+  forceGenerate: Boolean
+  batch: Boolean
+) on INPUT_FIELD_DEFINITION | FIELD_DEFINITION
+
 schema {
   query: Query
   mutation: Mutation
@@ -34,7 +44,7 @@ type Account {
   code: Bytes!
   # Storage provides access to the storage of a contract account, indexed
   # by its 32 byte slot identifier.
-  storage(slot: Bytes32!): Bytes32!
+  storage(slot: Bytes32!): Bytes32! @goField(forceResolver: true)
 }
 
 # Log is an Ethereum event log.
@@ -43,7 +53,7 @@ type Log {
   index: Long!
   # Account is the account which generated this log - this will always
   # be a contract account.
-  account(block: Long): Account!
+  account(block: Long): Account! @goField(forceResolver: true)
   # Topics is a list of 0-4 indexed topics for the log.
   topics: [Bytes32!]!
   # Data is unindexed data for this log.
@@ -69,10 +79,10 @@ type Transaction {
   index: Long
   # From is the account that sent this transaction - this will always be
   # an externally owned account.
-  from(block: Long): Account!
+  from(block: Long): Account! @goField(forceResolver: true)
   # To is the account the transaction was sent to. This is null for
   # contract-creating transactions.
-  to(block: Long): Account
+  to(block: Long): Account @goField(forceResolver: true)
   # Value is the value, in wei, sent along with this transaction.
   value: BigInt!
   # GasPrice is the price offered to miners for gas, in wei per unit.
@@ -113,7 +123,7 @@ type Transaction {
   # CreatedContract is the account that was created by a contract creation
   # transaction. If the transaction was not a contract creation transaction,
   # or it has not yet been mined, this field will be null.
-  createdContract(block: Long): Account
+  createdContract(block: Long): Account @goField(forceResolver: true)
   # Logs is a list of log entries emitted by this transaction. If the
   # transaction has not yet been mined, this field will be null.
   logs: [Log!]
@@ -178,7 +188,7 @@ type Block {
   # ReceiptsRoot is the keccak256 hash of the trie of transaction receipts in this block.
   receiptsRoot: Bytes32!
   # Miner is the account that mined this block.
-  miner(block: Long): Account!
+  miner(block: Long): Account! @goField(forceResolver: true)
   # ExtraData is an arbitrary data field supplied by the miner.
   extraData: Bytes!
   # GasLimit is the maximum amount of gas that was available to transactions in this block.
@@ -222,9 +232,9 @@ type Block {
   # bounds, this field will be null.
   transactionAt(index: Int!): Transaction
   # Logs returns a filtered set of logs from this block.
-  logs(filter: BlockFilterCriteria!): [Log!]!
+  logs(filter: BlockFilterCriteria!): [Log!]! @goField(forceResolver: true)
   # Account fetches an Ethereum account at the current block's state.
-  account(address: Address!): Account!
+  account(address: Address!): Account! @goField(forceResolver: true)
   # Call executes a local call operation at the current block's state.
   call(data: CallData!): CallResult
   # EstimateGas estimates the amount of gas that will be required for

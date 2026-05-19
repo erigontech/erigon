@@ -2,6 +2,8 @@ package graph
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strings"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
@@ -12,12 +14,18 @@ import (
 )
 
 func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, defaultBlock uint64, override *uint64) (*model.Account, error) {
-	blockNum := rpc.BlockNumber(defaultBlock)
+	blockNum := defaultBlock
 	if override != nil {
-		blockNum = rpc.BlockNumber(*override)
+		blockNum = *override
+	}
+	if !common.IsHexAddress(address) {
+		return nil, fmt.Errorf("invalid address %q", address)
+	}
+	if blockNum > uint64(math.MaxInt64) {
+		return nil, fmt.Errorf("block number %d exceeds max supported value", blockNum)
 	}
 	addr := common.HexToAddress(address)
-	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, blockNum)
+	balance, nonce, code, err := r.GraphQLAPI.GetAccountInfo(ctx, addr, rpc.BlockNumber(blockNum))
 	if err != nil {
 		return nil, err
 	}
@@ -26,8 +34,72 @@ func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, de
 		Balance:          balance,
 		TransactionCount: nonce,
 		Code:             code,
-		BlockNum:         uint64(blockNum),
+		BlockNum:         blockNum,
 	}, nil
+}
+
+func (r *Resolver) resolveAccountAtRequestedBlock(ctx context.Context, account *model.Account, block *uint64) (*model.Account, error) {
+	if account == nil || account.Address == "" {
+		return nil, nil
+	}
+	return r.resolveAccountAtBlock(ctx, account.Address, account.BlockNum, block)
+}
+
+func normalizeHex(value string) string {
+	return strings.ToLower(value)
+}
+
+func flattenBlockLogs(transactions []*model.Transaction) []*model.Log {
+	var logs []*model.Log
+	for _, tx := range transactions {
+		if tx == nil {
+			continue
+		}
+		logs = append(logs, tx.Logs...)
+	}
+	return logs
+}
+
+func blockLogMatchesFilter(log *model.Log, filter model.BlockFilterCriteria) bool {
+	if log == nil {
+		return false
+	}
+
+	if len(filter.Addresses) > 0 {
+		if log.Account == nil || log.Account.Address == "" {
+			return false
+		}
+		match := false
+		for _, address := range filter.Addresses {
+			if normalizeHex(address) == normalizeHex(log.Account.Address) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+
+	for i, alternatives := range filter.Topics {
+		if len(alternatives) == 0 {
+			continue
+		}
+		if i >= len(log.Topics) {
+			return false
+		}
+		match := false
+		for _, topic := range alternatives {
+			if normalizeHex(topic) == normalizeHex(log.Topics[i]) {
+				match = true
+				break
+			}
+		}
+		if !match {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
