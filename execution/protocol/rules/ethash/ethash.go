@@ -168,7 +168,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 		if dump != nil {
 			_ = dump.Close()
 		}
-		_ = os.Remove(temp)
+		_ = dir2.RemoveFile(temp)
 	}()
 	if err = dump.Truncate(int64(len(dumpMagic))*4 + int64(size)); err != nil {
 		return nil, nil, nil, err
@@ -184,14 +184,18 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	data := buffer[len(dumpMagic):]
 	generator(data)
 
-	if err := mem.Unmap(); err != nil {
-		return nil, nil, nil, err
-	}
+	// Nil out mem/dump immediately after release so the deferred cleanup
+	// doesn't re-invoke Unmap/Close on a handle in an undefined state.
+	unmapErr := mem.Unmap()
 	mem = nil
-	if err := dump.Close(); err != nil {
-		return nil, nil, nil, err
+	if unmapErr != nil {
+		return nil, nil, nil, unmapErr
 	}
+	closeErr := dump.Close()
 	dump = nil
+	if closeErr != nil {
+		return nil, nil, nil, closeErr
+	}
 	if err := os.Rename(temp, path); err != nil {
 		return nil, nil, nil, err
 	}

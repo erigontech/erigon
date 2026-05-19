@@ -20,6 +20,7 @@
 package ethash
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -131,6 +132,13 @@ func TestMemoryMapAndGenerateCleansTempFileOnRenameFailure(t *testing.T) {
 	_, _, _, err := memoryMapAndGenerate(path, 1024, false, func(buffer []uint32) {})
 	if err == nil {
 		t.Fatal("expected rename failure, got nil")
+	}
+	// Pin the failure to os.Rename so the test fails loudly if a future change
+	// shifts the failure to an earlier step (Create/Truncate/mmap) — the cleanup
+	// path under test is the post-rename one.
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Op != "rename" {
+		t.Fatalf("expected *os.LinkError with Op=rename, got: %v", err)
 	}
 
 	temps, globErr := filepath.Glob(path + ".*")
