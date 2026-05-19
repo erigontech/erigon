@@ -84,11 +84,26 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 }
 
 func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
-	has, err := db.Has(kv.ConfigTable, kv.GenesisKey)
+	existing, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
 		return err
 	}
-	if has {
+	if len(existing) > 0 {
+		// If the stored blob predates the chain.Config JSON-compat fix, the
+		// ChainID / TerminalTotalDifficulty fields are quoted strings, which
+		// older binaries (still on *big.Int for those fields) reject. Detect
+		// and re-marshal in place so subsequent downgrades can read the DB.
+		if needsLegacyGenesisRewrite(existing) {
+			var stored types.Genesis
+			if err := json.Unmarshal(existing, &stored); err != nil {
+				return fmt.Errorf("rewrite legacy genesis JSON: unmarshal: %w", err)
+			}
+			val, err := json.Marshal(&stored)
+			if err != nil {
+				return fmt.Errorf("rewrite legacy genesis JSON: marshal: %w", err)
+			}
+			return db.Put(kv.ConfigTable, kv.GenesisKey, val)
+		}
 		return nil
 	}
 
@@ -98,6 +113,15 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 		return err
 	}
 	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
+}
+
+// needsLegacyGenesisRewrite reports whether the stored genesis JSON has
+// chain.Config.ChainID or chain.Config.TerminalTotalDifficulty serialised as
+// quoted strings — uint256.Int's default form, incompatible with older
+// erigon binaries that decode those fields into *big.Int.
+func needsLegacyGenesisRewrite(blob []byte) bool {
+	return bytes.Contains(blob, []byte(`"chainId":"`)) ||
+		bytes.Contains(blob, []byte(`"terminalTotalDifficulty":"`))
 }
 
 func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
