@@ -198,7 +198,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
 			} else if major == kv.DBSchemaVersion.Major {
 				if minor > kv.DBSchemaVersion.Minor {
-					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
+					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor)
 				}
 			}
 			// major < DBSchemaVersion.Major: upgrade handled by migrations
@@ -214,6 +214,9 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 // Apply runs all pending migrations in order and returns the (possibly reopened)
 // target DB handle. Callers must use the returned handle rather than the one passed
 // in, because a wipe migration may have closed and replaced it.
+//
+// On error the returned db may be nil (if the old handle was closed for a wipe but
+// reopening failed). Callers must close a non-nil returned handle even on error.
 //
 //   - db is the target database being migrated (e.g. chaindata).
 //   - migrationsDB is the dedicated migrations-tracking database (opened via OpenMigrationsDB).
@@ -294,6 +297,9 @@ func (m *Migrator) applyOne(db kv.RwDB, migrationsDB kv.RwDB, v Migration, dirs 
 				return db, fmt.Errorf("migrator.applyOne: migration %s requires ReopenDB", v.Name)
 			}
 			dbPath := db.Path()
+			if dbPath == "" || !filepath.IsAbs(dbPath) {
+				return db, fmt.Errorf("migrator.applyOne: migration %s: refusing wipe on unsafe DB path %q", v.Name, dbPath)
+			}
 			logger.Warn("[migration] chaindata predates required schema — wiping; state will be re-synced from snapshots",
 				"migration", v.Name, "db_major", major, "min_major", v.WipeDataIfMajorBelow, "path", dbPath)
 			db.Close()

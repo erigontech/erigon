@@ -2121,7 +2121,7 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	if !a.produce {
-		a.logger.Warn("[snapshots] buildFiles: produce=false")
+		a.logger.Debug("[snapshots] buildFiles: produce=false")
 		close(fin)
 		return fin
 	}
