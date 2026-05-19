@@ -24,23 +24,26 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// dropIncarnationFromStorage clears the legacy E2 plain/hashed state and
-// changeset tables whose storage keys bake the per-account `incarnation`
-// counter into the composite key ([addr]+[inc]+[key] in PlainState's
-// dupsort layout; [hash(addr)]+[inc]+[hash(key)] in HashedStorage).
-// None of these tables are read by the E3 execution path — kv.StorageDomain
-// is the active store and its keys are already incarnation-free
+// dropLegacyE2Tables clears the pre-E3 ("E2-era") plain/hashed state,
+// changeset, and history index tables. None of these are read by the E3
+// execution path — kv.AccountsDomain / kv.StorageDomain / kv.CommitmentDomain
+// are the active stores, and their keys are already incarnation-free
 // ([addr]+[key]).
 //
+// PlainState, HashedStorage and the StorageChangeSet baked the per-account
+// `incarnation` counter into the storage key; the others (HashedAccounts,
+// AccountChangeSet, AccountHistory, StorageHistory) are dead E2 indices.
+//
 // On a database originally created under E2 these tables may still hold
-// dormant rows; we drop them outright here. The follow-up commit removes
-// the table constants from kv.ChaindataTables so the empty buckets are
-// not recreated on next open.
+// dormant rows; we drop them outright here. The corresponding constants
+// have been moved from kv.ChaindataTables to kv.ChaindataDeprecatedTables
+// so the empty buckets are not recreated on next open and the mdbx
+// migrator can drop them on the next exclusive open.
 //
 // The migration is idempotent — ClearTable is a no-op on already-empty
 // tables.
-var dropIncarnationFromStorage = Migration{
-	Name: "drop_incarnation_from_storage",
+var dropLegacyE2Tables = Migration{
+	Name: "drop_legacy_e2_tables",
 	Up: func(db kv.RwDB, _ datadir.Dirs, _ []byte, BeforeCommit Callback, _ log.Logger) error {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
@@ -54,6 +57,8 @@ var dropIncarnationFromStorage = Migration{
 			kv.HashedAccountsDeprecated,
 			kv.StorageChangeSetDeprecated,
 			kv.AccountChangeSetDeprecated,
+			kv.E2AccountsHistory,
+			kv.E2StorageHistory,
 		} {
 			if err := tx.ClearTable(table); err != nil {
 				return err
