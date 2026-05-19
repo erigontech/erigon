@@ -835,6 +835,22 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	val := scope.Stack.pop()
 	addr := scope.Contract.Address()
 
+	// Fire the OnStorageChange tracer at the actual SSTORE PC (before the
+	// cache mutation), so trace ordering matches the opcode stream.  prev
+	// comes from the cache walk if any frame in the chain holds this slot,
+	// otherwise from a cold IBS read.  Tracer fires only on an attached
+	// hook; the cold read is gated behind that check so non-traced
+	// execution stays fast.
+	if tr := evm.config.Tracer; tr != nil && tr.OnStorageChange != nil {
+		var prev uint256.Int
+		if cell, ok := scope.findSlotCell(addr, key); ok {
+			prev = cell.Value
+		} else {
+			prev, _ = evm.IntraBlockState().GetState(addr, key)
+		}
+		tr.OnStorageChange(addr, key, prev, val)
+	}
+
 	// Write into the *local* frame's slotCache only — never mutate an
 	// ancestor's cell directly.  If a child mutated its parent's cell and
 	// then erred, the parent's pre-call value would be lost; the rollup
@@ -858,10 +874,11 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// ibs.SetState is intentionally skipped here: cache is the source of
 	// truth for the duration of execution.  The outermost-frame defer in
 	// Run batches the cells back into IBS via FlushSlotCacheWrite (which
-	// produces journal entries, fires OnStorageChange, and runs
-	// versionWritten) when err == nil at parent == nil.  On err the
-	// cache is discarded — no journal entry was ever made, so nothing
-	// to revert.
+	// produces journal entries + versionWritten) when err == nil at
+	// parent == nil.  On err the cache is discarded — no journal entry
+	// was ever made, so nothing to revert.  OnStorageChange is fired at
+	// the SSTORE PC above (not at flush) so trace ordering follows the
+	// opcode stream rather than the flush iteration order.
 	return pc, nil, nil
 }
 

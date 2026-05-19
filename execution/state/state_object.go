@@ -279,9 +279,15 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		wasCommited: commited,
 	})
 
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
-		so.db.tracingHooks.OnStorageChange(so.address, key, prev, value)
-	}
+	// OnStorageChange is fired by the caller at the actual SSTORE PC
+	// (opSstore in execution/vm/instructions.go), not here.  Firing
+	// here would either misorder (the slot-cache flush path batches
+	// all SSTOREs at outer-frame return — they would appear in a
+	// trace at the end, not at the opcode) or double-fire (with the
+	// in-opcode fire from opSstore).  Other SetState callers
+	// (genesis init, RPC state-overrides, EIP-2935 system write,
+	// debug fake-storage) are pre-EVM or non-traced contexts that
+	// don't expect a tracer hook.
 	so.setState(key, value)
 
 	return true, nil
