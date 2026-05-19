@@ -66,7 +66,7 @@ type Config struct {
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        new(uint64),
 			TangerineWhistleBlock: new(uint64),
 			SpuriousDragonBlock:   new(uint64),
