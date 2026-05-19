@@ -149,10 +149,10 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - (no file changes — investigation only)
 
-- [ ] Branch off `awskii/r36converter`: `git checkout -b awskii/convert-continue-flag awskii/r36converter`
-- [ ] Verify local build green: `make integration` builds (the `integration` binary holds the convert command)
-- [ ] Verify existing tests pass: `go test ./db/state/ -run Convert -count=1`
-- [ ] Read `dumpStepRangeToPath` in `db/state/` to confirm `.kv` write atomicity. Record finding under `## Findings` below with one of these explicit conclusions:
+- [x] Branch off `awskii/r36converter`: `git checkout -b awskii/convert-continue-flag awskii/r36converter`
+- [x] Verify local build green: `make integration` builds (the `integration` binary holds the convert command)
+- [x] Verify existing tests pass: `go test ./db/state/ -run Convert -count=1`
+- [x] Read `dumpStepRangeToPath` in `db/state/` to confirm `.kv` write atomicity. Record finding under `## Findings` below with one of these explicit conclusions:
   - **(a) atomic** (tmp-then-rename): Task 2 completeness check = existence of `.kv` + every required accessor. No size check needed.
   - **(b) in-place writes**: Task 2 completeness check = existence + every accessor file is non-zero size AND the .kv is non-zero size. Test fidelity rider in Task 4 (`TestPreflightResume_zeroSizeKv`) becomes mandatory.
   - **(c) ambiguous / mixed paths**: stop and surface the ambiguity to the user before starting Task 2. Do not proceed with an assumption.
@@ -274,7 +274,23 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 
 ## Findings
 
-*(Task 0 records `dumpStepRangeToPath` write atomicity here before Task 2 starts.)*
+### Task 0: `dumpStepRangeToPath` write atomicity
+
+**Conclusion: (a) atomic — tmp-then-rename for all four file types.**
+
+Trace of how each output file lands at its final path:
+
+1. `.kv` (data) — `db/state/domain.go:649` `dumpStepRangeToPath` → `collateETL` (`domain.go:684`) → `seg.NewCompressor(...)` (`domain.go:698`). Compressor writes via `dir.CreateTemp(c.outputFile)` at `db/seg/compress.go:326`, fsyncs (`compress.go:388`), then `os.Rename(tmpFileName, c.outputFile)` at `compress.go:394`. Final `.kv` only appears at its destination path once write is complete and fsynced.
+
+2. `.kvi` (hash-map accessor) — built in `buildFileRange` (`domain.go:980-988`) via `buildHashMapAccessorAt` → `recsplit`. `recsplit.go:890` opens `dir.CreateTemp(rs.filePath)`, then `os.Rename(rs.indexF.Name(), rs.filePath)` at `recsplit.go:1026`.
+
+3. `.bt` (btree accessor) — built in `buildFileRange` (`domain.go:991-997`) via `btindex.CreateBtreeIndexWithDecompressor`. `db/datastruct/btindex/btree_index.go:265` uses `dir.CreateTemp(btw.args.IndexFile)` and `os.Rename(btw.indexF.Name(), btw.args.IndexFile)` at line 312.
+
+4. `.kvei` (existence filter) — `db/datastruct/existence/existence_filter.go:113` uses `dir.CreateTemp(b.FilePath)` and `os.Rename(cf.Name(), b.FilePath)` at line 128.
+
+**Consequences for Task 2 / Task 4**:
+- Task 2 completeness check: existence of `.kv` + each required accessor sibling is sufficient. No file-size check needed.
+- Task 4 `TestPreflightResume_zeroSizeKv` is **skipped** — zero-byte `.kv` files cannot appear at the final path under normal crash recovery; a zero-byte file would only exist if someone manually `touch`ed it, which is out of scope for "interrupted previous run" resume.
 
 ## Post-Completion
 
