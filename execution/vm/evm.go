@@ -205,6 +205,20 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 	}
 }
 
+// deriveFrameRegularGasUsed derives the regular-gas component of a frame's
+// gasUsed from the total gas it received (inputTotal), the total left over
+// at exit (gasRemainingTotal), and the frame's signed net state-gas usage.
+//
+// Regular = (input − leftover) − state, with leftover potentially exceeding
+// input when state refunds (creditStateGasRefund, which grows the local
+// reservoir) outweighed the regular gas spent. The arithmetic stays in
+// int64 so a refund-heavy frame's negative delta cancels against an equally
+// negative stateGasUsed to yield the correct positive regular-ops count.
+func deriveFrameRegularGasUsed(inputTotal, gasRemainingTotal uint64, stateGasUsed int64) uint64 {
+	delta := int64(inputTotal) - int64(gasRemainingTotal)
+	return uint64(delta - stateGasUsed)
+}
+
 // CallGasTemp returns the callGasTemp for the EVM
 func (evm *EVM) CallGasTemp() uint64 {
 	return evm.callGasTemp
@@ -248,11 +262,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
-		gasRemainingTotal := gasRemaining.Total()
-		if gasRemainingTotal <= inputTotal {
-			delta := int64(inputTotal - gasRemainingTotal)
-			gasUsed.Regular = uint64(delta - gasUsed.State)
-		}
+		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
 			gasUsed.State = 0
 		}
@@ -509,11 +519,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// even on call failure.
 	inputTotal := gas.Total()
 	defer func() {
-		gasRemainingTotal := gasRemaining.Total()
-		if gasRemainingTotal <= inputTotal {
-			delta := int64(inputTotal - gasRemainingTotal)
-			gasUsed.Regular = uint64(delta - gasUsed.State)
-		}
+		gasUsed.Regular = deriveFrameRegularGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
 			gasUsed.State = -int64(params.StateGasNewAccount)
 		}
