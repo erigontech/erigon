@@ -561,16 +561,26 @@ type headerMarshaling struct {
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
-func (h *Header) Hash() (hash common.Hash) {
-	if h.mutable {
-		return RlpHash(h)
+//
+// The variable scoping below is load-bearing: in an earlier formulation that
+// used a single named return (`hash common.Hash`), `h.hash.Store(&hash)` in
+// the miss branch forced that named return to escape to heap on every call —
+// including the hot cache-hit path. Keeping the address-taken variable
+// (`cacheEntry`) confined to the miss branch lets the hit path return its
+// value entirely on the stack with zero allocations.
+func (h *Header) Hash() common.Hash {
+	if !h.mutable {
+		if cached := h.hash.Load(); cached != nil {
+			return *cached
+		}
+		// Cache miss: compute, cache, return.
+		computed := RlpHash(h)
+		cacheEntry := computed
+		h.hash.Store(&cacheEntry)
+		return computed
 	}
-	if hash := h.hash.Load(); hash != nil {
-		return *hash
-	}
-	hash = RlpHash(h)
-	h.hash.Store(&hash)
-	return hash
+	// mutable: always recompute, no caching.
+	return RlpHash(h)
 }
 
 // CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its
