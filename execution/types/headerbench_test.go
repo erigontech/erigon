@@ -166,3 +166,72 @@ func BenchmarkHeaderHash_Memoized(b *testing.B) {
 		_ = h.Hash()
 	}
 }
+
+// --- New entry-point benchmarks (types.DecodeHeader) ----------------------
+//
+// These exercise the concrete-typed entry point that bypasses the reflective
+// `rlp.DecodeBytes(b, val any)` path. Compare against the corresponding
+// non-TypesAPI bench above to see the entry-point boxing savings.
+
+// BenchmarkDecodeHeader_PreLondon_TypesAPI decodes via types.DecodeHeader.
+func BenchmarkDecodeHeader_PreLondon_TypesAPI(b *testing.B) {
+	headers := loadHeadersRLP(b, "headers-mainnet-00099.rlp")
+	hRLP := headers[0]
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var h Header
+		if err := DecodeHeader(hRLP, &h); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkDecodeHeader_London_TypesAPI decodes via types.DecodeHeader.
+func BenchmarkDecodeHeader_London_TypesAPI(b *testing.B) {
+	headers := loadHeadersRLP(b, "headers-mainnet-01894.rlp")
+	hRLP := headers[0]
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var h Header
+		if err := DecodeHeader(hRLP, &h); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkDecodeHeader_Loop_PreLondon_Hoisted walks 100 headers per op
+// using the hoisted var + types.DecodeHeader pattern — the optimised
+// freezeblocks.ForEachHeader shape.
+func BenchmarkDecodeHeader_Loop_PreLondon_Hoisted(b *testing.B) {
+	headers := loadHeadersRLP(b, "headers-mainnet-00099.rlp")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var h Header // hoisted out of the inner loop
+		for _, hRLP := range headers {
+			if err := DecodeHeader(hRLP, &h); err != nil {
+				b.Fatal(err)
+			}
+			_ = h.ParentHash
+		}
+	}
+}
+
+// BenchmarkDecodeHeader_Loop_London_Hoisted walks 100 post-London headers
+// per op using the hoisted var + types.DecodeHeader pattern.
+func BenchmarkDecodeHeader_Loop_London_Hoisted(b *testing.B) {
+	headers := loadHeadersRLP(b, "headers-mainnet-01894.rlp")
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		var h Header
+		for _, hRLP := range headers {
+			if err := DecodeHeader(hRLP, &h); err != nil {
+				b.Fatal(err)
+			}
+			_ = h.ParentHash
+		}
+	}
+}

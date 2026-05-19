@@ -1045,13 +1045,21 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	view := s.View()
 	defer view.Close()
 
+	// Hoisted out of the inner loop: the *Header escapes (passed to walker
+	// of unknown retention), so leaving the declaration in the loop body
+	// allocates a fresh ~600-byte Header every iteration. Hoisting amortises
+	// that to one allocation per ForEachHeader call. Walker callers must
+	// NOT retain the *Header beyond their callback; audited 2026-05-19 —
+	// see also Header.DecodeRLP which clears h.hash so a reused Header
+	// doesn't return a stale cached hash.
+	var header types.Header
+
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func() error {
 			g := sn.Src().MakeGetter()
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
-				var header types.Header
-				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
+				if err := types.DecodeHeader(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {

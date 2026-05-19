@@ -665,6 +665,34 @@ func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done fun
 	}
 }
 
+// NewBytesStream returns a Stream that reads from b, using an internal
+// zero-allocation adapter over the byte slice. The Stream MUST be
+// returned to the pool with PutStream when the caller is finished;
+// failing to do so leaks the Stream from the pool.
+//
+// Use this entry point when you have a fully-buffered RLP payload and
+// want to drive decode via Stream methods directly (e.g. by calling a
+// type's hand-written DecodeRLP), bypassing the reflective entry
+// point's `val any` boxing and reflect.ValueOf overhead.
+//
+// This intentionally does NOT return a cleanup closure: the closure
+// would capture `stream` and heap-allocate on every call. Callers
+// should use:
+//
+//	stream := rlp.NewBytesStream(b)
+//	defer rlp.PutStream(stream)
+func NewBytesStream(b []byte) *Stream {
+	r := (*sliceReader)(&b)
+	stream := streamPool.Get().(*Stream)
+	stream.Reset(r, uint64(len(b)))
+	return stream
+}
+
+// PutStream returns a Stream to the pool. Pairs with NewBytesStream.
+func PutStream(stream *Stream) {
+	streamPool.Put(stream)
+}
+
 // Bytes reads an RLP string and returns its contents as a byte slice.
 // If the input does not contain an RLP string, the returned
 // error will be ErrExpectedString.

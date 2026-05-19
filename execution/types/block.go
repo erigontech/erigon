@@ -341,7 +341,37 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+// DecodeHeader decodes one RLP-encoded header from b into dst. Unlike
+// rlp.DecodeBytes(b, dst), this entry point avoids:
+//   - the `val any` boxing escape at the package-level entry point,
+//   - the typecache lookup, and
+//   - the val.Addr().Interface().(Decoder) boxing inside the reflective
+//     dispatcher (rlp/decode.go decodeDecoder).
+//
+// It uses an internal zero-allocation byte-slice reader and calls the
+// hand-written (*Header).DecodeRLP method directly. dst is overwritten
+// in place; any cached hash from a prior decode is cleared.
+//
+// Returns rlp.ErrMoreThanOneValue if b has trailing data after the header.
+func DecodeHeader(b []byte, dst *Header) error {
+	stream := rlp.NewBytesStream(b)
+	defer rlp.PutStream(stream)
+	if err := dst.DecodeRLP(stream); err != nil {
+		return err
+	}
+	if stream.Remaining() != 0 {
+		return rlp.ErrMoreThanOneValue
+	}
+	return nil
+}
+
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	// Clear any cached hash from a prior decode so that a hoisted /
+	// reused *Header doesn't return the previous iteration's hash.
+	// Safe regardless of caller pattern: on a freshly-zeroed Header
+	// h.hash is already nil; this is a no-op there.
+	h.hash.Store(nil)
+
 	_, err := s.List()
 	if err != nil {
 		return err
