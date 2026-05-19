@@ -265,9 +265,9 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 
 ### Task 8: Cleanup
 
-- [ ] Verify all checkboxes marked
-- [ ] `mkdir -p docs/plans/completed && mv docs/plans/20260519-convert-continue-flag.md docs/plans/completed/`
-- [ ] Leave CLAUDE.md untouched unless a new pattern emerged worth capturing
+- [x] Verify all checkboxes marked
+- [x] `mkdir -p docs/plans/completed && mv docs/plans/20260519-convert-continue-flag.md docs/plans/completed/`
+- [x] Leave CLAUDE.md untouched unless a new pattern emerged worth capturing
 
 ## Findings
 
