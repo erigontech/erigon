@@ -148,7 +148,7 @@ jobs:
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json
+          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}-${{ matrix.exec_mode }}.json
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
