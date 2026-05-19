@@ -22,10 +22,6 @@ package ethconfig
 
 import (
 	"math/big"
-	"os"
-	"os/user"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -93,13 +89,6 @@ var Defaults = Config{
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
 	},
-	Ethash: ethashcfg.Config{
-		CachesInMem:      2,
-		CachesLockMmap:   false,
-		DatasetsInMem:    1,
-		DatasetsOnDisk:   2,
-		DatasetsLockMmap: false,
-	},
 	NetworkID:   1,
 	Prune:       prune.DefaultMode,
 	TxPool:      txpoolcfg.DefaultConfig,
@@ -118,30 +107,6 @@ var Defaults = Config{
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
-
-func init() {
-	home := os.Getenv("HOME")
-	if home == "" {
-		if user, err := user.Current(); err == nil {
-			home = user.HomeDir
-		}
-	}
-	if runtime.GOOS == "darwin" {
-		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
-		localappdata := os.Getenv("LOCALAPPDATA")
-		if localappdata != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
-		} else {
-			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
-		}
-	} else {
-		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
-			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
-		}
-		Defaults.Ethash.DatasetDir = filepath.Join(home, ".local/share/erigon-ethash") //nolint:gocritic
-	}
-}
 
 //go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 

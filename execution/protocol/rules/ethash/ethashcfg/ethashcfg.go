@@ -22,13 +22,7 @@ import (
 
 // Config are the configuration parameters of the ethash.
 type Config struct {
-	CachesInMem      int
-	CachesLockMmap   bool
-	DatasetDir       string
-	DatasetsInMem    int
-	DatasetsOnDisk   int
-	DatasetsLockMmap bool
-	PowMode          Mode
+	PowMode Mode
 
 	Log log.Logger `toml:"-"`
 }

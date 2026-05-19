@@ -59,14 +59,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 			logger.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
-			eng = ethash.New(ethashcfg.Config{
-				CachesInMem:      consensusCfg.CachesInMem,
-				CachesLockMmap:   consensusCfg.CachesLockMmap,
-				DatasetDir:       consensusCfg.DatasetDir,
-				DatasetsInMem:    consensusCfg.DatasetsInMem,
-				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
-				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, noVerify)
+			eng = ethash.New(ethashcfg.Config{}, noVerify)
 		}
 	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {

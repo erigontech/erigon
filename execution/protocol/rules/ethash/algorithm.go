@@ -55,6 +55,13 @@ const (
 	loopAccesses       = 64      // Number of accesses in hashimoto loop
 )
 
+// isLittleEndian returns whether the local system is running in little or big
+// endian byte order.
+func isLittleEndian() bool {
+	n := uint32(0x01020304)
+	return *(*byte)(unsafe.Pointer(&n)) == 0x04
+}
+
 // cacheSize returns the size of the ethash verification cache that belongs to a certain
 // block number.
 func cacheSize(block uint64) uint64 {

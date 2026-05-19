@@ -27,8 +27,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
-
-	"github.com/erigontech/erigon/common/length"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal
@@ -739,26 +737,6 @@ func BenchmarkHashimotoFullSmall(b *testing.B) {
 	for b.Loop() {
 		hashimotoFull(dataset, hash, 0)
 	}
-}
-
-func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
-	b.Run(name, func(b *testing.B) {
-		tmpdir := b.TempDir()
-		d := &dataset{epoch: 0}
-		d.generate(tmpdir, 1, lock, testing.Short())
-		var hash [length.Hash]byte
-		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
-			binary.PutVarint(hash[:], int64(i))
-			hashimotoFull(d.dataset, hash[:], 0)
-		}
-	})
-}
-
-// Benchmarks the full verification performance for mmap
-func BenchmarkHashimotoFullMmap(b *testing.B) {
-	benchmarkHashimotoFullMmap(b, "WithLock", true)
-	benchmarkHashimotoFullMmap(b, "WithoutLock", false)
 }
 
 func BenchmarkSeedHash(b *testing.B) {

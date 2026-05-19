@@ -150,25 +150,6 @@ var (
 		Name:  "trusted-setup-file",
 		Usage: "Absolute path to trusted_setup.json file",
 	}
-	// Ethash settings
-	EthashCachesInMemoryFlag = cli.IntFlag{
-		Name:  "ethash.cachesinmem",
-		Usage: "Number of recent ethash caches to keep in memory (16MB each)",
-		Value: ethconfig.Defaults.Ethash.CachesInMem,
-	}
-	EthashCachesLockMmapFlag = cli.BoolFlag{
-		Name:  "ethash.cacheslockmmap",
-		Usage: "Lock memory maps of recent ethash caches",
-	}
-	EthashDatasetDirFlag = flags.DirectoryFlag{
-		Name:  "ethash.dagdir",
-		Usage: "Directory to store the ethash mining DAGs",
-		Value: flags.DirectoryString(ethconfig.Defaults.Ethash.DatasetDir),
-	}
-	EthashDatasetsLockMmapFlag = cli.BoolFlag{
-		Name:  "ethash.dagslockmmap",
-		Usage: "Lock memory maps for recent ethash mining DAGs",
-	}
 	ExternalConsensusFlag = cli.BoolFlag{
 		Name:  "externalcl",
 		Usage: "Enables the external consensus layer",
@@ -1684,23 +1665,9 @@ func setShutter(ctx *cli.Context, chainName string, nodeConfig *nodecfg.Config, 
 	ethConfig.Shutter = config
 }
 
-func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
-	if ctx.IsSet(EthashDatasetDirFlag.Name) {
-		cfg.Ethash.DatasetDir = ctx.String(EthashDatasetDirFlag.Name)
-	} else {
-		cfg.Ethash.DatasetDir = filepath.Join(datadir, "ethash-dags")
-	}
-	if ctx.IsSet(EthashCachesInMemoryFlag.Name) {
-		cfg.Ethash.CachesInMem = ctx.Int(EthashCachesInMemoryFlag.Name)
-	}
-	if ctx.IsSet(EthashCachesLockMmapFlag.Name) {
-		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
-	}
+func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.IsSet(FakePoWFlag.Name) {
 		cfg.Ethash.PowMode = ethashcfg.ModeFake
-	}
-	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
-		cfg.Ethash.DatasetsLockMmap = ctx.Bool(EthashDatasetsLockMmapFlag.Name)
 	}
 }
 
@@ -1978,7 +1945,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setTxPool(ctx, nodeConfig.Dirs.TxPool, cfg)
 	setShutter(ctx, chain, nodeConfig, cfg)
 
-	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
+	setEthash(ctx, cfg)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
