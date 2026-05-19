@@ -45,7 +45,6 @@ type structInfoReceiver interface {
 	topHash() []byte
 	topHashes(prefix []byte, branches, children uint16) []byte
 	printTopHashes(prefix []byte, branches, children uint16)
-	setProofElement(pe *proofElement)
 }
 
 // HashCollector gets called whenever there might be a need to create intermediate hash record
