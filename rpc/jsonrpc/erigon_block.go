@@ -94,7 +94,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	currentHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if currentHeader == nil {
 		return nil, errors.New("current header not found")
 	}

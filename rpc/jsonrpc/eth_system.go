@@ -121,7 +121,8 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, overlayTx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	gasResult := uint256.NewInt(0)
 
@@ -129,7 +130,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
+	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -143,7 +144,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, api.filters.WithTemporalOverlay(tx), api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -166,7 +167,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, api.filters.WithTemporalOverlay(tx), api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
 
 	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -211,7 +212,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if header == nil || header.ExcessBlobGas == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
@@ -238,7 +239,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadCurrentHeader(tx)
+	header := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if header == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}

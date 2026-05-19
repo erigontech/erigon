@@ -105,7 +105,7 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
+	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err
 	}

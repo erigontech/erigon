@@ -376,7 +376,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, err
 	}

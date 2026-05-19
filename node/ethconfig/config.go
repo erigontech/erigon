@@ -111,9 +111,17 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	// FcuBackgroundCommit lets the FCU response return to the consensus client
+	// before MDBX commit lands. Notifications are dispatched pre-commit from the
+	// SharedDomains overlay (see notification_dispatcher.go), and embedded RPC
+	// reads consult the overlay via filters.LatestSD()/WithOverlay (see
+	// rpc/rpchelper/filters.go). Remote rpcdaemon's kvcache.Coherent receives
+	// pre-commit StateChanges and correctly serves the matching state-version
+	// root while the remote tx still observes the pre-commit MDBX state — a
+	// ~50ms window of consistent (lagging) reads, not divergent state.
+	FcuBackgroundCommit: true,
 	ExperimentalBAL:     false,
 }
 

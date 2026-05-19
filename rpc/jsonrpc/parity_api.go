@@ -73,7 +73,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
-	bn := rawdb.ReadCurrentBlockNumber(tx)
+	bn := rawdb.ReadCurrentBlockNumber(api.filters.WithOverlay(tx))
 	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err

@@ -169,7 +169,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err != nil {
 			return nil, err
 		}

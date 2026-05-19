@@ -343,7 +343,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		overlayTx := api.filters.WithOverlay(dbtx)
+		headNumber, err := api._blockReader.HeaderNumber(ctx, overlayTx, rawdb.ReadHeadHeaderHash(overlayTx))
 		if err != nil {
 			return err
 		}
