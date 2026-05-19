@@ -512,3 +512,56 @@ func TestPreflightResume_orphan(t *testing.T) {
 	_, statErr := os.Stat(filepath.Join(rebuildDir, "v1-commitment.0-1.kv"))
 	require.NoError(t, statErr, "complete shard .kv must remain")
 }
+
+func TestPreflightResume_phantomShard(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Inputs cover steps 0..2. rebuildDir has a complete shard for steps
+	// 99-100 that does NOT correspond to any input file — operator's input
+	// set has drifted since the original run.
+	files := fakeInputFiles(0, 2)
+	writeCompleteShard(t, rebuildDir, 99, 100, preflightTestAccessors)
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.Error(t, err)
+	require.Nil(t, out)
+	require.Contains(t, err.Error(), "does not match any current input file")
+	require.Contains(t, err.Error(), "99-100", "error must name the phantom range")
+}
+
+// TestPreflightResume_validationErrorPreservesDisk locks in the invariant
+// that contiguity / phantom-shard validation failures return WITHOUT mutating
+// rebuildDir, so the operator can investigate the pre-resume state.
+func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Set up a gap-triggering state alongside orphans and an incomplete
+	// shard. preflightResume must reject the resume AND leave every file
+	// in place.
+	files := fakeInputFiles(0, 3)
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	writeCompleteShard(t, rebuildDir, 2, 3, preflightTestAccessors) // gap at 1-2
+	orphan := filepath.Join(rebuildDir, "stray.txt")
+	require.NoError(t, os.WriteFile(orphan, []byte("noise"), 0o644))
+	incompleteKV := filepath.Join(rebuildDir, "v1-commitment.4-5.kv")
+	require.NoError(t, os.WriteFile(incompleteKV, nil, 0o644))
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.Error(t, err)
+	require.Nil(t, out)
+
+	// Everything pre-existing must still be on disk.
+	for _, p := range []string{
+		filepath.Join(rebuildDir, "v1-commitment.0-1.kv"),
+		filepath.Join(rebuildDir, "v1-commitment.2-3.kv"),
+		orphan,
+		incompleteKV,
+	} {
+		_, statErr := os.Stat(p)
+		require.NoError(t, statErr, "file %s must survive validation-error return", p)
+	}
+}

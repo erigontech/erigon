@@ -464,8 +464,9 @@ var cmdCommitmentConvert = &cobra.Command{
 between two independent axes: value squeeze state and key encoding (V1/V2).
 
 Both flags default false. Flag value is the target state, not direction; the
-tool detects the current state of each file and converts only what is needed
-so the operation is idempotent and re-runnable after crashes.
+tool detects the current state of each file and converts only what is needed.
+Files already in the target state on disk under <datadir>/snapshots/domain/
+are skipped.
 
 Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
 
@@ -473,10 +474,19 @@ Originals are preserved at <datadir>/snapshots/backup/domains/ for revert.
 removes the converted files. It is mutually exclusive with --squeeze and
 --nibbles.v2.
 
+--continue resumes a prior interrupted run, re-using complete shards left
+in <datadir>/snap/rebuild/domain/ and re-doing the rest. The operator MUST
+pass the same --squeeze and --nibbles.v2 values used in the original run; a
+mismatch silently produces mixed-encoding output. Without --continue, a
+mid-run crash discards any in-progress work in snap/rebuild/domain/ and
+Phase 1 restarts from scratch. --continue is mutually exclusive with
+--restore.
+
 Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
+  integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")

@@ -1095,8 +1095,8 @@ func requiredAccessorsForCommitment(d *Domain) []string {
 // returns `files` unchanged and logs "no prior progress, starting fresh".
 //
 // File-level write atomicity (tmp-then-rename, see Findings in
-// docs/plans/20260519-convert-continue-flag.md) makes existence sufficient
-// for the per-file completeness check — no size check needed.
+// docs/plans/completed/20260519-convert-continue-flag.md) makes existence
+// sufficient for the per-file completeness check — no size check needed.
 func preflightResume(
 	files VisibleFiles,
 	rebuildDir string,
@@ -1193,21 +1193,8 @@ func preflightResume(
 		}
 	}
 
-	for _, name := range orphans {
-		p := filepath.Join(rebuildDir, name)
-		if rmErr := dir.RemoveAll(p); rmErr != nil {
-			return nil, fmt.Errorf("[commitment_convert] --continue: remove orphan %s: %w", p, rmErr)
-		}
-	}
-	for _, r := range incompleteRanges {
-		for _, name := range groups[r] {
-			p := filepath.Join(rebuildDir, name)
-			if rmErr := dir.RemoveFile(p); rmErr != nil {
-				return nil, fmt.Errorf("[commitment_convert] --continue: remove incomplete shard %s: %w", p, rmErr)
-			}
-		}
-	}
-
+	// Validate the contiguity invariant BEFORE mutating rebuildDir, so an
+	// error return leaves the directory exactly as the operator left it.
 	prefixLen := -1
 	var firstMissingRange stepRange
 	seenInInput := make(map[stepRange]bool, len(done))
@@ -1220,9 +1207,8 @@ func preflightResume(
 			seenInInput[fr] = true
 			if prefixLen != -1 {
 				return nil, fmt.Errorf(
-					"[commitment_convert] --continue: non-contiguous shards: gap at steps %d-%d "+
-						"(rebuildDir has %d-%d but missing %d-%d before it)",
-					firstMissingRange.from, firstMissingRange.to,
+					"[commitment_convert] --continue: non-contiguous shards: "+
+						"rebuildDir has complete shard at steps %d-%d but is missing %d-%d before it",
 					fr.from, fr.to,
 					firstMissingRange.from, firstMissingRange.to)
 			}
@@ -1243,6 +1229,22 @@ func preflightResume(
 		}
 	}
 
+	// Validation passed; now safe to mutate disk.
+	for _, name := range orphans {
+		p := filepath.Join(rebuildDir, name)
+		if rmErr := dir.RemoveAll(p); rmErr != nil {
+			return nil, fmt.Errorf("[commitment_convert] --continue: remove orphan %s: %w", p, rmErr)
+		}
+	}
+	for _, r := range incompleteRanges {
+		for _, name := range groups[r] {
+			p := filepath.Join(rebuildDir, name)
+			if rmErr := dir.RemoveFile(p); rmErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] --continue: remove incomplete shard %s: %w", p, rmErr)
+			}
+		}
+	}
+
 	if prefixLen == 0 {
 		logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
 		return files, nil
@@ -1250,6 +1252,15 @@ func preflightResume(
 
 	firstFile := files[0]
 	lastCompleteFile := files[prefixLen-1]
+	if prefixLen == len(files) {
+		logger.Info(fmt.Sprintf(
+			"[commitment_convert] --continue: all %d input files already converted in rebuild dir (steps %d-%d); proceeding to Phase 2",
+			prefixLen,
+			firstFile.StartRootNum()/stepSize,
+			lastCompleteFile.EndRootNum()/stepSize,
+		))
+		return files[prefixLen:], nil
+	}
 	lastInputFile := files[len(files)-1]
 	logger.Info(fmt.Sprintf(
 		"[commitment_convert] --continue: resuming. complete shards in rebuild dir: %d (steps %d-%d), remaining: %d input files (steps %d-%d)",
