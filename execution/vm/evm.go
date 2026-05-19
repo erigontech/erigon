@@ -535,15 +535,34 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		}
 	}
 	if incrementNonce {
-		nonce, err := evm.intraBlockState.GetNonce(caller)
-		if err != nil {
-			return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		cc := evm.currentCallContext
+		var nonce uint64
+		if cc != nil {
+			if cached, ok := cc.findNonce(caller); ok {
+				nonce = cached
+			} else {
+				var err error
+				nonce, err = evm.intraBlockState.GetNonce(caller)
+				if err != nil {
+					return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+				}
+				cc.cacheNonce(caller, nonce)
+			}
+		} else {
+			var err error
+			nonce, err = evm.intraBlockState.GetNonce(caller)
+			if err != nil {
+				return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 		}
 		if nonce+1 < nonce {
 			err = ErrNonceUintOverflow
 			return nil, accounts.NilAddress, gasRemaining, err
 		}
 		evm.intraBlockState.SetNonce(caller, nonce+1)
+		if cc != nil {
+			cc.cacheNonce(caller, nonce+1)
+		}
 	}
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
@@ -562,6 +581,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+	// Intentionally uncached: the new contract's nonce read for the EIP-684
+	// collision check.  SetNonce(address, 1) below sits *after* PushSnapshot,
+	// so on a CREATE failure handleFrameRevert rewinds the IBS nonce — caching
+	// the read or the write would leave a stale entry that a same-frame
+	// re-CREATE2 (same salt) would observe as a false-positive collision.
 	nonce, err := evm.intraBlockState.GetNonce(address)
 	if err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -592,6 +616,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
+		// Intentionally NOT cached — this SetNonce sits after PushSnapshot,
+		// so handleFrameRevert may rewind it.  See note at the GetNonce(address)
+		// site above.
 	}
 	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -707,9 +734,21 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining mdgas.
 		contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), ch.Hash()))
 	} else {
 		var nonce uint64
-		nonce, err = evm.intraBlockState.GetNonce(caller)
-		if err != nil {
-			return nil, accounts.NilAddress, mdgas.MdGas{}, err
+		if cc := evm.currentCallContext; cc != nil {
+			if cached, ok := cc.findNonce(caller); ok {
+				nonce = cached
+			} else {
+				nonce, err = evm.intraBlockState.GetNonce(caller)
+				if err != nil {
+					return nil, accounts.NilAddress, mdgas.MdGas{}, err
+				}
+				cc.cacheNonce(caller, nonce)
+			}
+		} else {
+			nonce, err = evm.intraBlockState.GetNonce(caller)
+			if err != nil {
+				return nil, accounts.NilAddress, mdgas.MdGas{}, err
+			}
 		}
 		contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 	}

@@ -168,6 +168,16 @@ type CallContext struct {
 	cachedCodeHash      accounts.CodeHash
 	cachedCodeHashValid bool
 
+	// nonceCache holds per-address nonce reads to short-circuit
+	// IBS.GetNonce on the CREATE / CREATE2 paths (the only EVM-internal
+	// nonce read sites — there is no opcode that reads nonce directly).
+	// SetNonce sites do a write-through so subsequent reads in the same
+	// frame chain see the new value without an IBS round-trip.  Cache is
+	// per-frame; lookup walks the parent chain via findNonce.  No
+	// gas-fn→op handoff field — all consumers live in evm.go and read
+	// the cache inline rather than through a CallContext field.
+	nonceCache map[accounts.Address]uint64
+
 	Stack    Stack
 	Contract Contract
 }
@@ -210,6 +220,19 @@ var (
 // DumpCodeHashCacheStats snapshots the frame-local codehash cache counters.
 func DumpCodeHashCacheStats() (hits, misses uint64) {
 	return codeHashCacheHitCount.Load(), codeHashCacheMissCount.Load()
+}
+
+// Frame-local nonce cache hit/miss counters.  Same purpose as the other
+// per-field cache counters but for the nonce cache consulted by evm.create
+// / evm.Create on the CREATE/CREATE2 paths.
+var (
+	nonceCacheHitCount  atomic.Uint64
+	nonceCacheMissCount atomic.Uint64
+)
+
+// DumpNonceCacheStats snapshots the frame-local nonce cache counters.
+func DumpNonceCacheStats() (hits, misses uint64) {
+	return nonceCacheHitCount.Load(), nonceCacheMissCount.Load()
 }
 
 // findSlotCell walks the parent chain from this frame upward looking for
@@ -275,6 +298,32 @@ func (ctx *CallContext) invalidateCodeHash(addr accounts.Address) {
 	for c := ctx; c != nil; c = c.parent {
 		delete(c.codeHashCache, addr)
 	}
+}
+
+// findNonce walks the parent chain for a cached nonce entry.  Mirrors
+// findCodeEntry but value-typed.
+func (ctx *CallContext) findNonce(addr accounts.Address) (uint64, bool) {
+	for c := ctx; c != nil; c = c.parent {
+		if n, ok := c.nonceCache[addr]; ok {
+			nonceCacheHitCount.Add(1)
+			return n, true
+		}
+	}
+	nonceCacheMissCount.Add(1)
+	return 0, false
+}
+
+// cacheNonce records nonce as the current value for addr in this frame's
+// cache.  Used on both miss-fill (after an IBS read) and write-through
+// (after SetNonce).  The current-frame write shadows any stale ancestor
+// entry via findNonce's parent-chain order; the rollup at frame return
+// then propagates current-frame entries up to the parent on success,
+// overwriting the stale value there too.
+func (ctx *CallContext) cacheNonce(addr accounts.Address, nonce uint64) {
+	if ctx.nonceCache == nil {
+		ctx.nonceCache = map[accounts.Address]uint64{}
+	}
+	ctx.nonceCache[addr] = nonce
 }
 
 // internTableSize is the size of the direct-mapped intern caches on each
@@ -389,6 +438,9 @@ func (c *CallContext) put() {
 	}
 	if c.codeHashCache != nil {
 		clear(c.codeHashCache)
+	}
+	if c.nonceCache != nil {
+		clear(c.nonceCache)
 	}
 	c.cachedSlotCell = nil
 	c.cachedCodeEntry = nil
@@ -742,6 +794,20 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				parentCodeHashCache[addr] = h
 			}
 		}
+		// Nonce-cache rollup: same shape, uint64 values.  Child nonce
+		// writes (from CREATE/CREATE2 + SetNonce write-through) propagate
+		// up so the parent's view stays consistent with the IBS state
+		// the child left behind on success.
+		if err == nil && len(callContext.nonceCache) > 0 && callContext.parent != nil {
+			parentNonceCache := callContext.parent.nonceCache
+			if parentNonceCache == nil {
+				parentNonceCache = map[accounts.Address]uint64{}
+				callContext.parent.nonceCache = parentNonceCache
+			}
+			for addr, n := range callContext.nonceCache {
+				parentNonceCache[addr] = n
+			}
+		}
 		// Diagnostic dump of frame-local code-cache hit/miss counters at
 		// outer-frame return (one log line per tx).  Lets the bench
 		// harness confirm the cache is actually being exercised on a
@@ -754,6 +820,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if hits, misses := codeHashCacheHitCount.Load(), codeHashCacheMissCount.Load(); hits+misses > 0 {
 				ratio := float64(hits) * 100 / float64(hits+misses)
 				log.Info("[codehashcache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
+			}
+			if hits, misses := nonceCacheHitCount.Load(), nonceCacheMissCount.Load(); hits+misses > 0 {
+				ratio := float64(hits) * 100 / float64(hits+misses)
+				log.Info("[noncecache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
 			}
 		}
 		// Pop this frame.
