@@ -65,12 +65,7 @@ func BuildTrieFromWitness(witness *Witness, trace bool) (*Trie, error) {
 				fieldSet = 15
 			}
 
-			// Incarnation is always needed for a hashbuilder.
-			// but it is just our implementation detail needed for contract self-descruction support with our
-			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
-			incarnation := uint64(0)
-
-			if err := hb.accountLeaf(len(op.Key), op.Key, balance, nonce, incarnation, fieldSet, int(op.CodeSize)); err != nil {
+			if err := hb.accountLeaf(len(op.Key), op.Key, balance, nonce, fieldSet, int(op.CodeSize)); err != nil {
 				return nil, err
 			}
 		case *OperatorEmptyRoot:

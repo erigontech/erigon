@@ -35,8 +35,8 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlp.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32, codeSize int) error
-	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, fieldset uint32, codeSize int) error
+	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -67,10 +67,9 @@ type GenStructStepData interface {
 }
 
 type GenStructStepAccountData struct {
-	FieldSet    uint32
-	Balance     uint256.Int
-	Nonce       uint64
-	Incarnation uint64
+	FieldSet uint32
+	Balance  uint256.Int
+	Nonce    uint64
 }
 
 func (GenStructStepAccountData) GenStructStepData() {}
@@ -186,14 +185,14 @@ func GenStructStepEx(
 			case *GenStructStepAccountData:
 				proving := retainIfProving(curr[:remainderStart])
 				if proving || retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
 					}
 					if proving {
 						e.setProofElement(nil)
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.FieldSet); err != nil {
 						return nil, nil, nil, err
 					}
 				}
@@ -400,11 +399,11 @@ func GenStructStepOld(
 				buildExtensions = true
 			case *GenStructStepAccountData:
 				if retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}

@@ -658,7 +658,6 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				var a = aVal
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
-				accData.Incarnation = a.Incarnation
 				aEmptyRoot = a.IsEmptyRoot()
 				copy(aRoot[:], a.Root[:])
 				fieldSet = 0
