@@ -244,6 +244,38 @@ func timestampToTime(unixSec uint64) *time.Time {
 	return &t
 }
 
+// legacyJSONUint256 wraps uint256.Int to marshal as an unquoted decimal JSON
+// number, matching big.Int's encoding. uint256's default MarshalJSON emits a
+// quoted string, which math/big.Int's UnmarshalJSON rejects — and Erigon 3.4
+// still reads ChainID and TerminalTotalDifficulty into *big.Int. Without this
+// wrapper, a chain config written by Erigon 3.5+ cannot be re-read by 3.4.
+type legacyJSONUint256 uint256.Int
+
+func (n *legacyJSONUint256) MarshalJSON() ([]byte, error) {
+	if n == nil {
+		return []byte("null"), nil
+	}
+	return []byte((*uint256.Int)(n).Dec()), nil
+}
+
+// MarshalJSON serialises Config in a form readable by both Erigon 3.5+ (which
+// uses *uint256.Int for ChainID and TerminalTotalDifficulty) and Erigon 3.4
+// (which uses *big.Int). uint256.Int.UnmarshalJSON accepts both quoted and
+// unquoted decimals, but big.Int.UnmarshalJSON accepts only unquoted, so the
+// wire form has to be unquoted decimals.
+func (c *Config) MarshalJSON() ([]byte, error) {
+	type alias Config
+	return json.Marshal(&struct {
+		ChainID                 *legacyJSONUint256 `json:"chainId"`
+		TerminalTotalDifficulty *legacyJSONUint256 `json:"terminalTotalDifficulty,omitempty"`
+		*alias
+	}{
+		ChainID:                 (*legacyJSONUint256)(c.ChainID),
+		TerminalTotalDifficulty: (*legacyJSONUint256)(c.TerminalTotalDifficulty),
+		alias:                   (*alias)(c),
+	})
+}
+
 func (c *Config) String() string {
 	engine := c.getEngine()
 

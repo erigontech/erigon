@@ -17,9 +17,13 @@
 package chain
 
 import (
+	"encoding/json"
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -247,4 +251,60 @@ func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	assert.Equal(t, uint64(6), c.GetTargetBlobsPerBlock(0))
 	assert.Equal(t, uint64(9), c.GetMaxBlobsPerBlock(0))
 	assert.Equal(t, uint64(5007716), c.GetBlobGasPriceUpdateFraction(0))
+}
+
+// TestConfigJSONLegacyCompat pins the wire format for ChainID and
+// TerminalTotalDifficulty so a chain config written by Erigon 3.5+ stays
+// readable by 3.4, which decodes those fields into *big.Int and rejects
+// the quoted-string form uint256.Int emits by default.
+func TestConfigJSONLegacyCompat(t *testing.T) {
+	ttd := new(uint256.Int)
+	require.NoError(t, ttd.SetFromDecimal("58750000000000000000000"))
+	cfg := &Config{
+		ChainName:               "mainnet",
+		ChainID:                 uint256.NewInt(1),
+		TerminalTotalDifficulty: ttd, // mainnet TTD
+	}
+
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+
+	// Emitted as unquoted JSON numbers (matches big.Int encoding).
+	assert.Contains(t, string(data), `"chainId":1`)
+	assert.Contains(t, string(data), `"terminalTotalDifficulty":58750000000000000000000`)
+	assert.NotContains(t, string(data), `"chainId":"1"`)
+	assert.NotContains(t, string(data), `"terminalTotalDifficulty":"`)
+
+	// Decodes into a struct whose ChainID and TerminalTotalDifficulty are
+	// *big.Int, simulating Erigon 3.4's parser.
+	var legacy struct {
+		ChainName               string   `json:"chainName"`
+		ChainID                 *big.Int `json:"chainId"`
+		TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"`
+	}
+	require.NoError(t, json.Unmarshal(data, &legacy))
+	assert.Equal(t, "mainnet", legacy.ChainName)
+	require.NotNil(t, legacy.ChainID)
+	assert.Equal(t, "1", legacy.ChainID.String())
+	require.NotNil(t, legacy.TerminalTotalDifficulty)
+	assert.Equal(t, "58750000000000000000000", legacy.TerminalTotalDifficulty.String())
+
+	// Round-trip back into Config preserves both fields.
+	var round Config
+	require.NoError(t, json.Unmarshal(data, &round))
+	require.NotNil(t, round.ChainID)
+	assert.Equal(t, uint64(1), round.ChainID.Uint64())
+	require.NotNil(t, round.TerminalTotalDifficulty)
+	assert.Equal(t, "58750000000000000000000", round.TerminalTotalDifficulty.Dec())
+}
+
+// TestConfigJSONNilUint256Fields verifies marshaling does not panic when
+// TerminalTotalDifficulty is nil (a common case for pre-merge testnets), and
+// that ChainID=nil renders as JSON null rather than crashing.
+func TestConfigJSONNilUint256Fields(t *testing.T) {
+	cfg := &Config{ChainName: "test"}
+	data, err := json.Marshal(cfg)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"chainId":null`)
+	assert.NotContains(t, string(data), `terminalTotalDifficulty`) // omitempty
 }
