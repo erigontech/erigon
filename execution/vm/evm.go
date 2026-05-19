@@ -184,24 +184,34 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 	// exceptional halt burnt it in step 2. At depth==0 the user-side
 	// refund flows through gasUsed.State (see func doc).
 	//
-	// The sum must be >= 0. `gasRemaining.State + stateGasUsed` starts at
-	// the parent-passed-in reservoir R (≥ 0) and is monotonically
-	// non-decreasing: charges within the reservoir and inline refunds
-	// both leave the sum unchanged (charge: `stateGas -= a;
-	// frameStateUsed += a`; refund: `stateGas += a; frameStateUsed -=
-	// a`), and charges that spill into regular gas only grow it
-	// (stateGas clamps at 0 while frameStateUsed gets the full amount).
-	// So when stateGasUsed is negative, `gasRemaining.State >= |stateGasUsed|`
-	// and the cast doesn't underflow. If the sum does go negative, an
-	// EIP-8037 accounting invariant is broken upstream — panic rather
-	// than silently wrapping and corrupting the parent's reservoir.
 	if evm.chainRules.IsAmsterdam && depth > 0 {
-		restored := int64(gasRemaining.State) + stateGasUsed
-		if restored < 0 {
-			panic(fmt.Sprintf("EIP-8037 invariant violated: state_gas_left (%d) + child state_gas_used (%d) = %d < 0",
-				gasRemaining.State, stateGasUsed, restored))
+		// Invariant: gasRemaining.State + stateGasUsed >= 0. useMdGas
+		// (charge: stateGas -= a, frameStateUsed += a) and
+		// creditStateGasRefund (refund: stateGas += a, frameStateUsed -= a)
+		// are the only mutators and update both sides in lock-step, so
+		// the sum can only grow (via spillover charges) from the parent's
+		// reservoir R ≥ 0. A negative sum here means some new code path
+		// mutated stateGas or frameStateUsed without the paired update,
+		// or the EIP-8037 accounting was reimplemented incorrectly. Keep
+		// the panic: silently wrapping the parent's reservoir on this
+		// path would corrupt block-level gas accounting downstream and be
+		// painful to track back here.
+		//
+		// The comparison stays in uint64 (`uint64(-stateGasUsed) >
+		// gasRemaining.State`) rather than promoting both sides to int64.
+		// gasRemaining.State is a reservoir balance — unsigned by design
+		// and free to use the full uint64 range — so an int64 cast would
+		// flip any value above 2^63 to negative and fire the panic
+		// spuriously. Comparing the magnitudes directly in uint64 keeps
+		// the check correct at any gas size.
+		if stateGasUsed < 0 && uint64(-stateGasUsed) > gasRemaining.State {
+			panic(fmt.Sprintf("EIP-8037 invariant violated: gasRemaining.State (%d) + stateGasUsed (%d) < 0",
+				gasRemaining.State, stateGasUsed))
 		}
-		gasRemaining.State = uint64(restored)
+		// uint64(negative int64) = 2^64 − |stateGasUsed|; the += then
+		// overflows and wraps into the correct subtraction for negative
+		// stateGasUsed.
+		gasRemaining.State += uint64(stateGasUsed)
 	}
 }
 
@@ -209,14 +219,12 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 // gasUsed from the total gas it received (inputTotal), the total left over
 // at exit (gasRemainingTotal), and the frame's signed net state-gas usage.
 //
-// Regular = (input − leftover) − state, with leftover potentially exceeding
-// input when state refunds (creditStateGasRefund, which grows the local
-// reservoir) outweighed the regular gas spent. The arithmetic stays in
-// int64 so a refund-heavy frame's negative delta cancels against an equally
-// negative stateGasUsed to yield the correct positive regular-ops count.
+// Regular = (input − leftover) − state. Computed in uint64 modular
+// arithmetic: a negative stateGasUsed becomes a large uint64 via the cast,
+// and subtracting it wraps mod 2^64 into the correct positive sum. Safe at
+// any gas magnitude.
 func deriveFrameRegularGasUsed(inputTotal, gasRemainingTotal uint64, stateGasUsed int64) uint64 {
-	delta := int64(inputTotal) - int64(gasRemainingTotal)
-	return uint64(delta - stateGasUsed)
+	return inputTotal - gasRemainingTotal - uint64(stateGasUsed)
 }
 
 // CallGasTemp returns the callGasTemp for the EVM
