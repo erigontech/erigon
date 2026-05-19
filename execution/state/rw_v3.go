@@ -87,7 +87,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 		type addrState struct {
 			balance        *uint256.Int
 			nonce          *uint64
-			incarnation    *uint64
 			codeHash       *accounts.CodeHash
 			code           []byte
 			selfDestruct   bool
@@ -112,9 +111,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			case NoncePath:
 				v := w.Val.(uint64)
 				d.nonce = &v
-			case IncarnationPath:
-				v := w.Val.(uint64)
-				d.incarnation = &v
 			case CodeHashPath:
 				v := w.Val.(accounts.CodeHash)
 				d.codeHash = &v
@@ -161,7 +157,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
 					}
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if d.balance == nil && d.nonce == nil && d.codeHash == nil {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -175,7 +171,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						return err
 					}
 					// Pure delete: no account fields means DeleteAccount was called.
-					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if d.balance == nil && d.nonce == nil && d.codeHash == nil {
 						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
@@ -197,7 +193,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+			if d.balance != nil || d.nonce != nil || d.codeHash != nil || d.code != nil {
 				// LightCollector emits only fields that changed vs the per-TX
 				// `original` snapshot, so missing fields here mean "unchanged"
 				// — we must read the current base (from blockCache when present,
@@ -220,9 +216,6 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				if d.nonce != nil {
 					acc.Nonce = *d.nonce
-				}
-				if d.incarnation != nil {
-					acc.Incarnation = *d.incarnation
 				}
 				if d.codeHash != nil {
 					acc.CodeHash = *d.codeHash
@@ -604,7 +597,6 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	c.writes = append(c.writes,
 		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
 		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
-		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
 		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
 
@@ -641,13 +633,8 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	// MIRROR-OF: LightCollector.DeleteAccount — kept symmetric so that
 	// future searches for one find the other. Both collectors emit only
-	// SelfDestructPath; the IncarnationPath needed by the parallel
-	// commitment calculator for the SD-of-pre-existing-contract case is
-	// emitted via IBS.Selfdestruct's versionWritten (intra_block_state.go
-	// around line 1430), not via either DeleteAccount. If a future caller
-	// ever invokes DeleteAccount outside the IBS.Selfdestruct path on a
-	// pre-existing contract, both implementations would need an
-	// IncarnationPath emit here.
+	// SelfDestructPath; the parallel commitment calculator drives the
+	// storage/code wipe off of that single signal.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 
 	c.rs.accountsMutex.Lock()
@@ -728,9 +715,6 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 	if accountCopy.Nonce != original.Nonce {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
 	}
-	if accountCopy.Incarnation != original.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
-	}
 	if accountCopy.CodeHash != original.CodeHash {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash})
 	}
@@ -766,10 +750,9 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 	}
 
 	type pendingAccount struct {
-		balance     *uint256.Int
-		nonce       *uint64
-		incarnation *uint64
-		codeHash    *accounts.CodeHash
+		balance  *uint256.Int
+		nonce    *uint64
+		codeHash *accounts.CodeHash
 	}
 
 	pending := make(map[accounts.Address]*pendingAccount, len(writes)/4+1)
@@ -795,14 +778,6 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			}
 			v := w.Val.(uint64)
 			p.nonce = &v
-		case IncarnationPath:
-			p := pending[w.Address]
-			if p == nil {
-				p = &pendingAccount{}
-				pending[w.Address] = p
-			}
-			v := w.Val.(uint64)
-			p.incarnation = &v
 		case CodeHashPath:
 			p := pending[w.Address]
 			if p == nil {
@@ -813,18 +788,10 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			p.codeHash = &v
 		case CodePath:
 			code := w.Val.([]byte)
-			var inc uint64
-			if p := pending[w.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeCode(w.Address.Value(), inc, code)
+			accumulator.ChangeCode(w.Address.Value(), 0, code)
 		case StoragePath:
 			val := w.Val.(uint256.Int)
-			var inc uint64
-			if p := pending[w.Address]; p != nil && p.incarnation != nil {
-				inc = *p.incarnation
-			}
-			accumulator.ChangeStorage(w.Address.Value(), inc, w.Key.Value(), val.Bytes())
+			accumulator.ChangeStorage(w.Address.Value(), 0, w.Key.Value(), val.Bytes())
 		}
 	}
 
@@ -839,9 +806,6 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 		}
 		if p.nonce != nil {
 			acc.Nonce = *p.nonce
-		}
-		if p.incarnation != nil {
-			acc.Incarnation = *p.incarnation
 		}
 		if p.codeHash != nil {
 			acc.CodeHash = *p.codeHash

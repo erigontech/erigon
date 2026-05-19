@@ -217,7 +217,7 @@ func valueString(path AccountPath, value any) string {
 	case StoragePath:
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
-	case NoncePath, IncarnationPath:
+	case NoncePath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
 		l := min(len(value.([]byte)), 40)
@@ -353,9 +353,6 @@ func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, a
 	}
 	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
 		account.Nonce = update
-	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, IncarnationPath, accounts.NilKey, vr.txIndex); ok {
-		account.Incarnation = update
 	}
 	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
 		account.CodeHash = update
@@ -730,7 +727,6 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 	return append(writes,
 		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
 		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
-		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
 		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
 	)
 }
@@ -977,7 +973,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				}
 
 				if pr.Source == MapRead {
-					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+					if path == BalancePath || path == NoncePath || path == CodeHashPath {
 						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
 							return pr.Val.(T), ReadSetRead, pr.Version, nil
@@ -1065,7 +1061,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			}
 		}
 
-		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+		if path == BalancePath || path == NoncePath || path == CodeHashPath {
 			readAccount, source, version, err := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 

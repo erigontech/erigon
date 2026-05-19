@@ -1664,7 +1664,7 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	// returns false, which would leave the recreated address out of
 	// journal.dirties — MakeWriteSet then sees isDirty=false and never calls
 	// Writer.UpdateAccountData, so the apply-time writeset is missing
-	// NoncePath/IncarnationPath for the resurrected empty account (EEST
+	// NoncePath for the resurrected empty account (EEST
 	// test_double_kill[fork_Frontier] under ERIGON_EXEC3_PARALLEL). On revert
 	// createObjectChange clears stateObjects[addr]; the next getStateObject
 	// re-discovers the SD via the versionMap marker path.

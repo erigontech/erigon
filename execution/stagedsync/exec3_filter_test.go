@@ -16,16 +16,15 @@ import (
 func TestFilterWritesByVersionMap_RemovesUnmodifiedFields(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x01})
 
-	// CollectorWrites has all 4 fields (LightCollector always emits all)
+	// CollectorWrites has all 3 fields (LightCollector always emits all)
 	collectorWrites := state.VersionedWrites{
 		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
 		{Address: addr, Path: state.NoncePath, Val: uint64(5)},
-		{Address: addr, Path: state.IncarnationPath, Val: uint64(0)},
 		{Address: addr, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
 	}
 
 	// versionMap WriteSet only has BalancePath and NoncePath
-	// (the TX modified balance and nonce but not incarnation/codeHash)
+	// (the TX modified balance and nonce but not codeHash)
 	vmWrites := state.VersionedWrites{
 		{Address: addr, Path: state.BalancePath, Val: *uint256.NewInt(1000)},
 		{Address: addr, Path: state.NoncePath, Val: uint64(5)},

@@ -28,8 +28,6 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
-	case IncarnationPath:
-		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -58,7 +56,6 @@ const (
 	SelfDestructPath
 	BalancePath
 	NoncePath
-	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
@@ -509,10 +506,6 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		wv, ok2 := writeVal.(uint256.Int)
 		return ok1 && ok2 && rv.Eq(&wv)
 	case NoncePath:
-		rv, ok1 := readVal.(uint64)
-		wv, ok2 := writeVal.(uint64)
-		return ok1 && ok2 && rv == wv
-	case IncarnationPath:
 		rv, ok1 := readVal.(uint64)
 		wv, ok2 := writeVal.(uint64)
 		return ok1 && ok2 && rv == wv

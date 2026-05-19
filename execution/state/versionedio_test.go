@@ -519,11 +519,10 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(0)
 	acc.Nonce = 3
-	acc.Incarnation = 1
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(500), tracing.BalanceIncreaseRewardTransactionFee, true)
 
-	// Should have original write + 4 new fields for addr.
-	require.Len(t, result, 5)
+	// Should have original write + 3 new fields for addr.
+	require.Len(t, result, 4)
 	pathSet := map[AccountPath]bool{}
 	for _, w := range result {
 		if w.Address == addr {
@@ -532,12 +531,11 @@ func TestSetAccountBalanceOrDelete_NewAccount(t *testing.T) {
 	}
 	require.True(t, pathSet[BalancePath], "BalancePath must be emitted")
 	require.True(t, pathSet[NoncePath], "NoncePath must be emitted")
-	require.True(t, pathSet[IncarnationPath], "IncarnationPath must be emitted")
 	require.True(t, pathSet[CodeHashPath], "CodeHashPath must be emitted")
 }
 
 // TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty verifies that passing
-// nil for acc creates a fresh empty account (nonce=0, incarnation=0, emptyCodeHash).
+// nil for acc creates a fresh empty account (nonce=0, emptyCodeHash).
 func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -546,13 +544,11 @@ func TestSetAccountBalanceOrDelete_NilAccountCreatesEmpty(t *testing.T) {
 
 	result := writes.SetAccountBalanceOrDelete(addr, nil, *uint256.NewInt(100), tracing.BalanceIncreaseRewardTransactionFee, false)
 
-	require.Len(t, result, 4)
+	require.Len(t, result, 3)
 	for _, w := range result {
 		require.Equal(t, addr, w.Address)
 		switch w.Path {
 		case NoncePath:
-			require.Equal(t, uint64(0), w.Val)
-		case IncarnationPath:
 			require.Equal(t, uint64(0), w.Val)
 		case CodeHashPath:
 			require.Equal(t, accounts.EmptyCodeHash, w.Val)
@@ -614,8 +610,8 @@ func TestSetAccountBalanceOrDelete_EIP161DisabledNoRemoval(t *testing.T) {
 	acc := accounts.NewAccount()
 	result := writes.SetAccountBalanceOrDelete(addr, &acc, *uint256.NewInt(0), tracing.BalanceIncreaseRewardTransactionFee, false)
 
-	// Should emit all 4 fields, NOT a SelfDestructPath.
-	require.Len(t, result, 4)
+	// Should emit all 3 fields, NOT a SelfDestructPath.
+	require.Len(t, result, 3)
 	for _, w := range result {
 		require.NotEqual(t, SelfDestructPath, w.Path)
 	}
