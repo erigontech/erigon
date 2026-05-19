@@ -524,12 +524,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if !initialCycle {
 				return nil, nil
 			}
-			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			commitRwTx, err := e.db.BeginTemporalRw(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
+			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
 			if err := sd.Flush(ctx, commitRwTx); err != nil {
-				commitRwTx.Rollback()
 				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
 			}
 			sd.ClearRam(true)
