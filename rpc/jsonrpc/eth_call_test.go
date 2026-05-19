@@ -809,13 +809,14 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
 	require.NoError(t, err)
 
-	// kv.StorageChangeSetDeprecated is no longer materialised in the
-	// active schema (drop_incarnation_from_storage migration drops it),
-	// so there is nothing to prune from that table.
+	// kv.StorageChangeSetDeprecated is no longer part of the active
+	// schema (drop_legacy_e2_tables migration drops it), so there is
+	// nothing to prune from that table.
 
 	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
 	//require.NoError(t, err)
