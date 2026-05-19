@@ -441,11 +441,19 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 	}
 
+	// Optional pointer fields below: in the hoisted-Header walker pattern,
+	// successive iterations decode headers from the same fork epoch and
+	// thus tend to repeat the same set of present optional fields. Reuse
+	// any existing pointer storage rather than allocating a fresh one;
+	// only allocate on the first occurrence (or on a transition from
+	// absent to present).
 	if !s.MoreDataInList() {
 		h.BaseFee = nil
 		return s.ListEnd()
 	}
-	h.BaseFee = new(uint256.Int)
+	if h.BaseFee == nil {
+		h.BaseFee = new(uint256.Int)
+	}
 	if err = s.ReadUint256(h.BaseFee); err != nil {
 		return fmt.Errorf("read BaseFee: %w", err)
 	}
@@ -455,7 +463,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.WithdrawalsHash = nil
 		return s.ListEnd()
 	}
-	h.WithdrawalsHash = new(common.Hash)
+	if h.WithdrawalsHash == nil {
+		h.WithdrawalsHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.WithdrawalsHash[:]); err != nil {
 		return fmt.Errorf("read WithdrawalsHash: %w", err)
 	}
@@ -464,28 +474,32 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.BlobGasUsed = nil
 		return s.ListEnd()
 	}
-	var blobGasUsed uint64
-	if blobGasUsed, err = s.Uint64(); err != nil {
+	if h.BlobGasUsed == nil {
+		h.BlobGasUsed = new(uint64)
+	}
+	if *h.BlobGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
-	h.BlobGasUsed = &blobGasUsed
 
 	if !s.MoreDataInList() {
 		h.ExcessBlobGas = nil
 		return s.ListEnd()
 	}
-	var excessBlobGas uint64
-	if excessBlobGas, err = s.Uint64(); err != nil {
+	if h.ExcessBlobGas == nil {
+		h.ExcessBlobGas = new(uint64)
+	}
+	if *h.ExcessBlobGas, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
-	h.ExcessBlobGas = &excessBlobGas
 
 	// ParentBeaconBlockRoot
 	if !s.MoreDataInList() {
 		h.ParentBeaconBlockRoot = nil
 		return s.ListEnd()
 	}
-	h.ParentBeaconBlockRoot = new(common.Hash)
+	if h.ParentBeaconBlockRoot == nil {
+		h.ParentBeaconBlockRoot = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.ParentBeaconBlockRoot[:]); err != nil {
 		return fmt.Errorf("read ParentBeaconBlockRoot: %w", err)
 	}
@@ -495,7 +509,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.RequestsHash = nil
 		return s.ListEnd()
 	}
-	h.RequestsHash = new(common.Hash)
+	if h.RequestsHash == nil {
+		h.RequestsHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.RequestsHash[:]); err != nil {
 		return fmt.Errorf("read RequestsHash: %w", err)
 	}
@@ -505,7 +521,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.BlockAccessListHash = nil
 		return s.ListEnd()
 	}
-	h.BlockAccessListHash = new(common.Hash)
+	if h.BlockAccessListHash == nil {
+		h.BlockAccessListHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.BlockAccessListHash[:]); err != nil {
 		return fmt.Errorf("read BlockAccessListHash: %w", err)
 	}
@@ -514,11 +532,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.SlotNumber = nil
 		return s.ListEnd()
 	}
-	var slotNumber uint64
-	if slotNumber, err = s.Uint64(); err != nil {
+	if h.SlotNumber == nil {
+		h.SlotNumber = new(uint64)
+	}
+	if *h.SlotNumber, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
-	h.SlotNumber = &slotNumber
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
