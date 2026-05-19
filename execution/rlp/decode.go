@@ -618,6 +618,12 @@ type ByteReader interface {
 type Stream struct {
 	r ByteReader
 
+	// sliceRdr is inline storage for NewBytesStream's sliceReader so that
+	// the slice header doesn't have to be heap-allocated per call. When
+	// Stream is reused for a non-byte-slice reader (e.g. via NewStream or
+	// NewStreamFromPool), sliceRdr remains nil and is unused.
+	sliceRdr sliceReader
+
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
@@ -675,21 +681,29 @@ func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done fun
 // type's hand-written DecodeRLP), bypassing the reflective entry
 // point's `val any` boxing and reflect.ValueOf overhead.
 //
-// This intentionally does NOT return a cleanup closure: the closure
-// would capture `stream` and heap-allocate on every call. Callers
-// should use:
+// Implementation notes:
+//   - Does NOT return a cleanup closure: the closure would capture
+//     `stream` and heap-allocate on every call.
+//   - Stores b's slice header in the pool-owned Stream's sliceRdr
+//     field rather than taking &b of the local parameter — the latter
+//     forces the slice header to escape to heap per call.
+//
+// Callers should use:
 //
 //	stream := rlp.NewBytesStream(b)
 //	defer rlp.PutStream(stream)
 func NewBytesStream(b []byte) *Stream {
-	r := (*sliceReader)(&b)
 	stream := streamPool.Get().(*Stream)
-	stream.Reset(r, uint64(len(b)))
+	stream.sliceRdr = b
+	stream.Reset(&stream.sliceRdr, uint64(len(b)))
 	return stream
 }
 
 // PutStream returns a Stream to the pool. Pairs with NewBytesStream.
+// Clears the embedded sliceRdr so the pool doesn't retain a reference
+// to the caller's backing array.
 func PutStream(stream *Stream) {
+	stream.sliceRdr = nil
 	streamPool.Put(stream)
 }
 
