@@ -507,18 +507,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// Chain tip (!initialCycle): only one block per FCU, so skip the
-			// in-loop work entirely — the post-RunLoop path handles
-			// flush+commit+prune. In catchup, run on every iter so the last
-			// batch gets the in-loop furious prune treatment too.
+			// Chain tip (!initialCycle): the post-RunLoop path handles
+			// flush+commit+collation-prune, but we still run the in-loop
+			// pipeline prune on the overlay so stage-level prunes (notably
+			// PruneExecutionStage → ChangeSets3 / BlockAccessList) fire at
+			// every cycle. The overlay pass-through is what enforces
+			// MaxReorgDepth-based changeset pruning at tip.
 			if !initialCycle {
-				return nil
+				return e.pipelineExecutor.RunPrune(ctx, rwtx, false, 500*time.Millisecond)
 			}
-			// Release the old RO snapshot so MDBX can reclaim retired pages.
+			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
-			// In-loop PruneExecutionStage no-ops on the overlay; drain here on
-			// a real RW tx. initialCycle=true so the catchup prune budget runs
-			// against the in-flight bursts (CollateAndPruneIfNeeded, own RW tx).
 			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
