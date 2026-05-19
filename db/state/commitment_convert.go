@@ -53,6 +53,12 @@ var commitmentStepRangeRe = regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.`)
 type ConvertOpts struct {
 	TargetSqueeze   bool
 	TargetNibblesV2 bool
+	// Continue resumes a prior interrupted conversion: input files whose
+	// converted shard already exists in <datadir>/snap/rebuild/domain/ with
+	// every required accessor sibling are skipped. Operator is responsible
+	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
+	// the original run; a mismatch produces mixed-encoding output silently.
+	Continue bool
 }
 
 // fileState describes the detected current encoding of a commitment .kv file.
@@ -631,6 +637,9 @@ func signedByteSizeHR(n int64) string {
 // prior conversion's backup is still in place) and wipes a leftover
 // snapshots/rebuild/domain/ from a prior crashed run.
 func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
+	if opts.Continue {
+		logger.Warn("[commitment_convert] --continue: assumes prior interrupted run used the SAME --squeeze and --nibbles.v2 values. Mismatch will produce mixed-encoding output silently.")
+	}
 	// at.Files mixes domain .kv with history .v / .ef when commitment history is
 	// enabled. The converter only handles .kv files; filter the rest out.
 	allFiles := at.Files(kv.CommitmentDomain)

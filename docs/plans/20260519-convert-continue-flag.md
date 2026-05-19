@@ -163,13 +163,13 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `db/state/commitment_convert.go`
 
-- [ ] Add `convertContinue bool` package var near `convertSqueeze`/`convertNibblesV2`/`convertRestore` in `commitment.go`
-- [ ] Add `Continue bool` field to `ConvertOpts` in `commitment_convert.go`
-- [ ] In `withConvertFlags(cmd)` (find via grep on `convertSqueeze`): register the `--continue` flag with full help text (carry the trust-operator caveat: "Flags --squeeze and --nibbles.v2 MUST match the original interrupted run")
-- [ ] In `cmdCommitmentConvert.Run`, add mutex check: `if convertRestore && convertContinue { logger.Error("--continue is mutually exclusive with --restore"); return }` — place alongside the existing `--restore` checks
-- [ ] In the `opts := dbstate.ConvertOpts{...}` literal, set `Continue: convertContinue`
-- [ ] In `ConvertCommitmentFiles`, add the startup `Warn` log line gated by `opts.Continue`
-- [ ] Run: `go test ./db/state/ -run Convert -count=1` and `go build ./cmd/integration/...` — both must pass before next task
+- [x] Add `convertContinue bool` package var near `convertSqueeze`/`convertNibblesV2`/`convertRestore` in `commitment.go`
+- [x] Add `Continue bool` field to `ConvertOpts` in `commitment_convert.go`
+- [x] In `withConvertFlags(cmd)` (find via grep on `convertSqueeze`): register the `--continue` flag with full help text (carry the trust-operator caveat: "Flags --squeeze and --nibbles.v2 MUST match the original interrupted run")
+- [x] In `cmdCommitmentConvert.Run`, add mutex check: `if convertRestore && convertContinue { logger.Error("--continue is mutually exclusive with --restore"); return }` — place alongside the existing `--restore` checks
+- [x] In the `opts := dbstate.ConvertOpts{...}` literal, set `Continue: convertContinue`
+- [x] In `ConvertCommitmentFiles`, add the startup `Warn` log line gated by `opts.Continue`
+- [x] Run: `go test ./db/state/ -run Convert -count=1` and `go build ./cmd/integration/...` — both must pass before next task
 
 (Field-existence smoke test deliberately omitted — Go's type system already enforces it; the integration test in Task 5 covers the wiring end-to-end.)
 

@@ -484,6 +484,10 @@ Examples:
 			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 			return
 		}
+		if convertRestore && convertContinue {
+			logger.Error("--continue is mutually exclusive with --restore")
+			return
+		}
 		if convertRestore {
 			// Restore is a filesystem-only operation. Dispatch before openDB so
 			// recovery still works when the on-disk state is broken enough that
@@ -508,6 +512,7 @@ Examples:
 		opts := dbstate.ConvertOpts{
 			TargetSqueeze:   convertSqueeze,
 			TargetNibblesV2: convertNibblesV2,
+			Continue:        convertContinue,
 		}
 		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
 			if !errors.Is(err, context.Canceled) {
