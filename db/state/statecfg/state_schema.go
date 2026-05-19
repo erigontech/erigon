@@ -414,8 +414,9 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 		logger.Info("adjusting receipt current version to v1.1")
 
 		// else v1.0 -- need to adjust version
+		// DataV is not adjusted here: .v files and .kv files version independently,
+		// and downgrading DataV.Current causes panic when .v files are already v3.0.
 		Schema.ReceiptDomain.FileVersion.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.Hist.FileVersion.DataV = version.V1_1_standart
 
 		return nil
 	})
