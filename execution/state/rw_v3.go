@@ -788,10 +788,10 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			p.codeHash = &v
 		case CodePath:
 			code := w.Val.([]byte)
-			accumulator.ChangeCode(w.Address.Value(), 0, code)
+			accumulator.ChangeCode(w.Address.Value(), code)
 		case StoragePath:
 			val := w.Val.(uint256.Int)
-			accumulator.ChangeStorage(w.Address.Value(), 0, w.Key.Value(), val.Bytes())
+			accumulator.ChangeStorage(w.Address.Value(), w.Key.Value(), val.Bytes())
 		}
 	}
 
@@ -811,7 +811,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 			acc.CodeHash = *p.codeHash
 		}
 		serialised := accounts.SerialiseV3(&acc)
-		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
+		accumulator.ChangeAccount(addr.Value(), serialised)
 	}
 }
 
@@ -850,7 +850,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	// comparison is performed here anymore.
 	value := accounts.SerialiseV3(account)
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
+		w.accumulator.ChangeAccount(addressValue, value)
 	}
 
 	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil); err != nil {
@@ -868,7 +868,7 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		return err
 	}
 	if w.accumulator != nil {
-		w.accumulator.ChangeCode(addressValue, incarnation, code)
+		w.accumulator.ChangeCode(addressValue, code)
 	}
 	return nil
 }
@@ -918,7 +918,7 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 	if w.accumulator != nil {
-		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
+		w.accumulator.ChangeStorage(addressValue, keyValue, v)
 	}
 
 	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)

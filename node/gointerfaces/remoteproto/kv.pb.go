@@ -425,7 +425,6 @@ func (x *StorageChange) GetData() []byte {
 type AccountChange struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Address        *typesproto.H160       `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	Incarnation    uint64                 `protobuf:"varint,2,opt,name=incarnation,proto3" json:"incarnation,omitempty"`
 	Action         Action                 `protobuf:"varint,3,opt,name=action,proto3,enum=remote.Action" json:"action,omitempty"`
 	Data           []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"` // nil if there is no UPSERT in action
 	Code           []byte                 `protobuf:"bytes,5,opt,name=code,proto3" json:"code,omitempty"` // nil if there is no CODE in action
@@ -469,13 +468,6 @@ func (x *AccountChange) GetAddress() *typesproto.H160 {
 		return x.Address
 	}
 	return nil
-}
-
-func (x *AccountChange) GetIncarnation() uint64 {
-	if x != nil {
-		return x.Incarnation
-	}
-	return 0
 }
 
 func (x *AccountChange) GetAction() Action {
@@ -2249,14 +2241,13 @@ const file_remote_kv_proto_rawDesc = "" +
 	"\x05tx_id\x18\x05 \x01(\x04R\x04txId\"L\n" +
 	"\rStorageChange\x12'\n" +
 	"\blocation\x18\x01 \x01(\v2\v.types.H256R\blocation\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\xe8\x01\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\xd9\x01\n" +
 	"\rAccountChange\x12%\n" +
-	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12 \n" +
-	"\vincarnation\x18\x02 \x01(\x04R\vincarnation\x12&\n" +
+	"\aaddress\x18\x01 \x01(\v2\v.types.H160R\aaddress\x12&\n" +
 	"\x06action\x18\x03 \x01(\x0e2\x0e.remote.ActionR\x06action\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\fR\x04data\x12\x12\n" +
 	"\x04code\x18\x05 \x01(\fR\x04code\x12>\n" +
-	"\x0fstorage_changes\x18\x06 \x03(\v2\x15.remote.StorageChangeR\x0estorageChanges\"\xb2\x02\n" +
+	"\x0fstorage_changes\x18\x06 \x03(\v2\x15.remote.StorageChangeR\x0estorageChangesJ\x04\b\x02\x10\x03R\vincarnation\"\xb2\x02\n" +
 	"\x10StateChangeBatch\x12(\n" +
 	"\x10state_version_id\x18\x01 \x01(\x04R\x0estateVersionId\x126\n" +
 	"\fchange_batch\x18\x02 \x03(\v2\x13.remote.StateChangeR\vchangeBatch\x123\n" +

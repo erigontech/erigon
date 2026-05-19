@@ -58,7 +58,6 @@ type StateChange struct {
 // AccountChange holds a single account's state change.
 type AccountChange struct {
 	Address        common.Address
-	Incarnation    uint64
 	Action         Action
 	Data           []byte
 	Code           []byte
@@ -143,11 +142,10 @@ func (sc *StateChange) ToProto() *remoteproto.StateChange {
 // ToProto converts an AccountChange to its protobuf representation.
 func (ac *AccountChange) ToProto() *remoteproto.AccountChange {
 	proto := &remoteproto.AccountChange{
-		Address:     gointerfaces.ConvertAddressToH160(ac.Address),
-		Incarnation: ac.Incarnation,
-		Action:      actionToProto(ac.Action),
-		Data:        ac.Data,
-		Code:        ac.Code,
+		Address: gointerfaces.ConvertAddressToH160(ac.Address),
+		Action:  actionToProto(ac.Action),
+		Data:    ac.Data,
+		Code:    ac.Code,
 	}
 	for i := range ac.StorageChanges {
 		proto.StorageChanges = append(proto.StorageChanges, ac.StorageChanges[i].ToProto())

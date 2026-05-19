@@ -95,9 +95,9 @@ func (a *Accumulator) StartChange(h *types.Header, txs [][]byte, unwind bool) {
 }
 
 // ChangeAccount adds modification of account balance or nonce (or both) to the latest change.
-func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, data []byte) {
+func (a *Accumulator) ChangeAccount(address common.Address, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address})
 		a.accountChangeIndex[address] = i
@@ -112,7 +112,6 @@ func (a *Accumulator) ChangeAccount(address common.Address, incarnation uint64, 
 	case ActionRemove:
 		//panic("")
 	}
-	accountChange.Incarnation = incarnation
 	accountChange.Data = data
 }
 
@@ -136,9 +135,9 @@ func (a *Accumulator) DeleteAccount(address common.Address) {
 }
 
 // ChangeCode adds code to the latest change.
-func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, code []byte) {
+func (a *Accumulator) ChangeCode(address common.Address, code []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionCode})
 		a.accountChangeIndex[address] = i
@@ -153,21 +152,19 @@ func (a *Accumulator) ChangeCode(address common.Address, incarnation uint64, cod
 	case ActionRemove:
 		//panic("")
 	}
-	accountChange.Incarnation = incarnation
 	accountChange.Code = code
 }
 
 // ChangeStorage adds a storage slot change to the latest change.
-func (a *Accumulator) ChangeStorage(address common.Address, incarnation uint64, location common.Hash, data []byte) {
+func (a *Accumulator) ChangeStorage(address common.Address, location common.Hash, data []byte) {
 	i, ok := a.accountChangeIndex[address]
-	if !ok || incarnation > a.latestChange.Changes[i].Incarnation {
+	if !ok {
 		i = len(a.latestChange.Changes)
 		a.latestChange.Changes = append(a.latestChange.Changes, AccountChange{Address: address, Action: ActionStorage})
 		a.accountChangeIndex[address] = i
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := &a.latestChange.Changes[i]
-	accountChange.Incarnation = incarnation
 	si, ok1 := a.storageChangeIndex[address]
 	if !ok1 {
 		si = make(map[common.Hash]int)

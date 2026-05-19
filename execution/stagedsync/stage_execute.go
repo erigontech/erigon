@@ -245,7 +245,6 @@ func unwindExec3State(ctx context.Context,
 	changeset *[kv.DomainLen][]kv.DomainEntryDiff, lastExecutedBlockHash common.Hash, logger log.Logger) error {
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
-	var currentInc uint64
 
 	//TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -264,7 +263,7 @@ func unwindExec3State(ctx context.Context,
 				copy(address[:], k)
 				newV := accounts.SerialiseV3(&account)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, account.Incarnation, newV)
+					accumulator.ChangeAccount(address, newV)
 				}
 			} else {
 				var address common.Address
@@ -281,7 +280,7 @@ func unwindExec3State(ctx context.Context,
 		copy(address[:], k[:length.Addr])
 		copy(location[:], k[length.Addr:])
 		if accumulator != nil {
-			accumulator.ChangeStorage(address, currentInc, location, common.Copy(v))
+			accumulator.ChangeStorage(address, location, common.Copy(v))
 		}
 		if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.StorageDomain)) {
 			if v == nil {
