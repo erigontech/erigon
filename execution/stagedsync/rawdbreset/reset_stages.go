@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -58,16 +58,17 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) er
 	if err := ResetExec(ctx, db); err != nil {
 		return err
 	}
-	if err := ResetCanonicalAboveTip(ctx, db, frozenBlocks); err != nil {
+	if err := ResetCanonicalAndRefillFromSnapshots(ctx, db, dirs, br, logger); err != nil {
 		return err
 	}
 	return nil
 }
 
-// ResetCanonicalAboveTip clears kv.HeaderCanonical entries above the snapshot
-// tip and caps Headers/BlockHashes/Bodies/Senders stage progress at the tip.
-// HeadHeaderHash is re-anchored to the canonical hash at the tip when one is
-// recorded.
+// ResetCanonicalAndRefillFromSnapshots wipes kv.HeaderCanonical, resets
+// Headers/BlockHashes/Bodies/Senders/Snapshots stage progress, and refills
+// the snapshot-covered range via FillDBFromSnapshots — the same pattern
+// stage_header --reset and stage_exec --reset use to rebuild canonical
+// markers and stage progress from frozen snapshot files.
 //
 // Motivation: prior to this, ResetState wiped MDBX state-domain tables and
 // the Execution stage progress, but left kv.HeaderCanonical untouched. A
@@ -75,8 +76,9 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) er
 // sidechain hash deposited by a successful older forkchoice update whose
 // later replacement reorgs failed on execution and rolled back — survived
 // the reset and steered the subsequent forward catchup back onto the
-// sidechain, re-introducing phantom state. By truncating those entries we
-// hand canonical-hash assignment for the post-tip range entirely to the
+// sidechain, re-introducing phantom state. Clearing the table and letting
+// FillDBFromSnapshots re-anchor canonical markers from the frozen segments
+// hands canonical-hash assignment for the post-tip range entirely to the
 // next forkchoice update from the consensus layer.
 //
 // kv.HeaderTD is intentionally NOT truncated: TD records live under both
@@ -86,38 +88,19 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context, frozenBlocks uint64) er
 // across the post-tip range would break that path with
 // "parent's total difficulty not found" until the headers were re-fetched
 // from peers. The stale TD records are independently keyed by hash and do
-// not affect canonical assignment.
-//
-// The function is safe to call when nothing is above the tip: the truncate
-// helper is a no-op when the table has no keys >= the cursor, and the
-// stage-progress writes only run when a stage is observably above the tip.
-func ResetCanonicalAboveTip(ctx context.Context, db kv.TemporalRwDB, frozenBlocks uint64) error {
+// not affect canonical assignment, and FillDBFromSnapshots rewrites the
+// snapshot-range TDs as it walks the frozen headers.
+func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := rawdb.TruncateCanonicalHash(tx, frozenBlocks+1, false /* markChainAsBad */); err != nil {
-			return fmt.Errorf("truncate canonical hash above snapshot tip: %w", err)
+		if err := tx.ClearTable(kv.HeaderCanonical); err != nil {
+			return fmt.Errorf("clear canonical hash table: %w", err)
 		}
-
-		if frozenBlocks > 0 {
-			tipHash, err := rawdb.ReadCanonicalHash(tx, frozenBlocks)
-			if err != nil {
-				return fmt.Errorf("read canonical hash at snapshot tip: %w", err)
-			}
-			if tipHash != (common.Hash{}) {
-				if err := rawdb.WriteHeadHeaderHash(tx, tipHash); err != nil {
-					return fmt.Errorf("re-anchor HeadHeaderHash to snapshot tip: %w", err)
-				}
-			}
+		if err := clearStageProgress(tx, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Snapshots); err != nil {
+			return fmt.Errorf("clear chain-data stage progress: %w", err)
 		}
-
-		for _, st := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders} {
-			progress, err := stages.GetStageProgress(tx, st)
-			if err != nil {
-				return fmt.Errorf("read %s stage progress: %w", st, err)
-			}
-			if progress > frozenBlocks {
-				if err := stages.SaveStageProgress(tx, st, frozenBlocks); err != nil {
-					return fmt.Errorf("save %s stage progress: %w", st, err)
-				}
+		if br.FrozenBlocks() > 0 {
+			if err := FillDBFromSnapshots("reset_state_fill_db_from_snapshots", ctx, tx, dirs, br, logger); err != nil {
+				return fmt.Errorf("refill canonical markers from snapshots: %w", err)
 			}
 		}
 		return nil
