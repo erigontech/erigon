@@ -52,10 +52,10 @@ func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimi
 		CommonTx: types.CommonTx{
 			Nonce:    nonce,
 			To:       &toAddr,
-			Value:    value,
+			Value:    &value,
 			GasLimit: gasLimit,
 		},
-		GasPrice: gasPrice,
+		GasPrice: &gasPrice,
 	}
 }
 
