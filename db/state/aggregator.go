@@ -351,10 +351,6 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.stepSize.Load() == 0 {
 		return fmt.Errorf("cannot configure domains: stepSize is 0")
 	}
-	// AdjustReceipt mutates the global statecfg.Schema; must run before Configure().
-	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
-		return err
-	}
 	if err := statecfg.Configure(statecfg.Schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}

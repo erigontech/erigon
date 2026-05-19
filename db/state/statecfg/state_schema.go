@@ -2,8 +2,6 @@ package statecfg
 
 import (
 	"fmt"
-	"io/fs"
-	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/version"
 )
 
 const (
@@ -365,61 +362,6 @@ func EnableHistoricalCommitment() {
 	cfg.Hist.HistoryDisabled = false
 	cfg.Hist.SnapshotsDisabled = false
 	Schema.CommitmentDomain = cfg
-}
-
-/*
-  - v1.0 -> v2.0  is a breaking change. It causes a change in interpretation of "logFirstIdx" stored in receipt domain.
-  - We wanted backwards compatibility however, so that was done with if checks, See `ReceiptStoresFirstLogIdx`
-  - This brings problem that data coming from v1.0 vs v2.0 is interpreted by app in different ways,
-    and so the version needs to be floated up to the application.
-  - So to simplify matters, we need to do- v1.0 files, if it appears, must appear alone (no v2.0 etc.)
-  - This function updates current version to v1.1  (to differentiate file created from 3.0 vs 3.1 erigon)
-    issue: https://github.com/erigontech/erigon/issues/16293
-
-Use this before creating aggregator.
-*/
-func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) error {
-	found := false
-	return filepath.WalkDir(dirs.SnapDomain, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if found {
-			return nil
-		}
-		if entry.IsDir() {
-			return nil
-		}
-
-		name := entry.Name()
-		res, isE3Seedable, ok := snaptype.ParseFileName(path, name)
-		if !isE3Seedable {
-			return nil
-		}
-		if !ok {
-			return fmt.Errorf("[adjust_receipt] couldn't parse: %s at %s", name, path)
-		}
-
-		if res.TypeString != "receipt" || res.Ext != ".kv" {
-			return nil
-		}
-
-		found = true
-
-		if res.Version.Cmp(version.V2_0) >= 0 {
-			return nil
-		}
-
-		logger.Info("adjusting receipt current version to v1.1")
-
-		// else v1.0 -- need to adjust version
-		// DataV is not adjusted here: .v files and .kv files version independently,
-		// and downgrading DataV.Current causes panic when .v files are already v3.0.
-		Schema.ReceiptDomain.FileVersion.DataKV = version.V1_1_standart
-
-		return nil
-	})
 }
 
 var DomainCompressCfg = seg.Cfg{
