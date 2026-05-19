@@ -22,13 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 
@@ -278,7 +278,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// expect when Hive imports one block per file.
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
-	var parentTd, currentHeadTd *big.Int
+	var parentTd, currentHeadTd *uint256.Int
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
@@ -289,7 +289,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 			}
 			parentTd = td
 		} else {
-			parentTd = new(big.Int)
+			parentTd = new(uint256.Int)
 		}
 		if hash := rawdb.ReadHeadBlockHash(tx); hash != (common.Hash{}) {
 			if num := rawdb.ReadHeaderNumber(tx, hash); num != nil {
@@ -315,21 +315,25 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	// UpdateForkChoice as before.
 	isPoW := tipBlock.Header().Difficulty.Sign() > 0
 	if setHead && isPoW && parentTd != nil && currentHeadTd != nil {
-		importedTipTd := new(big.Int).Set(parentTd)
+		importedTipTd := new(uint256.Int).Set(parentTd)
 		for _, b := range chain.Blocks {
-			importedTipTd.Add(importedTipTd, b.Header().Difficulty.ToBig())
+			if _, overflow := importedTipTd.AddOverflow(importedTipTd, &b.Header().Difficulty); overflow {
+				return fmt.Errorf("imported tip TD overflows uint256 at block %d", b.NumberU64())
+			}
 		}
 		if !ethash.ShouldReorg(currentHeadTd, currentHeadNumber, currentHeadHash, importedTipTd, tipBlock.NumberU64(), tipBlock.Hash()) {
 			// Side chain — write headers/bodies/TDs directly without executing
 			// or changing head.
 			return ethereum.ChainDB().Update(ctx, func(tx kv.RwTx) error {
-				td := new(big.Int).Set(parentTd)
+				td := new(uint256.Int).Set(parentTd)
 				for _, b := range chain.Blocks {
-					td.Add(td, b.Header().Difficulty.ToBig())
+					if _, overflow := td.AddOverflow(td, &b.Header().Difficulty); overflow {
+						return fmt.Errorf("side-chain TD overflows uint256 at block %d", b.NumberU64())
+					}
 					if err := rawdb.WriteHeader(tx, b.Header()); err != nil {
 						return fmt.Errorf("write side-chain header: %w", err)
 					}
-					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), td); err != nil {
+					if err := rawdb.WriteTd(tx, b.Hash(), b.NumberU64(), *td); err != nil {
 						return fmt.Errorf("write side-chain TD: %w", err)
 					}
 					if _, err := rawdb.WriteRawBodyIfNotExists(tx, b.Hash(), b.NumberU64(), b.RawBody()); err != nil {

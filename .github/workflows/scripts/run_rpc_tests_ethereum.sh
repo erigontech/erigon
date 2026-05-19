@@ -46,7 +46,6 @@ DISABLED_TEST_LIST=(
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
   # Temporarily disabled: the following tests hang (possible regression in Erigon).
-  # For eth_createAccessList, PR #21086 is in progress.
   # For debug_traceTransaction, the issue is under analysis.
   eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json

@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
@@ -311,9 +311,8 @@ func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.H
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*uint256.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
-
 }
 
 func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
