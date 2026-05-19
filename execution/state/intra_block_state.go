@@ -1648,17 +1648,23 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
-	// When previous is selfdestructed (cross-tx SD synthesized as previous, or
-	// same-tx SD-then-recreate), journal as a fresh creation rather than a
-	// reset. resetObjectChange.dirtied() returns false, which would leave the
-	// recreated address out of journal.dirties — MakeWriteSet then sees
-	// isDirty=false and never calls Writer.UpdateAccountData, so the apply-time
-	// writeset is missing NoncePath/IncarnationPath for the resurrected empty
-	// account (EEST test_double_kill[fork_Frontier] under ERIGON_EXEC3_PARALLEL).
-	// createObjectChange dirties and on revert deletes stateObjects[addr],
-	// letting the next getStateObject re-discover the SD via the versionMap
-	// marker path.
-	if previous == nil || previous.selfdestructed {
+	// In the parallel/versionMap path, when previous is selfdestructed (cross-
+	// tx SD synthesised as previous via the versionMap-marker path), journal
+	// as a fresh creation rather than a reset. resetObjectChange.dirtied()
+	// returns false, which would leave the recreated address out of
+	// journal.dirties — MakeWriteSet then sees isDirty=false and never calls
+	// Writer.UpdateAccountData, so the apply-time writeset is missing
+	// NoncePath/IncarnationPath for the resurrected empty account (EEST
+	// test_double_kill[fork_Frontier] under ERIGON_EXEC3_PARALLEL). On revert
+	// createObjectChange clears stateObjects[addr]; the next getStateObject
+	// re-discovers the SD via the versionMap marker path.
+	//
+	// The accumulating-IBS path (versionMap==nil) keeps resetObjectChange: the
+	// SD signal lives only in stateObjects[addr] (no versionMap to fall back
+	// to), so revert must restore it via ch.prev. Otherwise a CALL→CreateAccount
+	// →REVERT inside the same block would leak a resurrected stateObject
+	// (TestDeleteCreateRevert).
+	if previous == nil || (sdb.versionMap != nil && previous.selfdestructed) {
 		sdb.journal.append(createObjectChange{account: addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
