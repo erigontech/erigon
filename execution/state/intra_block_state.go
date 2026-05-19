@@ -1648,28 +1648,38 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
-	if previous == nil {
+	// When previous is selfdestructed (cross-tx SD synthesized as previous, or
+	// same-tx SD-then-recreate), journal as a fresh creation rather than a
+	// reset. resetObjectChange.dirtied() returns false, which would leave the
+	// recreated address out of journal.dirties — MakeWriteSet then sees
+	// isDirty=false and never calls Writer.UpdateAccountData, so the apply-time
+	// writeset is missing NoncePath/IncarnationPath for the resurrected empty
+	// account (EEST test_double_kill[fork_Frontier] under ERIGON_EXEC3_PARALLEL).
+	// createObjectChange dirties and on revert deletes stateObjects[addr],
+	// letting the next getStateObject re-discover the SD via the versionMap
+	// marker path.
+	if previous == nil || previous.selfdestructed {
 		sdb.journal.append(createObjectChange{account: addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: addr, prev: previous})
-		// recreatedFromDestructed is only needed in the accumulating-IBS path
-		// (blockgen serial: one IBS handles every tx in a block, with per-tx
-		// NoopWriter and end-of-block real Writer). In that path the SD's
-		// real Writer.DeleteAccount fires only at block end, so the IBS must
-		// signal the wipe across the SD-then-recreate-in-same-block boundary
-		// via this flag.
-		//
-		// Skip in the parallel/versionMap path: each worker has a fresh IBS
-		// per tx, and the SD tx's own writeset already drives the apply-time
-		// storage wipe via SelfDestructPath=true. Setting the flag here for
-		// later txs that simply observe a prior-tx SD (markers, value-
-		// transfer-revival) would cause updateAccount → versionedWriteCollector.
-		// DeleteAccount to emit a SECOND SelfDestructPath=true, which
-		// normalizeWriteSet treats as a destruction and drops the recreated
-		// account's fields — corrupting EEST test_recreate's post-state.
-		if sdb.versionMap == nil && !previous.versionMapMarker && (previous.selfdestructed || previous.deleted) {
-			newobj.recreatedFromDestructed = true
-		}
+	}
+	// recreatedFromDestructed is only needed in the accumulating-IBS path
+	// (blockgen serial: one IBS handles every tx in a block, with per-tx
+	// NoopWriter and end-of-block real Writer). In that path the SD's
+	// real Writer.DeleteAccount fires only at block end, so the IBS must
+	// signal the wipe across the SD-then-recreate-in-same-block boundary
+	// via this flag.
+	//
+	// Skip in the parallel/versionMap path: each worker has a fresh IBS
+	// per tx, and the SD tx's own writeset already drives the apply-time
+	// storage wipe via SelfDestructPath=true. Setting the flag here for
+	// later txs that simply observe a prior-tx SD (markers, value-
+	// transfer-revival) would cause updateAccount → versionedWriteCollector.
+	// DeleteAccount to emit a SECOND SelfDestructPath=true, which
+	// normalizeWriteSet treats as a destruction and drops the recreated
+	// account's fields — corrupting EEST test_recreate's post-state.
+	if previous != nil && sdb.versionMap == nil && !previous.versionMapMarker && (previous.selfdestructed || previous.deleted) {
+		newobj.recreatedFromDestructed = true
 	}
 	newobj.newlyCreated = true
 	sdb.setStateObject(addr, newobj)
