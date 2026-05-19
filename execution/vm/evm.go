@@ -248,9 +248,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
-		leftOverTotal := gasRemaining.Total()
-		if leftOverTotal <= inputTotal {
-			delta := int64(inputTotal - leftOverTotal)
+		gasRemainingTotal := gasRemaining.Total()
+		if gasRemainingTotal <= inputTotal {
+			delta := int64(inputTotal - gasRemainingTotal)
 			gasUsed.Regular = uint64(delta - gasUsed.State)
 		}
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
@@ -509,9 +509,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 	// even on call failure.
 	inputTotal := gas.Total()
 	defer func() {
-		leftOverTotal := gasRemaining.Total()
-		if leftOverTotal <= inputTotal {
-			delta := int64(inputTotal - leftOverTotal)
+		gasRemainingTotal := gasRemaining.Total()
+		if gasRemainingTotal <= inputTotal {
+			delta := int64(inputTotal - gasRemainingTotal)
 			gasUsed.Regular = uint64(delta - gasUsed.State)
 		}
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
