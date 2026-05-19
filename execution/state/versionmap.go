@@ -520,8 +520,7 @@ func valuesEqual(path AccountPath, readVal, writeVal any) bool {
 		if !ok1 || !ok2 || rv == nil || wv == nil {
 			return false
 		}
-		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce &&
-			rv.Incarnation == wv.Incarnation && rv.CodeHash == wv.CodeHash
+		return rv.Balance.Eq(&wv.Balance) && rv.Nonce == wv.Nonce && rv.CodeHash == wv.CodeHash
 	case StoragePath:
 		rv, ok1 := readVal.(uint256.Int)
 		wv, ok2 := writeVal.(uint256.Int)
