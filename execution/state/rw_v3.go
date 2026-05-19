@@ -582,7 +582,6 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// the stateObject is returned to the pool and its Account may be overwritten.
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
 
 	// Note: SELFDESTRUCT-driven storage wipe flows from the SD tx's own
 	// SelfDestructPath=true write (emitted by DeleteAccount). Subsequent writes
@@ -697,7 +696,6 @@ func (c *LightCollector) TakeWrites() VersionedWrites {
 func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
 
 	// Note: selfdestruct/recreate cleanup is signalled via DeleteAccount
 	// (driven by stateObject.recreatedFromDestructed in updateAccount),
@@ -841,7 +839,7 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.CodeHash)
 	}
 	addressValue := address.Value()
 	// Note: code+storage cleanup on selfdestruct/recreate now flows through

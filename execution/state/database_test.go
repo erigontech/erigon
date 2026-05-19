@@ -1129,10 +1129,6 @@ func TestWrongIncarnation(t *testing.T) {
 			t.Fatal(errors.New("acc not found"))
 		}
 
-		if acc.Incarnation != 0 {
-			t.Fatal("Incorrect incarnation", acc.Incarnation)
-		}
-
 		st := state.New(stateReader)
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
@@ -1155,9 +1151,6 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
-		}
-		if acc.Incarnation != 0 {
-			t.Fatal("Incorrect incarnation", acc.Incarnation)
 		}
 		return nil
 	})
@@ -1295,9 +1288,6 @@ func TestWrongIncarnation2(t *testing.T) {
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
 		}
-		if acc.Incarnation != 0 {
-			t.Fatal("wrong incarnation")
-		}
 		return nil
 	})
 	require.NoError(t, err)
@@ -1314,9 +1304,6 @@ func TestWrongIncarnation2(t *testing.T) {
 		}
 		if acc == nil {
 			t.Fatal(errors.New("acc not found"))
-		}
-		if acc.Incarnation != state.NonContractIncarnation {
-			t.Fatal("wrong incarnation", acc.Incarnation)
 		}
 		return nil
 	})

@@ -338,7 +338,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 		},
 	}
 
-	var decodedIncarnations []uint64
+	var decodedNonces []uint64
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
@@ -354,11 +354,11 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 
 				decodedAcc := Account{}
 				if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-					b.Fatal("can't decode the incarnation", err, encodedAccount)
+					b.Fatal("can't decode the account", err, encodedAccount)
 				}
 
 				b.StopTimer()
-				decodedIncarnations = append(decodedIncarnations, decodedAcc.Incarnation)
+				decodedNonces = append(decodedNonces, decodedAcc.Nonce)
 
 				b.StartTimer()
 			}
@@ -366,8 +366,8 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 	}
 
 	b.StopTimer()
-	for _, incarnation := range decodedIncarnations {
-		fmt.Fprint(io.Discard, incarnation)
+	for _, nonce := range decodedNonces {
+		fmt.Fprint(io.Discard, nonce)
 	}
 
 }

@@ -35,9 +35,9 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 	var a1 common.Address
 	a1[0] = 1
 	sc.SetAccountRead(a1.Bytes(), &accounts.Account{})
-	sc.SetAccountWrite(a1.Bytes(), &accounts.Account{Incarnation: 2})
+	sc.SetAccountWrite(a1.Bytes(), &accounts.Account{Nonce: 2})
 	x, ok := sc.GetAccount(a1.Bytes())
-	fmt.Printf("%+v,%t\n", x.Incarnation, ok)
+	fmt.Printf("%+v,%t\n", x.Nonce, ok)
 
 }
 
@@ -326,12 +326,12 @@ func TestGetDeletedAccount(t *testing.T) {
 	sc := NewStateCache(32, datasize.ByteSize(4*accountItemSize))
 	var account1 accounts.Account
 	account1.Balance.SetUint64(1)
-	account1.Incarnation = 1
+	account1.Nonce = 1
 	var addr1 common.Address
 	addr1[0] = 1
 	sc.SetAccountRead(addr1.Bytes(), &account1)
 	var account11 accounts.Account
-	account11.Incarnation = 2
+	account11.Nonce = 2
 	sc.SetAccountWrite(addr1.Bytes(), &account11)
 	acc := sc.GetDeletedAccount(addr1.Bytes())
 	if acc != nil {
@@ -342,8 +342,8 @@ func TestGetDeletedAccount(t *testing.T) {
 	if acc == nil {
 		t.Fatalf("Expected to find deleted account")
 	}
-	if acc.Incarnation != 2 {
-		t.Fatalf("Expected to find deleted account with incarnation 2, got %d", acc.Incarnation)
+	if acc.Nonce != 2 {
+		t.Fatalf("Expected to find deleted account with nonce 2, got %d", acc.Nonce)
 	}
 }
 

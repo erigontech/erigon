@@ -935,7 +935,6 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
 		case *AccountNode:
 			parent = n
 			nd = n.Storage
-			incarnation = n.Incarnation
 			account = false
 		case ValueNode:
 			return nd, parent, true, incarnation
@@ -1032,7 +1031,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 		}
 	case *AccountNode:
 		if n.Storage != nil {
-			t.touchAll(n.Storage, hex, del, n.Incarnation)
+			t.touchAll(n.Storage, hex, del, 0)
 		}
 	}
 }
@@ -1233,7 +1232,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			}
 			if n.Storage != nil {
 				// Mark all the storage nodes as deleted
-				t.touchAll(n.Storage, h, true, n.Incarnation)
+				t.touchAll(n.Storage, h, true, 0)
 			}
 			if preserveAccountNode {
 				n.Storage = nil
@@ -1245,7 +1244,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 
 			return true, nil
 		}
-		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.Storage, key, keyStart, preserveAccountNode, 0)
 		if updated {
 			n.Storage = nn
 			n.RootCorrect = false
@@ -1404,7 +1403,7 @@ func (t *Trie) notifyUnloadRecursive(hex []byte, incarnation uint64, nd Node) {
 		if _, ok := n.Storage.(*HashNode); ok {
 			return
 		}
-		t.notifyUnloadRecursive(hex, n.Incarnation, n.Storage)
+		t.notifyUnloadRecursive(hex, 0, n.Storage)
 	case *FullNode:
 		for i := range n.Children {
 			if n.Children[i] == nil {

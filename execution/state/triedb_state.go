@@ -636,9 +636,6 @@ func (tds *TrieDbState) ReadAccountData(address accounts.Address) (*accounts.Acc
 
 	if tds.resolveReads {
 		tds.currentBuffer.accountReads[addrHash] = address
-		if account != nil {
-			tds.currentBuffer.accountReadsIncarnation[addrHash] = account.Incarnation
-		}
 	}
 	return account, nil
 }
@@ -784,9 +781,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(address accounts.Address, original
 	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: addressValue, Account: account}
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
-	if original != nil {
-		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
-	}
 	return nil
 }
 
@@ -795,9 +789,6 @@ func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *ac
 	addrHash := common.Hash(crypto.Keccak256(addressValue[:]))
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = witnesstypes.AccountWithAddress{Address: addressValue, Account: original} // TODO: might be needed to use *AccountWithAddress to point to nil
 	tsw.tds.currentBuffer.accountReads[addrHash] = address
-	if original != nil {
-		tsw.tds.currentBuffer.accountReadsIncarnation[addrHash] = original.Incarnation
-	}
 	delete(tsw.tds.currentBuffer.storageUpdates, addrHash)
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)

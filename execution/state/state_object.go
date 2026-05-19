@@ -363,7 +363,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, 0, key, originValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value

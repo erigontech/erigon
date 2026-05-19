@@ -20,273 +20,60 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/empty"
 )
 
-func TestEmptyAccount(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       100,
-		Balance:     uint256.Int{},
-		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
-		Incarnation: 5,
-	}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-
-func TestEmptyAccount2(t *testing.T) {
-	t.Parallel()
-	emptyAcc := Account{}
-
-	encodedAccount := SerialiseV3(&emptyAcc)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, emptyAcc.Incarnation, decodedAcc.Incarnation)
-}
-
-// fails if run package tests
-// account_test.go:57: cant decode the account malformed RLP for Account(c064): prefixLength(1) + dataLength(0) != sliceLength(2) �d
-func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
+func TestSerialiseV3_Empty(t *testing.T) {
 	t.Parallel()
 	a := Account{}
+	enc := SerialiseV3(&a)
 
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
+	var decoded Account
+	require.NoError(t, DeserialiseV3(&decoded, enc))
+	require.Equal(t, a.Nonce, decoded.Nonce)
+	require.Equal(t, uint256.Int{}, decoded.Balance)
+	require.Equal(t, EmptyCodeHash, decoded.CodeHash)
 }
 
-func TestAccountEncodeWithCode(t *testing.T) {
+func TestSerialiseV3_NonEmpty(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(0).SetUint64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
-		Incarnation: 4,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1000),
+		CodeHash: InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 	}
+	enc := SerialiseV3(&a)
 
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
+	var decoded Account
+	require.NoError(t, DeserialiseV3(&decoded, enc))
+	require.Equal(t, a.Nonce, decoded.Nonce)
+	require.True(t, a.Balance.Eq(&decoded.Balance))
+	require.Equal(t, a.CodeHash, decoded.CodeHash)
 }
 
-func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
+// TestDeserialiseV3_LegacyFormatWithTrailingIncarnation verifies the tolerant
+// decoder accepts pre-incarnation-removal rows that carry an extra trailing
+// `[incLen][inc]` section. Such rows still live in frozen AccountsDomain
+// snapshot files until those snapshots are rebuilt.
+func TestDeserialiseV3_LegacyFormatWithTrailingIncarnation(t *testing.T) {
 	t.Parallel()
-	a := Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(0).SetUint64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
-		Incarnation: 5,
+	// Build a row by hand in the legacy 4-section format:
+	//   [nonceLen=1][nonce=7][balLen=2][bal=0x03e8][codeLen=32][codeHash][incLen=1][inc=0x05]
+	codeHash := common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))
+	legacy := []byte{
+		1, 7, // nonce=7
+		2, 0x03, 0xe8, // balance=1000
+		32, // codeHash length
 	}
+	legacy = append(legacy, codeHash[:]...)
+	legacy = append(legacy, 1, 5) // legacy trailing incarnation=5 — must be ignored
 
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-
-func TestAccountEncodeWithoutCode(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(0).SetUint64(1000),
-		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
-		Incarnation: 5,
-	}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-
-func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       0,
-		Balance:     uint256.Int{},
-		Root:        common.HexToHash("123"),
-		CodeHash:    InternCodeHash(common.HexToHash("123")),
-		Incarnation: 1,
-	}
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       0,
-		Balance:     uint256.Int{},
-		Incarnation: 1,
-	}
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAccount := Account{}
-	if err := DeserialiseV3(&decodedAccount, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	if a.Incarnation != decodedAccount.Incarnation {
-		t.FailNow()
-	}
-	if a.Balance.Cmp(&decodedAccount.Balance) != 0 {
-		t.FailNow()
-	}
-	if a.Nonce != decodedAccount.Nonce {
-		t.FailNow()
-	}
-}
-
-func isAccountsEqual(t *testing.T, src, dst Account) {
-	t.Helper()
-
-	if dst.CodeHash != src.CodeHash {
-		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
-	}
-
-	if dst.Balance.Cmp(&src.Balance) != 0 {
-		t.Fatal("cant decode the account Balance", src.Balance, dst.Balance)
-	}
-
-	if dst.Nonce != src.Nonce {
-		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
-	}
-	if dst.Incarnation != src.Incarnation {
-		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
-	}
-}
-
-func TestIncarnationForEmptyAccount(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       100,
-		Balance:     uint256.Int{},
-		Root:        empty.RootHash,
-		CodeHash:    EmptyCodeHash,
-		Incarnation: 4,
-	}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-
-func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
-	t.Parallel()
-	a := Account{}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
-}
-
-func TestIncarnationWithNonEmptyAccount(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(0).SetUint64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
-		Incarnation: 4,
-	}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-}
-
-func TestIncarnationWithNoIncarnation(t *testing.T) {
-	t.Parallel()
-	a := Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(0).SetUint64(1000),
-		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
-		Incarnation: 0,
-	}
-
-	encodedAccount := SerialiseV3(&a)
-
-	decodedAcc := Account{}
-	if err := DeserialiseV3(&decodedAcc, encodedAccount); err != nil {
-		t.Fatal("Can't decode the incarnation", err, encodedAccount)
-	}
-
-	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
-}
-
-func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
-
-	var failingSlice = []byte{1, 12}
-
-	if incarnation, err := DecodeIncarnationFromStorage(failingSlice); err == nil {
-		t.Fatal("decoded the incarnation", incarnation, failingSlice)
-	}
-
-}
-
-func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
-	t.Helper()
-	if initialIncarnation != decodedIncarnation {
-		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
-	}
+	var decoded Account
+	require.NoError(t, DeserialiseV3(&decoded, legacy))
+	require.Equal(t, uint64(7), decoded.Nonce)
+	require.Equal(t, uint64(1000), decoded.Balance.Uint64())
+	require.Equal(t, InternCodeHash(codeHash), decoded.CodeHash)
 }

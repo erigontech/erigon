@@ -1063,7 +1063,8 @@ func TestValidateTxReturnsSenderInfoError(t *testing.T) {
 
 	var badAddr [20]byte
 	badAddr[0] = 1
-	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+	// Truncated SerialiseV3: declares 1 balance byte but supplies none — forces a decode error.
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 1}, 0)
 
 	txn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	txn.IDHash[0] = 0xaa
@@ -1103,7 +1104,8 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 
 	var badAddr [20]byte
 	badAddr[0] = 1
-	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 0, 0}, 0)
+	// Truncated SerialiseV3: declares 1 balance byte but supplies none — forces a decode error.
+	writeTestSenderState(t, ctx, coreDB, logger, badAddr, []byte{0, 1}, 0)
 
 	var goodAddr [20]byte
 	goodAddr[0] = 2

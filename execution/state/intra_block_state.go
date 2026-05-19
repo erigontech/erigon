@@ -1936,7 +1936,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 		stateObject.deleted = false
 		// Write any contract code associated with the state object
 		if stateObject.code != nil && stateObject.dirtyCode {
-			if err := stateWriter.UpdateAccountCode(addr, stateObject.data.Incarnation, stateObject.data.CodeHash, stateObject.code); err != nil {
+			if err := stateWriter.UpdateAccountCode(addr, 0, stateObject.data.CodeHash, stateObject.code); err != nil {
 				return err
 			}
 		}

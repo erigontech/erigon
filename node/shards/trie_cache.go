@@ -157,7 +157,7 @@ func (shi *StorageHashItem) CopyValueFrom(item CacheItem) {
 func (ai *AccountItem) HasPrefix(prefix CacheItem) bool {
 	switch i := prefix.(type) {
 	case *AccountItem:
-		return ai.addrHash == i.addrHash && ai.account.Incarnation == i.account.Incarnation
+		return ai.addrHash == i.addrHash
 	default:
 		panic(fmt.Sprintf("unrecognised type of cache item: %T", prefix))
 	}

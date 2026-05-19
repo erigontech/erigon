@@ -62,8 +62,6 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, err
 	}
 
-	var acc accounts.Account
-
 	// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
 	//
 	// We traversing history Index - because it's cheaper than traversing History
@@ -100,20 +98,14 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			log.Error("[rpc] Unexpected error", "err", err)
 			return nil, err
 		}
-		if len(v) == 0 { // creation, but maybe not our Incarnation
+		if len(v) == 0 { // creation
 			prevTxnID = txnID
 			continue
 		}
 
-		if err := accounts.DeserialiseV3(&acc, v); err != nil {
-			return nil, err
-		}
-		// Found the shard where the incarnation change happens; ignore all next index values
-		if acc.Incarnation >= plainStateAcc.Incarnation {
-			nextTxnID = txnID
-			break
-		}
-		prevTxnID = txnID
+		// Non-empty value at this probe — creation found, narrow the search.
+		nextTxnID = txnID
+		break
 	}
 
 	// The sort.Search function finds the first block where the incarnation has
@@ -140,15 +132,6 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 			return false
 		}
 		if len(v) == 0 {
-			creationTxnID = max(creationTxnID, txnID)
-			return false
-		}
-
-		if err := accounts.DeserialiseV3(&acc, v); err != nil {
-			searchErr = err
-			return false
-		}
-		if acc.Incarnation < plainStateAcc.Incarnation {
 			creationTxnID = max(creationTxnID, txnID)
 			return false
 		}

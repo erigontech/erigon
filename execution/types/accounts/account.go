@@ -33,12 +33,10 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Nonce           uint64
-	Balance         uint256.Int
-	Root            common.Hash // merkle root of the storage trie
-	CodeHash        CodeHash    // hash of the bytecode
-	Incarnation     uint64
-	PrevIncarnation uint64
+	Nonce    uint64
+	Balance  uint256.Int
+	Root     common.Hash // merkle root of the storage trie
+	CodeHash CodeHash    // hash of the bytecode
 }
 
 const (
@@ -69,10 +67,6 @@ func (a *Account) EncodingLengthForStorage() uint {
 
 	if !a.IsEmptyCodeHash() {
 		structLength += 33 // 32-byte array + 1 bytes for length
-	}
-
-	if a.Incarnation > 0 {
-		structLength += uint(common.BitLenToByteLen(bits.Len64(a.Incarnation))) + 1
 	}
 
 	return structLength
@@ -107,18 +101,6 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		pos++
 		a.Balance.WriteToSlice(buffer[pos : pos+balanceBytes])
 		pos += balanceBytes
-	}
-
-	if a.Incarnation > 0 {
-		fieldSet |= 4
-		incarnationBytes := common.BitLenToByteLen(bits.Len64(a.Incarnation))
-		buffer[pos] = byte(incarnationBytes)
-		var incarnation = a.Incarnation
-		for i := incarnationBytes; i > 0; i-- {
-			buffer[pos+i] = byte(incarnation)
-			incarnation >>= 8
-		}
-		pos += incarnationBytes + 1
 	}
 
 	// Encoding CodeHash
@@ -260,7 +242,6 @@ func (a *Account) Copy(image *Account) {
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
 	a.CodeHash = image.CodeHash
-	a.Incarnation = image.Incarnation
 }
 
 func (a *Account) Empty() bool {
@@ -437,7 +418,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 
 func (a *Account) Reset() {
 	a.Nonce = 0
-	a.Incarnation = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
 	a.CodeHash = EmptyCodeHash
@@ -480,6 +460,9 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	}
 
 	if fieldSet&4 > 0 {
+		// Legacy Incarnation field — skipped (the field no longer exists on
+		// Account). Pre-E3 databases may still have rows with fieldset bit
+		// 4 set; deserialise just walks past those bytes.
 		decodeLength := int(enc[pos])
 
 		if len(enc) < pos+decodeLength+1 {
@@ -488,7 +471,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 				enc[pos+1:], decodeLength)
 		}
 
-		a.Incarnation = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
 		pos += decodeLength + 1
 	}
 
@@ -517,53 +499,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	return nil
 }
 
-func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
-	if len(enc) == 0 {
-		return 0, nil
-	}
-
-	var fieldSet = enc[0]
-	var pos = 1
-
-	//looks for the position incarnation is at
-	if fieldSet&1 > 0 {
-		decodeLength := int(enc[pos])
-		if len(enc) < pos+decodeLength+1 {
-			return 0, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&2 > 0 {
-		decodeLength := int(enc[pos])
-		if len(enc) < pos+decodeLength+1 {
-			return 0, fmt.Errorf(
-				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&4 > 0 {
-		decodeLength := int(enc[pos])
-
-		//checks if the ending position is correct if not returns 0
-		if len(enc) < pos+decodeLength+1 {
-			return 0, fmt.Errorf(
-				"malformed CBOR for Account.Incarnation: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		incarnation := common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
-		return incarnation, nil
-	}
-
-	return 0, nil
-
-}
-
 func (a *Account) SelfCopy() *Account {
 	newAcc := NewAccount()
 	newAcc.Copy(a)
@@ -588,55 +523,57 @@ func (a *Account) IsEmptyRoot() bool {
 	return a.Root == empty.RootHash || a.Root == common.Hash{}
 }
 
-func (a *Account) GetIncarnation() uint64 {
-	return a.Incarnation
-}
-
-func (a *Account) SetIncarnation(v uint64) {
-	a.Incarnation = v
-}
-
 func (a *Account) Equals(acc *Account) bool {
 	return a.Nonce == acc.Nonce &&
 		a.CodeHash == acc.CodeHash &&
-		a.Balance.Cmp(&acc.Balance) == 0 &&
-		a.Incarnation == acc.Incarnation
+		a.Balance.Cmp(&acc.Balance) == 0
 }
 
-// DeserialiseV3 - method to deserialize accounts in Erigon22 history
+// DeserialiseV3 decodes the E3 on-disk account format. Current format is
+// 3 length-prefixed sections — nonce, balance, codeHash. Legacy databases
+// may have a 4th section carrying an Incarnation byte; if present we walk
+// past it silently. SerialiseV3 writes the new 3-section form; the
+// drop_account_incarnation migration rewrites legacy values in place so
+// the trailing bytes only persist in frozen snapshot files.
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
-	//if len(enc) == 0 {
-	//	return nil
-	//}
 	pos := 0
+	if pos >= len(enc) {
+		return fmt.Errorf("DeserialiseV3: truncated input at nonce length, len=%d", len(enc))
+	}
 	nonceBytes := int(enc[pos])
 	pos++
 	if nonceBytes > 0 {
+		if pos+nonceBytes > len(enc) {
+			return fmt.Errorf("DeserialiseV3: truncated nonce, need %d bytes, have %d", nonceBytes, len(enc)-pos)
+		}
 		a.Nonce = common.BytesToUint64(enc[pos : pos+nonceBytes])
 		pos += nonceBytes
+	}
+	if pos >= len(enc) {
+		return fmt.Errorf("DeserialiseV3: truncated input at balance length, len=%d", len(enc))
 	}
 	balanceBytes := int(enc[pos])
 	pos++
 	if balanceBytes > 0 {
+		if pos+balanceBytes > len(enc) {
+			return fmt.Errorf("DeserialiseV3: truncated balance, need %d bytes, have %d", balanceBytes, len(enc)-pos)
+		}
 		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
 		pos += balanceBytes
+	}
+	if pos >= len(enc) {
+		return fmt.Errorf("DeserialiseV3: truncated input at codeHash length, len=%d", len(enc))
 	}
 	codeHashBytes := int(enc[pos])
 	pos++
 	if codeHashBytes > 0 {
+		if pos+codeHashBytes > len(enc) {
+			return fmt.Errorf("DeserialiseV3: truncated codeHash, need %d bytes, have %d", codeHashBytes, len(enc)-pos)
+		}
 		var codeHashValue common.Hash
 		copy(codeHashValue[:], enc[pos:pos+codeHashBytes])
 		a.CodeHash = InternCodeHash(codeHashValue)
-		pos += codeHashBytes
-	}
-	if pos >= len(enc) {
-		return fmt.Errorf("deserialse2: %d >= %d ", pos, len(enc))
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = common.BytesToUint64(enc[pos : pos+incBytes])
 	}
 	return nil
 }
@@ -654,10 +591,6 @@ func SerialiseV3(a *Account) []byte {
 	l++
 	if !a.IsEmptyCodeHash() {
 		l += 32
-	}
-	l++
-	if a.Incarnation > 0 {
-		l += common.BitLenToByteLen(bits.Len64(a.Incarnation))
 	}
 	value := make([]byte, l)
 	pos := 0
@@ -686,24 +619,11 @@ func SerialiseV3(a *Account) []byte {
 	}
 	if a.IsEmptyCodeHash() {
 		value[pos] = 0
-		pos++
 	} else {
 		value[pos] = 32
 		pos++
 		codeHashValue := a.CodeHash.Value()
 		copy(value[pos:pos+32], codeHashValue[:])
-		pos += 32
-	}
-	if a.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := common.BitLenToByteLen(bits.Len64(a.Incarnation))
-		value[pos] = byte(incBytes)
-		var inc = a.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
 	}
 	return value
 }
