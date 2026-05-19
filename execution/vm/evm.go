@@ -159,10 +159,11 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 // state-gas reservoir restoration for child frames.
 //
 // At depth 0 there is no parent reservoir to restore to: TxnExecutor reads
-// vmerr together with the returned gasUsed.State (and gasUsed.MdGas/intrinsic)
-// to derive the receipt and block-state-gas accounting directly, so this
-// function only needs the state-revert + regular-burn steps at the top level.
-func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapshot int, childStateConsumed uint64) {
+// vmerr together with the returned gasUsed.State (signed net usage) and
+// the intrinsic to derive the receipt and block-state-gas accounting
+// directly, so this function only needs the state-revert + regular-burn
+// steps at the top level.
+func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapshot int, childStateConsumed int64) {
 
 	// 1. Revert state changes.
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
@@ -175,13 +176,16 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int, snapsh
 		gas.Regular = 0
 	}
 
-	// 3. EIP-8037: at depth>0 restore the child's own state-gas charges
-	// (reservoir-sourced + spill) to the parent's reservoir. Regular gas:
-	// REVERT preserves it (step 2 didn't apply); exceptional halt burnt it in
-	// step 2. At depth==0 TxnExecutor handles the user-side refund directly
-	// from vmerr + gasUsed.State.
+	// 3. EIP-8037: at depth>0 restore the original child reservoir to the
+	// parent. Per the spec's incorporate_child_on_error invariant:
+	//   parent.state_gas_left += child.state_gas_used + child.state_gas_left
+	// (the sum equals what the parent originally passed in, after any
+	// inline refunds the child credited are dropped along with reverted
+	// state). Regular gas: REVERT preserves it (step 2 didn't apply);
+	// exceptional halt burnt it in step 2. At depth==0 TxnExecutor handles
+	// the user-side refund directly from vmerr + gasUsed.State.
 	if evm.chainRules.IsAmsterdam && depth > 0 {
-		gas.State += childStateConsumed
+		gas.State = uint64(int64(gas.State) + childStateConsumed)
 	}
 }
 
@@ -214,20 +218,26 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// Derive gasUsed.Regular from the final leftOverGas at function exit,
 	// uniformly across Run / precompile / no-code paths and after any
 	// handleFrameRevert gas burn. gasUsed.State is set by Run's defer
-	// (frameStateUsed) and is 0 for precompile/no-code frames.
+	// (signed frameStateUsed = charges − inline refunds) and is 0 for
+	// precompile/no-code frames. Regular = (input − leftover) − state,
+	// computed in signed int64 so a negative net state correctly grows
+	// the regular component (refund credit lands in the reservoir,
+	// which leftover absorbs back).
 	//
-	// At depth==0 on error, also route the frame's own execution state-gas
-	// out via PendingStateGasCredit so TxnExecutor subtracts it uniformly.
-	// (At depth>0, handleFrameRevert already restored child state to the
-	// parent's reservoir, and Run's defer dropped PendingStateGasCredit.)
+	// At depth==0 on error, the spec resets the top-frame's state_gas_used
+	// to 0 (the refund-on-failure invariant). Mirror that on the returned
+	// gasUsed.State so TxnExecutor's tx_state_gas computation is uniform
+	// across success and error paths. (At depth>0, handleFrameRevert
+	// already restored the child's reservoir to the parent.)
 	inputTotal := gas.Total()
 	defer func() {
 		leftOverTotal := leftOverGas.Total()
 		if leftOverTotal <= inputTotal {
-			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
+			delta := int64(inputTotal - leftOverTotal)
+			gasUsed.Regular = uint64(delta - gasUsed.State)
 		}
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
-			gasUsed.PendingStateGasCredit = gasUsed.State
+			gasUsed.State = 0
 		}
 	}()
 
@@ -464,22 +474,29 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// Derive gasUsed.Regular from the final leftOverGas at function exit,
 	// uniformly across all Create exit paths (Run, depth/balance/collision
 	// errors, post-handleFrameRevert gas burn). gasUsed.State is set by Run's
-	// defer for the initcode frame and stays 0 on early-exit paths.
+	// defer for the initcode frame (signed net) and stays 0 on early-exit
+	// paths. Regular = (input − leftover) − state in signed int64 so a
+	// negative net state correctly grows the regular component.
 	//
-	// At depth==0 on error, also route the frame's own execution state-gas
-	// PLUS the intrinsic NEW_ACCOUNT state-gas (paid by the tx but unused
-	// because the contract was never created) out via PendingStateGasCredit
-	// so TxnExecutor subtracts both uniformly. The Call counterpart does NOT
-	// add intrinsic AUTH state-gas — EIP-7702 auth side effects persist even
-	// on call failure.
+	// At depth==0 on error, the spec resets the top-frame's state_gas_used
+	// to 0 AND adds STATE_BYTES_PER_NEW_ACCOUNT * COST_PER_STATE_BYTE to
+	// state_refund (the contract was never created, so the intrinsic
+	// NEW_ACCOUNT state-gas is returned). Mirror both by setting
+	// gasUsed.State = −StateGasNewAccount so TxnExecutor's
+	// tx_state_gas = intrinsic_state + gasUsed.State naturally yields the
+	// "intrinsic refunded" outcome (= 0 for a CREATE tx, since its
+	// intrinsic_state == StateGasNewAccount). The Call counterpart does NOT
+	// refund intrinsic AUTH state-gas — EIP-7702 auth side effects persist
+	// even on call failure.
 	inputTotal := gasRemaining.Total()
 	defer func() {
 		leftOverTotal := leftOverGas.Total()
 		if leftOverTotal <= inputTotal {
-			gasUsed.Regular = (inputTotal - leftOverTotal) - gasUsed.State
+			delta := int64(inputTotal - leftOverTotal)
+			gasUsed.Regular = uint64(delta - gasUsed.State)
 		}
 		if depth == 0 && evm.chainRules.IsAmsterdam && err != nil {
-			gasUsed.PendingStateGasCredit = gasUsed.State + params.StateGasNewAccount
+			gasUsed.State = -int64(params.StateGasNewAccount)
 		}
 	}()
 
@@ -621,7 +638,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			evm.intraBlockState.SetCode(address, ret)
 			// EIP-8037: post-Run code-deposit state charge counts toward this
 			// frame's state-gas usage.
-			gasUsed.State += stateGas
+			gasUsed.State += int64(stateGas)
 		} else {
 			if evm.chainRules.IsAmsterdam {
 				// Code deposit failed: per EIP-8037 the failure cost is
