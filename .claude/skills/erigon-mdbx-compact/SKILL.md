@@ -54,15 +54,15 @@ This places `mdbx_copy` at `./build/bin/mdbx_copy`.
 
 ### 5. Run Compaction
 
-Create a sibling directory for the compacted output. The destination argument to `mdbx_copy` must be a **file path**, not a directory.
+Create a sibling directory for the compacted output. Both arguments to `mdbx_copy` are **directories** — do NOT include `mdbx.dat` in either path.
 
 ```bash
 mkdir -p <datadir>/chaindata-compacted
-./build/bin/mdbx_copy -c <datadir>/chaindata <datadir>/chaindata-compacted/mdbx.dat
+./build/bin/mdbx_copy -c <datadir>/chaindata <datadir>/chaindata-compacted
 ```
 
 - Source is the **directory** `<datadir>/chaindata`
-- Destination is a **file** `<datadir>/chaindata-compacted/mdbx.dat`
+- Destination is the **directory** `<datadir>/chaindata-compacted` (mdbx_copy writes `mdbx.dat` inside it)
 
 This can take hours to days for large databases. Run in background.
 
