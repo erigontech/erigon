@@ -95,8 +95,10 @@ type forkGraphDisk struct {
 	headers   sync.Map // set of headers
 	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
 
-	// current state data — protected by currentStateMu when accessed
-	// concurrently (e.g. getCheckpointState runs outside forkchoice mu).
+	// current state data — dual-protected. AddChainSegment is the sole writer
+	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
+	// already serialized against the writer and don't need currentStateMu.
+	// Reads outside f.mu (e.g. getCheckpointState) must take currentStateMu.
 	currentStateMu        sync.RWMutex
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
