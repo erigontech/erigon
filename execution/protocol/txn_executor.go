@@ -303,20 +303,16 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	// EIP-8037 inclusion check, per-dimension:
-	//   min(TX_MAX_GAS_LIMIT, tx.gas) <= regular_gas_available
-	//   tx.gas                         <= state_gas_available  (Amsterdam+)
-	if st.gp != nil {
-		regularContribution := st.msg.Gas()
-		if rules.IsAmsterdam {
-			regularContribution = min(regularContribution, params.MaxTxnGasLimit)
+	regularContribution := st.msg.Gas()
+	var stateContribution uint64
+	if rules.IsAmsterdam {
+		stateContribution = regularContribution
+		if regularContribution > params.MaxTxnGasLimit {
+			regularContribution = params.MaxTxnGasLimit
 		}
-		if regularContribution > st.gp.RegularGasAvailable() {
-			return ErrGasLimitReached
-		}
-		if rules.IsAmsterdam && st.msg.Gas() > st.gp.StateGasAvailable() {
-			return ErrGasLimitReached
-		}
+	}
+	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
+		return err
 	}
 
 	// Make sure the transaction feeCap is greater than the block's baseFee.

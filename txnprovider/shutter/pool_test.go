@@ -909,7 +909,7 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 		},
 		GasPrice: *uint256.NewInt(555),
 	}
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
 	require.NoError(t, err)
 	var signedTxnBuf bytes.Buffer
@@ -939,7 +939,7 @@ func MockEncryptedBlobTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) t
 	senderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(senderPrivKey.PublicKey)
-	signer := types.LatestSignerForChainID(chainId.ToBig())
+	signer := types.LatestSignerForChainID(chainId)
 	txn := types.MakeV1WrappedBlobTxn(chainId)
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)
 	require.NoError(t, err)

@@ -628,9 +628,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
-		dbg.Exec3Parallel = true // default for integration tool
-	}
 	if syncCfg.ChainTipMode() && noCommit {
 		return errors.New("--limit=1 cannot be combined with --no-commit")
 	}
