@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// dropLegacyE2Tables clears the pre-E3 ("E2-era") plain/hashed state,
-// changeset, and history index tables. None of these are read by the E3
+// dropLegacyE2Tables drops the pre-E3 ("E2-era") plain/hashed state,
+// changeset, and history index buckets. None of these are read by the E3
 // execution path — kv.AccountsDomain / kv.StorageDomain / kv.CommitmentDomain
 // are the active stores, and their keys are already incarnation-free
 // ([addr]+[key]).
@@ -34,14 +34,13 @@ import (
 // `incarnation` counter into the storage key; the others (HashedAccounts,
 // AccountChangeSet, AccountHistory, StorageHistory) are dead E2 indices.
 //
-// On a database originally created under E2 these tables may still hold
-// dormant rows; we drop them outright here. The corresponding constants
-// have been moved from kv.ChaindataTables to kv.ChaindataDeprecatedTables
-// so the empty buckets are not recreated on next open and the mdbx
-// migrator can drop them on the next exclusive open.
+// The corresponding constants have been moved from kv.ChaindataTables to
+// kv.ChaindataDeprecatedTables so the buckets are not recreated on next
+// open. DropTable both empties any dormant E2 rows and removes the bucket
+// metadata itself.
 //
-// The migration is idempotent — ClearTable is a no-op on already-empty
-// tables.
+// The migration is idempotent — DropTable is a no-op on a bucket whose
+// DBI is NonExistingDBI and that cannot be re-opened.
 var dropLegacyE2Tables = Migration{
 	Name: "drop_legacy_e2_tables",
 	Up: func(db kv.RwDB, _ datadir.Dirs, _ []byte, BeforeCommit Callback, _ log.Logger) error {
@@ -60,7 +59,7 @@ var dropLegacyE2Tables = Migration{
 			kv.E2AccountsHistory,
 			kv.E2StorageHistory,
 		} {
-			if err := tx.ClearTable(table); err != nil {
+			if err := tx.DropTable(table); err != nil {
 				return err
 			}
 		}
