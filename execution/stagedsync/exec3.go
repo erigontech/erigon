@@ -605,11 +605,9 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var dbBAL types.BlockAccessList
 			var data []byte
-			// Use a fresh read tx (not tx.Apply) so we can see BAL data
-			// committed by InsertBlocks after this execution's tx was opened.
-			if err = te.cfg.db.View(ctx, func(roTx kv.Tx) error {
+			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
 				var e error
-				data, e = rawdb.ReadBlockAccessListBytes(roTx, b.Hash(), blockNum)
+				data, e = rawdb.ReadBlockAccessListBytes(applyTx, b.Hash(), blockNum)
 				return e
 			}); err != nil {
 				return err

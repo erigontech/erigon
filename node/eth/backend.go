@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
@@ -260,6 +261,13 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	go func() {
+		// warmup kzg init so first block doesn't suffer
+		t := time.Now()
+		kzg.InitKZGCtx()
+		logger.Info("KZG crypto context ready", "took", time.Since(t))
+	}()
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp

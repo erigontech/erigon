@@ -388,16 +388,24 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
+					// Account-existence changes are signalled by AddressPath
+					// MVReadResultDone (newObject in a prior tx),
+					// SelfDestructPath, or IncarnationPath. We cross-check
+					// SelfDestructPath and IncarnationPath here because under
+					// HasBAL the worker's AddressPath write is filtered out of
+					// the per-tx flush (BAL doesn't list AddressPath), so the
+					// MVReadResultDone arm can't catch the staleness on its
+					// own. IncarnationPath is the SPECIFIC signal — it's
+					// written only by CreateAccount and SelfDestruct, never by
+					// UpdateAccountData and never by BAL pre-population. Using
+					// BalancePath here (the prior implementation) overfires for
+					// every gas-paying same-sender tx and for any BAL-listed
+					// balance change, causing a retry storm under BAL.
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix)
-
-					// If a prior tx created this account, BalancePath will
-					// have an entry at a lower txIndex (from BAL pre-population
-					// or worker flush). A nil AddressPath read from storage
-					// is then stale and must be invalidated.
 					if valid == VersionValid {
-						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
-						if balRR.Status() == MVReadResultDone {
+						incRR := vm.Read(addr, IncarnationPath, accounts.NilKey, txIndex)
+						if incRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
 						}
 					}
