@@ -633,16 +633,6 @@ func (c *Coherent) clearCaches(r *CoherentRoot) {
 	r.codeCache.Clear()
 }
 
-// AssertCheckValues was the E2 sanity check that compared cache rows against
-// the now-removed kv.PlainState bucket. On E3 the active state lives in
-// kv.AccountsDomain / kv.StorageDomain, the read-key format no longer
-// matches what the cache stores, and the txnpool assertion that invoked
-// this function never observed a real divergence in practice. The function
-// is kept as a no-op so existing call sites compile; the assertion is now
-// best expressed by the domain-level integrity checks in db/state.
-func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
-	return 0, nil
-}
 func (c *Coherent) evictRoots() {
 	if c.latestStateVersionID <= c.cfg.KeepViews {
 		return
