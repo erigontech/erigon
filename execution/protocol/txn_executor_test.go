@@ -214,3 +214,85 @@ func TestEIP8037_GasPoolTracksRegularAndStateIndependently(t *testing.T) {
 	require.NotEqual(t, blockGasLimit-(max(r1, s1)+max(r2, s2)), gp.RegularGasAvailable(),
 		"regular pool must not be charged Σ max(r_i, s_i) — that is the pre-378d07cb bug")
 }
+
+// TestPreCheckErrorOrdering_GasBeforeFeeCap asserts the geth-aligned
+// validation ordering: a tx that fails both block-gas inclusion AND
+// EIP-1559 fee-cap must produce ErrGasLimitReached, not ErrFeeCapTooLow.
+//
+// Regression test for the parallel-exec gap that prompted PR #21237: the
+// parallel worker constructs a per-tx gas pool (trace_worker.go:121) so
+// preCheck's gp-branch is a no-op (tx.gas vs tx.gas) under parallel and
+// the fee-cap check fires first, mis-classifying the failure for
+// EEST/Hive mappers (expected GAS_ALLOWANCE_EXCEEDED, got
+// INSUFFICIENT_MAX_FEE_PER_GAS).
+//
+// The fix routes the same check through CheckBlockGasInclusion against
+// the block-level pool, so the ordering is preserved on both paths.
+func TestPreCheckErrorOrdering_GasBeforeFeeCap(t *testing.T) {
+	t.Parallel()
+
+	const blockGasLimit = 30_000_000
+	cfg := chain.TestChainAuraConfig // London rules active
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	t.Run("tx-gas > block-gas-limit AND fee-cap < baseFee returns ErrGasLimitReached", func(t *testing.T) {
+		ibs := state.New(state.NewNoopReader())
+		blockCtx := evmtypes.BlockContext{
+			CanTransfer: CanTransfer,
+			Transfer:    misc.Transfer,
+			GasLimit:    blockGasLimit,
+			BaseFee:     *uint256.NewInt(100), // non-zero baseFee
+		}
+		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, cfg, vm.Config{})
+
+		// feeCap=1, baseFee=100 -> would fail ErrFeeCapTooLow
+		// gas=blockGasLimit+1 -> must fail ErrGasLimitReached first
+		msg := types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), blockGasLimit+1,
+			uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1),
+			nil, nil,
+			false, false, true, false, nil,
+		)
+		gp := new(GasPool).AddGas(blockGasLimit)
+
+		st := NewTxnExecutor(evm, msg, gp)
+		_, err := st.Execute(true, false)
+
+		require.ErrorIs(t, err, ErrGasLimitReached,
+			"gas-pool inclusion must reject before fee-cap")
+		require.NotErrorIs(t, err, ErrFeeCapTooLow,
+			"fee-cap error must not leak past the gas-pool reject")
+	})
+
+	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool", func(t *testing.T) {
+		gp := new(GasPool).AddGas(blockGasLimit)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, blockGasLimit+1, 0), ErrGasLimitReached)
+	})
+
+	t.Run("CheckBlockGasInclusion accepts contribution <= reservoirs", func(t *testing.T) {
+		gp := new(GasPool).AddGas(blockGasLimit)
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit, 0))
+		require.NoError(t, CheckBlockGasInclusion(gp, blockGasLimit-1, 0))
+	})
+
+	t.Run("CheckBlockGasInclusion is a no-op for nil gp", func(t *testing.T) {
+		require.NoError(t, CheckBlockGasInclusion(nil, blockGasLimit*1000, blockGasLimit*1000))
+	})
+
+	t.Run("CheckBlockGasInclusion rejects state contribution > state pool", func(t *testing.T) {
+		gp := NewGasPool(100_000, 0)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 50_000, 200_000), ErrGasLimitReached)
+	})
+
+	t.Run("CheckBlockGasInclusion rejects regular contribution > regular pool (Amsterdam shape)", func(t *testing.T) {
+		gp := NewGasPool(100_000, 0)
+		require.ErrorIs(t, CheckBlockGasInclusion(gp, 200_000, 50_000), ErrGasLimitReached)
+	})
+
+	t.Run("CheckBlockGasInclusion accepts when both contributions fit", func(t *testing.T) {
+		gp := NewGasPool(100_000, 0)
+		require.NoError(t, CheckBlockGasInclusion(gp, 50_000, 80_000))
+	})
+}

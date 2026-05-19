@@ -3540,7 +3540,7 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

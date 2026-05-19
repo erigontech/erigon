@@ -635,6 +635,16 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+type codeAccessTracker interface {
+	OnCodeAccess(accounts.Address, []byte)
+}
+
+func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
+	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
+		hook.OnCodeAccess(addr, code)
+	}
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return sdb.getCode(addr, false)
@@ -655,6 +665,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
 			}
+			if err == nil {
+				sdb.callCodeAccessHook(addr, code)
+			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -670,6 +683,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	// not in a previous tx sharing the same IBS (block generator reuses IBS).
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			sdb.callCodeAccessHook(addr, so.code)
 			return so.code, nil
 		}
 	}
@@ -692,7 +706,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
 		}
 	}
-
+	if err == nil {
+		sdb.callCodeAccessHook(addr, code)
+	}
 	return code, err
 }
 
@@ -707,6 +723,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			return 0, nil
 		}
 		if stateObject.code != nil {
+			sdb.callCodeAccessHook(addr, stateObject.code)
 			return len(stateObject.code), nil
 		}
 		if stateObject.data.CodeHash.IsEmpty() {
@@ -722,6 +739,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 				return 0, nil
 			}
 			if s.code != nil {
+				sdb.callCodeAccessHook(addr, s.code)
 				return len(s.code), nil
 			}
 			if s.data.CodeHash.IsEmpty() {
@@ -1813,6 +1831,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil && previous.selfdestructed {
+		// resetObjectChange.dirtied() returns false, so without this the
+		// parallel worker's MakeWriteSet drops the resurrect write
+		// (test_double_kill / EIP-6780 family on the parallel shard).
+		// Confined to CreateAccount — the GetOrNewStateObject AddBalance
+		// path must NOT mark dirty here (regresses TestSelfDestructReceive).
+		sdb.journal.dirty(addr)
+	}
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
