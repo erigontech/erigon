@@ -279,16 +279,6 @@ func (s *RecordingState) ReadAccountCodeSize(address accounts.Address) (int, err
 	return size, err
 }
 
-func (s *RecordingState) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addr := address.Value()
-	s.AccessedAccounts[addr] = struct{}{}
-	inc, err := s.inner.ReadAccountIncarnation(address)
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE] ReadAccountIncarnation %s -> %d (err=%v)\n", addr.Hex(), inc, err)
-	}
-	return inc, err
-}
-
 func (s *RecordingState) SetTrace(trace bool, tracePrefix string) {
 	s.trace = trace
 	s.prefix = tracePrefix
@@ -1373,14 +1363,6 @@ func (s *witnessStateless) ReadAccountCodeSize(address accounts.Address) (int, e
 		fmt.Printf("[TRACE-S] ReadAccountCodeSize %s -> %d\n", addr.Hex(), len(code))
 	}
 	return len(code), nil
-}
-
-func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addr := address.Value()
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE-S] ReadAccountIncarnation %s -> 0\n", addr.Hex())
-	}
-	return 0, nil
 }
 
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {

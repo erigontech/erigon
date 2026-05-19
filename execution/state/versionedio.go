@@ -475,18 +475,6 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	return 0, nil
 }
 
-func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		return r.Val.(*accounts.Account).Incarnation, nil
-	}
-
-	if vr.stateReader != nil {
-		return vr.stateReader.ReadAccountIncarnation(address)
-	}
-
-	return 0, nil
-}
-
 type VersionedWrites []*VersionedWrite
 
 // TouchUpdates feeds VersionedWrites directly to a commitment.Updates buffer

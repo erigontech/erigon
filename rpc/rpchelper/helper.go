@@ -324,7 +324,3 @@ func (hr *cachedHistoryReaderV3) ReadAccountCode(address accounts.Address) ([]by
 func (hr *cachedHistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	return hr.reader.ReadAccountCodeSize(address)
 }
-
-func (hr *cachedHistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}

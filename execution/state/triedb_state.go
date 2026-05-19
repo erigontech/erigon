@@ -128,7 +128,6 @@ type TrieDbState struct {
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
 	hashBuilder       *trie.HashBuilder
-	incarnationMap    map[accounts.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
 func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *TrieDbState {
@@ -140,7 +139,6 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
 		hashBuilder:       trie.NewHashBuilder(false),
-		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	return tds
 }
@@ -168,11 +166,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 
 	n := tds.getBlockNr()
 	cpy := TrieDbState{
-		t:              &tcopy,
-		tMu:            new(sync.Mutex),
-		blockNr:        n,
-		hashBuilder:    trie.NewHashBuilder(false),
-		incarnationMap: make(map[accounts.Address]uint64),
+		t:           &tcopy,
+		tMu:         new(sync.Mutex),
+		blockNr:     n,
+		hashBuilder: trie.NewHashBuilder(false),
 	}
 	return &cpy
 }
@@ -215,7 +212,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
 		hashBuilder:       trie.NewHashBuilder(false),
-		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	tds.tMu.Unlock()
 
@@ -240,7 +236,6 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
 		hashBuilder:       trie.NewHashBuilder(false),
-		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 }
 
@@ -776,18 +771,6 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 	return codeSize, nil
 }
 
-func (tds *TrieDbState) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	if inc, ok := tds.incarnationMap[address]; ok {
-		return inc, nil
-	}
-	inc, err := tds.StateReader.ReadAccountIncarnation(address)
-	if err != nil {
-		return 0, err
-	} else {
-		return inc, nil
-	}
-}
-
 type TrieStateWriter struct {
 	tds *TrieDbState
 }
@@ -819,9 +802,6 @@ func (tsw *TrieStateWriter) DeleteAccount(address accounts.Address, original *ac
 	delete(tsw.tds.currentBuffer.storageIncarnation, addrHash)
 	delete(tsw.tds.currentBuffer.codeUpdates, addrHash)
 	tsw.tds.currentBuffer.deleted[addrHash] = address
-	if original.Incarnation > 0 {
-		tsw.tds.incarnationMap[address] = original.Incarnation
-	}
 	return nil
 }
 

@@ -1505,10 +1505,6 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	return size, nil
 }
 
-func (r *ReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}
-
 type bufferedReader struct {
 	reader        StateReader
 	bufferedState *StateV3Buffered
@@ -1704,23 +1700,6 @@ func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, err
 	}
 
 	return r.reader.ReadAccountCodeSize(address)
-}
-
-func (r *bufferedReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	var incarnation uint64
-
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok && so.data != nil {
-		incarnation = so.data.Incarnation
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-
-	if ok {
-		return incarnation, nil
-	}
-
-	return r.reader.ReadAccountIncarnation(address)
 }
 
 type ReadLists map[string]*execctx.KvList

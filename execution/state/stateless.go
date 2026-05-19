@@ -222,10 +222,6 @@ func (s *Stateless) ReadAccountCodeSize(address accounts.Address) (codeSize int,
 	return 0, nil
 }
 
-func (s *Stateless) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	return 0, nil
-}
-
 // UpdateAccountData is a part of the StateWriter interface
 // This implementation registers the account update in the `accountUpdates` map
 func (s *Stateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {

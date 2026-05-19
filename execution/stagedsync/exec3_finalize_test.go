@@ -65,13 +65,6 @@ func (r *mapStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error)
 	return len(r.code[addr]), nil
 }
 
-func (r *mapStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
-	if a, ok := r.accounts[addr]; ok {
-		return a.Incarnation, nil
-	}
-	return 0, nil
-}
-
 func (r *mapStateReader) SetTrace(bool, string) {}
 func (r *mapStateReader) Trace() bool           { return false }
 func (r *mapStateReader) TracePrefix() string   { return "" }

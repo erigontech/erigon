@@ -201,13 +201,12 @@ func (r *preBlockReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Ac
 func (r *preBlockReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
-func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
-func (r *preBlockReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
-func (r *preBlockReader) SetTrace(bool, string)                                   {}
-func (r *preBlockReader) Trace() bool                                             { return false }
-func (r *preBlockReader) TracePrefix() string                                     { return "" }
+func (r *preBlockReader) HasStorage(accounts.Address) (bool, error)         { return false, nil }
+func (r *preBlockReader) ReadAccountCode(accounts.Address) ([]byte, error)  { return nil, nil }
+func (r *preBlockReader) ReadAccountCodeSize(accounts.Address) (int, error) { return 0, nil }
+func (r *preBlockReader) SetTrace(bool, string)                             {}
+func (r *preBlockReader) Trace() bool                                       { return false }
+func (r *preBlockReader) TracePrefix() string                               { return "" }
 
 // TestSDOfPreExistingContract_FullPipeline drives the production pipeline
 // end-to-end for an SD-of-pre-existing-contract scenario:

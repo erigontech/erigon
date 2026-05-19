@@ -46,12 +46,9 @@ func (r *minimalStateReader) ReadAccountCode(addr accounts.Address) ([]byte, err
 	return nil, nil
 }
 func (r *minimalStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) { return 0, nil }
-func (r *minimalStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
-	return 0, nil
-}
-func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
-func (r *minimalStateReader) Trace() bool                             { return false }
-func (r *minimalStateReader) TracePrefix() string                     { return "" }
+func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string)                {}
+func (r *minimalStateReader) Trace() bool                                            { return false }
+func (r *minimalStateReader) TracePrefix() string                                    { return "" }
 
 // TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
 // system address (0xff...fe) is excluded from the BAL when it has no actual

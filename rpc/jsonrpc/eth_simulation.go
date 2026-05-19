@@ -1115,17 +1115,6 @@ func (r *simulationIntraBlockStateReader) ReadAccountCodeSize(address accounts.A
 	return len(code), err
 }
 
-func (r *simulationIntraBlockStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	acc, err := r.ReadAccountData(address)
-	if err != nil || acc == nil {
-		return 0, err
-	}
-	if acc.Incarnation == 0 {
-		return 0, nil
-	}
-	return acc.Incarnation - 1, nil
-}
-
 func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}
 func (r *simulationIntraBlockStateReader) Trace() bool               { return false }
 func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }

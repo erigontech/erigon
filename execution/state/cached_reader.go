@@ -118,13 +118,3 @@ func (cr *CachedReader) ReadAccountCodeSize(address accounts.Address) (int, erro
 	c, err := cr.ReadAccountCode(address)
 	return len(c), err
 }
-
-// ReadAccountIncarnation is called when incarnation of the account is required (to create and recreate contract)
-func (cr *CachedReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addrValue := address.Value()
-	deleted := cr.cache.GetDeletedAccount(addrValue[:])
-	if deleted != nil {
-		return deleted.Incarnation, nil
-	}
-	return cr.r.ReadAccountIncarnation(address)
-}

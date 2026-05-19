@@ -277,28 +277,3 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, e
 	enc, _, err := hr.getAsOf(kv.CodeDomain, addressValue[:])
 	return len(enc), err
 }
-
-func (hr *HistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	addressValue := address.Value()
-	enc, ok, err := hr.getAsOf(kv.AccountsDomain, addressValue[:])
-	if err != nil || !ok || len(enc) == 0 {
-		if hr.trace {
-			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [0]\n", hr.tracePrefix, address)
-		}
-		return 0, err
-	}
-	var a accounts.Account
-	if err := a.DecodeForStorage(enc); err != nil {
-		return 0, fmt.Errorf("%sread account incarnation (hist)[%x]: %w", hr.tracePrefix, address, err)
-	}
-	if a.Incarnation == 0 {
-		if hr.trace {
-			fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [%d]\n", hr.tracePrefix, address, 0)
-		}
-		return 0, nil
-	}
-	if hr.trace {
-		fmt.Printf("%sReadAccountIncarnation (hist)[%x] => [%d]\n", hr.tracePrefix, address, a.Incarnation-1)
-	}
-	return a.Incarnation - 1, nil
-}

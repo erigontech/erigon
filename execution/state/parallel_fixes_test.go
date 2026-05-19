@@ -21,13 +21,12 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *emptyReader) HasStorage(accounts.Address) (bool, error)               { return false, nil }
-func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)        { return nil, nil }
-func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error)       { return 0, nil }
-func (r *emptyReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
-func (r *emptyReader) SetTrace(bool, string)                                   {}
-func (r *emptyReader) Trace() bool                                             { return false }
-func (r *emptyReader) TracePrefix() string                                     { return "" }
+func (r *emptyReader) HasStorage(accounts.Address) (bool, error)         { return false, nil }
+func (r *emptyReader) ReadAccountCode(accounts.Address) ([]byte, error)  { return nil, nil }
+func (r *emptyReader) ReadAccountCodeSize(accounts.Address) (int, error) { return 0, nil }
+func (r *emptyReader) SetTrace(bool, string)                             {}
+func (r *emptyReader) Trace() bool                                       { return false }
+func (r *emptyReader) TracePrefix() string                               { return "" }
 
 // TestValueTiebreaker_BalancePath verifies that validation does not
 // invalidate a StorageRead when the versionMap Done value matches the
