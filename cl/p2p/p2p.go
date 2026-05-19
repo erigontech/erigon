@@ -2,15 +2,16 @@ package p2p
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"net"
+	"path/filepath"
 	"time"
-
-	"path"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	elp2p "github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/discover"
@@ -65,6 +66,14 @@ type p2pManager struct {
 	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
 }
 
+func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
+	if dataDir == "" {
+		return crypto.GenerateKey()
+	}
+	var cfg elp2p.NodeKeyConfig
+	return cfg.LoadOrGenerateAndSave(filepath.Join(dataDir, "caplin-nodekey"))
+}
+
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
 	// Resolve external IP from NAT once so both discv5 ENR and libp2p multiaddrs use
 	// the same public address. ExtIP resolves immediately; STUN/UPnP make network calls.
@@ -87,8 +96,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		enodes[i] = newNode
 	}
 
-	var nodeKeyConfig elp2p.NodeKeyConfig
-	privateKey, err := nodeKeyConfig.LoadOrGenerateAndSave(path.Join(cfg.DataDir, "caplin-nodekey"))
+	privateKey, err := loadOrGenerateKey(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
