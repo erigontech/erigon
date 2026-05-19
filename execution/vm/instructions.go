@@ -575,16 +575,18 @@ func loadAndCacheCode(scope *CallContext, ibs *state.IntraBlockState, addr accou
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr := scope.peekAddress()
 	slot := scope.Stack.peek()
-	// BAL: EXTCODESIZE is a real state access per EIP-7928.
-	evm.IntraBlockState().MarkAddressAccess(addr, false)
-	// Cache-hit fast path: gas function (gasEip2929AccountCheck) stashed
-	// the entry, or a prior EXTCODE* on this addr populated the cache and
-	// the hand-off resolved.  EXTCODESIZE returns len(Code), which is 0
-	// for non-existent and empty-code accounts alike.
+	// Cache-hit fast path: gas function stashed the entry.  Skip
+	// MarkAddressAccess — a prior EXTCODE* on this addr already called
+	// it with revertable=false, so the BAL set is idempotently correct
+	// and the revertable flag is already terminal.
 	if entry := scope.cachedCodeEntry; entry != nil {
 		slot.SetUint64(uint64(len(entry.Code)))
 		return pc, nil, nil
 	}
+	// BAL: EXTCODESIZE is a real state access per EIP-7928.  Mark once
+	// per frame (here, on the first miss) — subsequent same-addr ops
+	// hit the cache and take the shortcut above.
+	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -621,18 +623,16 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	memOffset := stack.pop()
 	codeOffset := stack.pop()
 	length := stack.pop()
-	// BAL: EXTCODECOPY is a real state access per EIP-7928.
-	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	// Cache-hit fast path: use the bytes stashed by the gas function (or
-	// fetched fresh on miss).  IBS.GetCode result is what we cache, which
-	// is exactly what EXTCODECOPY needs (EIP-7702 delegation marker bytes
-	// for delegated EOAs, raw code otherwise).
+	// Cache-hit fast path.  Skip MarkAddressAccess — prior touch already
+	// marked the addr; the BAL set is idempotent and revertable terminal.
 	var code []byte
 	if entry := scope.cachedCodeEntry; entry != nil {
 		code = entry.Code
 	} else {
+		// First touch this frame: BAL mark + IBS load + cache populate.
+		evm.IntraBlockState().MarkAddressAccess(addr, false)
 		entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), addr)
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -689,20 +689,20 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	address := scope.peekAddress()
 	slot := scope.Stack.peek()
 
-	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
-	// non-revertable.  Also ensures non-existent accounts appear in the BAL
-	// when Empty() returns true and GetCodeHash is never called.
-	evm.IntraBlockState().MarkAddressAccess(address, false)
-
-	// Cache-hit fast path.  loadAndCacheCode sets entry.Hash to the zero
-	// CodeHash when Empty(addr) is true (non-existent account → EXTCODEHASH
-	// returns 0) and to GetCodeHash(addr) otherwise (emptyCodeHash for an
-	// existing account with no code; keccak(code) for a contract).
+	// Cache-hit fast path.  Skip MarkAddressAccess (prior touch
+	// already marked).  loadAndCacheCode sets entry.Hash to zero
+	// CodeHash when Empty(addr) is true (non-existent account →
+	// EXTCODEHASH returns 0) and to GetCodeHash(addr) otherwise
+	// (emptyCodeHash for existing-no-code, keccak(code) for a contract).
 	if entry := scope.cachedCodeEntry; entry != nil {
 		hashValue := entry.Hash.Value()
 		slot.SetBytes(hashValue[:])
 		return pc, nil, nil
 	}
+	// First touch this frame: BAL mark + IBS load + cache populate.  BAL
+	// also covers the non-existent-account case (where loadAndCacheCode
+	// would otherwise return without calling GetCodeHash).
+	evm.IntraBlockState().MarkAddressAccess(address, false)
 	entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
