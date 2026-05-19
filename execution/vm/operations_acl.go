@@ -133,9 +133,19 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // charge 2100 gas and add the pair to accessed_storage_keys.
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
-	// If the caller cannot afford the cost, this change will be rolled back
-	// If he does afford it, we can skip checking the same thing later on, during execution
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.peekStorageKey()); slotMod {
+	addr := callContext.Address()
+	key := callContext.peekStorageKey()
+	// Slot-cache warm shortcut: if (addr, key) is in the call-frame chain's
+	// slot cache, it is warm by construction.  The cache is populated only
+	// by opSload-miss-then-fill or opSstore, both gated by a gas function
+	// that calls AddSlotToAccessList first.  So `cache has cell` implies
+	// `access list contains slot warm`, and we can skip the access-list
+	// hashmap probe (2 map lookups in al.AddSlot vs 1 in findSlotCell).
+	// On sload-same-key this fires for every SLOAD after the first.
+	if _, ok := callContext.findSlotCell(slotCacheKey{addr: addr, key: key}); ok {
+		return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
+	}
+	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, key); slotMod {
 		return mdgas.MdGas{Regular: params.ColdSloadCostEIP2929}, nil
 	}
 	return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
