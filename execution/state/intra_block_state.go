@@ -628,6 +628,16 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+type codeAccessTracker interface {
+	OnCodeAccess(accounts.Address, []byte)
+}
+
+func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
+	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
+		hook.OnCodeAccess(addr, code)
+	}
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return sdb.getCode(addr, false)
@@ -648,6 +658,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
 			}
+			if err == nil {
+				sdb.callCodeAccessHook(addr, code)
+			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -663,6 +676,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	// not in a previous tx sharing the same IBS (block generator reuses IBS).
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			sdb.callCodeAccessHook(addr, so.code)
 			return so.code, nil
 		}
 	}
@@ -685,7 +699,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
 		}
 	}
-
+	if err == nil {
+		sdb.callCodeAccessHook(addr, code)
+	}
 	return code, err
 }
 
@@ -700,6 +716,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			return 0, nil
 		}
 		if stateObject.code != nil {
+			sdb.callCodeAccessHook(addr, stateObject.code)
 			return len(stateObject.code), nil
 		}
 		if stateObject.data.CodeHash.IsEmpty() {
@@ -715,6 +732,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 				return 0, nil
 			}
 			if s.code != nil {
+				sdb.callCodeAccessHook(addr, s.code)
 				return len(s.code), nil
 			}
 			if s.data.CodeHash.IsEmpty() {
@@ -1249,7 +1267,21 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		//   (2) the pre-tx original (cumulative net-zero — e.g. EIP-7702
 		//       authority that sets a delegation then resets to no-delegation
 		//       within the same tx).
-		if codeHash == baseCodeHash || codeHash == stateObject.original.CodeHash {
+		//
+		// Case (2) is disabled for newly-created stateObjects (CREATE2 after
+		// SELFDESTRUCT, or any contract creation). stateObject.original holds
+		// the PRE-CREATION account snapshot (carried over from the destructed
+		// previous incarnation by createObject(addr, previous)). New code that
+		// happens to match the destroyed contract's code is NOT a cumulative
+		// net-zero — it is a deploy of the same bytecode at a new incarnation,
+		// and the CodePath/CodeHashPath writes are load-bearing. Deleting them
+		// causes FlushVersionedWrites to omit them, so a later tx's read of
+		// CodeHashPath misses the versionMap and falls through to the recursive
+		// AddressPath read, which returns the stale snapshot captured at
+		// createObject time (CodeHash=EmptyCodeHash). That empty CodeHash then
+		// serialises into the account and corrupts the trie root.
+		matchesOriginal := !stateObject.newlyCreated && codeHash == stateObject.original.CodeHash
+		if codeHash == baseCodeHash || matchesOriginal {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
 					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
@@ -1840,6 +1872,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil && previous.selfdestructed {
+		// resetObjectChange.dirtied() returns false, so without this the
+		// parallel worker's MakeWriteSet drops the resurrect write
+		// (test_double_kill / EIP-6780 family on the parallel shard).
+		// Confined to CreateAccount — the GetOrNewStateObject AddBalance
+		// path must NOT mark dirty here (regresses TestSelfDestructReceive).
+		sdb.journal.dirty(addr)
+	}
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}

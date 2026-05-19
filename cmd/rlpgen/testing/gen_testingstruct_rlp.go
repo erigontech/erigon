@@ -4,14 +4,11 @@ package testing
 
 import (
 	"fmt"
-	"io"
-	"math/big"
-
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
+	"io"
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {
@@ -19,8 +16,6 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	if obj.aa != nil {
 		size += rlp.U64Len(uint64(*obj.aa))
 	}
-	size += rlp.BigIntLen(&obj.b)
-	size += rlp.BigIntLen(obj.bb)
 	size += rlp.Uint256Len(obj.c)
 	size += rlp.Uint256Len(*obj.cc)
 	size += 8 + 1
@@ -106,12 +101,6 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 		if err := rlp.EncodeU64(uint64(*obj.aa), w, b[:]); err != nil {
 			return err
 		}
-	}
-	if err := rlp.EncodeBigInt(&obj.b, w, b[:]); err != nil {
-		return err
-	}
-	if err := rlp.EncodeBigInt(obj.bb, w, b[:]); err != nil {
-		return err
 	}
 	if err := rlp.EncodeUint256(obj.c, w, b[:]); err != nil {
 		return err
@@ -347,15 +336,6 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 		i := n
 		obj.aa = &i
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("error decoding field b, err: %w", err)
-	}
-	obj.b = *(new(big.Int).SetBytes(b))
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("error decoding field bb, err: %w", err)
-	}
-	obj.bb = new(big.Int).SetBytes(b)
 	if err = s.ReadUint256(&obj.c); err != nil {
 		return fmt.Errorf("error decoding field c, err: %w", err)
 	}
@@ -384,6 +364,7 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadBytes((*obj.ff)[:]); err != nil {
 		return fmt.Errorf("error decoding field ff, err: %w", err)
 	}
+	var b []byte
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("error decoding field g, err: %w", err)
 	}

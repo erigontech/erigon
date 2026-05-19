@@ -20,8 +20,6 @@
 package tracing
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -72,7 +70,7 @@ type VMContext struct {
 // It contains the block as well as consensus related information.
 type BlockEvent struct {
 	Block     *types.Block
-	TD        *big.Int
+	TD        *uint256.Int
 	Finalized *types.Header
 	Safe      *types.Header
 }
