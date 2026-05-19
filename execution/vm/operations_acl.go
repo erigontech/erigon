@@ -166,7 +166,15 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 		return mdgas.MdGas{}, err
 	}
 	addr := callContext.peekAddress()
-	// Check slot presence in the access list
+	// Code-cache warm shortcut: if the address is in our code cache the gas
+	// function that populated the cache (this one, or gasEip2929AccountCheck
+	// for EXTCODESIZE/HASH) already called AddAddressToAccessList, so the
+	// address is warm in the access list.  Skip the second probe + hand the
+	// entry off to opExtCodeCopy via callContext.cachedCodeEntry.
+	if entry, ok := callContext.findCodeEntry(addr); ok {
+		callContext.cachedCodeEntry = entry
+		return gas, nil
+	}
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
@@ -187,6 +195,19 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
 	addr := callContext.peekAddress()
+	// Code-cache warm shortcut for EXTCODESIZE / EXTCODEHASH: cache hit
+	// implies the address is already warm in the access list (since the
+	// gas function that populated the cache called AddAddressToAccessList
+	// first).  Hand the entry off to the op handler via cachedCodeEntry.
+	// BALANCE also uses this gas function but opBalance ignores
+	// cachedCodeEntry; the warm-cost return here is still correct for
+	// BALANCE because the address being in the code cache implies it's
+	// been touched in this frame chain (warm access-list state).
+	if entry, ok := callContext.findCodeEntry(addr); ok {
+		callContext.cachedCodeEntry = entry
+		// The warm storage read cost is already charged as constantGas
+		return mdgas.MdGas{}, nil
+	}
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas

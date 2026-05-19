@@ -544,16 +544,52 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d %d", RETURNDATACOPY, memOffset.Uint64(), offset64, length.Uint64())
 }
 
+// loadAndCacheCode reads the code+hash for addr through IBS and stores it
+// in the local frame's codeCache.  Caller is responsible for the prior
+// MarkAddressAccess and access-list bookkeeping (handled by the gas
+// function on cache miss).  Returns the cached entry (also reachable via
+// findCodeEntry on subsequent ops).
+func loadAndCacheCode(scope *CallContext, ibs *state.IntraBlockState, addr accounts.Address) (*codeCacheEntry, error) {
+	empty, err := ibs.Empty(addr)
+	if err != nil {
+		return nil, err
+	}
+	entry := &codeCacheEntry{}
+	if !empty {
+		entry.Code, err = ibs.GetCode(addr)
+		if err != nil {
+			return nil, err
+		}
+		entry.Hash, err = ibs.GetCodeHash(addr)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if scope.codeCache == nil {
+		scope.codeCache = map[accounts.Address]*codeCacheEntry{}
+	}
+	scope.codeCache[addr] = entry
+	return entry, nil
+}
+
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	addr := scope.peekAddress()
 	slot := scope.Stack.peek()
 	// BAL: EXTCODESIZE is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
-	codeSize, err := evm.IntraBlockState().GetCodeSize(addr)
+	// Cache-hit fast path: gas function (gasEip2929AccountCheck) stashed
+	// the entry, or a prior EXTCODE* on this addr populated the cache and
+	// the hand-off resolved.  EXTCODESIZE returns len(Code), which is 0
+	// for non-existent and empty-code accounts alike.
+	if entry := scope.cachedCodeEntry; entry != nil {
+		slot.SetUint64(uint64(len(entry.Code)))
+		return pc, nil, nil
+	}
+	entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	slot.SetUint64(uint64(codeSize))
+	slot.SetUint64(uint64(len(entry.Code)))
 	return pc, nil, nil
 }
 
@@ -589,9 +625,19 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
-	code, err := evm.IntraBlockState().GetCode(addr)
-	if err != nil {
-		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	// Cache-hit fast path: use the bytes stashed by the gas function (or
+	// fetched fresh on miss).  IBS.GetCode result is what we cache, which
+	// is exactly what EXTCODECOPY needs (EIP-7702 delegation marker bytes
+	// for delegated EOAs, raw code otherwise).
+	var code []byte
+	if entry := scope.cachedCodeEntry; entry != nil {
+		code = entry.Code
+	} else {
+		entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), addr)
+		if err != nil {
+			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		code = entry.Code
 	}
 
 	codeOffset64, overflow := codeOffset.Uint64WithOverflow()
@@ -648,21 +694,21 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	// when Empty() returns true and GetCodeHash is never called.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
 
-	empty, err := evm.IntraBlockState().Empty(address)
+	// Cache-hit fast path.  loadAndCacheCode sets entry.Hash to the zero
+	// CodeHash when Empty(addr) is true (non-existent account → EXTCODEHASH
+	// returns 0) and to GetCodeHash(addr) otherwise (emptyCodeHash for an
+	// existing account with no code; keccak(code) for a contract).
+	if entry := scope.cachedCodeEntry; entry != nil {
+		hashValue := entry.Hash.Value()
+		slot.SetBytes(hashValue[:])
+		return pc, nil, nil
+	}
+	entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), address)
 	if err != nil {
-		return pc, nil, err
+		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	if empty {
-		slot.Clear()
-	} else {
-		var codeHash accounts.CodeHash
-		codeHash, err = evm.IntraBlockState().GetCodeHash(address)
-		if err != nil {
-			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		codeHashValue := codeHash.Value()
-		slot.SetBytes(codeHashValue[:])
-	}
+	hashValue := entry.Hash.Value()
+	slot.SetBytes(hashValue[:])
 	return pc, nil, nil
 }
 

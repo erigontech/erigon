@@ -657,6 +657,15 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret)
+			// Invalidate any prior cached codeCacheEntry for this address
+			// in the running frame chain.  Earlier EXTCODE* on `address`
+			// (before this CREATE/CREATE2 finalized) would have cached
+			// "no code"; subsequent EXTCODE* must reflect the new code.
+			// invalidateCodeEntry walks the parent chain; safe to call
+			// even if no entry exists.
+			if cc := evm.currentCallContext; cc != nil {
+				cc.invalidateCodeEntry(address)
+			}
 		} else {
 			if evm.chainRules.IsAmsterdam {
 				// Code deposit failed: per EIP-8037 the failure cost is

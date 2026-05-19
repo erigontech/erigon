@@ -130,8 +130,40 @@ type CallContext struct {
 	// to AddSlotToAccessList).
 	cachedSlotCell *state.WriteCell[uint256.Int]
 
+	// codeCache holds the per-address result of IBS.GetCode at first
+	// access, so subsequent EXTCODESIZE / EXTCODEHASH / EXTCODECOPY for the
+	// same address skip the versionedReadCore + GetCode chain in IBS.
+	// Stores what IBS.GetCode returns (NOT what ResolveCode returns) — i.e.,
+	// the EIP-7702 delegation marker bytes for a delegated EOA, raw code
+	// otherwise.  That matches what EXTCODE* opcodes need; CALL machinery
+	// uses ResolveCode and is intentionally not served by this cache.
+	//
+	// Key is accounts.Address = unique.Handle = 8-byte pointer ⇒ fast64
+	// map probe.  Cache is per-frame; lookup walks the parent chain via
+	// findCodeEntry.  Invalidation: opCreate / opCreate2 success calls
+	// invalidateCodeEntry to delete the new address from the chain (the
+	// only mid-EVM mutation of stored code; SELFDESTRUCT only marks
+	// selfdestructed and FinalizeTx does the actual code deletion).
+	codeCache map[accounts.Address]*codeCacheEntry
+
+	// cachedCodeEntry hands a *codeCacheEntry looked up by an EXTCODE*
+	// gas function forward to the op handler, mirroring cachedSlotCell.
+	// Same lifetime: cleared at the top of each interpreter Run iteration.
+	cachedCodeEntry *codeCacheEntry
+
 	Stack    Stack
 	Contract Contract
+}
+
+// codeCacheEntry is the per-address payload of the frame-local code cache.
+// Code is what IBS.GetCode returns (raw code for normal contracts, the
+// EIP-7702 delegation marker for delegated EOAs, nil/empty for missing or
+// empty accounts).  Hash mirrors IBS.GetCodeHash for the same address (so
+// EXTCODEHASH can return without a second IBS call).  Size is derivable
+// from len(Code) and not stored separately.
+type codeCacheEntry struct {
+	Code []byte
+	Hash accounts.CodeHash
 }
 
 // findSlotCell walks the parent chain from this frame upward looking for
@@ -149,6 +181,30 @@ func (ctx *CallContext) findSlotCell(addr accounts.Address, key accounts.Storage
 		}
 	}
 	return nil, false
+}
+
+// findCodeEntry walks the parent chain looking for a cached codeCacheEntry
+// for addr.  Used by EXTCODESIZE / EXTCODEHASH / EXTCODECOPY op handlers
+// and their gas functions.  Each probe is a fast64 map lookup on the
+// 8-byte unique.Handle Address key.
+func (ctx *CallContext) findCodeEntry(addr accounts.Address) (*codeCacheEntry, bool) {
+	for c := ctx; c != nil; c = c.parent {
+		if entry, ok := c.codeCache[addr]; ok {
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// invalidateCodeEntry removes any cached codeCacheEntry for addr from this
+// frame and every ancestor.  Called by opCreate / opCreate2 success after
+// SetCode lands a new contract at addr — the prior cached "no code" entry
+// (if any) is now stale and a subsequent EXTCODE* must re-read from IBS.
+// Cost is bounded by the frame depth (typically 1–2).
+func (ctx *CallContext) invalidateCodeEntry(addr accounts.Address) {
+	for c := ctx; c != nil; c = c.parent {
+		delete(c.codeCache, addr)
+	}
 }
 
 // internTableSize is the size of the direct-mapped intern caches on each
@@ -258,6 +314,11 @@ func (c *CallContext) put() {
 	if c.slotCache != nil {
 		clear(c.slotCache)
 	}
+	if c.codeCache != nil {
+		clear(c.codeCache)
+	}
+	c.cachedSlotCell = nil
+	c.cachedCodeEntry = nil
 	contextPool.Put(c)
 }
 
@@ -575,6 +636,25 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				}
 			}
 		}
+		// Code-cache finaliser.  Same structure as slotCache rollup but
+		// read-only (no IBS flush — code is read via IBS.GetCode each
+		// time we miss; the cache is purely a per-frame accelerator).
+		// On success, child's entries propagate to parent so the parent
+		// inherits a warm view of post-call code reads.  On err the
+		// child's cache vanishes with the frame; any invalidations the
+		// child made on parent/ancestor entries (via invalidateCodeEntry)
+		// stay applied, but that's safe — those entries just re-cache
+		// from IBS on the next read.
+		if err == nil && len(callContext.codeCache) > 0 && callContext.parent != nil {
+			parentCodeCache := callContext.parent.codeCache
+			if parentCodeCache == nil {
+				parentCodeCache = map[accounts.Address]*codeCacheEntry{}
+				callContext.parent.codeCache = parentCodeCache
+			}
+			for addr, entry := range callContext.codeCache {
+				parentCodeCache[addr] = entry
+			}
+		}
 		// Pop this frame.
 		evm.currentCallContext = callContext.parent
 		callContext.parent = nil
@@ -608,6 +688,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		callContext.cachedKeyValid = false
 		callContext.cachedAddrValid = false
 		callContext.cachedSlotCell = nil
+		callContext.cachedCodeEntry = nil
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
