@@ -29,13 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
-	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
-	NonContractIncarnation = 0
-)
-
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)

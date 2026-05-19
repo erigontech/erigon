@@ -30,7 +30,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/state"
 )
 
 type reconPair struct {
@@ -176,9 +175,8 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 				if item.key2 == nil {
 					composite = make([]byte, 8+len(item.key1))
 				} else {
-					composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
-					binary.BigEndian.PutUint64(composite[8+len(item.key1):], state.FirstContractIncarnation)
-					copy(composite[8+len(item.key1)+8:], item.key2)
+					composite = make([]byte, 8+len(item.key1)+len(item.key2))
+					copy(composite[8+len(item.key1):], item.key2)
 				}
 				binary.BigEndian.PutUint64(composite, item.txNum)
 				copy(composite[8:], item.key1)
