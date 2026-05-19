@@ -29,11 +29,12 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
-	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type GraphQLCallResult struct {
@@ -57,19 +58,19 @@ type GraphQLAPI interface {
 
 type GraphQLAPIImpl struct {
 	*BaseAPI
-	db                  kv.TemporalRoDB
-	txPool              txpoolproto.TxpoolClient
-	allowUnprotectedTxs bool
-	eth                 EthAPI
+	db              kv.TemporalRoDB
+	eth             EthAPI
+	gasCap          uint64
+	returnDataLimit int
 }
 
-func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient, eth EthAPI, allowUnprotectedTxs bool) *GraphQLAPIImpl {
+func NewGraphQLAPI(base *BaseAPI, db kv.TemporalRoDB, eth EthAPI, gasCap uint64, returnDataLimit int) *GraphQLAPIImpl {
 	return &GraphQLAPIImpl{
-		BaseAPI:             base,
-		db:                  db,
-		txPool:              txPool,
-		allowUnprotectedTxs: allowUnprotectedTxs,
-		eth:                 eth,
+		BaseAPI:         base,
+		db:              db,
+		eth:             eth,
+		gasCap:          gasCap,
+		returnDataLimit: returnDataLimit,
 	}
 }
 
@@ -365,60 +366,71 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 }
 
 func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
-	txn, err := types.DecodeWrappedTransaction(encodedTx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if !txn.Protected() && !api.allowUnprotectedTxs {
-		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
-	}
-
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer tx.Rollback()
-
-	cc, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if txn.Protected() {
-		txnChainId := txn.GetChainID()
-		if cc.ChainID.Cmp(txnChainId.ToBig()) != 0 {
-			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", cc.ChainID, txnChainId)
-		}
-	}
-
-	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encodedTx}})
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if res.Imported[0] != txpoolproto.ImportResult_SUCCESS {
-		return txn.Hash(), fmt.Errorf("%s: %s", txpoolproto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
-	}
-
-	return txn.Hash(), nil
+	return api.eth.SendRawTransaction(ctx, encodedTx)
 }
 
 func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	data, err := api.eth.Call(ctx, args, &blockNrOrHash, nil, nil)
+
+	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		var revertErr *ethapi.RevertError
-		if errors.As(err, &revertErr) {
-			var revertData []byte
-			if errStr, ok := revertErr.ErrorData().(string); ok {
-				revertData, _ = hexutil.Decode(errStr)
-			}
-			return &GraphQLCallResult{Data: revertData, Status: 0}, nil
-		}
 		return nil, err
 	}
-	return &GraphQLCallResult{Data: data, Status: 1}, nil
+	defer roTx.Rollback()
+
+	var tx kv.TemporalTx = roTx
+	if api.filters != nil {
+		if sd := api.filters.LatestSD(); sd != nil {
+			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
+				tx = overlayTx
+			}
+		}
+	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if args.Gas == nil || uint64(*args.Gas) == 0 {
+		args.Gas = (*hexutil.Uint64)(&api.gasCap)
+	}
+
+	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header not found")
+	}
+
+	if err = api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+		return nil, err
+	}
+
+	if err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := transactions.DoCall(ctx, api.engine(), args, tx, blockNrOrHash, header, nil, nil, api.gasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	if api.returnDataLimit > 0 && len(result.ReturnData) > api.returnDataLimit {
+		return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.returnDataLimit)
+	}
+
+	if errors.Is(result.Err, vm.ErrExecutionReverted) {
+		return &GraphQLCallResult{Data: result.Revert(), GasUsed: result.ReceiptGasUsed, Status: 0}, nil
+	}
+
+	return &GraphQLCallResult{Data: result.Return(), GasUsed: result.ReceiptGasUsed, Status: 1}, nil
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {

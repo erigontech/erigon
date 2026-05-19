@@ -88,7 +88,7 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 	if err != nil {
 		return "", fmt.Errorf("invalid transaction data: %w", err)
 	}
-	hash, err := r.GraphQLAPI.SendRawTransaction(ctx, encodedTx)
+	hash, err := r.GraphQLAPI.SendRawTransaction(ctx, hexutil.Bytes(encodedTx))
 	if err != nil {
 		return "", err
 	}

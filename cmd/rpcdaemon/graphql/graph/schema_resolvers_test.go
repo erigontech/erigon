@@ -18,6 +18,8 @@ package graph
 
 import (
 	"context"
+	"errors"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -25,6 +27,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
+	ethapi "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 // TestBlockResolver_Account_InvalidAddress verifies that a malformed address
@@ -223,6 +229,289 @@ func TestRpcLogsToModel(t *testing.T) {
 	if ml.Transaction.Block == nil || ml.Transaction.Block.Hash != blockHash.Hex() {
 		t.Errorf("unexpected Transaction.Block.Hash: %v", ml.Transaction.Block)
 	}
+}
+
+// mockGraphQLAPI is a minimal stub of jsonrpc.GraphQLAPI for resolver-level tests.
+type mockGraphQLAPI struct {
+	getLogsCrit   filters.FilterCriteria
+	getLogsResult types.RPCLogs
+	getLogsErr    error
+
+	callBlockNum rpc.BlockNumber
+	callArgs     ethapi.CallArgs
+	callResult   *jsonrpc.GraphQLCallResult
+	callErr      error
+
+	sendRawTx     hexutil.Bytes
+	sendRawResult common.Hash
+	sendRawErr    error
+}
+
+func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
+	return nil, nil
+}
+func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
+	return nil, nil
+}
+func (m *mockGraphQLAPI) GetLatestBlockNumber(_ context.Context) (uint64, error) { return 0, nil }
+func (m *mockGraphQLAPI) GetChainID(_ context.Context) (*big.Int, error)         { return nil, nil }
+func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
+	return "", 0, "", nil
+}
+func (m *mockGraphQLAPI) GetAccountStorage(_ context.Context, _ common.Address, _ string, _ rpc.BlockNumber) (string, error) {
+	return "", nil
+}
+func (m *mockGraphQLAPI) GetBlockNumberForTx(_ context.Context, _ common.Hash) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (m *mockGraphQLAPI) SendRawTransaction(_ context.Context, data hexutil.Bytes) (common.Hash, error) {
+	m.sendRawTx = data
+	return m.sendRawResult, m.sendRawErr
+}
+func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*jsonrpc.GraphQLCallResult, error) {
+	m.callBlockNum = blockNumber
+	m.callArgs = args
+	return m.callResult, m.callErr
+}
+func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+	m.getLogsCrit = crit
+	return m.getLogsResult, m.getLogsErr
+}
+
+func TestBlockResolver_Logs(t *testing.T) {
+	blockHash := "0x" + strings.Repeat("aa", 32)
+	addr := "0x1234567890123456789012345678901234567890"
+	topic := "0x" + strings.Repeat("bb", 32)
+
+	t.Run("success — criteria and result", func(t *testing.T) {
+		mock := &mockGraphQLAPI{
+			getLogsResult: types.RPCLogs{
+				{Log: types.Log{
+					Address:     common.HexToAddress(addr),
+					BlockNumber: 10,
+					BlockHash:   common.HexToHash(blockHash),
+					TxHash:      common.HexToHash("0x" + strings.Repeat("cc", 32)),
+				}},
+			},
+		}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Block{Number: 10, Hash: blockHash}
+		filter := model.BlockFilterCriteria{
+			Addresses: []string{addr},
+			Topics:    [][]string{{topic}},
+		}
+
+		got, err := r.Logs(context.Background(), obj, filter)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.getLogsCrit.BlockHash == nil || mock.getLogsCrit.BlockHash.Hex() != blockHash {
+			t.Errorf("BlockHash not set correctly in crit: %v", mock.getLogsCrit.BlockHash)
+		}
+		if len(mock.getLogsCrit.Addresses) != 1 || mock.getLogsCrit.Addresses[0] != common.HexToAddress(addr) {
+			t.Errorf("Addresses not set correctly: %v", mock.getLogsCrit.Addresses)
+		}
+		if len(mock.getLogsCrit.Topics) != 1 || len(mock.getLogsCrit.Topics[0]) != 1 {
+			t.Errorf("Topics not set correctly: %v", mock.getLogsCrit.Topics)
+		}
+		if len(got) != 1 {
+			t.Errorf("expected 1 log, got %d", len(got))
+		}
+	})
+
+	t.Run("error from GetLogs propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{getLogsErr: errors.New("db error")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), &model.Block{Hash: blockHash}, model.BlockFilterCriteria{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid address returns error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), &model.Block{Hash: blockHash}, model.BlockFilterCriteria{
+			Addresses: []string{"not-an-address"},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid address, got nil")
+		}
+	})
+
+	t.Run("invalid topic returns error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), &model.Block{Hash: blockHash}, model.BlockFilterCriteria{
+			Topics: [][]string{{"not-hex"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid topic, got nil")
+		}
+	})
+}
+
+func TestBlockResolver_Call(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	t.Run("success — args and result", func(t *testing.T) {
+		mock := &mockGraphQLAPI{
+			callResult: &jsonrpc.GraphQLCallResult{
+				Data:    hexutil.Bytes{0xde, 0xad},
+				GasUsed: 21000,
+				Status:  1,
+			},
+		}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		obj := &model.Block{Number: 5}
+		got, err := r.Call(context.Background(), obj, model.CallData{To: &toAddr})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.callBlockNum != 5 {
+			t.Errorf("block number not forwarded: got %d", mock.callBlockNum)
+		}
+		if mock.callArgs.To == nil || *mock.callArgs.To != common.HexToAddress(toAddr) {
+			t.Errorf("To address not set: %v", mock.callArgs.To)
+		}
+		if got.GasUsed != 21000 {
+			t.Errorf("GasUsed: want 21000, got %d", got.GasUsed)
+		}
+		if got.Status != 1 {
+			t.Errorf("Status: want 1, got %d", got.Status)
+		}
+		if got.Data != hexutil.Encode([]byte{0xde, 0xad}) {
+			t.Errorf("Data: unexpected value %q", got.Data)
+		}
+	})
+
+	t.Run("revert — status 0 and gas used", func(t *testing.T) {
+		mock := &mockGraphQLAPI{
+			callResult: &jsonrpc.GraphQLCallResult{
+				Data:    hexutil.Bytes{0x08, 0xc3, 0x79, 0xa0},
+				GasUsed: 15000,
+				Status:  0,
+			},
+		}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.Call(context.Background(), &model.Block{Number: 1}, model.CallData{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Status != 0 {
+			t.Errorf("Status: want 0, got %d", got.Status)
+		}
+		if got.GasUsed != 15000 {
+			t.Errorf("GasUsed: want 15000, got %d", got.GasUsed)
+		}
+	})
+
+	t.Run("error from Call propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{callErr: errors.New("execution error")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Call(context.Background(), &model.Block{Number: 1}, model.CallData{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid to address returns error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		bad := "not-an-address"
+		_, err := r.Call(context.Background(), &model.Block{Number: 1}, model.CallData{To: &bad})
+		if err == nil {
+			t.Fatal("expected error for invalid to address, got nil")
+		}
+	})
+}
+
+func TestQueryResolver_Logs(t *testing.T) {
+	t.Run("fromBlock and toBlock set correctly", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		from := uint64(100)
+		to := uint64(200)
+		_, err := r.Logs(context.Background(), model.FilterCriteria{FromBlock: &from, ToBlock: &to})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.getLogsCrit.FromBlock == nil || mock.getLogsCrit.FromBlock.Uint64() != 100 {
+			t.Errorf("FromBlock: want 100, got %v", mock.getLogsCrit.FromBlock)
+		}
+		if mock.getLogsCrit.ToBlock == nil || mock.getLogsCrit.ToBlock.Uint64() != 200 {
+			t.Errorf("ToBlock: want 200, got %v", mock.getLogsCrit.ToBlock)
+		}
+	})
+
+	t.Run("nil fromBlock and toBlock not set", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), model.FilterCriteria{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.getLogsCrit.FromBlock != nil || mock.getLogsCrit.ToBlock != nil {
+			t.Error("expected nil FromBlock and ToBlock when not provided")
+		}
+	})
+
+	t.Run("error from GetLogs propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{getLogsErr: errors.New("storage error")}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), model.FilterCriteria{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid address returns error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Logs(context.Background(), model.FilterCriteria{Addresses: []string{"bad"}})
+		if err == nil {
+			t.Fatal("expected error for invalid address, got nil")
+		}
+	})
+}
+
+func TestMutationResolver_SendRawTransaction(t *testing.T) {
+	validHex := "0x" + strings.Repeat("ab", 20)
+	wantHash := common.HexToHash("0x" + strings.Repeat("cc", 32))
+
+	t.Run("success — decodes hex and returns hash", func(t *testing.T) {
+		mock := &mockGraphQLAPI{sendRawResult: wantHash}
+		r := &mutationResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.SendRawTransaction(context.Background(), validHex)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != wantHash.Hex() {
+			t.Errorf("hash: want %q, got %q", wantHash.Hex(), got)
+		}
+		wantBytes, _ := hexutil.Decode(validHex)
+		if string(mock.sendRawTx) != string(wantBytes) {
+			t.Errorf("decoded bytes not forwarded correctly")
+		}
+	})
+
+	t.Run("invalid hex returns error", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &mutationResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.SendRawTransaction(context.Background(), "not-hex")
+		if err == nil {
+			t.Fatal("expected error for invalid hex, got nil")
+		}
+	})
+
+	t.Run("error from SendRawTransaction propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{sendRawErr: errors.New("nonce too low")}
+		r := &mutationResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.SendRawTransaction(context.Background(), validHex)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
 }
 
 func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
