@@ -1872,6 +1872,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil && previous.selfdestructed {
+		// resetObjectChange.dirtied() returns false, so without this the
+		// parallel worker's MakeWriteSet drops the resurrect write
+		// (test_double_kill / EIP-6780 family on the parallel shard).
+		// Confined to CreateAccount — the GetOrNewStateObject AddBalance
+		// path must NOT mark dirty here (regresses TestSelfDestructReceive).
+		sdb.journal.dirty(addr)
+	}
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}

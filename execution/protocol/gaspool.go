@@ -23,8 +23,6 @@ import (
 	"fmt"
 	"math"
 	"sync"
-
-	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // GasPool tracks block-level gas availability across the two EIP-8037 dimensions.
@@ -169,22 +167,19 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 	return nil
 }
 
-// CheckBlockGasInclusion verifies the EIP-8037 per-dimension inclusion
-// rule against gp. Called from TxnExecutor.preCheck (serial path) and
-// parallelExecutor finalize (parallel path, where preCheck sees a
-// per-tx pool and so the check there is a no-op).
-func CheckBlockGasInclusion(gp *GasPool, txGas uint64, isAmsterdam bool) error {
+// CheckBlockGasInclusion verifies that the supplied per-dimension gas
+// values fit in the remaining EIP-8037 reservoirs. Callers compute the
+// dimension contributions for their context: pre-execution uses
+// min(MaxTxnGasLimit, tx.gas) and tx.gas; post-execution uses the
+// realised BlockRegularGasUsed and BlockStateGasUsed.
+func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
 	if gp == nil {
 		return nil
 	}
-	regularContribution := txGas
-	if isAmsterdam {
-		regularContribution = min(regularContribution, params.MaxTxnGasLimit)
-	}
-	if regularContribution > gp.RegularGasAvailable() {
+	if regularGas > gp.RegularGasAvailable() {
 		return ErrGasLimitReached
 	}
-	if isAmsterdam && txGas > gp.StateGasAvailable() {
+	if stateGas > gp.StateGasAvailable() {
 		return ErrGasLimitReached
 	}
 	return nil
