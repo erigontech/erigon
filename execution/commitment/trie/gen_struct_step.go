@@ -48,9 +48,9 @@ type structInfoReceiver interface {
 	setProofElement(pe *proofElement)
 }
 
-// HashCollector2 gets called whenever there might be a need to create intermediate hash record
-type HashCollector2 func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
-type StorageHashCollector2 func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+// HashCollector gets called whenever there might be a need to create intermediate hash record
+type HashCollector func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+type StorageHashCollector func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -108,7 +108,7 @@ func GenStructStepEx(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	h HashCollector2,
+	h HashCollector,
 	data GenStructStepData,
 	groups []uint16,
 	hasTree []uint16,
@@ -342,7 +342,7 @@ func GenStructStep(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	h HashCollector2,
+	h HashCollector,
 	data GenStructStepData,
 	groups []uint16,
 	hasTree []uint16,
