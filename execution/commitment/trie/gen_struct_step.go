@@ -102,9 +102,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 
-// GenStructStepEx is extended to support optional generation of an Account Proof during trie_root.go CalcTrieRoot().
-// The wrapper below calls it with nil/false defaults so that other callers do not need to be modified.
-func GenStructStepEx(
+func GenStructStep(
 	retain func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
@@ -114,8 +112,6 @@ func GenStructStepEx(
 	hasTree []uint16,
 	hasHash []uint16,
 	trace bool,
-	retainProof func(prefix []byte) *proofElement,
-	cutoff bool,
 ) ([]uint16, []uint16, []uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
@@ -148,20 +144,6 @@ func GenStructStepEx(
 		}
 		//fmt.Printf("groups is now %x,%d,%b\n", extraDigit, maxLen, groups)
 
-		// retainIfProving will call setProofElement to a new proof element
-		// it is the caller's responsibility set the proof element to nil after the
-		// next element invocation. This function returns whether a proof is needed
-		// for this node.
-		retainIfProving := func(key []byte) bool {
-			if retainProof != nil {
-				if pe := retainProof(key); pe != nil {
-					e.setProofElement(pe)
-					return true
-				}
-			}
-			return false
-		}
-
 		if !buildExtensions {
 			switch v := data.(type) {
 			case *GenStructStepHashData:
@@ -181,13 +163,9 @@ func GenStructStepEx(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
@@ -196,13 +174,9 @@ func GenStructStepEx(
 				}
 			case *GenStructStepLeafData:
 				/* building leafs */
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
@@ -243,13 +217,9 @@ func GenStructStepEx(
 					fmt.Printf("Extension: %x, %b, %b, %b\n", curr[remainderStart:remainderStart+remainderLen], hasHash, hasTree, groups)
 				}
 				/* building extensions */
-				proving := retainIfProving(curr[:remainderStart])
-				if proving || retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) {
 					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
 						return nil, nil, nil, err
-					}
-					if proving {
-						e.setProofElement(nil)
 					}
 				} else {
 					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
@@ -299,13 +269,9 @@ func GenStructStepEx(
 			if trace {
 				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
-			proving := retainIfProving(curr[:maxLen])
-			if proving || retain(curr[:maxLen]) {
+			if retain(curr[:maxLen]) {
 				if err := e.branch(groups[maxLen]); err != nil {
 					return nil, nil, nil, err
-				}
-				if proving {
-					e.setProofElement(nil)
 				}
 			} else {
 				if err := e.branchHash(groups[maxLen]); err != nil {
@@ -337,17 +303,4 @@ func GenStructStepEx(
 		}
 	}
 	return nil, nil, nil, nil
-}
-func GenStructStep(
-	retain func(prefix []byte) bool,
-	curr, succ []byte,
-	e structInfoReceiver,
-	h HashCollector,
-	data GenStructStepData,
-	groups []uint16,
-	hasTree []uint16,
-	hasHash []uint16,
-	trace bool,
-) ([]uint16, []uint16, []uint16, error) {
-	return GenStructStepEx(retain, curr, succ, e, h, data, groups, hasTree, hasHash, trace, nil, false)
 }
