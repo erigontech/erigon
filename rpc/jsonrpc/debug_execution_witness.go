@@ -497,12 +497,16 @@ type witnessBlockInfo struct {
 type ExecutionWitnessResult struct {
 	// State contains the list of RLP-encoded trie nodes in the witness trie
 	State []hexutil.Bytes `json:"state"`
-	// Codes is the list of accessed/created bytecodes during block execution
+	// Codes is the list of bytecodes accessed via GetCode/GetCodeSize during block execution,
+	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
+	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
 	// Keys is always null (reserved for future use, included for Geth compatibility)
 	Keys []hexutil.Bytes `json:"keys"`
 	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
-	// Always includes the parent block header; also includes any blocks accessed via BLOCKHASH.
+	// For blocks that touch state, always includes the parent block header plus any blocks accessed
+	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
+	// before headers are collected.
 	Headers []map[string]any `json:"headers,omitempty"`
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
