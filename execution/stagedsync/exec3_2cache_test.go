@@ -184,7 +184,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xBEEF"))
 
 	original := &accounts.Account{}
-	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3, Incarnation: 1}
+	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3}
 	err := collector.UpdateAccountData(addr, original, account)
 	require.NoError(t, err)
 

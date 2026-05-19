@@ -92,10 +92,9 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		require.Equal(t, length.Hash, n)
 
 		acc := accounts.Account{
-			Nonce:       txNum,
-			Balance:     *uint256.NewInt(1000000000000),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    txNum,
+			Balance:  *uint256.NewInt(1000000000000),
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
@@ -247,10 +246,9 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		keys[txNum-1] = append(addr, loc...)
 
 		acc := accounts.Account{
-			Nonce:       1,
-			Balance:     uint256.Int{},
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    1,
+			Balance:  uint256.Int{},
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 
@@ -332,10 +330,9 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
-			Nonce:       1,
-			Balance:     uint256.Int{},
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    1,
+			Balance:  uint256.Int{},
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
@@ -683,10 +680,9 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
 		acc := accounts.Account{
-			Nonce:       1,
-			Balance:     *uint256.NewInt(txNum * 1e6),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    1,
+			Balance:  *uint256.NewInt(txNum * 1e6),
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
 		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
@@ -1026,10 +1022,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 		switch {
 		case r <= 33:
 			acc := accounts.Account{
-				Nonce:       txNum,
-				Balance:     *uint256.NewInt(txNum * 100_000),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 100_000),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
@@ -1077,10 +1072,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
 				acc := accounts.Account{
-					Nonce:       txNum,
-					Balance:     *uint256.NewInt(txNum * 100_000),
-					CodeHash:    accounts.EmptyCodeHash,
-					Incarnation: 0,
+					Nonce:    txNum,
+					Balance:  *uint256.NewInt(txNum * 100_000),
+					CodeHash: accounts.EmptyCodeHash,
 				}
 				buf := accounts.SerialiseV3(&acc)
 				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)

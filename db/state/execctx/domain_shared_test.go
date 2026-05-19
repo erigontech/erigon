@@ -119,10 +119,9 @@ Loop:
 		txNum := uint64(i)
 		for accs := 0; accs < 256; accs++ {
 			acc := accounts3.Account{
-				Nonce:       txNum,
-				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)
@@ -927,10 +926,9 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		txNum := uint64(i)
 		for accs := 0; accs < noaccounts; accs++ {
 			acc := accounts3.Account{
-				Nonce:       uint64(i),
-				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    uint64(i),
+				Balance:  *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			v := accounts3.SerialiseV3(&acc)
 			k0[0] = byte(accs)

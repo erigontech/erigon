@@ -235,10 +235,9 @@ func generateAccountUpdates(r *rndGen, totalTx, keyTxsLimit uint64) []upd {
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 		jitter := r.IntN(10e7)
 		acc := accounts3.Account{
-			Nonce:       i,
-			Balance:     *uint256.NewInt(i*10e4 + uint64(jitter)),
-			CodeHash:    accounts3.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    i,
+			Balance:  *uint256.NewInt(i*10e4 + uint64(jitter)),
+			CodeHash: accounts3.EmptyCodeHash,
 		}
 		value := accounts3.SerialiseV3(&acc)
 
@@ -365,10 +364,9 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 		switch {
 		case r <= 33:
 			acc := accounts3.Account{
-				Nonce:       txNum,
-				Balance:     *uint256.NewInt(txNum * 100_000),
-				CodeHash:    accounts3.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    txNum,
+				Balance:  *uint256.NewInt(txNum * 100_000),
+				CodeHash: accounts3.EmptyCodeHash,
 			}
 			buf := accounts3.SerialiseV3(&acc)
 			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
@@ -415,10 +413,9 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 			if prev == nil {
 				prevKeys[string(key)] = struct{}{}
 				acc := accounts3.Account{
-					Nonce:       txNum,
-					Balance:     *uint256.NewInt(txNum * 100_000),
-					CodeHash:    accounts3.EmptyCodeHash,
-					Incarnation: 0,
+					Nonce:    txNum,
+					Balance:  *uint256.NewInt(txNum * 100_000),
+					CodeHash: accounts3.EmptyCodeHash,
 				}
 				buf := accounts3.SerialiseV3(&acc)
 				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)

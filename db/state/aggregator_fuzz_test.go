@@ -77,10 +77,9 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
-				Nonce:       1,
-				Balance:     uint256.Int{},
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    1,
+				Balance:  uint256.Int{},
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
@@ -188,10 +187,9 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 		}
 		for txNum := uint64(1); txNum <= txs; txNum++ {
 			acc := accounts.Account{
-				Nonce:       1,
-				Balance:     *uint256.NewInt(txNum * 1e6),
-				CodeHash:    accounts.EmptyCodeHash,
-				Incarnation: 0,
+				Nonce:    1,
+				Balance:  *uint256.NewInt(txNum * 1e6),
+				CodeHash: accounts.EmptyCodeHash,
 			}
 			buf := accounts.SerialiseV3(&acc)
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)

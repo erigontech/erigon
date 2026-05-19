@@ -459,10 +459,9 @@ func TestCommit(t *testing.T) {
 	blockNum, txNum := uint64(0), uint64(0)
 
 	acc := accounts.Account{
-		Nonce:       0,
-		Balance:     u256.U64(7),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  u256.U64(7),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	buf := accounts.SerialiseV3(&acc)
 

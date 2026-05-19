@@ -135,10 +135,9 @@ func TestNonceFromAddress(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -364,10 +363,9 @@ func TestMultipleAuthorizations(t *testing.T) {
 	require.NoError(t, err)
 
 	acc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(10 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(10 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -485,10 +483,9 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -588,10 +585,9 @@ func TestReverseNonces(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -703,10 +699,9 @@ func TestTxnPoke(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -974,10 +969,9 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -1114,10 +1108,9 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 	var goodAddr [20]byte
 	goodAddr[0] = 2
 	goodAcc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	writeTestSenderState(t, ctx, coreDB, logger, goodAddr, accounts3.SerialiseV3(&goodAcc), 1)
 
@@ -1170,10 +1163,9 @@ func TestBlobTxnReplacement(t *testing.T) {
 
 	// Add 1 eth to the user account, as a part of change
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 
@@ -1428,10 +1420,9 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       2,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    2,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -1529,10 +1520,9 @@ func TestBlobSlots(t *testing.T) {
 
 	// Add 1 eth to the user account, as a part of change
 	acc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 
@@ -1617,10 +1607,9 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 		},
 	}
 	acc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -1745,10 +1734,9 @@ func TestGetBlobs(t *testing.T) {
 
 	// Add 1 eth to the user account, as a part of change
 	acc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 
@@ -1819,10 +1807,9 @@ func TestGasLimitChanged(t *testing.T) {
 	var addr [20]byte
 	addr[0] = 1
 	acc := accounts3.Account{
-		Nonce:       0,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 1,
+		Nonce:    0,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	tx, err := db.BeginRw(ctx)
@@ -1914,10 +1901,9 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 		var addr [20]byte
 		addr[0] = uint8(i + 1)
 		acc := accounts3.Account{
-			Nonce:       0,
-			Balance:     *uint256.NewInt(1 * common.Ether),
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 1,
+			Nonce:    0,
+			Balance:  *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		v := accounts3.SerialiseV3(&acc)
 		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
@@ -1987,10 +1973,9 @@ func TestZombieQueuedEviction(t *testing.T) {
 
 	// Set sender's on-chain nonce = 5
 	acc := accounts3.Account{
-		Nonce:       5,
-		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
-		Incarnation: 0,
+		Nonce:    5,
+		Balance:  *uint256.NewInt(1 * common.Ether),
+		CodeHash: accounts.EmptyCodeHash,
 	}
 	v := accounts3.SerialiseV3(&acc)
 	change := &remoteproto.StateChangeBatch{
@@ -2153,7 +2138,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 		req.NoError(werr)
 		a := accounts3.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
-			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		req.NoError(sd.DomainPut(kv.AccountsDomain, tx, addr1[:], accounts3.SerialiseV3(&a), txNum, nil))
 		req.NoError(sd.Flush(ctx, tx))
@@ -2164,7 +2149,7 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 	serialiseAcc := func(nonce uint64) []byte {
 		a := accounts3.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
-			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		return accounts3.SerialiseV3(&a)
 	}
@@ -2286,7 +2271,7 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	serialiseAcc := func(nonce uint64) []byte {
 		a := accounts3.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
-			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+			CodeHash: accounts.EmptyCodeHash,
 		}
 		return accounts3.SerialiseV3(&a)
 	}

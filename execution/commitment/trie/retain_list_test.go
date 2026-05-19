@@ -75,10 +75,9 @@ func TestProofRetainerConstruction(t *testing.T) {
 	pr, err := NewProofRetainer(
 		common.Address{0x1},
 		&accounts.Account{
-			Nonce:       2,
-			Balance:     u256.U64(6e9),
-			CodeHash:    accounts.InternCodeHash(common.Hash{3}),
-			Incarnation: 3,
+			Nonce:    2,
+			Balance:  u256.U64(6e9),
+			CodeHash: accounts.InternCodeHash(common.Hash{3}),
 		},
 		[]common.Hash{{1}, {2}, {3}},
 		rl,

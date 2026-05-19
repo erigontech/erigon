@@ -207,9 +207,8 @@ func fAddr(name string) accounts.Address {
 
 func fMakeAccount(balance uint64, nonce uint64) *accounts.Account {
 	return &accounts.Account{
-		Balance:     *uint256.NewInt(balance),
-		Nonce:       nonce,
-		Incarnation: 1,
+		Balance: *uint256.NewInt(balance),
+		Nonce:   nonce,
 	}
 }
 
