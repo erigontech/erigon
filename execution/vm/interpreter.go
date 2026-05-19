@@ -128,6 +128,20 @@ type slotCacheKey struct {
 	key  accounts.StorageKey
 }
 
+// findSlotCell walks the parent chain from this frame upward looking for
+// a cached *WriteCell for (addr, key).  Returns (cell, true) on hit, the
+// cell's containing frame for caller's use, or (nil, false) on miss.
+// Used by opSload, opSstore (for prev/tracer), and gasSStore* (for
+// 'current' value in EIP-2200/2929 gas accounting).
+func (ctx *CallContext) findSlotCell(k slotCacheKey) (*state.WriteCell[uint256.Int], bool) {
+	for c := ctx; c != nil; c = c.parent {
+		if cell, ok := c.slotCache[k]; ok {
+			return cell, true
+		}
+	}
+	return nil, false
+}
+
 // internTableSize is the size of the direct-mapped intern caches on each
 // CallContext. 16 slots covers the typical EVM call-frame working set of
 // hot keys/addresses; collisions on the first-uint64 index resolve via
@@ -506,21 +520,37 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}
-		// Slot-cache rollup: on a normal return (no error), the child's
-		// reads + writes propagate into the parent's cache so the parent
-		// inherits a warm view of the post-call storage.  Pointer copy —
-		// the same *WriteCell[T] travels from child to parent.  On any
-		// error (REVERT, OOG, stack-underflow, etc.) the snapshot
-		// mechanism in the caller's opCall rewinds IBS state, and the
-		// child's cache is discarded — parent's cache is unchanged.
-		if err == nil && callContext.parent != nil && len(callContext.slotCache) > 0 {
-			parentCache := callContext.parent.slotCache
-			if parentCache == nil {
-				parentCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
-				callContext.parent.slotCache = parentCache
-			}
-			for k, cell := range callContext.slotCache {
-				parentCache[k] = cell
+		// Slot-cache finaliser.
+		//
+		// Inner frame (parent != nil):
+		//   On success, child's cells propagate to the parent's cache by
+		//   pointer copy so the parent inherits a warm post-call view.
+		//   On err the snapshot in the caller's opCall rewinds IBS state,
+		//   and the child's cache is discarded — parent's cache untouched.
+		//
+		// Outermost frame (parent == nil):
+		//   On success, the cache is the only record of the call's storage
+		//   writes (opSstore intentionally skipped ibs.SetState).  Flush
+		//   each cell back into IBS so FinalizeTx + parallel-execution
+		//   conflict detection see the writes.  On err, drop the cache —
+		//   no IBS journal entry was ever made, so nothing to revert.
+		if err == nil && len(callContext.slotCache) > 0 {
+			if callContext.parent != nil {
+				parentCache := callContext.parent.slotCache
+				if parentCache == nil {
+					parentCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+					callContext.parent.slotCache = parentCache
+				}
+				for k, cell := range callContext.slotCache {
+					parentCache[k] = cell
+				}
+			} else {
+				ibs := evm.intraBlockState
+				for k, cell := range callContext.slotCache {
+					if ferr := ibs.FlushSlotCacheWrite(k.addr, k.key, cell.Value); ferr != nil && err == nil {
+						err = ferr
+					}
+				}
 			}
 		}
 		// Pop this frame.

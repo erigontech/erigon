@@ -51,7 +51,16 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			cost    = uint64(0)
 		)
 
-		current, _ = evm.IntraBlockState().GetState(callContext.Address(), slot)
+		// Walk the slot cache first — opSstore (Step 2b) skips ibs.SetState
+		// and writes only into the cache, so for repeated SSTOREs on the same
+		// slot the "current" value lives in the cache, not IBS.  On miss
+		// (first access this frame chain), fall back to IBS for the committed
+		// or read-back value.
+		if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: slot}); ok {
+			current = cell.Value
+		} else {
+			current, _ = evm.IntraBlockState().GetState(callContext.Address(), slot)
+		}
 		// If the caller cannot afford the cost, this change will be rolled back
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
 			cost = params.ColdSloadCostEIP2929

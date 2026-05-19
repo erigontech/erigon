@@ -1242,6 +1242,22 @@ func (sdb *IntraBlockState) SetState(addr accounts.Address, key accounts.Storage
 	return sdb.setState(addr, key, value, false)
 }
 
+// FlushSlotCacheWrite flushes a single slot-cache cell back into IBS at the
+// outermost EVM-frame return.  Equivalent to SetState — produces the full
+// storageChange journal entry, fires the OnStorageChange tracer hook, and
+// records versionWritten (MarkAddressAccess + parallel-execution write set).
+// The cache exists to batch and skip the journal/versionMap work *during*
+// EVM execution; correctness paths post-EVM (eth_call snapshot/revert,
+// gas estimation, FinalizeTx, parallel exec conflict detection) require
+// the full SetState side-effects, so we apply them once per cell here.
+//
+// NOTE: this path makes the OnStorageChange tracer fire at flush time
+// instead of at each SSTORE PC.  Tracer-at-opcode is a follow-up
+// (per-opcode tracing refactor).
+func (sdb *IntraBlockState) FlushSlotCacheWrite(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
+	return sdb.setState(addr, key, value, false)
+}
+
 func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool) error {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value.Hex())

@@ -794,13 +794,9 @@ func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err e
 	addr := scope.Contract.Address()
 	key := scope.peekStorageKey()
 	cacheKey := slotCacheKey{addr: addr, key: key}
-	// Walk the frame chain — every ancestor that has rolled-up entries from
-	// successful child frames carries them down for reuse here.
-	for c := scope; c != nil; c = c.parent {
-		if cell, ok := c.slotCache[cacheKey]; ok {
-			*loc = cell.Value
-			return pc, nil, nil
-		}
+	if cell, ok := scope.findSlotCell(cacheKey); ok {
+		*loc = cell.Value
+		return pc, nil, nil
 	}
 	val, err := evm.IntraBlockState().GetState(addr, key)
 	if err != nil {
@@ -828,6 +824,12 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	val := scope.Stack.pop()
 	addr := scope.Contract.Address()
 	cacheKey := slotCacheKey{addr: addr, key: key}
+
+	// Write into the *local* frame's slotCache only — never mutate an
+	// ancestor's cell directly.  If a child mutated its parent's cell and
+	// then erred, the parent's pre-call value would be lost; the rollup
+	// logic relies on "child's cells are discarded on err / pointer-copied
+	// up on success" and that requires the cell to live in the child.
 	if existing, ok := scope.slotCache[cacheKey]; ok {
 		existing.Value = val
 	} else {
@@ -836,7 +838,14 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 		scope.slotCache[cacheKey] = &state.WriteCell[uint256.Int]{Value: val}
 	}
-	return pc, nil, evm.IntraBlockState().SetState(addr, key, val)
+	// ibs.SetState is intentionally skipped here: cache is the source of
+	// truth for the duration of execution.  The outermost-frame defer in
+	// Run batches the cells back into IBS via FlushSlotCacheWrite (which
+	// produces journal entries, fires OnStorageChange, and runs
+	// versionWritten) when err == nil at parent == nil.  On err the
+	// cache is discarded — no journal entry was ever made, so nothing
+	// to revert.
+	return pc, nil, nil
 }
 
 func stSstore(_ uint64, scope *CallContext) string {

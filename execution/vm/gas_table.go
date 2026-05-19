@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
@@ -108,7 +110,12 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	}
 	value := callContext.Stack.Back(1)
 	key := callContext.peekStorageKey()
-	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
+	var current uint256.Int
+	if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: key}); ok {
+		current = cell.Value
+	} else {
+		current, _ = evm.IntraBlockState().GetState(callContext.Address(), key)
+	}
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
@@ -197,7 +204,12 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value := callContext.Stack.Back(1)
 	key := callContext.peekStorageKey()
-	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
+	var current uint256.Int
+	if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: key}); ok {
+		current = cell.Value
+	} else {
+		current, _ = evm.IntraBlockState().GetState(callContext.Address(), key)
+	}
 
 	if current.Eq(value) { // noop (1)
 		return mdgas.MdGas{Regular: params.SloadGasEIP2200}, nil
