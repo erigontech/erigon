@@ -1050,23 +1050,6 @@ type BlockStateCache struct {
 	committedAccounts map[accounts.Address]*accounts.Account
 	committedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
 
-	// committedCode is the pre-block code per address — populated at
-	// block start by PrewarmBlockStateCacheFromBAL reading
-	// cache.StateCache.CodeDomain.  IBS.GetCode / GetCodeSize /
-	// GetCodeHash consult this before the versionedReadCore chain to
-	// short-circuit cold EXTCODE* and CALL-target code loads.
-	//
-	// committedCodeByHash is the same data deduplicated by Ethereum
-	// codeHash, so the many-addresses-share-one-code pattern (proxies,
-	// factory clones, ERC-20 token deployments) only stores the bytes
-	// once.  A PrewarmBlockStateCacheFromBAL miss on the addr key can
-	// still hit via the hash key once the account's codeHash is known.
-	//
-	// Nil-value entry = "this address has no code" (EOA / non-existent
-	// / empty-code account) — a positive answer, not a miss.
-	committedCode       map[accounts.Address][]byte
-	committedCodeByHash map[accounts.CodeHash][]byte
-
 	// current holds the latest state including intra-block writes.
 	// Updated by WriteAccount/WriteStorage. Read by block finalize.
 	// At block boundary, dirty entries are flushed to SharedDomains.
@@ -1120,13 +1103,11 @@ type bcWriteOp struct {
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		committedAccounts:   make(map[accounts.Address]*accounts.Account),
-		committedStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		committedCode:       make(map[accounts.Address][]byte),
-		committedCodeByHash: make(map[accounts.CodeHash][]byte),
-		currentAccounts:     make(map[accounts.Address][]byte),
-		currentStorage:      make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentCode:         make(map[accounts.Address][]byte),
+		committedAccounts: make(map[accounts.Address]*accounts.Account),
+		committedStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentAccounts:   make(map[accounts.Address][]byte),
+		currentStorage:    make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentCode:       make(map[accounts.Address][]byte),
 	}
 }
 
@@ -1169,41 +1150,6 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 		c.committedStorage[addr] = slots
 	}
 	slots[key] = val
-	c.mu.Unlock()
-}
-
-// GetCommittedCode returns the pre-block code bytes for addr, or
-// (nil, false) on miss.  A returned (nil, true) means "this address has
-// no code" (EOA / non-existent / empty-code), which is a positive answer
-// the caller can use directly without falling through to IBS.
-func (c *BlockStateCache) GetCommittedCode(addr accounts.Address) ([]byte, bool) {
-	c.mu.RLock()
-	code, ok := c.committedCode[addr]
-	c.mu.RUnlock()
-	return code, ok
-}
-
-// GetCommittedCodeByHash returns code bytes by Ethereum codeHash for a
-// many-addrs-one-code (proxy / factory clone) deduplication.  Same
-// semantics as GetCommittedCode.
-func (c *BlockStateCache) GetCommittedCodeByHash(hash accounts.CodeHash) ([]byte, bool) {
-	c.mu.RLock()
-	code, ok := c.committedCodeByHash[hash]
-	c.mu.RUnlock()
-	return code, ok
-}
-
-// PutCommittedCode caches pre-block code under both addr and codeHash
-// keys.  Pass hash = accounts.ZeroCodeHash (or nil-valued zero) to
-// skip the hash layer when the caller doesn't have a codeHash (e.g. a
-// declared-empty BAL entry).  Nil code is preserved as "this address
-// has no code" — a positive cache entry.
-func (c *BlockStateCache) PutCommittedCode(addr accounts.Address, hash accounts.CodeHash, code []byte) {
-	c.mu.Lock()
-	c.committedCode[addr] = code
-	if hash != (accounts.CodeHash{}) {
-		c.committedCodeByHash[hash] = code
-	}
 	c.mu.Unlock()
 }
 
@@ -1463,47 +1409,6 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 		}
 	}
 	return v, ok, nil
-}
-
-// ReadAccountCode consults the per-block BlockStateCache.committedCode
-// (populated by the BAL prewarm at block start) before falling through
-// to the embedded ReaderV3's SD read.  On a fall-through hit we
-// backfill the committedCode entry so subsequent reads on the same
-// addr within this block skip the SD probe.  Nil-valued cache entries
-// are positive answers ("this address has no code") — preserved across
-// the round-trip.
-func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	if r.blockCache != nil {
-		if code, ok := r.blockCache.GetCommittedCode(address); ok {
-			return code, nil
-		}
-	}
-	code, err := r.ReaderV3.ReadAccountCode(address)
-	if err != nil {
-		return nil, err
-	}
-	if r.blockCache != nil {
-		// Cache the result (including nil for "no code") so this address
-		// short-circuits next time within the block.  The codeHash is
-		// not known here without a sibling account read; pass zero hash
-		// to skip the hash-keyed layer — committedCodeByHash is only
-		// populated by PrewarmBlockStateCacheFromBAL where the codeHash
-		// is available from the account.
-		r.blockCache.PutCommittedCode(address, accounts.CodeHash{}, code)
-	}
-	return code, nil
-}
-
-// ReadAccountCodeSize prefers a length-only lookup when the per-block
-// cache has the bytes (so EXTCODESIZE / EXTCODEHASH don't materialise
-// large code slices).  Falls through to ReaderV3 otherwise.
-func (r *CachedReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r.blockCache != nil {
-		if code, ok := r.blockCache.GetCommittedCode(address); ok {
-			return len(code), nil
-		}
-	}
-	return r.ReaderV3.ReadAccountCodeSize(address)
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
