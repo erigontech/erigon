@@ -199,11 +199,7 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
 	results := make([]testResult, 0, len(stateTests))
 
-	// One temp datadir + DB per file; per-subtest isolation comes from a
-	// fresh write tx that is always rolled back. Mirrors the Go-test pattern
-	// in execution/tests/state_test.go and avoids re-opening MDBX (and its
-	// aggregator) for every subtest, which dominated wall time on
-	// short-EVM-work subtests.
+	// One temp datadir & DB per file; per-subtest isolation comes from tx rollback.
 	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
 	if err != nil {
 		return nil, err
