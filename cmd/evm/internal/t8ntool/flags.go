@@ -87,7 +87,7 @@ var (
 		Usage: "`stdin` or file name of where to find the transactions to apply.",
 		Value: "txs.json",
 	}
-	ChainIDFlag = cli.Int64Flag{
+	ChainIDFlag = cli.Uint64Flag{
 		Name:  "state.chainid",
 		Usage: "ChainID to use",
 		Value: 1,

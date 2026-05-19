@@ -33,8 +33,6 @@ var handlers = map[string]handle{
 	"*bool":               boolPtrHandle,
 	"uint64":              uintHandle,
 	"*uint64":             uintPtrHandle,
-	"big.Int":             bigIntHandle,
-	"*big.Int":            bigIntPtrHandle,
 	"uint256.Int":         uint256Handle,
 	"*uint256.Int":        uint256PtrHandle,
 	"types.BlockNonce":    blockNonceHandle,

@@ -99,10 +99,9 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
-		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
 		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
 			Block:     block,
-			TD:        td,
+			TD:        chainReader.GetTd(block.ParentHash(), block.NumberU64()-1),
 			Finalized: chainReader.CurrentFinalizedHeader(),
 			Safe:      chainReader.CurrentSafeHeader(),
 		})

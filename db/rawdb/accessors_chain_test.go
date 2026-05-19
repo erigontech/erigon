@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"math/big"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -616,7 +615,7 @@ func TestTdStorage(t *testing.T) {
 	defer tx.Rollback()
 
 	// Create a test TD to move around the database and make sure it's really new
-	hash, td := common.Hash{}, big.NewInt(314)
+	hash, td := common.Hash{}, uint256.NewInt(314)
 	entry, err := rawdb.ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
@@ -625,7 +624,7 @@ func TestTdStorage(t *testing.T) {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
-	err = rawdb.WriteTd(tx, hash, 0, td)
+	err = rawdb.WriteTd(tx, hash, 0, *td)
 	if err != nil {
 		t.Fatalf("WriteTd failed: %v", err)
 	}
