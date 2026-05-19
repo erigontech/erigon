@@ -791,6 +791,13 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
+	// Hand-off from gasSLoadEIP2929: if the gas function already looked the
+	// slot up in the cache and stashed the cell pointer, consume it here
+	// and skip a second findSlotCell map probe.
+	if cell := scope.cachedSlotCell; cell != nil {
+		*loc = cell.Value
+		return pc, nil, nil
+	}
 	addr := scope.Contract.Address()
 	key := scope.peekStorageKey()
 	cacheKey := slotCacheKey{addr: addr, key: key}

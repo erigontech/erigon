@@ -119,6 +119,15 @@ type CallContext struct {
 	// Nil at the outermost frame.
 	parent *CallContext
 
+	// cachedSlotCell hands a *WriteCell looked up by gasSLoadEIP2929 forward
+	// to opSload so the op handler skips a second findSlotCell map probe on
+	// the SLOAD cache-hit path.  Lifetime is a single opcode dispatch: the
+	// interpreter Run loop clears it at the top of each iteration alongside
+	// cachedKeyValid/cachedAddrValid.  Nil when no cell was prefetched (op
+	// not SLOAD, or SLOAD missed in the cache and gas function fell through
+	// to AddSlotToAccessList).
+	cachedSlotCell *state.WriteCell[uint256.Int]
+
 	Stack    Stack
 	Contract Contract
 }
@@ -585,6 +594,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	for {
 		callContext.cachedKeyValid = false
 		callContext.cachedAddrValid = false
+		callContext.cachedSlotCell = nil
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
