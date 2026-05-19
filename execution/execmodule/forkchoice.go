@@ -507,14 +507,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// Chain tip (!initialCycle): the post-RunLoop path handles
-			// flush+commit+collation-prune, but we still run the in-loop
-			// pipeline prune on the overlay so stage-level prunes (notably
-			// PruneExecutionStage → ChangeSets3 / BlockAccessList) fire at
-			// every cycle. The overlay pass-through is what enforces
-			// MaxReorgDepth-based changeset pruning at tip.
+			// Chain tip (!initialCycle): no in-loop work — post-RunLoop path
+			// handles flush+commit+prune.
 			if !initialCycle {
-				return e.pipelineExecutor.RunPrune(ctx, rwtx, false, 500*time.Millisecond)
+				return nil
 			}
 			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
@@ -885,29 +881,6 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-
-	// Pre-check (read-only): skip work on short chains with no snapshots /
-	// no need for pruning. Same gate as before; just lifted out of the RW
-	// path so we don't hold a write tx unnecessarily.
-	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // closed below before CollateAndPruneIfNeeded opens its own RW tx
-	if err != nil {
-		return nil, err
-	}
-	defer roTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-	skip := false
-	currentHeader := rawdb.ReadCurrentHeader(roTx)
-	if currentHeader == nil {
-		skip = true
-	} else {
-		maxTxNum, txNumErr := rawdbv3.TxNums.Max(e.bacgroundCtx, roTx, currentHeader.Number.Uint64())
-		if txNumErr != nil || maxTxNum < (roTx.Debug().StepSize()*5)/4 {
-			skip = true
-		}
-	}
-	roTx.Rollback()
-	if skip {
-		return nil, nil
-	}
 
 	// Kick collation (build files) + prune via the same path that
 	// stageloop.StageLoopIteration uses. Without this call from the FCU
