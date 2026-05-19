@@ -107,11 +107,13 @@ type CallContext struct {
 	// the child's cache is discarded.  Both happen in Run's deferred
 	// finaliser before put().
 	//
-	// ibs.SetState remains the source of truth in this iteration so gas
-	// accounting (gasSStore reads current value via ibs.GetState) and
-	// tracer paths keep working unchanged; eliding ibs.SetState is a
-	// follow-up that needs gasSStore/tracer-hook plumbing changes.
-	slotCache map[slotCacheKey]*state.WriteCell[uint256.Int]
+	// Layout: two-level map keyed by Address (outer) and StorageKey (inner).
+	// Both Address and StorageKey are unique.Handle = single 8-byte pointer,
+	// so each level qualifies for Go's runtime mapaccess_fast64 fast path
+	// (vs the generic mapaccess used for the prior 16-byte struct key).
+	// On sload-same-key, 2 fast64 probes beat 1 generic probe by enough to
+	// offset the second map lookup.
+	slotCache map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]
 
 	// parent is the CallContext that invoked this frame.  Used by SLOAD to
 	// walk up the chain when the local cache misses, and by Run's deferred
@@ -132,20 +134,18 @@ type CallContext struct {
 	Contract Contract
 }
 
-type slotCacheKey struct {
-	addr accounts.Address
-	key  accounts.StorageKey
-}
-
 // findSlotCell walks the parent chain from this frame upward looking for
-// a cached *WriteCell for (addr, key).  Returns (cell, true) on hit, the
-// cell's containing frame for caller's use, or (nil, false) on miss.
-// Used by opSload, opSstore (for prev/tracer), and gasSStore* (for
-// 'current' value in EIP-2200/2929 gas accounting).
-func (ctx *CallContext) findSlotCell(k slotCacheKey) (*state.WriteCell[uint256.Int], bool) {
+// a cached *WriteCell for (addr, key).  Each level of the two-level map
+// uses an 8-byte unique.Handle key which qualifies for the runtime's
+// mapaccess_fast64 fast path, so a hit costs 2 fast probes rather than
+// 1 generic probe on a 16-byte struct key.  Used by opSload, opSstore,
+// and gasSStore* / gasSLoadEIP2929 for cache-warm shortcuts.
+func (ctx *CallContext) findSlotCell(addr accounts.Address, key accounts.StorageKey) (*state.WriteCell[uint256.Int], bool) {
 	for c := ctx; c != nil; c = c.parent {
-		if cell, ok := c.slotCache[k]; ok {
-			return cell, true
+		if inner, ok := c.slotCache[addr]; ok {
+			if cell, ok := inner[key]; ok {
+				return cell, true
+			}
 		}
 	}
 	return nil, false
@@ -547,17 +547,30 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if callContext.parent != nil {
 				parentCache := callContext.parent.slotCache
 				if parentCache == nil {
-					parentCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+					parentCache = map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]{}
 					callContext.parent.slotCache = parentCache
 				}
-				for k, cell := range callContext.slotCache {
-					parentCache[k] = cell
+				for addr, innerMap := range callContext.slotCache {
+					parentInner, ok := parentCache[addr]
+					if !ok {
+						// Parent had no entries for this address — hand the
+						// child's inner map over wholesale.  Child's outer
+						// map gets cleared on put() but the inner map
+						// survives via the parent's pointer.
+						parentCache[addr] = innerMap
+						continue
+					}
+					for k, cell := range innerMap {
+						parentInner[k] = cell
+					}
 				}
 			} else {
 				ibs := evm.intraBlockState
-				for k, cell := range callContext.slotCache {
-					if ferr := ibs.FlushSlotCacheWrite(k.addr, k.key, cell.Value); ferr != nil && err == nil {
-						err = ferr
+				for addr, innerMap := range callContext.slotCache {
+					for k, cell := range innerMap {
+						if ferr := ibs.FlushSlotCacheWrite(addr, k, cell.Value); ferr != nil && err == nil {
+							err = ferr
+						}
 					}
 				}
 			}

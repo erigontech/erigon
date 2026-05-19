@@ -1201,8 +1201,8 @@ func TestOpSloadHitsLocalSlotCache(t *testing.T) {
 	// Pre-seed the cache.  If opSload doesn't short-circuit on the cache
 	// hit it will dispatch to IBS GetState through a nil IntraBlockState
 	// and panic.
-	callContext.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{
-		{addr: to, key: storageKey}: {Value: cachedVal},
+	callContext.slotCache = map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]{
+		to: {storageKey: {Value: cachedVal}},
 	}
 
 	callContext.Stack.push(keyVal)
@@ -1235,8 +1235,8 @@ func TestSlotCacheParentChainWalk(t *testing.T) {
 	// Seed only the parent's cache.  A nil IBS guarantees that any IBS
 	// fallback would panic, so a passing test proves the chain walk hit
 	// before any fallback was attempted.
-	parent.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{
-		{addr: to, key: storageKey}: {Value: cachedVal},
+	parent.slotCache = map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]{
+		to: {storageKey: {Value: cachedVal}},
 	}
 
 	child.Stack.push(keyVal)

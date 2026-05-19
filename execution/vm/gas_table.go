@@ -111,7 +111,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	value := callContext.Stack.Back(1)
 	key := callContext.peekStorageKey()
 	var current uint256.Int
-	if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: key}); ok {
+	if cell, ok := callContext.findSlotCell(callContext.Address(), key); ok {
 		current = cell.Value
 	} else {
 		current, _ = evm.IntraBlockState().GetState(callContext.Address(), key)
@@ -205,7 +205,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	value := callContext.Stack.Back(1)
 	key := callContext.peekStorageKey()
 	var current uint256.Int
-	if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: key}); ok {
+	if cell, ok := callContext.findSlotCell(callContext.Address(), key); ok {
 		current = cell.Value
 	} else {
 		current, _ = evm.IntraBlockState().GetState(callContext.Address(), key)

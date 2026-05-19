@@ -56,7 +56,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// slot the "current" value lives in the cache, not IBS.  On miss
 		// (first access this frame chain), fall back to IBS for the committed
 		// or read-back value.
-		if cell, ok := callContext.findSlotCell(slotCacheKey{addr: callContext.Address(), key: slot}); ok {
+		if cell, ok := callContext.findSlotCell(callContext.Address(), slot); ok {
 			current = cell.Value
 		} else {
 			current, _ = evm.IntraBlockState().GetState(callContext.Address(), slot)
@@ -144,7 +144,7 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, m
 	// callContext.cachedSlotCell so the op handler doesn't redo the probe —
 	// without that hand-off the second findSlotCell call costs more than
 	// the AddSlot probes we saved (measured -25% on sload-same-key).
-	if cell, ok := callContext.findSlotCell(slotCacheKey{addr: addr, key: key}); ok {
+	if cell, ok := callContext.findSlotCell(addr, key); ok {
 		callContext.cachedSlotCell = cell
 		return mdgas.MdGas{Regular: params.WarmStorageReadCostEIP2929}, nil
 	}

@@ -800,8 +800,7 @@ func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err e
 	}
 	addr := scope.Contract.Address()
 	key := scope.peekStorageKey()
-	cacheKey := slotCacheKey{addr: addr, key: key}
-	if cell, ok := scope.findSlotCell(cacheKey); ok {
+	if cell, ok := scope.findSlotCell(addr, key); ok {
 		*loc = cell.Value
 		return pc, nil, nil
 	}
@@ -810,9 +809,14 @@ func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err e
 		return pc, nil, err
 	}
 	if scope.slotCache == nil {
-		scope.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+		scope.slotCache = map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]{}
 	}
-	scope.slotCache[cacheKey] = &state.WriteCell[uint256.Int]{Value: val}
+	inner, ok := scope.slotCache[addr]
+	if !ok {
+		inner = map[accounts.StorageKey]*state.WriteCell[uint256.Int]{}
+		scope.slotCache[addr] = inner
+	}
+	inner[key] = &state.WriteCell[uint256.Int]{Value: val}
 	*loc = val
 	return pc, nil, nil
 }
@@ -830,20 +834,26 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.Stack.pop()
 	val := scope.Stack.pop()
 	addr := scope.Contract.Address()
-	cacheKey := slotCacheKey{addr: addr, key: key}
 
 	// Write into the *local* frame's slotCache only — never mutate an
 	// ancestor's cell directly.  If a child mutated its parent's cell and
 	// then erred, the parent's pre-call value would be lost; the rollup
 	// logic relies on "child's cells are discarded on err / pointer-copied
 	// up on success" and that requires the cell to live in the child.
-	if existing, ok := scope.slotCache[cacheKey]; ok {
-		existing.Value = val
+	inner, ok := scope.slotCache[addr]
+	if ok {
+		if cell, ok := inner[key]; ok {
+			cell.Value = val
+		} else {
+			inner[key] = &state.WriteCell[uint256.Int]{Value: val}
+		}
 	} else {
 		if scope.slotCache == nil {
-			scope.slotCache = map[slotCacheKey]*state.WriteCell[uint256.Int]{}
+			scope.slotCache = map[accounts.Address]map[accounts.StorageKey]*state.WriteCell[uint256.Int]{}
 		}
-		scope.slotCache[cacheKey] = &state.WriteCell[uint256.Int]{Value: val}
+		inner = map[accounts.StorageKey]*state.WriteCell[uint256.Int]{}
+		inner[key] = &state.WriteCell[uint256.Int]{Value: val}
+		scope.slotCache[addr] = inner
 	}
 	// ibs.SetState is intentionally skipped here: cache is the source of
 	// truth for the duration of execution.  The outermost-frame defer in
