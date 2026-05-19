@@ -523,6 +523,15 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
+	// E2-era tables (deprecated; see ChaindataDeprecatedTables). The
+	// DupSort flag is preserved here so that opening an existing E2
+	// database for migration uses the right bucket flags before the
+	// drop_incarnation_from_storage migration clears + drops them.
+	PlainState:                 {Flags: DupSort},
+	HashedStorageDeprecated:    {Flags: DupSort},
+	AccountChangeSetDeprecated: {Flags: DupSort},
+	StorageChangeSetDeprecated: {Flags: DupSort},
+
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
 	TblAccountHistoryVals: {Flags: DupSort},
