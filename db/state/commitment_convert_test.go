@@ -318,3 +318,34 @@ func TestXform_BuildValueTransformer_PassThrough(t *testing.T) {
 			"buildValueTransformer(detected=%v, target=%v) with matching axes must return nil", sq, sq)
 	}
 }
+
+// preflightResume tests live below. Stubs are populated in Task 4 of
+// docs/plans/20260519-convert-continue-flag.md.
+
+func TestPreflightResume_continueFalse_wipes(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_empty(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_partial(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_allDone(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_incomplete(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_gap(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}
+
+func TestPreflightResume_orphan(t *testing.T) {
+	t.Skip("assertions land in Task 4")
+}

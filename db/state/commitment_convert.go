@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1040,6 +1041,211 @@ func preflightRebuildDir(rebuildDir string, logger log.Logger) error {
 		return fmt.Errorf("[commitment_convert] pre-flight: wipe rebuild dir %s: %w", rebuildDir, rmErr)
 	}
 	return nil
+}
+
+// requiredAccessorsForCommitment returns the accessor file extensions that
+// must accompany every commitment .kv file under the supplied domain config.
+// Extensions include the leading dot (".bt", ".kvi", ".kvei"). The .kv data
+// file itself is always required and is not in this list.
+//
+// Extracted from convertPhase2 so preflightResume can apply the same
+// completeness check before phase 1 starts.
+func requiredAccessorsForCommitment(d *Domain) []string {
+	var out []string
+	if d.Accessors.Has(statecfg.AccessorBTree) {
+		out = append(out, ".bt")
+	}
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		out = append(out, ".kvi")
+	}
+	if d.Accessors.Has(statecfg.AccessorExistence) {
+		out = append(out, ".kvei")
+	}
+	return out
+}
+
+// preflightResume prepares rebuildDir for ConvertCommitmentFiles' phase 1.
+//
+// When continueMode is false, it replicates today's wipe-and-start-fresh
+// behavior (delegates to preflightRebuildDir) and returns files unchanged.
+//
+// When continueMode is true, it scans rebuildDir for shards left behind by a
+// prior interrupted run. A shard for step range (from, to) is "complete" iff
+// rebuildDir contains a file whose basename ends with `-commitment.<from>-<to>.kv`
+// AND, for every acc in requiredAccessors, a file whose basename ends with
+// `-commitment.<from>-<to><acc>`. Incomplete shards (.kv present but at
+// least one accessor missing) and orphan files (anything not matching the
+// commitment step-range pattern) are removed from rebuildDir.
+//
+// The complete shards must form a contiguous prefix of `files` (input
+// ordering). A gap — a complete shard for a range that comes after an
+// incomplete or missing range in `files` — is a hard error: the operator's
+// input set has drifted and resume is unsafe.
+//
+// Returned VisibleFiles is the suffix of `files` that still needs
+// conversion. Empty rebuildDir + continueMode=true is a benign no-op:
+// returns `files` unchanged and logs "no prior progress, starting fresh".
+//
+// File-level write atomicity (tmp-then-rename, see Findings in
+// docs/plans/20260519-convert-continue-flag.md) makes existence sufficient
+// for the per-file completeness check — no size check needed.
+func preflightResume(
+	files VisibleFiles,
+	rebuildDir string,
+	requiredAccessors []string,
+	stepSize uint64,
+	continueMode bool,
+	logger log.Logger,
+) (VisibleFiles, error) {
+	if !continueMode {
+		if err := preflightRebuildDir(rebuildDir, logger); err != nil {
+			return nil, err
+		}
+		return files, nil
+	}
+
+	entries, err := os.ReadDir(rebuildDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+			return files, nil
+		}
+		return nil, fmt.Errorf("[commitment_convert] --continue: read rebuild dir %s: %w", rebuildDir, err)
+	}
+	if len(entries) == 0 {
+		logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+		return files, nil
+	}
+
+	type stepRange struct{ from, to uint64 }
+	groups := make(map[stepRange][]string)
+	var orphans []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			orphans = append(orphans, name)
+			continue
+		}
+		m := commitmentStepRangeRe.FindStringSubmatch(name)
+		if m == nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		from, perr := strconv.ParseUint(m[1], 10, 64)
+		if perr != nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		to, perr := strconv.ParseUint(m[2], 10, 64)
+		if perr != nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		r := stepRange{from, to}
+		groups[r] = append(groups[r], name)
+	}
+
+	done := make(map[stepRange]struct{})
+	var incompleteRanges []stepRange
+	for r, names := range groups {
+		var hasKV bool
+		accFound := make(map[string]bool, len(requiredAccessors))
+		kvSuffix := fmt.Sprintf("-commitment.%d-%d.kv", r.from, r.to)
+		for _, n := range names {
+			if strings.HasSuffix(n, kvSuffix) {
+				hasKV = true
+				continue
+			}
+			for _, ext := range requiredAccessors {
+				if strings.HasSuffix(n, fmt.Sprintf("-commitment.%d-%d%s", r.from, r.to, ext)) {
+					accFound[ext] = true
+					break
+				}
+			}
+		}
+		complete := hasKV
+		for _, ext := range requiredAccessors {
+			if !accFound[ext] {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			done[r] = struct{}{}
+		} else {
+			incompleteRanges = append(incompleteRanges, r)
+		}
+	}
+
+	for _, name := range orphans {
+		p := filepath.Join(rebuildDir, name)
+		if rmErr := dir.RemoveAll(p); rmErr != nil {
+			return nil, fmt.Errorf("[commitment_convert] --continue: remove orphan %s: %w", p, rmErr)
+		}
+	}
+	for _, r := range incompleteRanges {
+		for _, name := range groups[r] {
+			p := filepath.Join(rebuildDir, name)
+			if rmErr := dir.RemoveFile(p); rmErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] --continue: remove incomplete shard %s: %w", p, rmErr)
+			}
+		}
+	}
+
+	prefixLen := -1
+	var firstMissingRange stepRange
+	seenInInput := make(map[stepRange]bool, len(done))
+	for i, f := range files {
+		fr := stepRange{
+			from: f.StartRootNum() / stepSize,
+			to:   f.EndRootNum() / stepSize,
+		}
+		if _, ok := done[fr]; ok {
+			seenInInput[fr] = true
+			if prefixLen != -1 {
+				return nil, fmt.Errorf(
+					"[commitment_convert] --continue: non-contiguous shards: gap at steps %d-%d "+
+						"(rebuildDir has %d-%d but missing %d-%d before it)",
+					firstMissingRange.from, firstMissingRange.to,
+					fr.from, fr.to,
+					firstMissingRange.from, firstMissingRange.to)
+			}
+		} else if prefixLen == -1 {
+			prefixLen = i
+			firstMissingRange = fr
+		}
+	}
+	if prefixLen == -1 {
+		prefixLen = len(files)
+	}
+	for r := range done {
+		if !seenInInput[r] {
+			return nil, fmt.Errorf(
+				"[commitment_convert] --continue: rebuildDir contains complete shard for steps %d-%d "+
+					"that does not match any current input file; verify the input file set matches the original run",
+				r.from, r.to)
+		}
+	}
+
+	if prefixLen == 0 {
+		logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+		return files, nil
+	}
+
+	firstFile := files[0]
+	lastCompleteFile := files[prefixLen-1]
+	lastInputFile := files[len(files)-1]
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] --continue: resuming. complete shards in rebuild dir: %d (steps %d-%d), remaining: %d input files (steps %d-%d)",
+		prefixLen,
+		firstFile.StartRootNum()/stepSize,
+		lastCompleteFile.EndRootNum()/stepSize,
+		len(files)-prefixLen,
+		lastCompleteFile.EndRootNum()/stepSize,
+		lastInputFile.EndRootNum()/stepSize,
+	))
+
+	return files[prefixLen:], nil
 }
 
 // convertPhase1 runs convertCommitmentFile against every visible commitment

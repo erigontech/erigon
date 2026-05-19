@@ -178,20 +178,20 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - Modify: `db/state/commitment_convert.go`
 
-- [ ] Add `preflightResume(files VisibleFiles, rebuildDir string, requiredAccessors []string, stepSize uint64, continueMode bool, logger log.Logger) (VisibleFiles, error)`
-- [ ] When `continueMode=false`: replicate today's `preflightRebuildDir` behavior (wipe + mkdir), return `files` unchanged
-- [ ] When `continueMode=true`:
+- [x] Add `preflightResume(files VisibleFiles, rebuildDir string, requiredAccessors []string, stepSize uint64, continueMode bool, logger log.Logger) (VisibleFiles, error)`
+- [x] When `continueMode=false`: replicate today's `preflightRebuildDir` behavior (wipe + mkdir), return `files` unchanged
+- [x] When `continueMode=true`:
   - Walk `rebuildDir`; for each `*-commitment.<from>-<to>.kv` (use `commitmentStepRangeRe`), apply the completeness check.
   - **Unconditional**: every required accessor sibling file exists for the same `<from>-<to>` range.
   - **Conditional rider** (only if Task 0 finding = `(b)` in-place writes): every file (.kv + accessors) has size > 0. If Task 0 finding = `(a)` atomic, skip this rider.
   - Complete shards → add `(from,to)` to `done` set
   - Incomplete shards → remove the .kv and any partial siblings
   - Orphan files (not matching the regex) → remove
-- [ ] Validate contiguity: walk `files` in order; the prefix that's all-in-`done` is the resume zone. If any `file` after a non-done file is in `done` → return hard error like `non-contiguous shards: gap at steps %d-%d (rebuildDir has %d-%d but missing %d-%d before it)`
-- [ ] Log resume summary (or "no prior progress, starting fresh" when `done` is empty)
-- [ ] Return the suffix slice (input files NOT in `done`)
-- [ ] Helper: `requiredAccessorsForCommitment(domainCfg)` — returns the accessor extension set (`.bt`, `.kvi`, `.kvei`) consumed by `preflightResume`. Extract from existing Phase 2 logic if not already a function
-- [ ] Write tests immediately (Task 4) — but stub them in this task so `go test` compiles; the assertions land in Task 4
+- [x] Validate contiguity: walk `files` in order; the prefix that's all-in-`done` is the resume zone. If any `file` after a non-done file is in `done` → return hard error like `non-contiguous shards: gap at steps %d-%d (rebuildDir has %d-%d but missing %d-%d before it)`
+- [x] Log resume summary (or "no prior progress, starting fresh" when `done` is empty)
+- [x] Return the suffix slice (input files NOT in `done`)
+- [x] Helper: `requiredAccessorsForCommitment(domainCfg)` — returns the accessor extension set (`.bt`, `.kvi`, `.kvei`) consumed by `preflightResume`. Extract from existing Phase 2 logic if not already a function
+- [x] Write tests immediately (Task 4) — but stub them in this task so `go test` compiles; the assertions land in Task 4
 
 ### Task 3: Wire `preflightResume` into `ConvertCommitmentFiles`
 
