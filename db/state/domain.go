@@ -62,8 +62,10 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 
 // LargeValues indirect-layout constants.
 const (
-	dupRecordLen  = 16             // invStep(8) + seqID(8)
-	deletionSeqID = math.MaxUint64 // sentinel: dup with this seqID has no row in valsTable
+	dupRecordLen = 16 // invStep(8) + seqID(8)
+	// deletionSeqID marks a keys-table dup as a tombstone (no row in valsTable).
+	// IncrementSequence starts at 0 and never wraps in practice, so MaxUint64 is safe.
+	deletionSeqID = math.MaxUint64
 )
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
@@ -2074,7 +2076,7 @@ func deleteLargeValuesDup(keysCursor kv.RwCursorDupSort, valsCursor kv.RwCursor,
 	return keysCursor.DeleteCurrent()
 }
 
-// pruneLargeValues prunes CommitmentKeys+CommitmentVals for a LargeValues domain by
+// pruneLargeValues prunes the keysTable+valsTable of a LargeValues domain by
 // scanning every (bareKey, invStep+seqID) dup with Next() instead of NextNoDup().
 // NextNoDup() only sees the first (newest) dup per bareKey; when that dup is beyond
 // the prune range, it would skip the entire key even if older-step dups are in range.

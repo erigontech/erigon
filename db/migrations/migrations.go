@@ -215,6 +215,9 @@ func (m *Migrator) VerifyVersion(db kv.RwDB, chaindata string) error {
 // target DB handle. Callers must use the returned handle rather than the one passed
 // in, because a wipe migration may have closed and replaced it.
 //
+// On error the returned db may be nil (if the old handle was closed for a wipe but
+// reopening failed). Callers must close a non-nil returned handle even on error.
+//
 //   - db is the target database being migrated (e.g. chaindata).
 //   - migrationsDB is the dedicated migrations-tracking database (opened via OpenMigrationsDB).
 //     Applied-migration records are written here, so they survive deletion of the target DB.
