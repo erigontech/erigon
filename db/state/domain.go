@@ -2081,7 +2081,8 @@ func deleteLargeValuesDup(keysCursor kv.RwCursorDupSort, valsCursor kv.RwCursor,
 // NextNoDup() only sees the first (newest) dup per bareKey; when that dup is beyond
 // the prune range, it would skip the entire key even if older-step dups are in range.
 func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, prg *prune.Stat) (stat *prune.Stat, err error) {
-	stat = &prune.Stat{MinTxNum: math.MaxUint64, ValueProgress: prune.Done}
+	// KeyProgress=Done: LargeValues domains have no separate keys-only pruning phase.
+	stat = &prune.Stat{MinTxNum: math.MaxUint64, KeyProgress: prune.Done, ValueProgress: prune.Done}
 
 	keysC, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
 	if err != nil {
@@ -2157,6 +2158,9 @@ func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom
 	}
 
 	stat.ValueProgress = prune.Done
+	if stat.PruneCountValues == 0 {
+		stat.MinTxNum = 0
+	}
 	return stat, nil
 }
 
