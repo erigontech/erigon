@@ -1700,61 +1700,9 @@ func (result *execResult) finalizeTxSimple(
 		}
 	}
 
-	// Engine post-apply message (e.g., AuRa system calls).
-	if engine != nil {
-		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-			execResult := result.ExecutionResult
-			cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
-			coinbase, err := cbReader.ReadAccountData(result.Coinbase)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if coinbase != nil {
-				execResult.CoinbaseInitBalance = coinbase.Balance
-			}
-			message, err := task.TxMessage()
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			// PostApplyMessage needs an IBS — create a minimal one
-			ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
-			ibs.SetTxContext(blockNum, txIndex)
-			if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-				return nil, nil, nil, err
-			}
-			// Mirror serial-exec's txn_executor.go post-message fee distribution
-			// (AddBalance(coinbase, tip) / AddBalance(burnt, burn)) AFTER applying
-			// TxOut. The parallel worker ran with shouldDelayFeeCalc=true, so the
-			// fees aren't in TxOut; the finalize accumulates them onto the
-			// version-map base separately. But the post-apply IBS handed to
-			// postApplyMessageFunc only sees TxOut — without crediting the fees
-			// here it underrepresents the coinbase's balance to LogSelfDestructedAccounts.
-			//
-			// The EIP-7708 case 2 path is the load-bearing one: when the coinbase
-			// is itself a contract that SELFDESTRUCTs during the tx, ApplyVersionedWrites
-			// has marked it selfdestructed with balance=0; AddBalance leaves the
-			// selfdestruct flag intact (Selfdestruct only fires on the addr→clear
-			// transition, not on subsequent balance writes) and restores the priority
-			// fee as residual balance. LogSelfDestructedAccounts' GetRemovedAccountsWithBalance
-			// then reports {coinbase, FeeTipped} and emits the Burn log — matching
-			// serial-exec exactly. https://github.com/erigontech/erigon/issues/21136
-			if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-				return nil, nil, nil, err
-			}
-			if hasBurnt && txTask.Config.IsLondon(blockNum) {
-				if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
-					return nil, nil, nil, err
-				}
-			}
-			postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
-
-			// Capture PostApplyMessage side effects (logs) — e.g. EIP-7708 Burn
-			// logs from LogSelfDestructedAccounts. Without this they're stranded
-			// on the post-apply ibs and never make it into the receipt, so the
-			// validating consumer recomputes a different receipts root and the
-			// block is rejected as a BadBlock.
-			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
-		}
+	// Engine post-apply message (e.g., AuRa system calls, EIP-7708 burn logs).
+	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader, hasBurnt, burntAddr); err != nil {
+		return nil, nil, nil, err
 	}
 
 	// Compute receipt.
@@ -1769,6 +1717,103 @@ func (result *execResult) finalizeTxSimple(
 	// subsequent TXs that read stale coinbase/burnt values.
 
 	return receipt, nil, allWrites, nil
+}
+
+// runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback
+// (e.g. AuRa system calls, EIP-7708 burn-log emission via
+// LogSelfDestructedAccounts) and appends any resulting logs to result.Logs.
+//
+// This is the load-bearing IntraBlockState use in finalizeTxSimple's
+// post-execution path. It exists to:
+//
+//  1. Read SD'd accounts and their residual balances
+//     (ibs.GetRemovedAccountsWithBalance) so LogSelfDestructedAccounts can
+//     emit EIP-7708 burn logs.
+//  2. Provide a log buffer (ibs.AddLog → ibs.GetLogs) so logs emitted by
+//     postApplyMessageFunc reach the receipt.
+//  3. Run AddBalance bookkeeping for the priority-fee credit so the SD'd
+//     coinbase carries FeeTipped at the time LogSelfDestructedAccounts
+//     inspects it.
+//
+// All three dependencies are slated for removal under #21138 — once the
+// SD-with-balance signal is explicit on ExecutionResult and
+// LogSelfDestructedAccounts returns logs as a value, this method becomes
+// IBS-free and the minimal IBS construction below disappears.
+func (result *execResult) runPostApplyMessageOnMinIBS(
+	task *taskVersion,
+	txTask *exec.TxTask,
+	engine rules.Engine,
+	vm *state.VersionMap,
+	stateReader state.StateReader,
+	hasBurnt bool,
+	burntAddr accounts.Address,
+) error {
+	if engine == nil {
+		return nil
+	}
+	postApplyMessageFunc := engine.GetPostApplyMessageFunc()
+	if postApplyMessageFunc == nil {
+		return nil
+	}
+
+	blockNum := task.Version().BlockNum
+	txIndex := task.Version().TxIndex
+	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
+
+	execResult := result.ExecutionResult
+	cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+	coinbase, err := cbReader.ReadAccountData(result.Coinbase)
+	if err != nil {
+		return err
+	}
+	if coinbase != nil {
+		execResult.CoinbaseInitBalance = coinbase.Balance
+	}
+	message, err := task.TxMessage()
+	if err != nil {
+		return err
+	}
+
+	// PostApplyMessage needs an IBS — create a minimal one.
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	ibs.SetTxContext(blockNum, txIndex)
+	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
+		return err
+	}
+
+	// Mirror serial-exec's txn_executor.go post-message fee distribution
+	// (AddBalance(coinbase, tip) / AddBalance(burnt, burn)) AFTER applying
+	// TxOut. The parallel worker ran with shouldDelayFeeCalc=true, so the
+	// fees aren't in TxOut; the finalize accumulates them onto the
+	// version-map base separately. But the post-apply IBS handed to
+	// postApplyMessageFunc only sees TxOut — without crediting the fees
+	// here it underrepresents the coinbase's balance to LogSelfDestructedAccounts.
+	//
+	// The EIP-7708 case 2 path is the load-bearing one: when the coinbase
+	// is itself a contract that SELFDESTRUCTs during the tx, ApplyVersionedWrites
+	// has marked it selfdestructed with balance=0; AddBalance leaves the
+	// selfdestruct flag intact (Selfdestruct only fires on the addr→clear
+	// transition, not on subsequent balance writes) and restores the priority
+	// fee as residual balance. LogSelfDestructedAccounts' GetRemovedAccountsWithBalance
+	// then reports {coinbase, FeeTipped} and emits the Burn log — matching
+	// serial-exec exactly. https://github.com/erigontech/erigon/issues/21136
+	if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return err
+	}
+	if hasBurnt && txTask.Config.IsLondon(blockNum) {
+		if err := ibs.AddBalance(burntAddr, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+			return err
+		}
+	}
+	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
+
+	// Capture PostApplyMessage side effects (logs) — e.g. EIP-7708 Burn
+	// logs from LogSelfDestructedAccounts. Without this they're stranded
+	// on the post-apply ibs and never make it into the receipt, so the
+	// validating consumer recomputes a different receipts root and the
+	// block is rejected as a BadBlock.
+	result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
+	return nil
 }
 
 type taskVersion struct {
