@@ -21,8 +21,6 @@ import (
 	"testing"
 )
 
-// encodeStringRLP wraps a byte payload in a minimal RLP string envelope.
-// Used by the Stream-level benchmarks to construct inputs of known shape.
 func encodeStringRLP(payload []byte) []byte {
 	if len(payload) == 1 && payload[0] < 0x80 {
 		return []byte{payload[0]}
@@ -30,7 +28,6 @@ func encodeStringRLP(payload []byte) []byte {
 	if len(payload) < 56 {
 		return append([]byte{0x80 + byte(len(payload))}, payload...)
 	}
-	// long-string encoding
 	lenBytes := []byte{}
 	n := len(payload)
 	for n > 0 {
@@ -41,9 +38,6 @@ func encodeStringRLP(payload []byte) []byte {
 	return append(hdr, payload...)
 }
 
-// BenchmarkStreamBytes_64B measures the cost of Stream.Bytes() for a
-// medium-small string. The current implementation allocates a fresh
-// []byte every call (decode.go:705).
 func BenchmarkStreamBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
@@ -61,8 +55,6 @@ func BenchmarkStreamBytes_64B(b *testing.B) {
 	}
 }
 
-// BenchmarkStreamBytes_4KB measures Stream.Bytes() for a larger payload.
-// Realistic for Header.Extra or transaction calldata.
 func BenchmarkStreamBytes_4KB(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 4096)
 	encoded := encodeStringRLP(payload)
@@ -80,10 +72,6 @@ func BenchmarkStreamBytes_4KB(b *testing.B) {
 	}
 }
 
-// BenchmarkStreamReadBytes_64B measures Stream.ReadBytes() — the existing
-// no-alloc variant that decodes into a caller-supplied buffer. Compare
-// against BenchmarkStreamBytes_64B to confirm the pattern that callers
-// passing a destination buffer pay zero per-call allocs.
 func BenchmarkStreamReadBytes_64B(b *testing.B) {
 	payload := bytes.Repeat([]byte{0xab}, 64)
 	encoded := encodeStringRLP(payload)
@@ -100,12 +88,6 @@ func BenchmarkStreamReadBytes_64B(b *testing.B) {
 	}
 }
 
-// BenchmarkDecodeBytes_VsStreamDecode compares the two reflective entry
-// points: the package-level DecodeBytes wrapper (one extra Reset() + pool
-// checkout) vs. a hand-managed Stream.Decode loop.
-//
-// Decodes a tiny payload (10-byte string) so we measure the entry-point
-// overhead, not the payload decode.
 func BenchmarkDecodeBytes_Tiny(b *testing.B) {
 	payload := []byte("hello rlp!")
 	encoded := encodeStringRLP(payload)
