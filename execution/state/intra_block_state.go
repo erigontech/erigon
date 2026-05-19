@@ -1538,22 +1538,14 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 
 	if readAccount == nil {
 		if sdb.versionMap != nil {
+			// Catch addresses CreateAccount'd by a prior same-block tx — their
+			// AddressPath lives in the versionMap even when the stateReader has
+			// no on-disk record yet. The SelfDestructPath short-circuit in
+			// versionedRead returns nil for cross-tx SD'd addresses; the
+			// SelfDestructPath probe below (after refreshVersionedAccount) sets
+			// the synthetic placeholder when that happens.
 			readAccount, accountSource, accountVersion, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
-
 			if readAccount == nil || err != nil {
-				return nil, err
-			}
-
-			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-
-			if destructed || err != nil {
-				so := stateObjectPool.Get().(*stateObject)
-				so.db = sdb
-				so.address = addr
-				so.selfdestructed = destructed
-				so.deleted = destructed
-				so.versionMapMarker = destructed
-				sdb.setStateObject(addr, so)
 				return nil, err
 			}
 		} else {
