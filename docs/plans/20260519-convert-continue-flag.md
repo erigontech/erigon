@@ -227,16 +227,16 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - Modify: `db/state/commitment_convert_test.go`
 
-- [ ] `TestConvertCommitmentFiles_ContinueResumes`: build on the existing convert test scaffolding in `commitment_convert_test.go` (find via grep for `ConvertCommitmentFiles`)
-- [ ] Set up a synthetic small datadir with a few commitment files (reuse existing test fixture if one exists; otherwise build minimally)
-- [ ] **Decision now (not deferred to start-of-task)**: add a test-only hook in `convertPhase1` — a `convertPhase1AfterFileHook func(idx int)` package-level var, called after each file completes, default-nil-no-op in production. The test sets it to `func(i int) { if i == 0 { cancel() } }`. This is one extra line in the production codepath, scoped, and avoids log-line counting fragility. Counting log lines is explicitly rejected as flaky across timestamp/lineno changes.
-- [ ] Implement the hook stub in `convertPhase1` as part of this task (one line, nil-guarded call)
-- [ ] Run `ConvertCommitmentFiles` with `cancel`-on-first-file via the hook
-- [ ] Verify rebuildDir contains 1 complete shard and the other input files are untouched
-- [ ] Re-run `ConvertCommitmentFiles` with `Continue: true` and a fresh ctx (hook nil this time)
-- [ ] Assert: second run's call count to `convertCommitmentFile` equals (total files - 1) — wire a second test-only counter hook if needed
-- [ ] Assert: all remaining files converted, Phases 2-5 promote everything, final state matches a non-interrupted reference run
-- [ ] Run: `go test ./db/state/ -run TestConvertCommitmentFiles_ContinueResumes -count=1 -v` — must pass before next task
+- [x] `TestConvertCommitmentFiles_ContinueResumes`: build on the existing convert test scaffolding in `commitment_convert_test.go` (find via grep for `ConvertCommitmentFiles`)
+- [x] Set up a synthetic small datadir with a few commitment files (reuse existing test fixture if one exists; otherwise build minimally)
+- [x] **Decision now (not deferred to start-of-task)**: add a test-only hook in `convertPhase1` — a `convertPhase1AfterFileHook func(idx int)` package-level var, called after each file completes, default-nil-no-op in production. The test sets it to `func(i int) { if i == 0 { cancel() } }`. This is one extra line in the production codepath, scoped, and avoids log-line counting fragility. Counting log lines is explicitly rejected as flaky across timestamp/lineno changes.
+- [x] Implement the hook stub in `convertPhase1` as part of this task (one line, nil-guarded call)
+- [x] Run `ConvertCommitmentFiles` with `cancel`-on-first-file via the hook
+- [x] Verify rebuildDir contains 1 complete shard and the other input files are untouched
+- [x] Re-run `ConvertCommitmentFiles` with `Continue: true` and a fresh ctx (hook nil this time)
+- [x] Assert: second run's call count to `convertCommitmentFile` equals (total files - 1) — wire a second test-only counter hook if needed
+- [x] Assert: all remaining files converted, Phases 2-5 promote everything, final state matches a non-interrupted reference run (basename match + .kv byte equality; accessor siblings exist but bytes differ across datadirs due to per-datadir random recsplit salt)
+- [x] Run: `go test ./db/state/ -run TestConvertCommitmentFiles_ContinueResumes -count=1 -v` — must pass before next task
 
 ### Task 6: Verify acceptance criteria
 

@@ -1264,6 +1264,13 @@ func preflightResume(
 	return files[prefixLen:], nil
 }
 
+// convertPhase1AfterFileHook is a test-only hook fired after each input file
+// completes a Phase 1 iteration (successful conversion or errSkip). nil in
+// production. Set via SetConvertPhase1AfterFileHookForTest in tests so the
+// resume integration test can cancel mid-Phase-1 deterministically without
+// racing against log-line counting.
+var convertPhase1AfterFileHook func(idx int)
+
 // convertPhase1 runs convertCommitmentFile against every visible commitment
 // file in sequence, writing outputs into rebuildDir. errSkip is caught
 // (counted as skipped, not as error); any other error aborts.
@@ -1295,6 +1302,9 @@ func convertPhase1(
 			logger.Info(fmt.Sprintf("[commitment_convert] phase 1 skip %s (already in target state) %s",
 				filepath.Base(f.Fullpath()),
 				buildPhase1Prefix(i+1, N, processedKeys, grandTotalKeys)))
+			if convertPhase1AfterFileHook != nil {
+				convertPhase1AfterFileHook(i)
+			}
 			continue
 		}
 		if convErr != nil {
@@ -1305,6 +1315,9 @@ func convertPhase1(
 		processedKeys += ki
 		processedFiles++
 		totalSizeDelta += delta
+		if convertPhase1AfterFileHook != nil {
+			convertPhase1AfterFileHook(i)
+		}
 	}
 	return processedFiles, skippedFiles, totalSizeDelta, processedKeys, nil
 }
