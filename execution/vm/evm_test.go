@@ -16,7 +16,10 @@
 
 package vm
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // TestDeriveFrameRegularGasUsed covers the EIP-8037 cases where the formula
 // Regular = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
@@ -86,6 +89,17 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			gasRemainingTotal: 150 + sgps,
 			stateGasUsed:      -sgps,
 			want:              0,
+		},
+		{
+			// Gas totals are unsigned reservoir balances and are free to
+			// occupy the full uint64 range. The helper must stay correct
+			// when those totals sit above 2^63 — a naive int64 promotion
+			// would flip the sign and break the arithmetic.
+			name:              "huge_gas_totals_uint64_safe",
+			inputTotal:        math.MaxUint64,
+			gasRemainingTotal: math.MaxUint64 - 12345,
+			stateGasUsed:      300,
+			want:              12345 - 300,
 		},
 	}
 
