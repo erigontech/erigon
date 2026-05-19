@@ -198,13 +198,13 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - Modify: `db/state/commitment_convert.go`
 
-- [ ] In `ConvertCommitmentFiles`, replace the `preflightRebuildDir(rebuildDir, logger)` call with `files, err = preflightResume(files, rebuildDir, requiredAccessors, at.StepSize(), opts.Continue, logger)`. Keep the subsequent `os.MkdirAll(rebuildDir, 0o755)` (harmless if dir exists)
-- [ ] Compute `requiredAccessors` once, before the call, using the new `requiredAccessorsForCommitment` helper from Task 2
-- [ ] Move `grandTotalKeys` accumulation to AFTER the filter so it represents work-remaining
-- [ ] **Backward-compat invariant** (explicit): when `Continue=false`, `preflightResume` returns the input slice unchanged (after wipe+mkdir), so the moved `grandTotalKeys` loop iterates over the same files as today — sum is byte-identical, progress percentages are identical, no caller-visible change
-- [ ] If `files` is empty after filter (only possible when `Continue=true` AND all shards already present): emit info log "all input files already converted in rebuild dir; proceeding to Phase 2" and proceed (Phases 2-5 still run to verify accessors and promote)
-- [ ] **Remove `preflightRebuildDir`** if `grep -rn preflightRebuildDir` shows zero call sites after the replacement (it should — convert is the only caller). Don't leave dead code.
-- [ ] Run: `go test ./db/state/ -run Convert -count=1` — must pass before next task
+- [x] In `ConvertCommitmentFiles`, replace the `preflightRebuildDir(rebuildDir, logger)` call with `files, err = preflightResume(files, rebuildDir, requiredAccessors, at.StepSize(), opts.Continue, logger)`. Keep the subsequent `os.MkdirAll(rebuildDir, 0o755)` (harmless if dir exists) — implemented with deviation: introduced `pendingFiles` for the filtered suffix, kept `files` as the full input list (see Findings)
+- [x] Compute `requiredAccessors` once, before the call, using the new `requiredAccessorsForCommitment` helper from Task 2
+- [x] Move `grandTotalKeys` accumulation to AFTER the filter so it represents work-remaining
+- [x] **Backward-compat invariant** (explicit): when `Continue=false`, `preflightResume` returns the input slice unchanged (after wipe+mkdir), so the moved `grandTotalKeys` loop iterates over the same files as today — sum is byte-identical, progress percentages are identical, no caller-visible change
+- [x] If `files` is empty after filter (only possible when `Continue=true` AND all shards already present): emit info log "all input files already converted in rebuild dir; proceeding to Phase 2" and proceed (Phases 2-5 still run to verify accessors and promote)
+- [x] **Remove `preflightRebuildDir`** if `grep -rn preflightRebuildDir` shows zero call sites after the replacement (it should — convert is the only caller). Don't leave dead code. — wipe logic inlined into `preflightResume`'s `!continueMode` branch
+- [x] Run: `go test ./db/state/ -run Convert -count=1` — must pass before next task
 
 ### Task 4: Unit tests for `preflightResume`
 
@@ -291,6 +291,20 @@ Trace of how each output file lands at its final path:
 **Consequences for Task 2 / Task 4**:
 - Task 2 completeness check: existence of `.kv` + each required accessor sibling is sufficient. No file-size check needed.
 - Task 4 `TestPreflightResume_zeroSizeKv` is **skipped** — zero-byte `.kv` files cannot appear at the final path under normal crash recovery; a zero-byte file would only exist if someone manually `touch`ed it, which is out of scope for "interrupted previous run" resume.
+
+### Task 3: deviation — `pendingFiles` introduced alongside `files`
+
+The plan text directs `files, err = preflightResume(files, ...)` (overwrite the slice in place), implicitly passing only the suffix to every phase. Doing that breaks Phases 2-3: prior-run shards already present in `rebuildDir` would not appear in `convertedFiles`, so Phase 3 would not back up their originals in `snapshots/domain/` before Phase 4's `os.Rename` overwrites them — silent data loss on the originals (recovery via `--restore` would be impossible).
+
+**Implementation**: kept `files` as the full original input list and introduced `pendingFiles` for the filtered suffix. `pendingFiles` is what Phase 1 iterates; `files` is what Phase 2 walks, so `convertPhase2` sees both prior-run shards and this-run shards and includes both in `convertedFiles`. Phase 3 then backs up both sets of originals.
+
+**Cascading adjustments**:
+- `priorCompleteCount := len(files) - len(pendingFiles)` is computed once after the preflight.
+- Phase 2 mismatch check changed from `len(convertedFiles) != processedFiles` to `len(convertedFiles) != processedFiles + priorCompleteCount`.
+- The early-return `if processedFiles == 0` short-circuit guarded with `&& priorCompleteCount == 0` — otherwise a `--continue` run that only adds prior shards (no work this iteration) would wipe `rebuildDir` and skip promote.
+- DONE log line shows the breakdown `N files (X this run + Y from prior runs)` only when `priorCompleteCount > 0`; otherwise the message is unchanged from today.
+
+**Backward-compat invariant** preserved: when `Continue=false`, `preflightResume` returns `files` unchanged, so `pendingFiles == files` and `priorCompleteCount == 0`. Every downstream computation collapses to today's behavior byte-for-byte.
 
 ## Post-Completion
 
