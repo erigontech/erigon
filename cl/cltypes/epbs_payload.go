@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
+	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -474,9 +475,11 @@ func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 	}
 	encoded, err := e.EncodeSSZ(nil)
 	if err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: EncodeSSZ failed", "err", err)
 		return cloned
 	}
 	if err := cloned.DecodeSSZ(encoded, int(e.Payload.Version())); err != nil {
+		log.Error("ExecutionPayloadEnvelope.Clone: DecodeSSZ failed", "err", err)
 		return cloned
 	}
 	return cloned

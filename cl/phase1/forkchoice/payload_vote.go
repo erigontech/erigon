@@ -84,34 +84,21 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			continue
 		}
 
-		for j, validatorIndex := range cached.ptc {
+		for j := range cached.ptc {
 			if payloadAttestation.AggregationBits.GetBitAt(j) {
-				f.applyPayloadAttestationVote(validatorIndex, data, blockRoot, cached.ptc)
+				f.applyPayloadAttestationVote(j, data, blockRoot)
 			}
 		}
 	}
 }
 
-// applyPayloadAttestationVote updates PTC vote tracking for a single validator.
-// Used by notifyPtcMessages with pre-computed PTC to avoid redundant GetState/GetPTC calls.
+// applyPayloadAttestationVote updates PTC vote tracking for a single PTC position.
+// ptcIndex is the position in the PTC (the aggregation bit index).
 func (f *ForkChoiceStore) applyPayloadAttestationVote(
-	validatorIndex uint64,
+	ptcIndex int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
-	ptc []uint64,
 ) {
-	// Find the validator's position in the PTC
-	ptcIndex := -1
-	for i, idx := range ptc {
-		if idx == validatorIndex {
-			ptcIndex = i
-			break
-		}
-	}
-	if ptcIndex == -1 {
-		return
-	}
-
 	// Atomically update PTC vote arrays under mutex to prevent concurrent
 	// Load→modify→Store from losing votes. See also OnPayloadAttestationMessage.
 	f.ptcVoteMu.Lock()
