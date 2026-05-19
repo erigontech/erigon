@@ -4,6 +4,7 @@ name: Docs - Update disk sizes
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
 # and opens (or updates) a draft PR against the measured run's branch.
 on:
+  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.4 for workflow_run events
   workflow_run:
     workflows:
       - "QA - Sync from scratch"
@@ -51,6 +52,7 @@ jobs:
 
     steps:
       - name: Determine prune mode and source run ID
+        id: determine
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_PRUNE_MODE: ${{ github.event.inputs.prune_mode }}
@@ -76,25 +78,28 @@ jobs:
               echo "::error::Invalid base_branch: allowed chars are [A-Za-z0-9._/-]"
               exit 1
             fi
-            printf 'PRUNE_MODE=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_ENV"
-            printf 'SOURCE_RUN_ID=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_ENV"
-            printf 'BASE_BRANCH=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_ENV"
+            printf 'prune_mode=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_OUTPUT"
+            printf 'source_run_id=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
+            printf 'base_branch=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_OUTPUT"
           elif [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
-            printf 'PRUNE_MODE=minimal\n' >> "$GITHUB_ENV"
-            printf 'SOURCE_RUN_ID=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_ENV"
-            printf 'BASE_BRANCH=release/3.4\n' >> "$GITHUB_ENV"
+            printf 'prune_mode=minimal\n' >> "$GITHUB_OUTPUT"
+            printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
+            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
           else
-            printf 'PRUNE_MODE=full\n' >> "$GITHUB_ENV"
-            printf 'SOURCE_RUN_ID=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_ENV"
-            printf 'BASE_BRANCH=release/3.4\n' >> "$GITHUB_ENV"
+            printf 'prune_mode=full\n' >> "$GITHUB_OUTPUT"
+            printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
+            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout base branch
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.BASE_BRANCH }}
+          ref: ${{ steps.determine.outputs.base_branch }}
+          persist-credentials: true
 
       - name: Prepare update branch
+        env:
+          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
         run: |
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
@@ -108,7 +113,7 @@ jobs:
       - name: Download disk usage artifacts
         uses: actions/download-artifact@v8
         with:
-          run-id: ${{ env.SOURCE_RUN_ID }}
+          run-id: ${{ steps.determine.outputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           pattern: disk-usage-*
           path: ./artifacts
@@ -118,6 +123,8 @@ jobs:
         run: ls -lh ./artifacts/ 2>/dev/null || echo "No artifacts found"
 
       - name: Verify artifacts are present
+        env:
+          SOURCE_RUN_ID: ${{ steps.determine.outputs.source_run_id }}
         run: |
           set -euo pipefail
           if [ -z "$(ls -A ./artifacts 2>/dev/null)" ]; then
@@ -132,22 +139,24 @@ jobs:
           python-version: "3.x"
 
       - name: Update disk-sizes.json
+        env:
+          PRUNE_MODE: ${{ steps.determine.outputs.prune_mode }}
         run: |
           set -euo pipefail
           python3 docs/site/scripts/update-disk-sizes.py \
             ./artifacts \
             docs/site/src/data/disk-sizes.json \
-            ${{ env.PRUNE_MODE }}
+            "$PRUNE_MODE"
 
       - name: Check for changes
         id: diff
         run: |
           set -euo pipefail
           if git diff --quiet docs/site/src/data/disk-sizes.json; then
-            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No changes to disk-sizes.json"
           else
-            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             git diff docs/site/src/data/disk-sizes.json
           fi
 
@@ -160,6 +169,8 @@ jobs:
 
       - name: Commit and push to update branch
         if: steps.diff.outputs.changed == 'true'
+        env:
+          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
         run: |
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
@@ -171,17 +182,18 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
         run: |
           set -euo pipefail
           BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
           TODAY=$(date +%Y-%m-%d)
-          EXISTING=$(gh pr list --head "$BRANCH" --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number // empty' 2>/dev/null)
+          EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null)
 
           if [ -z "$EXISTING" ]; then
             gh pr create \
               --draft \
               --head "$BRANCH" \
-              --base "${BASE_BRANCH}" \
+              --base "$BASE_BRANCH" \
               --title "docs: auto-update disk size measurements ($TODAY)" \
               --body "$(cat <<'EOF'
           ## Automated disk size update
