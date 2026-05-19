@@ -211,16 +211,16 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - Modify: `db/state/commitment_convert_test.go`
 
-- [ ] `TestPreflightResume_continueFalse_wipes` — pre-populate rebuildDir with junk, call with `continueMode=false`, verify dir is wiped and full `files` slice returned
-- [ ] `TestPreflightResume_empty` — empty rebuildDir + `continueMode=true` → returns full input slice, no error, logs "no prior progress"
-- [ ] `TestPreflightResume_partial` — N complete shards (`os.Create` empty .kv + all accessor siblings) covering contiguous prefix → returns suffix (remaining files), no error
-- [ ] `TestPreflightResume_allDone` — every input file has a complete shard in rebuildDir → returns empty slice, no error (downstream `ConvertCommitmentFiles` proceeds to Phase 2)
-- [ ] `TestPreflightResume_incomplete` — `.kv` present but one accessor missing → assert .kv removed, range NOT in `done`, file returned in suffix
-- [ ] `TestPreflightResume_gap` — shards [0-1024] and [2048-3072] present but [1024-2048] missing → returns error; error message names the gap range
-- [ ] `TestPreflightResume_orphan` — random non-commitment file in rebuildDir → assert removed, no error
-- [ ] **Conditional**: `TestPreflightResume_zeroSizeKv` — gated on Task 0 finding = `(b)` in-place writes. Pre-populate rebuildDir with a zero-byte .kv + all accessors present and non-zero. Assert .kv treated as incomplete (removed, returned in suffix). If Task 0 = `(a)` atomic, skip writing this test and note in `## Findings` why.
-- [ ] All tests use `t.TempDir()` + `os.Create`/`os.WriteFile` (latter for non-zero size) for fakes; assert via `os.Stat` and slice equality
-- [ ] Run: `go test ./db/state/ -run PreflightResume -count=1 -v` — all 7 (or 8 with the conditional) must pass before next task
+- [x] `TestPreflightResume_continueFalse_wipes` — pre-populate rebuildDir with junk, call with `continueMode=false`, verify dir is wiped and full `files` slice returned
+- [x] `TestPreflightResume_empty` — empty rebuildDir + `continueMode=true` → returns full input slice, no error, logs "no prior progress"
+- [x] `TestPreflightResume_partial` — N complete shards (`os.Create` empty .kv + all accessor siblings) covering contiguous prefix → returns suffix (remaining files), no error
+- [x] `TestPreflightResume_allDone` — every input file has a complete shard in rebuildDir → returns empty slice, no error (downstream `ConvertCommitmentFiles` proceeds to Phase 2)
+- [x] `TestPreflightResume_incomplete` — `.kv` present but one accessor missing → assert .kv removed, range NOT in `done`, file returned in suffix
+- [x] `TestPreflightResume_gap` — shards [0-1024] and [2048-3072] present but [1024-2048] missing → returns error; error message names the gap range
+- [x] `TestPreflightResume_orphan` — random non-commitment file in rebuildDir → assert removed, no error
+- [x] **Conditional**: `TestPreflightResume_zeroSizeKv` — skipped per Task 0 finding `(a)` atomic (tmp-then-rename); see Findings.
+- [x] All tests use `t.TempDir()` + `os.Create`/`os.WriteFile` (latter for non-zero size) for fakes; assert via `os.Stat` and slice equality
+- [x] Run: `go test ./db/state/ -run PreflightResume -count=1 -v` — all 7 (or 8 with the conditional) must pass before next task
 
 ### Task 5: Integration test for full resume flow
 
