@@ -435,6 +435,23 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursor.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		// Debug: track cursor position to catch MDBX_EKEYMISMATCH before it happens.
+		// ETL delivers keys sorted by (bareKey,invStep); existing seqIDs for those keys
+		// may be non-monotonic, so Put on a shared cursor can violate MDBX ordering.
+		var (
+			lastCursorSeqID    uint64
+			hasLastCursorSeqID bool
+		)
+		assertSeqIDMonotone := func(op string, seqID uint64, bareKey []byte) {
+			if hasLastCursorSeqID && seqID < lastCursorSeqID {
+				panic(fmt.Sprintf(
+					"domain flush %s(%s): valsCursor seqID went backward: prev=%d cur=%d bareKey=%x — would cause MDBX_EKEYMISMATCH",
+					op, w.valsTable, lastCursorSeqID, seqID, bareKey,
+				))
+			}
+			lastCursorSeqID = seqID
+			hasLastCursorSeqID = true
+		}
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
@@ -451,9 +468,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				switch {
 				case !oldIsDeletion && !newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
+					seqID := binary.BigEndian.Uint64(seqIDBuf[:])
+					assertSeqIDMonotone("Put", seqID, bareKey)
 					return valsCursor.Put(seqIDBuf[:], v)
 				case !oldIsDeletion && newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
+					seqID := binary.BigEndian.Uint64(seqIDBuf[:])
+					assertSeqIDMonotone("Delete", seqID, bareKey)
 					if err := valsCursor.Delete(seqIDBuf[:]); err != nil {
 						return err
 					}
@@ -466,6 +487,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 						return err
 					}
 					binary.BigEndian.PutUint64(seqIDBuf[:], newSeqID)
+					assertSeqIDMonotone("Append(del->real)", newSeqID, bareKey)
 					if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 						return err
 					}
@@ -485,6 +507,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
+				assertSeqIDMonotone("Append(new)", seqID, bareKey)
 				if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 					return err
 				}
