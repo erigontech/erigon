@@ -30,6 +30,21 @@ type MdGas struct {
 	State   uint64
 }
 
+func (g MdGas) Plus(other MdGas) MdGas {
+	return MdGas{
+		Regular: g.Regular + other.Regular,
+		State:   g.State + other.State,
+	}
+}
+
+func (g MdGas) Total() uint64 {
+	return g.Regular + g.State
+}
+
+func NewFullMdGas(regular, state, blob uint64) FullMdGas {
+	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
+}
+
 // FullMdGas extends MdGas with blob gas.
 type FullMdGas struct {
 	MdGas
@@ -45,21 +60,6 @@ type FullMdGas struct {
 type MdGasUsage struct {
 	Regular uint64
 	State   int64
-}
-
-func NewFullMdGas(regular, state, blob uint64) FullMdGas {
-	return FullMdGas{MdGas: MdGas{Regular: regular, State: state}, Blob: blob}
-}
-
-func (g MdGas) Plus(other MdGas) MdGas {
-	return MdGas{
-		Regular: g.Regular + other.Regular,
-		State:   g.State + other.State,
-	}
-}
-
-func (g MdGas) Total() uint64 {
-	return g.Regular + g.State
 }
 
 // PlusIntrinsic folds an intrinsic-gas MdGas into the frame-usage report,

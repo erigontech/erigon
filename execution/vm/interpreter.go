@@ -373,7 +373,7 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, leftOver mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
@@ -425,7 +425,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// EIP-8037: snapshot the frame's net state-gas usage (charges minus
 		// inline refunds, signed) before callContext.put() clears it.
 		// gasUsed.Regular is derived uniformly by evm.call/evm.create's defer
-		// from the final leftOverGas (covers precompile/no-code paths and
+		// from the final gasRemaining (covers precompile/no-code paths and
 		// handleFrameRevert gas burn).
 		gasUsed.State = callContext.frameStateUsed
 		// this function must execute _after_: the `CaptureState` needs the stacks before
