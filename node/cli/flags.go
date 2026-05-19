@@ -328,7 +328,7 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 // Add new overrides here as needed.
 func applyBloatnetDefaults(ctx *cli.Context, cfg *ethconfig.Config) {
 	if !ctx.IsSet(BatchSizeFlag.Name) {
-		_ = cfg.BatchSize.UnmarshalText([]byte("128m"))
+		_ = cfg.BatchSize.UnmarshalText([]byte("128m")) // ram: 42g -> 26g. chaindata size: 50g -> 35g
 	}
 }
 
