@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -234,7 +233,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	newRecipientBal := new(uint256.Int).Add(recipientBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	// TxIn: reads from execution. No coinbase reads (coinbase not touched
 	// during calcFees=false execution).
@@ -364,7 +363,7 @@ func coinbaseIsRecipientScenario() *testFinalizeScenario {
 	newCoinbaseBal := new(uint256.Int).Add(coinbaseBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	txIn := state.ReadSet{}
 	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
@@ -426,7 +425,7 @@ func selfTransferScenario() *testFinalizeScenario {
 	// Gas is NOT deducted during calcFees=false, so balance stays the same.
 	// But nonce increments.
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 	tip := uint256.NewInt(21_000)
 
 	txIn := state.ReadSet{}

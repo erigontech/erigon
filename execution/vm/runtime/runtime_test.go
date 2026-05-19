@@ -199,7 +199,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
@@ -313,10 +313,12 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool  { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
-func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
+func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
+	return nil
+}
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64    { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int

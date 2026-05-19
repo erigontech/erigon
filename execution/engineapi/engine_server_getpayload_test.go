@@ -19,7 +19,6 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -174,7 +173,7 @@ func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash)
 func (s *getPayloadStubModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	panic("not implemented")
 }
-func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
+func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	panic("not implemented")
 }
 func (s *getPayloadStubModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
