@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -316,6 +317,18 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
 		cfg.ChaosMonkey = true
+	}
+
+	if cfg.Snapshot.ChainName == networkname.Bloatnet {
+		applyBloatnetDefaults(ctx, cfg)
+	}
+}
+
+// applyBloatnetDefaults applies bloatnet-optimised values for flags the user did not explicitly set.
+// Add new overrides here as needed.
+func applyBloatnetDefaults(ctx *cli.Context, cfg *ethconfig.Config) {
+	if !ctx.IsSet(BatchSizeFlag.Name) {
+		_ = cfg.BatchSize.UnmarshalText([]byte("256M"))
 	}
 }
 
