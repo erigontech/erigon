@@ -35,6 +35,4 @@ const (
 	BlockNum = 8
 	// Ts TimeStamp (BlockNum, TxNum or any other uint64 equivalent of Time)
 	Ts = 8
-	// Incarnation length of uint64 for contract incarnations
-	Incarnation = 8
 )

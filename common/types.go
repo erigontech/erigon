@@ -36,8 +36,6 @@ import (
 const (
 	// BlockNumberLength length of uint64 big endian
 	BlockNumberLength = 8
-	// IncarnationLength length of uint64 for contract incarnations
-	IncarnationLength = 8
 )
 
 // UnprefixedHash allows marshaling a Hash without 0x prefix.
