@@ -243,16 +243,13 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - (no code changes — verification only)
 
-- [ ] `make lint` — non-deterministic; run until clean
-- [ ] `go test ./db/state/... -count=1` — all green
-- [ ] `go test ./cmd/integration/... -count=1` — all green
-- [ ] `make integration` — binary builds with new flag
-- [ ] Smoke check: `./build/bin/integration commitment convert --help` shows `--continue` with the full help text including the trust-operator caveat
-- [ ] Manual smoke test on a small chain (if a dev datadir is available):
-  - Run convert with `--squeeze=true`, interrupt with ctrl-C after a few files
-  - Re-run with `--continue --squeeze=true`
-  - Verify: log shows "resuming. complete shards: N (...)", final converted set matches a non-interrupted reference run
-- [ ] Run full test suite: `make test-short`
+- [x] `make lint` — non-deterministic; run until clean
+- [x] `go test ./db/state/... -count=1` — all green
+- [x] `go test ./cmd/integration/... -count=1` — all green
+- [x] `make integration` — binary builds with new flag
+- [x] Smoke check: `./build/bin/integration commitment convert --help` shows `--continue` with the full help text including the trust-operator caveat
+- [x] Manual smoke test on a small chain (skipped — not automatable, requires dev datadir; deferred to Post-Completion)
+- [x] Run full test suite: `make test-short`
 
 ### Task 7: PR open
 
