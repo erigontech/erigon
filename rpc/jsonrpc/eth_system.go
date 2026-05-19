@@ -60,7 +60,7 @@ type DeleteStrategy struct {
 // does not hold that data at all; otherwise OldestBlock is the lowest block number available.
 // DeleteStrategy is set when the node uses a finite retention window.
 type CapabilityField struct {
-	Disabled       bool            `json:"disabled"`
+	Disabled       bool            `json:"disabled,omitempty"`
 	OldestBlock    *hexutil.Uint64 `json:"oldestBlock,omitempty"`
 	DeleteStrategy *DeleteStrategy `json:"deleteStrategy,omitempty"`
 }
@@ -154,22 +154,28 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
 
-	var receiptsField CapabilityField
+	var receiptsField, logsField CapabilityField
 	if persistReceipts {
-		// --persist.receipts stores receipts for all blocks from genesis.
+		// --persist.receipts stores receipts (which include logs) for all blocks from genesis.
 		zero := hexutil.Uint64(0)
 		receiptsField = CapabilityField{OldestBlock: &zero}
+		logsField = receiptsField
 	} else {
-		// Without --persist.receipts, receipts are re-executed on demand; the
-		// available range is bounded by the state history prune window.
-		receiptsField = stateField
+		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
+		// history and the block body. Use the more restrictive of the two oldest-block bounds.
+		if blocksOldest > stateOldest {
+			receiptsField = avail(blocksOldest, pruneMode.Blocks)
+		} else {
+			receiptsField = stateField
+		}
+		logsField = stateField
 	}
 
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
 		State:       stateField,
 		Tx:          blocksField,
-		Logs:        stateField,
+		Logs:        logsField,
 		Receipts:    receiptsField,
 		Blocks:      blocksField,
 		StateProofs: stateproofs,

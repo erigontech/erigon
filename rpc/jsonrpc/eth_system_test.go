@@ -181,12 +181,13 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --persist.receipts: receipts available from genesis, not limited by state prune window.
+		// --persist.receipts: receipts and logs available from genesis, not limited by state prune window.
 		require.Equal(t, uint64(0), oldest(t, result.Receipts))
 		require.Nil(t, result.Receipts.DeleteStrategy)
-		// state and logs still respect history prune distance
+		require.Equal(t, uint64(0), oldest(t, result.Logs))
+		require.Nil(t, result.Logs.DeleteStrategy)
+		// state still respects history prune distance
 		require.Equal(t, pruned, oldest(t, result.State))
-		require.Equal(t, pruned, oldest(t, result.Logs))
 	})
 
 	t.Run("full_with_commitment", func(t *testing.T) {
@@ -225,6 +226,26 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
 		require.False(t, result.StateProofs.Disabled)
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
+	})
+
+	t.Run("minimal_persist_receipts", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testMinimalMode, false, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		// --persist.receipts overrides the prune window: receipts and logs available from genesis.
+		require.Equal(t, uint64(0), oldest(t, result.Receipts))
+		require.Nil(t, result.Receipts.DeleteStrategy)
+		require.Equal(t, uint64(0), oldest(t, result.Logs))
+		require.Nil(t, result.Logs.DeleteStrategy)
+		// state, tx, and blocks still respect the minimal prune window.
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+		require.Equal(t, testPruneDistance, window(t, result.State))
+		require.Equal(t, testPruneDistance, window(t, result.Tx))
+		require.Equal(t, testPruneDistance, window(t, result.Blocks))
 	})
 
 	// full mode on a chain with MergeHeight: pre-merge tx/blocks are not kept,
@@ -274,6 +295,84 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, mergeAt, oldest(t, result.Blocks))
 		// state is still limited by history prune distance
 		require.Equal(t, uint64(chainSize)-testPruneDistance, oldest(t, result.State))
+	})
+
+	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (DefaultBlocksPruneMode)
+	// so receipts.oldestBlock must be clamped to the merge point, not stateOldest.
+	t.Run("full_merge_height_receipts_seam", func(t *testing.T) {
+		t.Parallel()
+		mergeAt := uint64(chainSize - 2) // 18 > head-testPruneDistance=10
+
+		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+
+		var cfgWithMerge chain.Config
+		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+		cfgWithMerge.MergeHeight = &mergeAt
+		gspec := &types.Genesis{
+			Config: &cfgWithMerge,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+		signer := types.LatestSigner(gspec.Config)
+		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+			b.SetCoinbase(common.Address{1})
+			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
+			if txErr != nil {
+				t.Fatal(txErr)
+			}
+			b.AddTx(tx)
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(c))
+
+		ctx := t.Context()
+		dbTx, err := m.DB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer dbTx.Rollback()
+		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
+		require.NoError(t, dbTx.Commit())
+
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.Capabilities(ctx)
+		require.NoError(t, err)
+		stateOldest := uint64(chainSize) - testPruneDistance // = 10
+		// blocks constraint (mergeAt=18) is tighter than state (10): receipts must reflect it
+		require.Equal(t, mergeAt, oldest(t, result.Receipts))
+		require.Nil(t, result.Receipts.DeleteStrategy)
+		// logs only require state history, not block bodies
+		require.Equal(t, stateOldest, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+	})
+
+	// head_zero pins that ReadCanonicalHash(tx, 0) returns the genesis hash, not the zero hash.
+	t.Run("head_zero", func(t *testing.T) {
+		t.Parallel()
+		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		gspec := &types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+		ctx := t.Context()
+		dbTx, err := m.DB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer dbTx.Rollback()
+		_, err = prune.EnsureNotChanged(dbTx, prune.ArchiveMode)
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
+		require.NoError(t, dbTx.Commit())
+
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+		result, err := api.Capabilities(ctx)
+		require.NoError(t, err)
+		require.Equal(t, uint64(0), uint64(result.Head.Number))
+		require.NotEqual(t, common.Hash{}, result.Head.Hash)
 	})
 }
 
