@@ -19,9 +19,10 @@ package graph
 import (
 	"context"
 	"errors"
-	"math/big"
 	"strings"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
@@ -254,7 +255,7 @@ func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash)
 	return nil, nil
 }
 func (m *mockGraphQLAPI) GetLatestBlockNumber(_ context.Context) (uint64, error) { return 0, nil }
-func (m *mockGraphQLAPI) GetChainID(_ context.Context) (*big.Int, error)         { return nil, nil }
+func (m *mockGraphQLAPI) GetChainID(_ context.Context) (*uint256.Int, error)     { return nil, nil }
 func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, _ common.Address, _ rpc.BlockNumber) (string, uint64, string, error) {
 	return "", 0, "", nil
 }
