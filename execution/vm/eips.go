@@ -143,7 +143,7 @@ func enable2929(jt *JumpTable) {
 	jt[EXTCODESIZE].dynamicGas = gasEip2929AccountCheck
 
 	jt[EXTCODEHASH].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODEHASH].dynamicGas = gasEip2929AccountCheck
+	jt[EXTCODEHASH].dynamicGas = gasExtCodeHashEIP2929
 
 	jt[BALANCE].constantGas = params.WarmStorageReadCostEIP2929
 	jt[BALANCE].dynamicGas = gasEip2929AccountCheck

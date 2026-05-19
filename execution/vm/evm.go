@@ -665,6 +665,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			// even if no entry exists.
 			if cc := evm.currentCallContext; cc != nil {
 				cc.invalidateCodeEntry(address)
+				cc.invalidateCodeHash(address)
 			}
 		} else {
 			if evm.chainRules.IsAmsterdam {

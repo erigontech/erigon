@@ -152,6 +152,22 @@ type CallContext struct {
 	// Same lifetime: cleared at the top of each interpreter Run iteration.
 	cachedCodeEntry *codeCacheEntry
 
+	// codeHashCache is a hash-only sibling of codeCache for the EXTCODEHASH
+	// path.  Value-typed map (CodeHash is a 32-byte fixed array) so a hit
+	// returns the hash by value without an entry indirection.  Populated by
+	// loadAndCacheCodeHash on EXTCODEHASH-miss (which avoids the bytecode
+	// load that loadAndCacheCode performs) AND by loadAndCacheCode itself
+	// when EXTCODESIZE/COPY warms a cell (so an EXTCODEHASH later in the
+	// same frame is a hit either way).
+	codeHashCache map[accounts.Address]accounts.CodeHash
+
+	// cachedCodeHash + cachedCodeHashValid hand a CodeHash looked up by
+	// gasExtCodeHashEIP2929 forward to opExtCodeHash.  Value+bool rather
+	// than a pointer avoids the heap alloc per populate that a *CodeHash
+	// handoff would force.
+	cachedCodeHash      accounts.CodeHash
+	cachedCodeHashValid bool
+
 	Stack    Stack
 	Contract Contract
 }
@@ -181,6 +197,19 @@ var (
 // to confirm the cache is being exercised as expected on a given workload.
 func DumpCodeCacheStats() (hits, misses uint64) {
 	return codeCacheHitCount.Load(), codeCacheMissCount.Load()
+}
+
+// Frame-local codehash cache hit/miss counters.  Same purpose as the code
+// cache counters but for the hash-only sibling cache consulted by
+// gasExtCodeHashEIP2929 / opExtCodeHash.
+var (
+	codeHashCacheHitCount  atomic.Uint64
+	codeHashCacheMissCount atomic.Uint64
+)
+
+// DumpCodeHashCacheStats snapshots the frame-local codehash cache counters.
+func DumpCodeHashCacheStats() (hits, misses uint64) {
+	return codeHashCacheHitCount.Load(), codeHashCacheMissCount.Load()
 }
 
 // findSlotCell walks the parent chain from this frame upward looking for
@@ -223,6 +252,28 @@ func (ctx *CallContext) findCodeEntry(addr accounts.Address) (*codeCacheEntry, b
 func (ctx *CallContext) invalidateCodeEntry(addr accounts.Address) {
 	for c := ctx; c != nil; c = c.parent {
 		delete(c.codeCache, addr)
+	}
+}
+
+// findCodeHash walks the parent chain for a cached codehash entry.
+// Mirrors findCodeEntry but for the hash-only sibling cache.
+func (ctx *CallContext) findCodeHash(addr accounts.Address) (accounts.CodeHash, bool) {
+	for c := ctx; c != nil; c = c.parent {
+		if h, ok := c.codeHashCache[addr]; ok {
+			codeHashCacheHitCount.Add(1)
+			return h, true
+		}
+	}
+	codeHashCacheMissCount.Add(1)
+	return accounts.CodeHash{}, false
+}
+
+// invalidateCodeHash removes any cached codehash for addr from this frame
+// and every ancestor.  Called alongside invalidateCodeEntry on CREATE /
+// CREATE2 success.
+func (ctx *CallContext) invalidateCodeHash(addr accounts.Address) {
+	for c := ctx; c != nil; c = c.parent {
+		delete(c.codeHashCache, addr)
 	}
 }
 
@@ -336,8 +387,13 @@ func (c *CallContext) put() {
 	if c.codeCache != nil {
 		clear(c.codeCache)
 	}
+	if c.codeHashCache != nil {
+		clear(c.codeHashCache)
+	}
 	c.cachedSlotCell = nil
 	c.cachedCodeEntry = nil
+	c.cachedCodeHash = accounts.CodeHash{}
+	c.cachedCodeHashValid = false
 	contextPool.Put(c)
 }
 
@@ -674,6 +730,18 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				parentCodeCache[addr] = entry
 			}
 		}
+		// Codehash-cache rollup mirrors the code-cache rollup above —
+		// value-typed map (CodeHash) instead of pointer-to-entry.
+		if err == nil && len(callContext.codeHashCache) > 0 && callContext.parent != nil {
+			parentCodeHashCache := callContext.parent.codeHashCache
+			if parentCodeHashCache == nil {
+				parentCodeHashCache = map[accounts.Address]accounts.CodeHash{}
+				callContext.parent.codeHashCache = parentCodeHashCache
+			}
+			for addr, h := range callContext.codeHashCache {
+				parentCodeHashCache[addr] = h
+			}
+		}
 		// Diagnostic dump of frame-local code-cache hit/miss counters at
 		// outer-frame return (one log line per tx).  Lets the bench
 		// harness confirm the cache is actually being exercised on a
@@ -682,6 +750,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if hits, misses := codeCacheHitCount.Load(), codeCacheMissCount.Load(); hits+misses > 0 {
 				ratio := float64(hits) * 100 / float64(hits+misses)
 				log.Info("[codecache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
+			}
+			if hits, misses := codeHashCacheHitCount.Load(), codeHashCacheMissCount.Load(); hits+misses > 0 {
+				ratio := float64(hits) * 100 / float64(hits+misses)
+				log.Info("[codehashcache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
 			}
 		}
 		// Pop this frame.
@@ -718,6 +790,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		callContext.cachedAddrValid = false
 		callContext.cachedSlotCell = nil
 		callContext.cachedCodeEntry = nil
+		callContext.cachedCodeHashValid = false
 		if anyTrace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas

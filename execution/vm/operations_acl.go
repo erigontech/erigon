@@ -186,6 +186,32 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	return gas, nil
 }
 
+// gasExtCodeHashEIP2929 implements the EIP-2929 access-list shortcut for
+// EXTCODEHASH.  Consults the codehash cache first (hash-only, populated
+// without a bytecode load), then falls back to the full code cache (which
+// also carries the hash).  Either hit implies the address is already warm
+// in the access list — that's the invariant: every gas function that
+// populates either cache calls AddAddressToAccessList first.  The hit also
+// hands the hash off to opExtCodeHash via cachedCodeHash so the op handler
+// doesn't redo the parent-chain walk.
+func gasExtCodeHashEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+	addr := callContext.peekAddress()
+	if h, ok := callContext.findCodeHash(addr); ok {
+		callContext.cachedCodeHash = h
+		callContext.cachedCodeHashValid = true
+		return mdgas.MdGas{}, nil
+	}
+	if entry, ok := callContext.findCodeEntry(addr); ok {
+		callContext.cachedCodeHash = entry.Hash
+		callContext.cachedCodeHashValid = true
+		return mdgas.MdGas{}, nil
+	}
+	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+		return mdgas.MdGas{Regular: params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929}, nil
+	}
+	return mdgas.MdGas{}, nil
+}
+
 // gasEip2929AccountCheck checks whether the first stack item (as address) is present in the access list.
 // If it is, this method returns '0', otherwise 'cold-warm' gas, presuming that the opcode using it
 // is also using 'warm' as constant factor.

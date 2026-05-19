@@ -569,7 +569,38 @@ func loadAndCacheCode(scope *CallContext, ibs *state.IntraBlockState, addr accou
 		scope.codeCache = map[accounts.Address]*codeCacheEntry{}
 	}
 	scope.codeCache[addr] = entry
+	// Seed the codehash cache too — a later EXTCODEHASH on this addr in the
+	// same frame would otherwise miss codeHashCache and pay an unnecessary
+	// loadAndCacheCodeHash round-trip when we already have the hash in hand.
+	if scope.codeHashCache == nil {
+		scope.codeHashCache = map[accounts.Address]accounts.CodeHash{}
+	}
+	scope.codeHashCache[addr] = entry.Hash
 	return entry, nil
+}
+
+// loadAndCacheCodeHash reads JUST the codehash for addr (no bytecode load)
+// and stores it in the frame-local codeHashCache.  Used by opExtCodeHash on
+// cache miss to avoid the GetCode round-trip that loadAndCacheCode forces.
+// Caller is responsible for the prior MarkAddressAccess / access-list
+// bookkeeping (handled by gasExtCodeHashEIP2929 on cache miss).
+func loadAndCacheCodeHash(scope *CallContext, ibs *state.IntraBlockState, addr accounts.Address) (accounts.CodeHash, error) {
+	empty, err := ibs.Empty(addr)
+	if err != nil {
+		return accounts.CodeHash{}, err
+	}
+	var h accounts.CodeHash
+	if !empty {
+		h, err = ibs.GetCodeHash(addr)
+		if err != nil {
+			return accounts.CodeHash{}, err
+		}
+	}
+	if scope.codeHashCache == nil {
+		scope.codeHashCache = map[accounts.Address]accounts.CodeHash{}
+	}
+	scope.codeHashCache[addr] = h
+	return h, nil
 }
 
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -689,25 +720,26 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	address := scope.peekAddress()
 	slot := scope.Stack.peek()
 
-	// Cache-hit fast path.  Skip MarkAddressAccess (prior touch
-	// already marked).  loadAndCacheCode sets entry.Hash to zero
-	// CodeHash when Empty(addr) is true (non-existent account →
-	// EXTCODEHASH returns 0) and to GetCodeHash(addr) otherwise
-	// (emptyCodeHash for existing-no-code, keccak(code) for a contract).
-	if entry := scope.cachedCodeEntry; entry != nil {
-		hashValue := entry.Hash.Value()
+	// Cache-hit fast path.  gasExtCodeHashEIP2929 sets cachedCodeHash
+	// from either codeHashCache (preferred — hash-only, never paid the
+	// bytecode load) or codeCache (fallback — EXTCODESIZE/COPY warmed
+	// us).  Either way the address is already warm in the access list,
+	// so MarkAddressAccess is skipped.  Zero CodeHash here means a
+	// non-existent account, which is the correct EXTCODEHASH result.
+	if scope.cachedCodeHashValid {
+		hashValue := scope.cachedCodeHash.Value()
 		slot.SetBytes(hashValue[:])
 		return pc, nil, nil
 	}
-	// First touch this frame: BAL mark + IBS load + cache populate.  BAL
-	// also covers the non-existent-account case (where loadAndCacheCode
-	// would otherwise return without calling GetCodeHash).
+	// First touch this frame: BAL mark + IBS hash-only load + cache
+	// populate.  Avoids the GetCode round-trip that loadAndCacheCode
+	// would force — EXTCODEHASH doesn't need bytecode.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
-	entry, err := loadAndCacheCode(scope, evm.IntraBlockState(), address)
+	h, err := loadAndCacheCodeHash(scope, evm.IntraBlockState(), address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	hashValue := entry.Hash.Value()
+	hashValue := h.Value()
 	slot.SetBytes(hashValue[:])
 	return pc, nil, nil
 }
