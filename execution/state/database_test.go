@@ -55,7 +55,7 @@ func TestCreate2Revive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -239,7 +239,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -503,7 +503,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -666,7 +666,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -830,7 +830,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		funds        = big.NewInt(1000000000)
 		gspec        = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -974,7 +974,7 @@ func TestEip2200Gas(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -1082,7 +1082,7 @@ func TestWrongIncarnation(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -1206,7 +1206,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),
@@ -1700,7 +1700,7 @@ func TestTxLookupUnwind(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
 				SpuriousDragonBlock:   common.NewUint64(1),

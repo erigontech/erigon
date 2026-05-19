@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -207,7 +208,7 @@ func TestSetupGenesis(t *testing.T) {
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = types.Genesis{
-			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(3)},
+			Config: &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(3)},
 			Alloc: types.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
@@ -215,7 +216,7 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 	)
 	logger := log.New()
-	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(2)}
+	oldcustomg.Config = &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(2)}
 	tests := []struct {
 		wantErr    error
 		fn         func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error)

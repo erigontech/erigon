@@ -514,6 +514,7 @@ func (sd *SharedDomains) CommitmentCapture() bool {
 
 func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
+func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads
 // that miss in the local mem batch will check the parent's mem batch before

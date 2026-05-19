@@ -1015,7 +1015,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	cfg := txpoolcfg.DefaultConfig
 	var chainConfig chain.Config
 	copier.Copy(&chainConfig, testforks.Forks["Prague"])
-	chainConfig.ChainID = maxUint256.ToBig()
+	chainConfig.ChainID = maxUint256
 	cache := kvcache.NewSimple()
 	logger := log.New()
 	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
@@ -1378,7 +1378,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 
 	key, err := crypto.GenerateKey()
 	require.NoError(err)
-	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID.ToBig()), key)
+	signedTx, err := types.SignTx(wrapper, *types.LatestSignerForChainID(chainID), key)
 	require.NoError(err)
 	dt := &wrapper.Tx.DynamicFeeTransaction
 	v, r, s := signedTx.RawSignatureValues()
@@ -1668,7 +1668,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 
 	// Step 5: A valid Osaka-shaped blob txn must now be admittable (not rejected
 	// with BlobPoolOverflow), proving the counters were properly cleaned up.
-	chainID := uint256.MustFromBig(testforks.Forks["Cancun"].ChainID)
+	chainID := testforks.Forks["Cancun"].ChainID
 	osakaRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, 2)
 	parseCtx := NewTxnParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -1701,7 +1701,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 	require.NoError(err)
 
-	chainID := uint256.MustFromBig(testforks.Forks["Osaka"].ChainID)
+	chainID := testforks.Forks["Osaka"].ChainID
 	rawTxn := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, params.MaxBlobsPerTxn)
 
 	parseCtx := NewTxnParseContext(*chainID)
