@@ -515,9 +515,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// Release the old RO snapshot so MDBX can reclaim retired pages.
 			roTx.Rollback()
 			// In-loop PruneExecutionStage no-ops on the overlay; drain here on
-			// a real RW tx. Force initialCycle=false to always use the
-			// furious-prune budget (CollateAndPruneIfNeeded, own RW tx).
-			if _, pruneErr := e.runForkchoicePrune(false); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+			// a real RW tx. initialCycle=true so the catchup prune budget runs
+			// against the in-flight bursts (CollateAndPruneIfNeeded, own RW tx).
+			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			return nil
