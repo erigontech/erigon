@@ -413,7 +413,11 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if h.Time, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Time: %w", err)
 	}
-	if h.Extra, err = s.Bytes(); err != nil {
+	// Reuse h.Extra's underlying buffer when capacity is sufficient: in
+	// the hoisted-Header walker pattern this amortises the per-iteration
+	// alloc for Extra to one alloc whenever a larger Extra is encountered
+	// than has been seen so far.
+	if h.Extra, err = s.AppendBytes(h.Extra[:0]); err != nil {
 		return fmt.Errorf("read Extra: %w", err)
 	}
 
@@ -425,7 +429,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
-		if h.AuRaSeal, err = s.Bytes(); err != nil {
+		if h.AuRaSeal, err = s.AppendBytes(h.AuRaSeal[:0]); err != nil {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {

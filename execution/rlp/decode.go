@@ -750,6 +750,48 @@ func (s *Stream) ReadBytes(b []byte) error {
 	}
 }
 
+// AppendBytes decodes the next RLP string and appends its contents to
+// dst, returning the extended slice. Pass dst[:0] to overwrite an
+// existing buffer's contents while preserving its capacity (the typical
+// "reuse scratch" pattern); pass nil to allocate fresh.
+//
+// This is the variable-length counterpart to ReadBytes: ReadBytes
+// requires the caller to know the exact size; AppendBytes does not.
+// Compared to Bytes(), it lets the caller amortise allocation across
+// many decode calls by reusing a previously-allocated buffer.
+func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return dst, err
+	}
+	switch kind {
+	case Byte:
+		s.kind = -1 // rearm Kind
+		return append(dst, s.byteval), nil
+	case String:
+		cur := len(dst)
+		need := cur + int(size)
+		if cap(dst) < need {
+			// grow: allocate exactly `need` so the caller's buffer keeps
+			// growing only to the largest payload it has actually seen.
+			grown := make([]byte, need)
+			copy(grown, dst)
+			dst = grown
+		} else {
+			dst = dst[:need]
+		}
+		if err = s.readFull(dst[cur:]); err != nil {
+			return dst, err
+		}
+		if size == 1 && dst[cur] < 128 {
+			return dst, ErrCanonSize
+		}
+		return dst, nil
+	default:
+		return dst, ErrExpectedString
+	}
+}
+
 // Raw reads a raw encoded value including RLP type information.
 func (s *Stream) Raw() ([]byte, error) {
 	kind, size, err := s.Kind()
