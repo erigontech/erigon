@@ -256,12 +256,12 @@ When done set is empty: `[commitment_convert] --continue: no prior progress, sta
 **Files:**
 - (no code changes — PR mechanics only)
 
-- [ ] **Pre-push parent-drift check**: `git fetch origin awskii/r36converter && git log --oneline awskii/convert-continue-flag..origin/awskii/r36converter -- db/state/commitment_convert.go cmd/integration/commands/commitment.go db/state/commitment_convert_test.go`. If parent has new commits touching any of these files, rebase onto the updated parent and re-run Task 6 before pushing
-- [ ] Push `awskii/convert-continue-flag` to origin
-- [ ] Open PR against `awskii/r36converter` (NOT `main`/`release/3.4` — the parent branch isn't merged yet) with title `cmd/integration, db/state: add --continue flag for commitment convert`
-- [ ] PR body: link this plan; summarize the resume semantics and the trust-operator caveat on `--squeeze`/`--nibbles.v2`; list which manual smoke tests were run
-- [ ] Add `## Test plan` section: `make lint`, full `go test` suites, `--help` smoke, manual interrupt-and-resume test
-- [ ] Note in PR: needs rebase onto `main`/`release/3.4` once `awskii/r36converter` lands
+- [x] **Pre-push parent-drift check**: `git fetch origin awskii/r36converter && git log --oneline awskii/convert-continue-flag..origin/awskii/r36converter -- db/state/commitment_convert.go cmd/integration/commands/commitment.go db/state/commitment_convert_test.go`. If parent has new commits touching any of these files, rebase onto the updated parent and re-run Task 6 before pushing — no parent drift found
+- [x] Push `awskii/convert-continue-flag` to origin
+- [x] Open PR against `awskii/r36converter` (NOT `main`/`release/3.4` — the parent branch isn't merged yet) with title `cmd/integration, db/state: add --continue flag for commitment convert` — opened as https://github.com/erigontech/erigon/pull/21283
+- [x] PR body: link this plan; summarize the resume semantics and the trust-operator caveat on `--squeeze`/`--nibbles.v2`; list which manual smoke tests were run
+- [x] Add `## Test plan` section: `make lint`, full `go test` suites, `--help` smoke, manual interrupt-and-resume test
+- [x] Note in PR: needs rebase onto `main`/`release/3.4` once `awskii/r36converter` lands
 
 ### Task 8: Cleanup
 
