@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -166,6 +167,22 @@ type codeCacheEntry struct {
 	Hash accounts.CodeHash
 }
 
+// Frame-local code cache hit/miss counters.  Diagnostic only — incremented
+// inside findCodeEntry / loadAndCacheCode; surfaced via DumpCodeCacheStats
+// at process / bench end so we can verify the cache is actually catching
+// repeated EXT* reads as expected for a given workload.
+var (
+	codeCacheHitCount  atomic.Uint64
+	codeCacheMissCount atomic.Uint64
+)
+
+// DumpCodeCacheStats returns a snapshot of frame-local code-cache hit/miss
+// counters.  Callers (typically bench harness / engine_x runner) use this
+// to confirm the cache is being exercised as expected on a given workload.
+func DumpCodeCacheStats() (hits, misses uint64) {
+	return codeCacheHitCount.Load(), codeCacheMissCount.Load()
+}
+
 // findSlotCell walks the parent chain from this frame upward looking for
 // a cached *WriteCell for (addr, key).  Each level of the two-level map
 // uses an 8-byte unique.Handle key which qualifies for the runtime's
@@ -190,9 +207,11 @@ func (ctx *CallContext) findSlotCell(addr accounts.Address, key accounts.Storage
 func (ctx *CallContext) findCodeEntry(addr accounts.Address) (*codeCacheEntry, bool) {
 	for c := ctx; c != nil; c = c.parent {
 		if entry, ok := c.codeCache[addr]; ok {
+			codeCacheHitCount.Add(1)
 			return entry, true
 		}
 	}
+	codeCacheMissCount.Add(1)
 	return nil, false
 }
 
@@ -653,6 +672,16 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 			for addr, entry := range callContext.codeCache {
 				parentCodeCache[addr] = entry
+			}
+		}
+		// Diagnostic dump of frame-local code-cache hit/miss counters at
+		// outer-frame return (one log line per tx).  Lets the bench
+		// harness confirm the cache is actually being exercised on a
+		// given workload.  Tag with `[codecache]` so grep can isolate.
+		if callContext.parent == nil {
+			if hits, misses := codeCacheHitCount.Load(), codeCacheMissCount.Load(); hits+misses > 0 {
+				ratio := float64(hits) * 100 / float64(hits+misses)
+				log.Info("[codecache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
 			}
 		}
 		// Pop this frame.
