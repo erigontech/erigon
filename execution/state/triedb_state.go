@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"maps"
 	"sort"
@@ -333,9 +332,8 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash := range m {
 			var storageKey common.StorageKey
-			copy(storageKey[:], addrHash[:])
-			binary.BigEndian.PutUint64(storageKey[length.Hash:], tds.aggregateBuffer.storageIncarnation[addrHash])
-			copy(storageKey[length.Hash+length.Incarnation:], keyHash[:])
+			copy(storageKey[:length.Hash], addrHash[:])
+			copy(storageKey[length.Hash:], keyHash[:])
 			storageTouches = append(storageTouches, storageKey)
 		}
 	}
@@ -344,8 +342,8 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 	var keyHash common.Hash
 	var values = make([][]byte, len(storageTouches))
 	for i, storageKey := range storageTouches {
-		copy(addrHash[:], storageKey[:])
-		copy(keyHash[:], storageKey[length.Hash+length.Incarnation:])
+		copy(addrHash[:], storageKey[:length.Hash])
+		copy(keyHash[:], storageKey[length.Hash:])
 		values[i] = tds.aggregateBuffer.storageUpdates[addrHash][keyHash]
 	}
 	return storageTouches, values
@@ -354,7 +352,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) PopulateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
-		addr, _, hash := dbutils.ParseCompositeStorageKey(storageKey[:])
+		addr, hash := dbutils.ParseCompositeStorageKey(storageKey[:])
 		key := dbutils.GenerateCompositeTrieKey(addr, hash)
 		tds.retainListBuilder.AddStorageTouch(key)
 	}
@@ -673,7 +671,7 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 
 	if tds.resolveReads {
 		var storageKey common.StorageKey
-		copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, 1, seckey))
+		copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, seckey))
 		tds.currentBuffer.storageReads[storageKey] = storagePlainKey
 	}
 
@@ -857,7 +855,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address accounts.Address, incarn
 		return err
 	}
 	var storageKey common.StorageKey
-	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+	copy(storageKey[:], dbutils.GenerateCompositeStorageKey(addrHash, seckey))
 
 	storagePlainKey := dbutils.GenerateStoragePlainKey(addressValue, keyValue)
 	tsw.tds.currentBuffer.storageReads[storageKey] = storagePlainKey

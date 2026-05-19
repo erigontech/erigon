@@ -21,7 +21,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"os"
 
@@ -171,13 +170,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					fmt.Printf("accountNode %x\n", hex)
 				}
 				if v.Storage != nil {
-					binary.BigEndian.PutUint64(bytes8[:], v.Incarnation)
-					// Add decompressed incarnation to the hex
-					for i, b := range bytes8[:] {
-						bytes16[i*2] = b / 16
-						bytes16[i*2+1] = b % 16
-					}
-					it.hex = append(hex, bytes16[:]...)
+					// Storage subtree is rooted directly under the account
+					// hash — there used to be 16 nibbles of incarnation
+					// between them when accounts tracked an SD counter; that
+					// counter has been removed from IntraBlockState and the
+					// trie path elides it now.
+					it.hex = hex
 					it.nodeStack[l] = v.Storage
 					it.iStack[l] = 0
 					it.goDeepStack[l] = true
@@ -397,13 +395,9 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("accountNode %x\n", hex)
 			}
 			if n.Storage != nil {
-				binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
-				// Add decompressed incarnation to the hex
-				for i, b := range bytes8[:] {
-					bytes16[i*2] = b / 16
-					bytes16[i*2+1] = b % 16
-				}
-				it.hex = append(hex, bytes16[:]...)
+				// Storage subtree is rooted directly under the account
+				// hash; see the matching branch on the recursive arm above.
+				it.hex = hex
 				it.nodeStack[l] = n.Storage
 				it.iStack[l] = 0
 				it.goDeepStack[l] = true
@@ -778,7 +772,7 @@ func HashWithModifications(
 ) (common.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		keyBytes:  make([]byte, len(aKeys)*(2*length.Hash)+len(sKeys)*(4*length.Hash+2*length.Incarnation)),
+		keyBytes:  make([]byte, len(aKeys)*(2*length.Hash)+len(sKeys)*(4*length.Hash)),
 		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,

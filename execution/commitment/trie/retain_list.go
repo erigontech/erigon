@@ -21,7 +21,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -128,10 +127,9 @@ func NewProofRetainer(addr common.Address, a *accounts.Account, storageKeys []co
 			return nil, err
 		}
 
-		var compactEncoded [72]byte
-		copy(compactEncoded[:32], addrHash[:])
-		binary.BigEndian.PutUint64(compactEncoded[32:40], a.Incarnation)
-		copy(compactEncoded[40:], storageHash[:])
+		var compactEncoded [2 * length.Hash]byte
+		copy(compactEncoded[:length.Hash], addrHash[:])
+		copy(compactEncoded[length.Hash:], storageHash[:])
 		storageHexKeys[i] = rl.AddKey(compactEncoded[:])
 	}
 
@@ -229,7 +227,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 				continue
 			}
 
-			if pe.storageValue != nil && bytes.Equal(pe.storageKey, hexKey[2*(length.Hash+length.Incarnation):]) {
+			if pe.storageValue != nil && bytes.Equal(pe.storageKey, hexKey[2*length.Hash:]) {
 				result.StorageProof[i].Value = (*hexutil.Big)(pe.storageValue.ToBig())
 			}
 

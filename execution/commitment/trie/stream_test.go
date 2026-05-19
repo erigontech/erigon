@@ -95,7 +95,10 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		tr,
 		common.Hashes{}, []*accounts.Account{}, [][]byte{},
 		common.StorageKeys{}, [][]byte{},
-		40,
+		// 32 bytes = account-hash length; storage subtree is rooted
+		// directly under it now that the trie no longer inserts an
+		// 8-byte incarnation between account and storage.
+		32,
 		&stream, // Streams that will be reused for old and new stream
 		hb,      // HashBuilder will be reused
 		false,
@@ -159,7 +162,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		tr,
 		common.Hashes{insertKey}, []*accounts.Account{&insertA}, [][]byte{nil},
 		common.StorageKeys{}, [][]byte{},
-		40,
+		32,
 		&stream, // Streams that will be reused for old and new stream
 		hb,      // HashBuilder will be reused
 		false,

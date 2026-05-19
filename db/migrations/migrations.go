@@ -57,6 +57,7 @@ var migrations = map[kv.Label][]Migration{
 		ResetStageTxnLookup,
 		dbSchemaVersion6,
 		dbSchemaVersion7,
+		dropIncarnationFromStorage,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

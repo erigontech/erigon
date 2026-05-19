@@ -22,7 +22,6 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"reflect"
@@ -626,9 +625,6 @@ func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbit
 	return findSubTriesToLoad(t.RootNode, nil, nil, rl, nil, 0, nil, nil, nil)
 }
 
-var bytes8 [8]byte
-var bytes16 [16]byte
-
 func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
 	switch n := nd.(type) {
 	case *ShortNode:
@@ -711,19 +707,14 @@ func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecide
 		if n.Storage == nil {
 			return prefixes, fixedbits, hooks
 		}
-		binary.BigEndian.PutUint64(bytes8[:], n.Incarnation)
-		dbPrefix = append(dbPrefix, bytes8[:]...)
-		// Add decompressed incarnation to the nibblePath
-		for i, b := range bytes8[:] {
-			bytes16[i*2] = b / 16
-			bytes16[i*2+1] = b % 16
-		}
-		nibblePath = append(nibblePath, bytes16[:]...)
+		// Storage subtree is rooted directly under the account hash; no
+		// incarnation prefix nibbles are inserted (see stream.go for the
+		// matching iteration arm).
 		newPrefixes = prefixes
 		newFixedBits = fixedbits
 		newHooks = hooks
 		if rl.Retain(nibblePath) {
-			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits+64, prefixes, fixedbits, hooks)
+			newPrefixes, newFixedBits, newHooks = findSubTriesToLoad(n.Storage, nibblePath, hook, rl, dbPrefix, bits, prefixes, fixedbits, hooks)
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case *HashNode:

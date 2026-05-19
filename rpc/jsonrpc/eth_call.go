@@ -767,7 +767,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		if len(key) == 32 {
 			retainListBuilder.AddTouch(key)
 		} else {
-			addr, _, hash := dbutils.ParseCompositeStorageKey(key)
+			addr, hash := dbutils.ParseCompositeStorageKey(key)
 			storageTouch := dbutils.GenerateCompositeTrieKey(addr, hash)
 			retainListBuilder.AddStorageTouch(storageTouch)
 		}

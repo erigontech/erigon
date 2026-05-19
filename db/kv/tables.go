@@ -322,7 +322,6 @@ var ChaindataTables = []string{
 	ConfigTable,
 	DatabaseInfo,
 	SyncStageProgress,
-	PlainState,
 	ChangeSets3,
 	Senders,
 	HeadBlockKey,
@@ -451,10 +450,6 @@ var ChaindataTables = []string{
 	BuilderPendingPaymentsTable,
 	PtcWindowTable,
 	LatestExecutionPayloadBidTable,
-	AccountChangeSetDeprecated,
-	StorageChangeSetDeprecated,
-	HashedAccountsDeprecated,
-	HashedStorageDeprecated,
 }
 
 const (
@@ -483,7 +478,20 @@ var DownloaderTables = []string{
 }
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
-var ChaindataDeprecatedTables = []string{}
+var ChaindataDeprecatedTables = []string{
+	// Pre-E3 plain / hashed state and changeset tables. Their storage
+	// keys baked the per-account incarnation counter; the E3 execution
+	// path stores state in kv.AccountsDomain / kv.StorageDomain, which
+	// are incarnation-free. The `drop_incarnation_from_storage`
+	// migration empties these on databases that still hold dormant E2
+	// rows; listing them here lets the mdbx migrator drop the empty
+	// buckets on the next exclusive open.
+	PlainState,
+	HashedAccountsDeprecated,
+	HashedStorageDeprecated,
+	AccountChangeSetDeprecated,
+	StorageChangeSetDeprecated,
+}
 
 // Diagnostics tables
 var DiagnosticsTables = []string{
@@ -515,9 +523,6 @@ type TableCfgItem struct {
 }
 
 var ChaindataTablesCfg = TableCfg{
-	HashedStorageDeprecated: {Flags: DupSort},
-	PlainState:              {Flags: DupSort},
-
 	TblAccountVals:        {Flags: DupSort},
 	TblAccountHistoryKeys: {Flags: DupSort},
 	TblAccountHistoryVals: {Flags: DupSort},

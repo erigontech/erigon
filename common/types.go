@@ -142,12 +142,12 @@ func (hashes Hashes) Sort() {
 	slices.SortFunc(hashes, Hash.Cmp)
 }
 
-const StorageKeyLen = 2*length.Hash + IncarnationLength
+const StorageKeyLen = 2 * length.Hash
 
-// StorageKey is representation of address of a contract storage item
-// It consists of two parts, each of which are 32-byte hashes:
-// 1. Hash of the contract's address
-// 2. Hash of the item's key
+// StorageKey is representation of address of a contract storage item.
+// It consists of two parts, each of which is a 32-byte hash:
+//  1. Hash of the contract's address
+//  2. Hash of the item's key
 type StorageKey [StorageKeyLen]byte
 
 func (k StorageKey) Cmp(other StorageKey) int {

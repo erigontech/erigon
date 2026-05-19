@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -33,12 +32,9 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 
 	tr := New(common.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
-	kInc := make([]byte, 8)
-	binary.BigEndian.PutUint64(kInc, uint64(1))
 	ks1 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000001")
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
-	acc1.Incarnation = 1
 	tr.UpdateAccount(kAcc1, &acc1)
 	tr.Update(concat(kAcc1, ks1...), []byte{1, 2, 3})
 
@@ -47,7 +43,6 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	ks22 := common.FromHex("0000000000000000000000000000000000000000000000000000000000000002")
 	acc2 := accounts.NewAccount()
 	acc2.Balance.SetUint64(6789)
-	acc2.Incarnation = 1
 	tr.UpdateAccount(kAcc2, &acc2)
 	tr.Update(concat(kAcc2, ks2...), []byte{4, 5, 6})
 	tr.Update(concat(kAcc2, ks22...), []byte{7, 8, 9})
@@ -57,12 +52,17 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	tr.EvictNode(nibbles.KeybytesToHex(kAcc1))
 	tr.EvictNode(nibbles.KeybytesToHex(kAcc2))
 	rs := NewRetainList(0)
-	rs.AddKey(concat(concat(kAcc1, kInc...), ks1...))
-	rs.AddKey(concat(concat(kAcc2, kInc...), ks2...))
-	rs.AddKey(concat(concat(kAcc2, kInc...), ks22...))
+	rs.AddKey(concat(kAcc1, ks1...))
+	rs.AddKey(concat(kAcc2, ks2...))
+	rs.AddKey(concat(kAcc2, ks22...))
 	dbPrefixes, fixedbits, hooks := tr.FindSubTriesToLoad(rs)
-	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c830000000000000001 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c830000000000000001]", fmt.Sprintf("%x", dbPrefixes))
-	assert.Equal("[320 320]", fmt.Sprintf("%d", fixedbits))
+	// Storage subtree is rooted directly under the account hash; the
+	// 8-byte incarnation prefix between addr and storage key has been
+	// dropped from the trie path, so dbPrefixes are the bare 32-byte
+	// account hashes (256 bits each) and hooks carry the full
+	// account-hash nibble path.
+	assert.Equal("[0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83 0002cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83]", fmt.Sprintf("%x", dbPrefixes))
+	assert.Equal("[256 256]", fmt.Sprintf("%d", fixedbits))
 	assert.Equal("[000000010c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803 000000020c0f010c0e000606040704060d03090a0f090f060d0b09090d0c030307000208020f010d090d04080d0f070f0800040b070e060409090505080c0803]", fmt.Sprintf("%x", hooks))
 
 	// Evict everytning
