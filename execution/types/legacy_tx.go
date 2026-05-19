@@ -22,7 +22,6 @@ package types
 import (
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -374,12 +373,12 @@ type legacyTxSigHash struct {
 	To       *common.Address `rlp:"nil"`
 	Value    *uint256.Int
 	Data     []byte
-	ChainID  *big.Int
+	ChainID  *uint256.Int
 	V        uint
 	R        uint
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,

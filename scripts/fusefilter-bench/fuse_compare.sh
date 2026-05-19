@@ -32,7 +32,6 @@ fi
 
 DATADIR=/erigon-data/chiado_commit_gate
 LOGDIR=/erigon-logs
-METRICS_HOST=127.0.0.1
 METRICS_PORT=6061
 METRICS_URL=""                  # discovered after erigon starts (step 3a)
 POLL_INTERVAL=3                 # seconds between metric samples
