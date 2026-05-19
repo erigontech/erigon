@@ -874,6 +874,11 @@ func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}
+	// Under FcuBackgroundCommit, UpdateForkChoice returns Success before the
+	// MDBX commit lands. The state-change events insertPoSBlocks waits on are
+	// dispatched pre-commit. Block until the bg goroutine releases the FCU
+	// semaphore so the DB reads below observe the committed state.
+	emt.ExecModule.WaitIdle(emt.Ctx)
 	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {
 		return err

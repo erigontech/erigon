@@ -1035,12 +1035,6 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 // test only processes the genesis → block 1 transition to verify that
 // notification dispatch works correctly in the background commit path.
 func TestNotificationDispatchBackgroundCommit(t *testing.T) {
-	// Background commit creates a race: FCU N returns before commit finishes,
-	// so FCU N+1 reads stale state from DB. This is the known limitation that
-	// the API-layer "latest head pointer" coordination is designed to solve.
-	// Once that's implemented, remove this skip and verify the full flow.
-	t.Skip("background commit requires API-layer coordination (latest head pointer) to work correctly")
-
 	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
 
 	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
