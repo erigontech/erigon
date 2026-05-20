@@ -792,11 +792,6 @@ func (p *Provider) Initialize(deps Deps) error {
 					ChainConfig: p.ChainConfig,
 					Logger:      logger,
 					StateReady:  stateReady,
-					// Historical receipts exist only with
-					// --persist.receipts; without it the receipt-root
-					// check has no receipts to read and skips. The flag
-					// is independent of prune mode.
-					PersistReceipts: config.PersistReceiptsCacheV2,
 					// Same prune-mode treatment as
 					// CommitmentDomainValidator: skip Phase C cleanly
 					// when AtBlock body is intentionally absent under

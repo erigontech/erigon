@@ -74,16 +74,6 @@ type ReceiptRootValidator struct {
 	//
 	// nil → gate disabled (tools / tests that load everything up front).
 	StateReady func() bool
-
-	// PersistReceipts mirrors config.PersistReceiptsCacheV2 — the
-	// --persist.receipts flag, which is independent of prune mode.
-	// Historical receipts (the RCache history domain) are retained ONLY
-	// when it is set; the default leaves SnapshotsDisabled=true on the
-	// RCache domain. Without persisted receipts the per-block
-	// receipt-root cross-check has nothing to read, so the validator
-	// skips entirely — receipt snapshot files are optional and an
-	// unvalidatable optional file is not a validation failure.
-	PersistReceipts bool
 }
 
 // Name implements validation.StepValidator.
@@ -114,17 +104,23 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		return nil
 	}
 
-	// Historical receipts are retained only with --persist.receipts
-	// (independent of prune mode). Without it the RCache history domain
-	// is disabled, so CheckRCacheRootAtBlkRange has no receipts to read
-	// and would compute the empty-trie root for every block. Receipt
-	// snapshot files are optional — skip the per-block cross-check
-	// rather than fail; an optional file we cannot validate is not a
-	// validation failure.
-	if !v.PersistReceipts {
+	// Historical receipts are recomputable only under archive prune
+	// mode. Every pruning mode (minimal/full/blocks) prunes receipt
+	// history, so the per-block receipt-root cross-check has no
+	// historical receipts to recompute against —
+	// CheckRCacheRootAtBlkRange reads an empty set and computes the
+	// empty-trie root for every block. Receipt snapshot files are
+	// optional; skip the check rather than fail — an optional file we
+	// cannot validate (because the data was pruned) is not a validation
+	// failure.
+	//
+	// History.Enabled() is false only for archive (History distance is
+	// MaxUint64); minimal/full/blocks all prune history. Uninitialised
+	// PruneMode (tools/tests) leaves the validator running.
+	if v.PruneMode.Initialised && v.PruneMode.History.Enabled() {
 		if v.Logger != nil {
-			v.Logger.Debug("[storage] receipt-root check skipped — historical receipts not persisted (--persist.receipts off)",
-				"file", files[0].Name)
+			v.Logger.Debug("[storage] receipt-root check skipped — receipt history pruned",
+				"file", files[0].Name, "pruneMode", v.PruneMode.String())
 		}
 		return nil
 	}
