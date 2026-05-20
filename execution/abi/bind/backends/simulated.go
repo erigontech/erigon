@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/event"
+	eth "github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/bor"
 )
 
@@ -290,7 +291,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 		return nil, err
 	}
 	// Read all the receipts from the block and return the one with the matching hash
-	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block, commitmentHistoryEnabled)
+	receipts, err := b.m.ReceiptsReader.GetReceipts(ctx, b.m.ChainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 	if err != nil {
 		panic(err)
 	}

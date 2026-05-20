@@ -23,6 +23,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
+	eth "github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -70,7 +71,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.TemporalTx, block *ty
 	if err != nil {
 		return nil, err
 	}
-	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, commitmentHistoryEnabled)
+	return api.receiptsGenerator.GetReceipts(ctx, chainConfig, tx, block, eth.ReceiptsOpts{CommitmentHistoryEnabled: commitmentHistoryEnabled})
 }
 
 func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, postState *receipts.PostStateInfo) (*types.Receipt, error) {

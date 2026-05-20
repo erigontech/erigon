@@ -64,7 +64,7 @@ func TestCapabilities(t *testing.T) {
 		Blocks:      prune.Distance(testPruneDistance),
 	}
 
-	setupAPI := func(t *testing.T, pruneMode prune.Mode, commitmentHistory bool, persistReceiptsOpts ...bool) (*APIImpl, uint64) {
+	setupAPI := func(t *testing.T, pruneMode prune.Mode, commitmentHistory bool, persistReceipts bool) (*APIImpl, uint64) {
 		t.Helper()
 		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -96,7 +96,7 @@ func TestCapabilities(t *testing.T) {
 		_, err = prune.EnsureNotChanged(tx, pruneMode)
 		require.NoError(t, err)
 		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(tx, commitmentHistory))
-		if len(persistReceiptsOpts) > 0 && persistReceiptsOpts[0] {
+		if persistReceipts {
 			require.NoError(t, kvcfg.PersistReceipts.ForceWrite(tx, true))
 		}
 		require.NoError(t, tx.Commit())
@@ -108,6 +108,43 @@ func TestCapabilities(t *testing.T) {
 		require.NoError(t, err)
 
 		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil), head
+	}
+
+	setupAPIWithMerge := func(t *testing.T, mergeAt uint64, persistReceipts bool) *APIImpl {
+		t.Helper()
+		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr := crypto.PubkeyToAddress(key.PublicKey)
+		var cfgWithMerge chain.Config
+		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+		cfgWithMerge.MergeHeight = &mergeAt
+		gspec := &types.Genesis{
+			Config: &cfgWithMerge,
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		}
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+		signer := types.LatestSigner(gspec.Config)
+		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+			b.SetCoinbase(common.Address{1})
+			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
+			if txErr != nil {
+				t.Fatal(txErr)
+			}
+			b.AddTx(tx)
+		})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(c))
+		ctx := t.Context()
+		dbTx, err := m.DB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer dbTx.Rollback()
+		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
+		if persistReceipts {
+			require.NoError(t, kvcfg.PersistReceipts.ForceWrite(dbTx, true))
+		}
+		require.NoError(t, dbTx.Commit())
+		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	}
 
 	oldest := func(t *testing.T, f CapabilityField) uint64 {
@@ -124,7 +161,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("archive_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, prune.ArchiveMode, false)
+		api, head := setupAPI(t, prune.ArchiveMode, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, head, uint64(result.Head.Number))
@@ -144,7 +181,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("archive_with_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, _ := setupAPI(t, prune.ArchiveMode, true)
+		api, _ := setupAPI(t, prune.ArchiveMode, true, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), oldest(t, result.State))
@@ -155,7 +192,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, false)
+		api, head := setupAPI(t, testFullMode, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -192,7 +229,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_with_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, true)
+		api, head := setupAPI(t, testFullMode, true, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
@@ -202,7 +239,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("minimal_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testMinimalMode, false)
+		api, head := setupAPI(t, testMinimalMode, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -220,7 +257,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("minimal_with_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testMinimalMode, true)
+		api, head := setupAPI(t, testMinimalMode, true, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
@@ -253,42 +290,8 @@ func TestCapabilities(t *testing.T) {
 	t.Run("full_merge_height", func(t *testing.T) {
 		t.Parallel()
 		mergeAt := uint64(chainSize / 2) // = 10, well within the 20-block chain
-
-		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr := crypto.PubkeyToAddress(key.PublicKey)
-
-		var cfgWithMerge chain.Config
-		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
-		cfgWithMerge.MergeHeight = &mergeAt
-		gspec := &types.Genesis{
-			Config: &cfgWithMerge,
-			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
-		}
-		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-
-		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
-			b.SetCoinbase(common.Address{1})
-			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
-			if txErr != nil {
-				t.Fatal(txErr)
-			}
-			b.AddTx(tx)
-		})
-		require.NoError(t, err)
-		require.NoError(t, m.InsertChain(c))
-
-		ctx := t.Context()
-		dbTx, err := m.DB.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer dbTx.Rollback()
-		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
-		require.NoError(t, err)
-		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
-		require.NoError(t, dbTx.Commit())
-
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-		result, err := api.Capabilities(ctx)
+		api := setupAPIWithMerge(t, mergeAt, false)
+		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		// tx and blocks must start at the merge point, not 0
 		require.Equal(t, mergeAt, oldest(t, result.Tx))
@@ -298,54 +301,32 @@ func TestCapabilities(t *testing.T) {
 	})
 
 	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (DefaultBlocksPruneMode)
-	// so receipts.oldestBlock must be clamped to the merge point, not stateOldest.
+	// so receipts.oldestBlock and logs.oldestBlock must be clamped to the merge point.
 	t.Run("full_merge_height_receipts_seam", func(t *testing.T) {
 		t.Parallel()
 		mergeAt := uint64(chainSize - 2) // 18 > head-testPruneDistance=10
-
-		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		addr := crypto.PubkeyToAddress(key.PublicKey)
-
-		var cfgWithMerge chain.Config
-		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
-		cfgWithMerge.MergeHeight = &mergeAt
-		gspec := &types.Genesis{
-			Config: &cfgWithMerge,
-			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
-		}
-		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-
-		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
-			b.SetCoinbase(common.Address{1})
-			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
-			if txErr != nil {
-				t.Fatal(txErr)
-			}
-			b.AddTx(tx)
-		})
+		api := setupAPIWithMerge(t, mergeAt, false)
+		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
-		require.NoError(t, m.InsertChain(c))
-
-		ctx := t.Context()
-		dbTx, err := m.DB.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer dbTx.Rollback()
-		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
-		require.NoError(t, err)
-		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
-		require.NoError(t, dbTx.Commit())
-
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-		result, err := api.Capabilities(ctx)
-		require.NoError(t, err)
-		stateOldest := uint64(chainSize) - testPruneDistance // = 10
-		// blocks constraint (mergeAt=18) is tighter than state (10): receipts must reflect it
+		// blocks constraint (mergeAt=18) is tighter than state (10): both receipts and logs must reflect it
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
 		require.Nil(t, result.Receipts.DeleteStrategy)
-		// logs only require state history, not block bodies
-		require.Equal(t, stateOldest, oldest(t, result.Logs))
-		require.Equal(t, testPruneDistance, window(t, result.Logs))
+		require.Equal(t, mergeAt, oldest(t, result.Logs))
+		require.Nil(t, result.Logs.DeleteStrategy)
+	})
+
+	// full mode + --persist.receipts on a merge chain: pre-merge blocks were never downloaded,
+	// so their receipts were never persisted. receipts/logs.oldestBlock must reflect the merge point.
+	t.Run("full_persist_receipts_merge_height", func(t *testing.T) {
+		t.Parallel()
+		mergeAt := uint64(chainSize / 2) // = 10
+		api := setupAPIWithMerge(t, mergeAt, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, mergeAt, oldest(t, result.Receipts))
+		require.Nil(t, result.Receipts.DeleteStrategy)
+		require.Equal(t, mergeAt, oldest(t, result.Logs))
+		require.Nil(t, result.Logs.DeleteStrategy)
 	})
 
 	// head_zero pins that ReadCanonicalHash(tx, 0) returns the genesis hash, not the zero hash.

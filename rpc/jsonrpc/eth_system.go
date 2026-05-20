@@ -60,7 +60,7 @@ type DeleteStrategy struct {
 // does not hold that data at all; otherwise OldestBlock is the lowest block number available.
 // DeleteStrategy is set when the node uses a finite retention window.
 type CapabilityField struct {
-	Disabled       bool            `json:"disabled,omitempty"`
+	Disabled       bool            `json:"disabled"`
 	OldestBlock    *hexutil.Uint64 `json:"oldestBlock,omitempty"`
 	DeleteStrategy *DeleteStrategy `json:"deleteStrategy,omitempty"`
 }
@@ -107,11 +107,12 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return nil, err
 	}
 
-	headBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	overlayTx := api.filters.WithOverlay(tx)
+	headBlock, err := rpchelper.GetLatestBlockNumber(overlayTx)
 	if err != nil {
 		return nil, err
 	}
-	headHash, err := rawdb.ReadCanonicalHash(tx, headBlock)
+	headHash, err := rawdb.ReadCanonicalHash(overlayTx, headBlock)
 	if err != nil {
 		return nil, err
 	}
@@ -156,9 +157,15 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var receiptsField, logsField CapabilityField
 	if persistReceipts {
-		// --persist.receipts stores receipts (which include logs) for all blocks from genesis.
-		zero := hexutil.Uint64(0)
-		receiptsField = CapabilityField{OldestBlock: &zero}
+		// DefaultBlocksPruneMode means pre-merge blocks were never downloaded on merge chains,
+		// so their receipts were never persisted. All other modes downloaded every block first;
+		// receipts survive block-body pruning in a separate table and are available from genesis.
+		var oldest uint64
+		if pruneMode.Blocks == prune.DefaultBlocksPruneMode {
+			oldest = blocksOldest // = MergeHeight on merge chains, 0 otherwise
+		}
+		o := hexutil.Uint64(oldest)
+		receiptsField = CapabilityField{OldestBlock: &o}
 		logsField = receiptsField
 	} else {
 		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
@@ -168,7 +175,10 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		} else {
 			receiptsField = stateField
 		}
-		logsField = stateField
+		// getLogsV3 uses TxnByIdxInBlock to reconstruct receipts for log filtering; that
+		// call returns nil when block bodies are absent. Matches in [stateOldest, blocksOldest)
+		// are silently dropped, so the effective oldest for logs equals receipts.
+		logsField = receiptsField
 	}
 
 	return &CapabilitiesResult{

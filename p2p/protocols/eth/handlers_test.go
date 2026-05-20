@@ -25,7 +25,7 @@ func (m *mockReceiptsGetter) GetCachedReceipts(_ context.Context, hash common.Ha
 	return r, ok
 }
 
-func (m *mockReceiptsGetter) GetReceipts(_ context.Context, _ *chain.Config, _ kv.TemporalTx, _ *types.Block, _ bool) (types.Receipts, error) {
+func (m *mockReceiptsGetter) GetReceipts(_ context.Context, _ *chain.Config, _ kv.TemporalTx, _ *types.Block, _ ReceiptsOpts) (types.Receipts, error) {
 	panic("not expected in cache-only tests")
 }
 
