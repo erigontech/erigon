@@ -545,9 +545,11 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	}
 
 	v, r, s := txn.RawSignatureValues()
-	result.V = (*hexutil.Big)(v.ToBig())
-	result.R = (*hexutil.Big)(r.ToBig())
-	result.S = (*hexutil.Big)(s.ToBig())
+	if !v.IsZero() || !r.IsZero() || !s.IsZero() {
+		result.V = (*hexutil.Big)(v.ToBig())
+		result.R = (*hexutil.Big)(r.ToBig())
+		result.S = (*hexutil.Big)(s.ToBig())
+	}
 
 	if txn.Type() == types.LegacyTxType {
 		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
