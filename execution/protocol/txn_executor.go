@@ -303,14 +303,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	regularContribution := st.msg.Gas()
-	var stateContribution uint64
-	if rules.IsAmsterdam {
-		stateContribution = regularContribution
-		if regularContribution > params.MaxTxnGasLimit {
-			regularContribution = params.MaxTxnGasLimit
-		}
-	}
+	regularContribution, stateContribution := InclusionContributionsWithIgas(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
 	}

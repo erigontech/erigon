@@ -2664,8 +2664,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txTask := be.tasks[tx].Task
 
 				if txn := txTask.Tx(); txn != nil {
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, txResult.ExecutionResult.BlockRegularGasUsed, txResult.ExecutionResult.BlockStateGasUsed); err != nil {
-						return nil, fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)
+					regularContribution, stateContribution, err := protocol.InclusionContributions(txn, txTask.Rules())
+					if err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+					}
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}
 				}
 
