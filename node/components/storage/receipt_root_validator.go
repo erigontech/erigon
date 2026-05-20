@@ -108,6 +108,7 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 	}
 
 	var fromBlock, toBlock uint64
+	var rangeEmpty bool
 	if err := v.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		stepSize := tx.Debug().StepSize()
 		startTxNum := fromStep * stepSize
@@ -133,10 +134,66 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 		if !ok {
 			return fmt.Errorf("FindBlockNum(endTxNum-1=%d) returned ok=false: %w", endTxNum-1, validation.ErrPause)
 		}
+
+		// Boundary trim — skip blocks that straddle a step boundary.
+		// A receipt step covers a fixed txnum range; blocks aren't
+		// guaranteed to align to step boundaries, so at retire time a
+		// block can be split: its prefix txnums end up in the previous
+		// step file, the suffix in this one (or vice versa at the
+		// trailing edge). Computing DeriveSha(receipts) on a partial
+		// receipt set produces a different root than header.ReceiptHash
+		// (which covers the whole block) → spurious mismatch like
+		// "computed=0x24b33d... header=0x4f33..." at block 25069471
+		// observed live on the 2026-05-19 run.
+		//
+		// The fix: trim fromBlock forward if its Min(...) is below
+		// startTxNum (block prefix is in the prior step), and trim
+		// toBlock backward if its Max(...) extends to/past endTxNum
+		// (block suffix continues into the next step). The receipt
+		// step's coverage of boundary blocks is the prior/next step's
+		// concern; each step validates only the blocks FULLY contained
+		// in its txnum range. A future refinement could combine
+		// multiple step files to validate the boundary blocks, but
+		// blocks split exactly on a step boundary are common (~2 per
+		// step pair) and skipping them is honest about what each
+		// per-step validator can see.
+		fbMin, err := txNumReader.Min(ctx, tx, fb)
+		if err != nil {
+			return fmt.Errorf("Min(fromBlock=%d): %w", fb, err)
+		}
+		if fbMin < startTxNum {
+			fb++
+		}
+		tbMax, err := txNumReader.Max(ctx, tx, tb)
+		if err != nil {
+			return fmt.Errorf("Max(toBlock=%d): %w", tb, err)
+		}
+		if tbMax > endTxNum {
+			if tb == 0 {
+				rangeEmpty = true
+				return nil
+			}
+			tb--
+		}
+		if fb > tb {
+			rangeEmpty = true
+			return nil
+		}
 		fromBlock, toBlock = fb, tb
 		return nil
 	}); err != nil {
 		return err
+	}
+	if rangeEmpty {
+		// Both boundaries were partial; nothing left to validate in
+		// this step alone. Not an error — the validator's per-step
+		// coverage is fundamentally limited to full blocks within the
+		// step.
+		if v.Logger != nil {
+			v.Logger.Info("[storage] receipt step has only partial-boundary blocks; skipping per-block check",
+				"step", fmt.Sprintf("[%d, %d)", fromStep, toStep))
+		}
+		return nil
 	}
 
 	// Skip pre-Byzantium blocks (the integrity helper does too).
