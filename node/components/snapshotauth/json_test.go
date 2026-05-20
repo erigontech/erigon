@@ -17,6 +17,7 @@
 package snapshotauth
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -40,18 +41,18 @@ func TestJSONView_RootDelegation(t *testing.T) {
 	require.NoError(t, err)
 	s := string(raw)
 
-	require.Contains(t, s, `"version":1`)
+	require.Contains(t, s, `"version":2`)
 	require.Contains(t, s, `"capabilities":[`)
 	require.Contains(t, s, `"snapshot:advertise"`)
 	require.Contains(t, s, `"snapshot:serve"`)
 	require.Contains(t, s, `"notBefore":"immediately"`)
 	require.Contains(t, s, `"expires":"2030-01-01T00:00:00Z"`)
 	require.Contains(t, s, `"depthCap":2`)
-	require.NotContains(t, s, `"parent"`,
-		"root delegation should not emit a parent field")
+	require.NotContains(t, s, `"parentHash"`,
+		"root delegation should not emit a parentHash field")
 }
 
-func TestJSONView_ChainUnfolds(t *testing.T) {
+func TestJSONView_ParentRendersAsHash(t *testing.T) {
 	root := newKey(t)
 	mid := newKey(t)
 	leaf := newKey(t)
@@ -74,13 +75,16 @@ func TestJSONView_ChainUnfolds(t *testing.T) {
 	require.NoError(t, err)
 	s := string(raw)
 
-	// Outer mid delegation present + parent block unfolded inline.
+	// v2 stores the parent by hash; the JSON view renders it as a hex
+	// string, not a nested inline parent object.
 	require.Contains(t, s, `"depthCap":2`)
-	require.True(t, strings.Contains(s, `"parent"`),
-		"mid delegation should expose its parent chain in JSON view")
-	// Two version stamps appear — one per level of the chain.
-	require.Equal(t, 2, strings.Count(s, `"version":1`),
-		"both root and mid versions should render")
+	require.NotContains(t, s, `"parent":{`,
+		"v2 delegations no longer unfold the parent chain inline")
+	require.Contains(t, s, `"parentHash":"`+hex.EncodeToString(HashOf(rootEnc))+`"`,
+		"mid delegation should expose its parent as a hex hash")
+	// Only the mid delegation renders — exactly one version stamp.
+	require.Equal(t, 1, strings.Count(s, `"version":2`),
+		"only the mid delegation renders; the parent is referenced by hash")
 }
 
 func TestJSONView_IndefiniteExpirySentinel(t *testing.T) {

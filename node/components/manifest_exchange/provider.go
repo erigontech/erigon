@@ -535,7 +535,11 @@ func (p *Provider) gateOnUCAN(
 	}
 
 	audience := compressedFromECDSA(peerPub)
-	res, err := cfg.Verifier.Verify(ucanData, audience, cfg.RequiredCapabilities, nowFn())
+	// resolveParent is nil here: the current gate verifies a single
+	// delegation (no chain walk). The full two-UCAN verification chain
+	// — which resolves the Authority UCAN by ParentHash — is wired in
+	// Phase 5 (see docs/plans/20260520-chaintoml-ucan-flow-spec.md).
+	res, err := cfg.Verifier.Verify(ucanData, audience, cfg.RequiredCapabilities, nowFn(), nil)
 	if err != nil {
 		logger.Warn("[manifest_exchange] UCAN gate: verify",
 			"peer", peerID, "err", err)

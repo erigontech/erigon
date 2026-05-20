@@ -24,42 +24,37 @@ import (
 
 // jsonView is the human-readable form of a Delegation. Pubkeys and
 // signatures render as hex, timestamps as RFC3339 (or "indefinite" for
-// the zero-sentinel), and the parent chain is unfolded recursively so
-// the whole chain is visible at a glance.
+// the zero-sentinel). The parent link renders as a hex hash —
+// v2 delegations store the parent by hash, so the chain can no longer
+// be unfolded inline; an inspector resolves parents separately.
 //
 // This is READ-ONLY — there is no JSON unmarshaller for Delegation.
 // CBOR is the canonical on-disk + on-wire form; JSON exists solely for
 // inspection (CLI dump, log diagnostics, debugging).
 type jsonView struct {
-	Version      uint8     `json:"version"`
-	Issuer       string    `json:"issuer"`
-	Audience     string    `json:"audience"`
-	Capabilities []string  `json:"capabilities"`
-	NotBefore    string    `json:"notBefore"`
-	Expires      string    `json:"expires"`
-	DepthCap     uint16    `json:"depthCap"`
-	Parent       *jsonView `json:"parent,omitempty"`
-	Signature    string    `json:"signature"`
+	Version      uint8    `json:"version"`
+	Issuer       string   `json:"issuer"`
+	Audience     string   `json:"audience"`
+	Capabilities []string `json:"capabilities"`
+	NotBefore    string   `json:"notBefore"`
+	Expires      string   `json:"expires"`
+	DepthCap     uint16   `json:"depthCap"`
+	ParentHash   string   `json:"parentHash,omitempty"`
+	Signature    string   `json:"signature"`
 }
 
 // MarshalJSON renders the delegation as a human-readable JSON
-// document. Recursively unfolds the Parent chain so consumers see the
-// whole authority path at once. Returns an error only if a nested
-// parent fails to decode — encoding itself is infallible.
+// document. The parent link is shown as its hex hash. Encoding is
+// infallible.
 //
 // Output is compact JSON; callers wanting indentation should pass the
-// result through json.Indent or call json.MarshalIndent on the
-// Delegation directly (Go's json package strips whitespace from
+// result through json.Indent (Go's json package strips whitespace from
 // MarshalJSON output before re-emitting, so indenting here is lost).
 func (d *Delegation) MarshalJSON() ([]byte, error) {
-	view, err := d.toJSONView()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(view)
+	return json.Marshal(d.toJSONView())
 }
 
-func (d *Delegation) toJSONView() (*jsonView, error) {
+func (d *Delegation) toJSONView() *jsonView {
 	v := &jsonView{
 		Version:      d.Version,
 		Issuer:       hex.EncodeToString(d.Issuer),
@@ -70,18 +65,10 @@ func (d *Delegation) toJSONView() (*jsonView, error) {
 		DepthCap:     d.DepthCap,
 		Signature:    hex.EncodeToString(d.Signature),
 	}
-	if len(d.Parent) > 0 {
-		parent, err := Decode(d.Parent)
-		if err != nil {
-			return nil, err
-		}
-		pv, err := parent.toJSONView()
-		if err != nil {
-			return nil, err
-		}
-		v.Parent = pv
+	if len(d.ParentHash) > 0 {
+		v.ParentHash = hex.EncodeToString(d.ParentHash)
 	}
-	return v, nil
+	return v
 }
 
 func formatTimestamp(unix int64) string {

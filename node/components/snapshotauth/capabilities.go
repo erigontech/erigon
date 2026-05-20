@@ -41,6 +41,13 @@ const (
 	// this, the audience is a leaf authority — it can advertise/serve
 	// per its own caps but cannot pass authority on.
 	CapDelegate Capability = "snapshot:delegate"
+
+	// CapContentHashPrefix is the prefix of a Content-UCAN capability.
+	// Unlike the fixed snapshot:* capabilities, a content-hash
+	// capability is dynamic: chain.v2:hash:<sha256-hex> binds a Content
+	// UCAN to the exact manifest bytes it attests. Recognised
+	// prefix-wise (see ParseContentHashCapability), not by exact match.
+	CapContentHashPrefix = "chain.v2:hash:"
 )
 
 // AllCapabilities is the canonical set the package recognises.
@@ -78,6 +85,23 @@ func ParseCapabilities(s string) ([]string, error) {
 		return nil, fmt.Errorf("capability list resolved to empty after trimming")
 	}
 	return canonicalCapabilities(out), nil
+}
+
+// ContentHashCapability builds the Content-UCAN capability binding an
+// attestation to a manifest: chain.v2:hash:<sha256-hex>. hashHex is the
+// lowercase hex sha256 of the manifest's .toml bytes.
+func ContentHashCapability(hashHex string) string {
+	return CapContentHashPrefix + hashHex
+}
+
+// ParseContentHashCapability reports whether cap is a content-hash
+// capability and, if so, returns the hex hash it binds. ok=false for
+// any non-content-hash capability.
+func ParseContentHashCapability(capability string) (hashHex string, ok bool) {
+	if !strings.HasPrefix(capability, CapContentHashPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(capability, CapContentHashPrefix), true
 }
 
 func capabilityNamesJoined() string {

@@ -19,6 +19,7 @@ package snapshotauth
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"fmt"
 	"testing"
 	"time"
 
@@ -59,11 +60,27 @@ func TestVerify_RootDelegationSucceeds(t *testing.T) {
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, root)}})
 
 	res, err := v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	require.Equal(t, RootENR, res.MatchedRoot.Kind)
 	require.Len(t, res.Chain, 1)
+}
+
+// parentResolver builds an in-memory ParentResolver over the given
+// encoded parent delegations, keyed by their canonical-CBOR hash.
+func parentResolver(parents ...[]byte) ParentResolver {
+	byHash := make(map[string][]byte, len(parents))
+	for _, p := range parents {
+		byHash[string(HashOf(p))] = p
+	}
+	return func(h []byte) ([]byte, error) {
+		p, ok := byHash[string(h)]
+		if !ok {
+			return nil, fmt.Errorf("parent hash %x not registered", h)
+		}
+		return p, nil
+	}
 }
 
 func TestVerify_TwoHopChainSucceeds(t *testing.T) {
@@ -73,14 +90,15 @@ func TestVerify_TwoHopChainSucceeds(t *testing.T) {
 	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
 		[]string{string(CapAdvertise), string(CapServe), string(CapDelegate)},
 		2, nil)
+	rootEnc := mustEncoded(t, rootDel)
 	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
 		[]string{string(CapAdvertise), string(CapServe)},
-		1, mustEncoded(t, rootDel))
+		1, rootEnc)
 	leafCBOR := mustEncoded(t, midDel)
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
 	res, err := v.Verify(leafCBOR, compressed(t, keys.leaf),
-		[]string{string(CapAdvertise)}, now)
+		[]string{string(CapAdvertise)}, now, parentResolver(rootEnc))
 	require.NoError(t, err)
 	require.Len(t, res.Chain, 2, "root + mid")
 }
@@ -104,7 +122,7 @@ func TestVerify_DIDRootBeatsENRRoot(t *testing.T) {
 	})
 
 	res, err := v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.NoError(t, err)
 	require.Equal(t, RootDID, res.MatchedRoot.Kind,
 		"DID priority must win over ENR/Bootnode when multiple roots match")
@@ -122,7 +140,7 @@ func TestVerify_NoMatchingRoot(t *testing.T) {
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, other)}})
 	_, err := v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not match any configured trust root")
 }
@@ -138,7 +156,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, root)}})
 	_, err := v.Verify(enc, compressed(t, other),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "audience does not match")
 }
@@ -154,7 +172,7 @@ func TestVerify_RequiredCapabilityMissing(t *testing.T) {
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, root)}})
 	_, err := v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapServe)}, time.Now())
+		[]string{string(CapServe)}, time.Now(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing required capability")
 }
@@ -180,16 +198,16 @@ func TestVerify_TimeWindowEnforced(t *testing.T) {
 
 	// Before NotBefore — must fail.
 	_, err = v.Verify(enc, audience, caps,
-		notBefore.Add(-time.Hour))
+		notBefore.Add(-time.Hour), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not currently valid")
 
 	// Inside the window — must succeed.
-	_, err = v.Verify(enc, audience, caps, notBefore.Add(24*time.Hour))
+	_, err = v.Verify(enc, audience, caps, notBefore.Add(24*time.Hour), nil)
 	require.NoError(t, err)
 
 	// After Expires — must fail.
-	_, err = v.Verify(enc, audience, caps, expires.Add(time.Hour))
+	_, err = v.Verify(enc, audience, caps, expires.Add(time.Hour), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not currently valid")
 }
@@ -206,7 +224,7 @@ func TestVerify_IndefiniteExpiry(t *testing.T) {
 	// Far-future timestamp must still verify when Expires == 0.
 	_, err := v.Verify(enc, compressed(t, leaf),
 		[]string{string(CapServe)},
-		time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC))
+		time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), nil)
 	require.NoError(t, err, "indefinite-expiry delegation should still verify in 2099")
 }
 
@@ -216,14 +234,14 @@ func TestVerify_CapabilityAttenuationViolation(t *testing.T) {
 	// Root grants :advertise, :delegate; mid (incorrectly) grants :serve too.
 	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
 		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	rootEnc := mustEncoded(t, rootDel)
 	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
-		[]string{string(CapAdvertise), string(CapServe)}, 1,
-		mustEncoded(t, rootDel))
+		[]string{string(CapAdvertise), string(CapServe)}, 1, rootEnc)
 	enc := mustEncoded(t, midDel)
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
 	_, err := v.Verify(enc, compressed(t, keys.leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(rootEnc))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "capability attenuation violated")
 }
@@ -235,13 +253,14 @@ func TestVerify_DepthAttenuationViolation(t *testing.T) {
 	// We construct mid with DepthCap 2 to trigger violation.
 	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
 		[]string{string(CapAdvertise), string(CapDelegate)}, 1, nil)
+	rootEnc := mustEncoded(t, rootDel)
 	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
-		[]string{string(CapAdvertise)}, 2, mustEncoded(t, rootDel))
+		[]string{string(CapAdvertise)}, 2, rootEnc)
 	enc := mustEncoded(t, midDel)
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
 	_, err := v.Verify(enc, compressed(t, keys.leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(rootEnc))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "depth attenuation violated")
 }
@@ -253,13 +272,14 @@ func TestVerify_LeafParentLacksDelegateCap(t *testing.T) {
 	// from it should fail — parent didn't authorise re-delegation.
 	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
 		[]string{string(CapAdvertise)}, 1, nil)
+	rootEnc := mustEncoded(t, rootDel)
 	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
-		[]string{string(CapAdvertise)}, 0, mustEncoded(t, rootDel))
+		[]string{string(CapAdvertise)}, 0, rootEnc)
 	enc := mustEncoded(t, midDel)
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
 	_, err := v.Verify(enc, compressed(t, keys.leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(rootEnc))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lacks snapshot:delegate")
 }
@@ -277,7 +297,7 @@ func TestVerify_TamperedSignature(t *testing.T) {
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, root)}})
 	_, err = v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "signature failure")
 }
@@ -302,7 +322,7 @@ func TestVerify_ChainIntegrityBreak(t *testing.T) {
 
 	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
 	_, err = v.Verify(enc, compressed(t, keys.leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(parentEnc))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "chain integrity break")
 }
@@ -316,7 +336,7 @@ func TestVerify_NoRootsConfigured(t *testing.T) {
 
 	v := NewVerifier(nil)
 	_, err := v.Verify(enc, compressed(t, leaf),
-		[]string{string(CapAdvertise)}, time.Now())
+		[]string{string(CapAdvertise)}, time.Now(), nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no trust roots configured")
 }

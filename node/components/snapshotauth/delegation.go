@@ -57,7 +57,11 @@ import (
 // emitted by this package. Verifiers reject unknown versions outright;
 // future schema evolutions bump this and the verifier learns the new
 // shape.
-const CurrentVersion uint8 = 1
+//
+// v2: the parent link is stored by hash (ParentHash) rather than inline
+// (the former Parent []byte). v1 is rejected outright — nothing is in
+// production, so no migration path is kept.
+const CurrentVersion uint8 = 2
 
 // PubKeyLen is the length of a compressed secp256k1 public key in
 // bytes. Issuer and Audience are always compressed.
@@ -106,11 +110,13 @@ type Delegation struct {
 	// at most DepthCap-1 in the child.
 	DepthCap uint16
 
-	// Parent holds the CBOR encoding of the parent Delegation, or nil
-	// for a root. Storing the parent inline (rather than by hash)
-	// keeps the artefact self-contained — verifiers don't need to
-	// fetch out-of-band parents to evaluate the chain.
-	Parent []byte
+	// ParentHash is sha256 of the parent Delegation's canonical CBOR
+	// encoding, or nil for a root. The parent itself is fetched
+	// out-of-band by the verifier's ParentResolver and bound back to
+	// this hash. By-hash (rather than the former inline parent) keeps
+	// the slow-changing Authority UCAN out of every fast-changing
+	// Content UCAN generation — see docs/plans/20260520-chaintoml-ucan-flow-spec.md.
+	ParentHash []byte
 
 	// Signature is the secp256k1 signature over the canonical CBOR
 	// encoding of this Delegation with Signature itself zeroed.
@@ -119,6 +125,11 @@ type Delegation struct {
 
 // New constructs an unsigned Delegation. Sign() must be called before
 // the value is encoded for distribution.
+//
+// parentEncoded is the canonical CBOR of the parent Delegation, or nil
+// for a root. New stores sha256(parentEncoded) as ParentHash; the
+// caller is responsible for making the parent itself resolvable by
+// that hash (the verifier's ParentResolver fetches it).
 //
 // The capabilities slice is sorted and de-duplicated in place; callers
 // must not assume their input ordering is preserved.
@@ -143,9 +154,20 @@ func New(issuerPub, audiencePub *ecdsa.PublicKey, capabilities []string, notBefo
 		NotBefore:    unixOrZero(notBefore),
 		Expires:      unixOrZero(expires),
 		DepthCap:     depthCap,
-		Parent:       parentEncoded,
+	}
+	if len(parentEncoded) > 0 {
+		sum := sha256.Sum256(parentEncoded)
+		d.ParentHash = sum[:]
 	}
 	return d, nil
+}
+
+// HashOf returns sha256 of a delegation's canonical CBOR encoding —
+// the value a child stores in ParentHash and the verifier's
+// ParentResolver result is bound back to.
+func HashOf(encoded []byte) []byte {
+	sum := sha256.Sum256(encoded)
+	return sum[:]
 }
 
 // Sign computes the signature over the canonical encoding of d (with

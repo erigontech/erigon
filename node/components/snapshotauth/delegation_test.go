@@ -164,14 +164,16 @@ func TestDelegation_ParentChainNested(t *testing.T) {
 	midEnc, err := midDel.Encode()
 	require.NoError(t, err)
 
-	// Decoded mid carries the parent bytes; we can re-decode the parent
-	// and verify each link's signature independently.
+	// Decoded mid carries the parent's hash; the parent itself is
+	// resolved out-of-band and bound back via HashOf.
 	decodedMid, err := Decode(midEnc)
 	require.NoError(t, err)
 	require.NoError(t, decodedMid.VerifySignature())
-	require.NotEmpty(t, decodedMid.Parent)
+	require.NotEmpty(t, decodedMid.ParentHash)
+	require.Equal(t, HashOf(rootEnc), decodedMid.ParentHash,
+		"child ParentHash must be sha256 of the parent's canonical CBOR")
 
-	decodedRoot, err := Decode(decodedMid.Parent)
+	decodedRoot, err := Decode(rootEnc)
 	require.NoError(t, err)
 	require.NoError(t, decodedRoot.VerifySignature())
 

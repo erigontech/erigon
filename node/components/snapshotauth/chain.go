@@ -67,6 +67,20 @@ type TrustRoot struct {
 	DID    string
 }
 
+// maxChainDepth bounds the parent walk. Since v2 delegations link
+// parents by hash (resolved out-of-band), a malicious artefact could
+// otherwise present an unbounded — or cyclic — chain. 16 links is far
+// beyond any legitimate delegation depth.
+const maxChainDepth = 16
+
+// ParentResolver fetches a parent delegation's canonical CBOR by its
+// sha256 hash (the value stored in a child's ParentHash). The verifier
+// binds the result back to the requested hash, so a resolver cannot
+// substitute a different parent. Returns an error if the hash is
+// unknown. nil is acceptable only when verifying a root or a chain
+// known to be single-link.
+type ParentResolver func(parentHash []byte) (parentCBOR []byte, err error)
+
 // Verifier evaluates a delegation chain against a configured set of
 // trust roots. Construct once with NewVerifier; Verify is safe to call
 // concurrently — Verifier holds no mutable state.
@@ -110,7 +124,10 @@ type VerifyResult struct {
 //     [snapshot:advertise, snapshot:serve] for source selection.
 //   - now: evaluation time (caller passes time.Now() in production;
 //     tests pass a fixed instant).
-func (v *Verifier) Verify(leafCBOR []byte, audience []byte, requireCaps []string, now time.Time) (*VerifyResult, error) {
+//   - resolveParent: fetches each parent delegation by its ParentHash.
+//     May be nil when the leaf is a root (no ParentHash) — a non-root
+//     leaf with a nil resolver is an error.
+func (v *Verifier) Verify(leafCBOR []byte, audience []byte, requireCaps []string, now time.Time, resolveParent ParentResolver) (*VerifyResult, error) {
 	if len(v.roots) == 0 {
 		return nil, errors.New("verifier has no trust roots configured")
 	}
@@ -124,10 +141,26 @@ func (v *Verifier) Verify(leafCBOR []byte, audience []byte, requireCaps []string
 	}
 
 	// Walk back to the root, building the chain leaf..root, then
-	// reverse so each step verifies against its parent above it.
+	// reverse so each step verifies against its parent above it. v2
+	// delegations link parents by hash: resolveParent fetches the
+	// parent CBOR and the result is bound back to ParentHash, so a
+	// resolver cannot substitute a different parent.
 	chainLeafFirst := []*Delegation{leaf}
-	for cur := leaf; len(cur.Parent) > 0; {
-		parent, err := Decode(cur.Parent)
+	for cur := leaf; len(cur.ParentHash) > 0; {
+		if resolveParent == nil {
+			return nil, fmt.Errorf("delegation at depth %d has a parent but no ParentResolver was supplied", len(chainLeafFirst)-1)
+		}
+		if len(chainLeafFirst) >= maxChainDepth {
+			return nil, fmt.Errorf("delegation chain exceeds max depth %d (cyclic or abusive parent links?)", maxChainDepth)
+		}
+		parentCBOR, err := resolveParent(cur.ParentHash)
+		if err != nil {
+			return nil, fmt.Errorf("resolve parent at depth %d: %w", len(chainLeafFirst), err)
+		}
+		if !equalBytes(HashOf(parentCBOR), cur.ParentHash) {
+			return nil, fmt.Errorf("resolved parent at depth %d does not hash to the child's ParentHash", len(chainLeafFirst))
+		}
+		parent, err := Decode(parentCBOR)
 		if err != nil {
 			return nil, fmt.Errorf("decode parent at depth %d: %w", len(chainLeafFirst), err)
 		}
