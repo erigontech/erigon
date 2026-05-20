@@ -1984,6 +1984,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.LifecycleDrivenByStorage = ctx.Bool(SnapLifecycleDrivenByStorageFlag.Name)
 	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
+	cfg.Snapshot.DelegationPath = ctx.String(SnapshotDelegationPath.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot

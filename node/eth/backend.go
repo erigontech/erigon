@@ -94,6 +94,7 @@ import (
 	"github.com/erigontech/erigon/node"
 	manifestexchange "github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
+	"github.com/erigontech/erigon/node/components/snapshotauth"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/views"
@@ -534,6 +535,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			signKey := stack.Config().P2P.PrivateKey
 			backend.components.Downloader.Downloader.SetManifestSigner(func(data []byte) ([]byte, error) {
 				return snapshotsync.SignAdvertisement(data, signKey)
+			})
+		}
+
+		// Wire the producer-side Authority UCAN source. The operator's
+		// delegation — loaded from --snapshot.delegation, the default
+		// <datadir>/snapshot.ucan, or a self-signed bootstrap generated
+		// on first run (snapshotauth.LoadOrGenerateDelegation) — is
+		// paired with every published V2 generation. Consumers running
+		// with TrustConfig verify the manifest's Content UCAN chains to
+		// it. Empty bytes → V2-only publication (no AuthorityUCANHash).
+		delegationBytes, derr := snapshotauth.LoadOrGenerateDelegation(
+			config.Snapshot.DelegationPath, dirs.DataDir, stack.Config().P2P.PrivateKey, logger)
+		if derr != nil {
+			return nil, fmt.Errorf("loading snapshot delegation: %w", derr)
+		}
+		if len(delegationBytes) > 0 {
+			backend.components.Downloader.Downloader.SetDelegationSource(func() ([]byte, error) {
+				return delegationBytes, nil
 			})
 		}
 	}

@@ -196,6 +196,13 @@ type BlocksFreezing struct {
 	// See docs/plans/20260502-app-integration-completion.md §5b for the
 	// behaviour matrix. Active only when P2PManifest is true.
 	BootstrapFromPreverified bool
+
+	// DelegationPath is the operator-configured path to the snapshotauth
+	// UCAN delegation this node attests its V2 manifests with
+	// (--snapshot.delegation). Empty → snapshotauth.LoadOrGenerateDelegation
+	// falls back to <datadir>/snapshot.ucan and self-signs a bootstrap
+	// delegation on first run.
+	DelegationPath string
 }
 
 func (s BlocksFreezing) String() string {

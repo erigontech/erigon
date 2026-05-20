@@ -77,6 +77,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AuthRpcAddr,
 	&utils.AuthRpcPort,
 	&utils.JWTSecretPath,
+	&utils.SnapshotDelegationPath,
 	&utils.HttpCompressionFlag,
 	&utils.HTTPCORSDomainFlag,
 	&utils.HTTPVirtualHostsFlag,

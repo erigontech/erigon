@@ -175,6 +175,14 @@ type Downloader struct {
 	// data file and registers it as seedable.
 	manifestSigner ManifestSignerFn
 
+	// delegationSource is the producer-side Authority UCAN source.
+	// Same cycle-avoidance rationale as manifestSigner. Production
+	// wires a closure returning snapshotauth.LoadOrGenerateDelegation's
+	// bytes; tests/harness leave it nil (V2-only publication, manifests
+	// carry no AuthorityUCANHash). RollingV2Publisher.Publish writes the
+	// paired UCAN sidecar and stamps the manifest's AuthorityUCANHash.
+	delegationSource DelegationSource
+
 	// onPeerWithChainTomlDiscovered is called whenever the legacy
 	// chain.toml discovery loop finds a peer advertising a chain-toml
 	// ENR entry. Production wiring (backend.go) plugs in a function
@@ -535,6 +543,17 @@ func (d *Downloader) SetManifestSigner(fn ManifestSignerFn) {
 	d.manifestSigner = fn
 }
 
+// SetDelegationSource installs the producer-side Authority UCAN source
+// used by RollingV2Publisher.Publish to pair each generation with the
+// operator's delegation attestation. Wired at node startup from
+// snapshotauth.LoadOrGenerateDelegation. Pass nil to disable (default;
+// V2-only publication, manifests carry no AuthorityUCANHash).
+func (d *Downloader) SetDelegationSource(src DelegationSource) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.delegationSource = src
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -770,12 +789,16 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	d.lock.RLock()
 	selfCheck := d.manifestSelfCheck
 	signer := d.manifestSigner
+	delegationSource := d.delegationSource
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
 	}
 	if signer != nil {
 		pub.SetSigner(signer)
+	}
+	if delegationSource != nil {
+		pub.SetDelegationSource(delegationSource)
 	}
 	hash, err := pub.Publish(context.Background(), inv, authoritativeBlocks, updater)
 	if err != nil {
