@@ -445,6 +445,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursorApp.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
+		var lastAppendedSeqID uint64 = math.MaxUint64 // sentinel: no append yet
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
 			invStep := k[len(k)-8:]
@@ -459,6 +460,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			// Hot path: in-place update — keysTable dup unchanged.
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
 				copy(seqIDBuf[:], existing[8:])
+				if asserts {
+					log.Debug("[dbg] largeFlush hot-update", "table", w.valsTable, "bareKey", fmt.Sprintf("%x", bareKey), "step", ^binary.BigEndian.Uint64(invStep), "seqID", binary.BigEndian.Uint64(seqIDBuf[:]))
+				}
 				return valsCursorRW.Put(seqIDBuf[:], v)
 			}
 
@@ -466,6 +470,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
 				// real → deletion: remove from vals
 				copy(seqIDBuf[:], existing[8:])
+				if asserts {
+					log.Debug("[dbg] largeFlush real→del", "table", w.valsTable, "bareKey", fmt.Sprintf("%x", bareKey), "step", ^binary.BigEndian.Uint64(invStep), "delSeqID", binary.BigEndian.Uint64(seqIDBuf[:]))
+				}
 				if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
 					return err
 				}
@@ -477,9 +484,26 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
-				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
-					return err
+				if asserts {
+					if lastAppendedSeqID != math.MaxUint64 && seqID <= lastAppendedSeqID {
+						panic(fmt.Sprintf("largeFlush: non-monotonic seqID: table=%s seqID=%d lastAppended=%d bareKey=%x step=%d", w.valsTable, seqID, lastAppendedSeqID, bareKey, ^binary.BigEndian.Uint64(invStep)))
+					}
+					log.Debug("[dbg] largeFlush append", "table", w.valsTable, "bareKey", fmt.Sprintf("%x", bareKey), "step", ^binary.BigEndian.Uint64(invStep), "seqID", seqID, "lastAppended", lastAppendedSeqID, "isResurrected", hasDup)
 				}
+				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
+					// Read last key in valsTable for diagnostic context.
+					diagC, diagErr := tx.RwCursor(w.valsTable)
+					var lastSeqID uint64
+					if diagErr == nil {
+						defer diagC.Close()
+						if lastK, _, _ := diagC.Last(); len(lastK) == 8 {
+							lastSeqID = binary.BigEndian.Uint64(lastK)
+						}
+					}
+					return fmt.Errorf("largeFlush Append: table=%s seqID=%d lastInTable=%d lastAppended=%d bareKey=%x step=%d: %w",
+						w.valsTable, seqID, lastSeqID, lastAppendedSeqID, bareKey, ^binary.BigEndian.Uint64(invStep), err)
+				}
+				lastAppendedSeqID = seqID
 			}
 			// else: del→del or !hasDup+deletion → write tombstone seqID to keysTable only
 
