@@ -178,6 +178,55 @@ func TestFlush(t *testing.T) {
 	require.Equal(t, value, []byte("value5"))
 }
 
+// TestFlushAppendPath exercises the Append fast-path used when all in-memory
+// keys are strictly greater than the destination's existing max. This is the
+// common shape for canonical FCU advance.
+func TestFlushAppendPath(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	initializeDbNonDupSort(rwTx) // seeds AAAA..CCAA
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	// All keys strictly greater than CCAA → Append path.
+	batch.Put(kv.HeaderNumber, []byte("DAAA"), []byte("v-d"))
+	batch.Put(kv.HeaderNumber, []byte("EAAA"), []byte("v-e"))
+	batch.Put(kv.HeaderNumber, []byte("FAAA"), []byte("v-f"))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	for k, want := range map[string]string{"DAAA": "v-d", "EAAA": "v-e", "FAAA": "v-f"} {
+		v, err := rwTx.GetOne(kv.HeaderNumber, []byte(k))
+		require.NoError(t, err)
+		require.Equal(t, want, string(v))
+	}
+	// Pre-existing rows must be intact.
+	v, err := rwTx.GetOne(kv.HeaderNumber, []byte("CCAA"))
+	require.NoError(t, err)
+	require.Equal(t, "value3", string(v))
+}
+
+// TestFlushEmptyDestination exercises the empty-destination case (canAppend
+// holds without comparison) for both plain and dupsort tables.
+func TestFlushEmptyDestination(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("v1"))
+	batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("v2"))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	v, err := rwTx.GetOne(kv.HeaderNumber, []byte("AAAA"))
+	require.NoError(t, err)
+	require.Equal(t, "v1", string(v))
+	v, err = rwTx.GetOne(kv.HeaderNumber, []byte("BBBB"))
+	require.NoError(t, err)
+	require.Equal(t, "v2", string(v))
+}
+
 func TestForEach(t *testing.T) {
 	_, rwTx := newTestTx(t)
 

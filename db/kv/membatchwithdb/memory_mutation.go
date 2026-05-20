@@ -607,7 +607,7 @@ func (m *MemoryMutation) CreateTable(bucket string) error {
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
-	// Obtain buckets touched.
+	// Obtain buckets touched. ListTables only returns non-empty tables.
 	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return err
@@ -639,48 +639,108 @@ func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
 		default:
 		}
 		if isTablePurelyDupsort(bucket) {
-			if err := func() error {
-				cbucket, err := m.memTx.CursorDupSort(bucket)
-				if err != nil {
-					return err
-				}
-				defer cbucket.Close()
-				dbCursor, err := tx.RwCursorDupSort(bucket)
-				if err != nil {
-					return err
-				}
-				defer dbCursor.Close()
-				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-					if err != nil {
-						return err
-					}
-					if err := dbCursor.Put(k, v); err != nil {
-						return err
-					}
-				}
-				return nil
-			}(); err != nil {
+			if err := flushDupsortBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
 		} else {
-			if err := func() error {
-				cbucket, err := m.memTx.Cursor(bucket)
-				if err != nil {
-					return err
-				}
-				defer cbucket.Close()
-				for k, v, err := cbucket.First(); k != nil; k, v, err = cbucket.Next() {
-					if err != nil {
-						return err
-					}
-					if err := tx.Put(bucket, k, v); err != nil {
-						return err
-					}
-				}
-				return nil
-			}(); err != nil {
+			if err := flushPlainBucket(m.memTx, tx, bucket); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// flushPlainBucket copies all keys from the in-memory bucket to the destination
+// transaction. When the destination's largest existing key is strictly less than
+// the source's smallest key — the common case for canonical chain advance, where
+// the overlay accumulates writes for new blocks above the committed tip — we use
+// Append rather than Put, which skips MDBX's per-key B-tree search.
+//
+// Falling back to Put for the mixed case (overlay rewrites a key already present
+// in the destination, e.g. SyncStageProgress or HeadBlockHash) keeps behaviour
+// identical for unwinds and re-issued FCUs.
+func flushPlainBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
+	srcCursor, err := memTx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer srcCursor.Close()
+
+	srcFirstKey, _, err := srcCursor.First()
+	if err != nil {
+		return err
+	}
+	if srcFirstKey == nil {
+		return nil
+	}
+
+	dstCursor, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer dstCursor.Close()
+
+	dstLastKey, _, err := dstCursor.Last()
+	if err != nil {
+		return err
+	}
+	canAppend := dstLastKey == nil || bytes.Compare(srcFirstKey, dstLastKey) > 0
+
+	for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if canAppend {
+			if err := dstCursor.Append(k, v); err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Put(bucket, k, v); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// flushDupsortBucket copies a DupSort bucket. AppendDup has stricter ordering
+// requirements than Append (key non-decreasing AND value strictly greater for
+// equal keys), so we stay on Put unless the destination is empty.
+func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
+	srcCursor, err := memTx.CursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer srcCursor.Close()
+	dstCursor, err := tx.RwCursorDupSort(bucket)
+	if err != nil {
+		return err
+	}
+	defer dstCursor.Close()
+
+	dstLastKey, _, err := dstCursor.Last()
+	if err != nil {
+		return err
+	}
+	canAppendDup := dstLastKey == nil
+	if canAppendDup {
+		for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+			if err != nil {
+				return err
+			}
+			if err := dstCursor.AppendDup(k, v); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if err := dstCursor.Put(k, v); err != nil {
+			return err
 		}
 	}
 	return nil
