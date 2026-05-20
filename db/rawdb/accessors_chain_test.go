@@ -1171,7 +1171,10 @@ func TestBlockAccessListStorage(t *testing.T) {
 
 	decoded, err = types.DecodeBlockAccessListBytes(data)
 	require.NoError(t, err)
-	require.Nil(t, decoded)
+	// EIP-7928: Decoding 0xc0 (empty RLP list) should return an initialized empty slice,
+	// rather than nil, to distinguish a valid empty BAL from a missing/pruned one.
+	require.NotNil(t, decoded)
+	require.Empty(t, decoded)
 	require.NoError(t, decoded.Validate())
 	require.Equal(t, empty.BlockAccessListHash, decoded.Hash())
 }

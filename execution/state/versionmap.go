@@ -435,16 +435,30 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 							version, nil, checkVersion, traceInvalid, tracePrefix)
 					}
 				} else if path == AddressPath {
+					// Account-existence changes are signalled by AddressPath
+					// MVReadResultDone (newObject in a prior tx),
+					// SelfDestructPath, or CreateContractPath. We cross-check
+					// SelfDestructPath and CreateContractPath here because under
+					// HasBAL the worker's AddressPath write is filtered out of
+					// the per-tx flush (BAL doesn't list AddressPath), so the
+					// MVReadResultDone arm can't catch the staleness on its
+					// own. CreateContractPath is the SPECIFIC creation signal —
+					// it is written only by CREATE / CREATE2 (the contract
+					// creation path in IBS.CreateAccount), never by
+					// UpdateAccountData and never by BAL pre-population. Using
+					// BalancePath here overfires for every gas-paying
+					// same-sender tx and for any BAL-listed balance change,
+					// causing a retry storm under BAL (see PR #21240). EOA-
+					// creation-via-CALL+value (CreateAccount with
+					// contractCreation=false) does not emit CreateContractPath
+					// on this branch — that case is intentionally not caught by
+					// this cross-check; downstream value-tiebreaker validation
+					// catches real EOA-balance staleness.
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, nil, checkVersion, traceInvalid, tracePrefix)
-
-					// If a prior tx created this account, BalancePath will
-					// have an entry at a lower txIndex (from BAL pre-population
-					// or worker flush). A nil AddressPath read from storage
-					// is then stale and must be invalidated.
 					if valid == VersionValid {
-						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
-						if balRR.Status() == MVReadResultDone {
+						ccRR := vm.Read(addr, CreateContractPath, accounts.NilKey, txIndex)
+						if ccRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
 						}
 					}
