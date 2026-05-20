@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 const referenceEra1URL = "https://mainnet.era.nimbus.team/mainnet-00001-40cf2f3c.era"
@@ -139,4 +141,64 @@ func TestScanReferenceEra1(t *testing.T) {
 	}
 
 	t.Logf("era-1: %d block records, %d empty slots", g.BlockRecords, emptySlots)
+}
+
+func TestReadReferenceEra1(t *testing.T) {
+	path := referenceEra1Path(t)
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	_, cfg, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	if err != nil {
+		t.Fatalf("mainnet config: %v", err)
+	}
+
+	e, err := ReadEra(f, cfg)
+	if err != nil {
+		t.Fatalf("ReadEra: %v", err)
+	}
+
+	if e.Number != 1 {
+		t.Errorf("era number = %d, want 1", e.Number)
+	}
+	if e.State == nil {
+		t.Fatal("no state decoded")
+	}
+	if got := e.State.Slot(); got != 1*SlotsPerHistoricalRoot {
+		t.Errorf("state slot = %d, want %d", got, SlotsPerHistoricalRoot)
+	}
+	if len(e.Blocks) != 7715 {
+		t.Errorf("decoded blocks = %d, want 7715", len(e.Blocks))
+	}
+
+	// Spec verification rule: the root of each block in the era file must
+	// match state.block_roots. The era-1 state is at slot 8192; its ring
+	// buffer covers slots 1..8191 directly (slot 0 is the cross-era edge
+	// case and is skipped here).
+	verified := 0
+	for _, blk := range e.Blocks {
+		slot := blk.Block.Slot
+		if slot < 1 || slot > SlotsPerHistoricalRoot-1 {
+			continue
+		}
+		want, err := e.State.GetBlockRootAtSlot(slot)
+		if err != nil {
+			t.Fatalf("GetBlockRootAtSlot(%d): %v", slot, err)
+		}
+		got, err := blk.Block.HashSSZ()
+		if err != nil {
+			t.Fatalf("block.HashSSZ (slot %d): %v", slot, err)
+		}
+		if want != got {
+			t.Fatalf("block root mismatch at slot %d: file %x, state.block_roots %x", slot, got, want)
+		}
+		verified++
+	}
+	if verified == 0 {
+		t.Fatal("no blocks verified against state.block_roots")
+	}
+	t.Logf("era-1: %d blocks decoded, %d verified against state.block_roots", len(e.Blocks), verified)
 }
