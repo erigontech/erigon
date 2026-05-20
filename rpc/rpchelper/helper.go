@@ -120,12 +120,17 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
-			pendingBlock := filters.LastPendingBlock()
-			if pendingBlock == nil {
-				blockNumber = plainStateBlockNumber
-			} else {
-				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
+			// filters may be nil here: callers that intentionally disable
+			// overlay-aware resolution (log-range scans against committed tx)
+			// pass nil. Treat that as "no pending block known" and fall back
+			// to plainStateBlockNumber — same as when filters is set but has
+			// no pending block.
+			if filters != nil {
+				if pendingBlock := filters.LastPendingBlock(); pendingBlock != nil {
+					return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
+				}
 			}
+			blockNumber = plainStateBlockNumber
 		case rpc.LatestExecutedBlockNumber:
 			blockNumber = plainStateBlockNumber
 		default:
