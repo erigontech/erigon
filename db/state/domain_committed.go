@@ -369,7 +369,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						// if shortened key lost, we can't continue
 						dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
 							"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-							"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
+							"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 
 						return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 					}
@@ -406,7 +406,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					}
 					dt.d.logger.Crit("valTransform: replacement for full account key was not found",
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
+						"shortened", hex.EncodeToString(key), "toReplace", hex.EncodeToString(auxBuf))
 					return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 				}
 				accountKeyCache[string(auxBuf)] = shortenedKeyOffset
