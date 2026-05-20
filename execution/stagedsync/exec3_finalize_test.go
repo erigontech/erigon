@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -234,7 +233,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	newRecipientBal := new(uint256.Int).Add(recipientBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	// TxIn: reads from execution. No coinbase reads (coinbase not touched
 	// during calcFees=false execution).
@@ -247,9 +246,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	// CollectorWrites: LightCollector output from MakeWriteSet.
@@ -364,7 +363,7 @@ func coinbaseIsRecipientScenario() *testFinalizeScenario {
 	newCoinbaseBal := new(uint256.Int).Add(coinbaseBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	txIn := state.ReadSet{}
 	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
@@ -376,9 +375,9 @@ func coinbaseIsRecipientScenario() *testFinalizeScenario {
 
 	// TxOut: coinbase has transfer amount but NOT tip (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	collectorWrites := state.VersionedWrites{
@@ -426,7 +425,7 @@ func selfTransferScenario() *testFinalizeScenario {
 	// Gas is NOT deducted during calcFees=false, so balance stays the same.
 	// But nonce increments.
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 	tip := uint256.NewInt(21_000)
 
 	txIn := state.ReadSet{}
@@ -435,7 +434,7 @@ func selfTransferScenario() *testFinalizeScenario {
 	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
 
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: sender, Path: state.BalancePath, Val: *senderBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
 	}
 

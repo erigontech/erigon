@@ -180,3 +180,39 @@ func TestBlockAccessListHashEmpty(t *testing.T) {
 		t.Fatalf("empty BAL should be valid: %v", err)
 	}
 }
+
+// TestBlockAccessListEmptyRoundTrip verifies that an empty BAL encodes to the
+// canonical empty RLP list (0xc0) and decodes back to a non-nil empty slice.
+// EIP-7928 requires: "When no state changes are present, this field is the
+// empty RLP list 0xc0, i.e. rlp.encode([])."
+func TestBlockAccessListEmptyRoundTrip(t *testing.T) {
+	// Encode nil BAL — must produce 0xc0.
+	encoded, err := EncodeBlockAccessListBytes(nil)
+	if err != nil {
+		t.Fatalf("encode nil BAL: %v", err)
+	}
+	if !bytes.Equal(encoded, []byte{0xc0}) {
+		t.Fatalf("nil BAL encoding: got %x, want c0", encoded)
+	}
+
+	// Encode empty (non-nil) BAL — must also produce 0xc0.
+	encoded2, err := EncodeBlockAccessListBytes(make(BlockAccessList, 0))
+	if err != nil {
+		t.Fatalf("encode empty BAL: %v", err)
+	}
+	if !bytes.Equal(encoded2, []byte{0xc0}) {
+		t.Fatalf("empty BAL encoding: got %x, want c0", encoded2)
+	}
+
+	// Decode 0xc0 — must produce non-nil empty slice (not nil).
+	decoded, err := DecodeBlockAccessListBytes(encoded)
+	if err != nil {
+		t.Fatalf("decode empty BAL: %v", err)
+	}
+	if decoded == nil {
+		t.Fatal("decoded empty BAL must be non-nil")
+	}
+	if len(decoded) != 0 {
+		t.Fatalf("decoded empty BAL length: got %d, want 0", len(decoded))
+	}
+}

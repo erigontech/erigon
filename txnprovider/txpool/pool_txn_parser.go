@@ -76,7 +76,7 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 
 	// behave as of London enabled
 	ctx.chainID.Set(&chainID)
-	ctx.signer = types.LatestSignerForChainID(chainID.ToBig())
+	ctx.signer = types.LatestSignerForChainID(&chainID)
 
 	malleable := *ctx.signer
 	malleable.SetMalleable(true)

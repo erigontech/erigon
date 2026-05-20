@@ -7,32 +7,38 @@
   {
     "shard": "statetests-devnet",
     "workers": 12,
-    "max-allowed-failures": 5253
+    "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable",
+    "shard": "blocktests-stable-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
     "shard": "blocktests-stable-parallel",
     "workers": 12,
-    "max-allowed-failures": 370,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-devnet",
     "workers": 12,
-    "max-allowed-failures": 6486,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-stable",
+    "shard": "enginextests-stable-sequential",
     "workers": 8,
     "max-allowed-failures": 0
   },
   {
-    "shard": "enginextests-benchmark-1m",
+    "shard": "enginextests-stable-parallel",
+    "workers": 8,
+    "max-allowed-failures": 0,
+    "exec3-parallel": true
+  },
+  {
+    "shard": "enginextests-benchmark-1m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -43,7 +49,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-5m",
+    "shard": "enginextests-benchmark-5m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -54,7 +60,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-10m",
+    "shard": "enginextests-benchmark-10m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -65,7 +71,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-30m",
+    "shard": "enginextests-benchmark-30m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -76,7 +82,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-60m",
+    "shard": "enginextests-benchmark-60m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -87,7 +93,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-100m",
+    "shard": "enginextests-benchmark-100m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -98,7 +104,7 @@
     "exec3-parallel": true
   },
   {
-    "shard": "enginextests-benchmark-150m",
+    "shard": "enginextests-benchmark-150m-sequential",
     "workers": 1,
     "max-allowed-failures": 0
   },
@@ -109,53 +115,53 @@
     "exec3-parallel": true
   },
   {
-    "shard": "blocktests-stable-race-pre-cancun",
+    "shard": "blocktests-stable-race-pre-cancun-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-cancun",
+    "shard": "blocktests-stable-race-cancun-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-prague",
+    "shard": "blocktests-stable-race-prague-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
-    "shard": "blocktests-stable-race-osaka",
+    "shard": "blocktests-stable-race-osaka-sequential",
     "workers": 12,
     "max-allowed-failures": 0
   },
   {
     "shard": "blocktests-stable-race-pre-cancun-parallel",
     "workers": 12,
-    "max-allowed-failures": 259,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-cancun-parallel",
     "workers": 12,
-    "max-allowed-failures": 140,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-prague-parallel",
     "workers": 12,
-    "max-allowed-failures": 136,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-stable-race-osaka-parallel",
     "workers": 12,
-    "max-allowed-failures": 136,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   },
   {
     "shard": "blocktests-devnet-race-amsterdam",
     "workers": 12,
-    "max-allowed-failures": 6182,
+    "max-allowed-failures": 0,
     "exec3-parallel": true
   }
 ]
