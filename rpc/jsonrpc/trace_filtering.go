@@ -343,8 +343,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		overlayTx := api.filters.WithOverlay(dbtx)
-		headNumber, err := api._blockReader.HeaderNumber(ctx, overlayTx, rawdb.ReadHeadHeaderHash(overlayTx))
+		// filterV3 below scans receipts/logs against dbtx; keep toBlock on the
+		// same view so the upper bound and the scan agree. Routing the head
+		// lookup through the overlay would let toBlock point at a block whose
+		// receipts are not yet committed.
+		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
 		if err != nil {
 			return err
 		}

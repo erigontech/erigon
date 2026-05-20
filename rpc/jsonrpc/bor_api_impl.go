@@ -103,11 +103,12 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		overlayTx := api.filters.WithOverlay(tx)
+		latestBlockNum, err2 := rpchelper.GetLatestBlockNumber(overlayTx)
 		if err2 != nil {
 			return accounts.NilAddress, err2
 		}
-		header, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
+		header, err = api._blockReader.HeaderByNumber(ctx, overlayTx, latestBlockNum)
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
 			header, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
