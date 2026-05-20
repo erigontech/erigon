@@ -1022,19 +1022,27 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		if readStorage == nil {
-			// Record the probe so ValidateVersion sees prior-tx writes that
-			// invalidate later reads of the same account property.
+			// Record reads so that ValidateVersion can detect when a prior
+			// transaction modifies any account property.  Without tracking
+			// these reads, validation misses conflicts where a prior tx
+			// changes an account's balance/nonce/etc. — causing later txs
+			// to execute against stale data, and the parallel-built block
+			// access list (AsBlockAccessList) to diverge from the header.
 			//
-			// Exclude CodePath: getStateObject calls versionedRead(CodePath,
-			// readStorage=nil) to check for EIP-7702 writes; caching the
-			// nil defaultV would poison subsequent getCode calls.
+			// AddressPath probes MUST be recorded: getStateObject probes the
+			// versionMap for AddressPath before falling back to the
+			// stateReader. The validator's path==AddressPath branch cross-
+			// checks the precise IncarnationPath signal (account create /
+			// destruct), so the recorded probe does not over-invalidate on
+			// ordinary BalancePath/NoncePath writes.
 			//
-			// Exclude AddressPath: getStateObject probes vm for AddressPath
-			// then falls back to the stateReader (the account does exist).
-			// Recording the nil probe makes the validator's path==Address
-			// branch invalidate the account whenever any prior tx in the
-			// block wrote BalancePath/etc — which is normal state.
-			if !commited && path != CodePath && path != AddressPath {
+			// Do NOT cache CodePath: getStateObject calls versionedRead for
+			// CodePath with readStorage=nil to check if a prior tx wrote
+			// code (EIP-7702).  Caching defaultV (nil) would poison the
+			// ReadSet, causing subsequent getCode calls (which pass a real
+			// readStorage callback) to return empty code instead of loading
+			// it from the DB — breaking deposit contract execution, etc.
+			if !commited && path != CodePath {
 				vr.Source = StorageRead
 				vr.Val = defaultV
 				if s.versionedReads == nil {
