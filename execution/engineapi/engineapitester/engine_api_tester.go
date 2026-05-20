@@ -295,6 +295,13 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		},
 		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+		// Run tests under async commit by default: it exercises the
+		// background-flush path, where the post-FCU flush runs on a
+		// goroutine and a subsequent newPayload may read the parent SD
+		// either pre- or post-flush. Sync commit makes every flush
+		// deterministic per-FCU and masks flush-timing bugs. A test that
+		// needs sync commit can still opt out via EthConfigTweaker.
+		FcuBackgroundCommit: true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
