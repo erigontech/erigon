@@ -153,9 +153,12 @@ func (e *ExecModule) runCommit(gen *commitGen) {
 	// Commit; this is a safety net (Rollback is idempotent).
 	gen.roTx.Rollback()
 	e.markGenCommitted(gen)
-	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
-		dispatcher.PublishOverlay(nil)
-	}
+	// NOTE: the worker does NOT touch the published overlay (Events.LatestSD).
+	// Publishing the latest executed block's SharedDomains is a foreground
+	// concern, owned by updateForkChoice (dispatchNotificationsFromOverlay).
+	// A background commit landing does not change "what the latest block is",
+	// so it must not republish — doing so previously nil'd LatestSD whenever
+	// the worker caught up, leaving the block builder / RPC caches blind.
 }
 
 // markGenCommitted records that a generation's commit has landed. The
@@ -187,29 +190,48 @@ func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Unlock()
 }
 
-// drainCommittedGens closes and clears the generation chain when every
-// generation in it has committed. Called by a foreground op while it holds
-// the semaphore — no concurrent reader exists, so closing the SharedDomains
-// is race-free. If any generation is still uncommitted the chain is left
-// intact. Returns true when the chain was drained.
-func (e *ExecModule) drainCommittedGens() bool {
+// drainCommittedGens retires fully-committed generations, but ALWAYS keeps
+// the newest one alive. The newest generation's SharedDomains is what the
+// foreground published as Events.LatestSD — the latest executed block's
+// state — and the block builder + RPC caches read through it until a newer
+// block supersedes it. Retiring it here would make LatestSD point at a
+// closed SD (the root cause of the builder reading a stale DB).
+//
+// Older generations are detached + closed only once EVERY generation has
+// committed: each closed generation's delta is durably in the DB, and the
+// kept newest generation reads its own committed delta via the stateCache /
+// files, so detaching the parent chain loses nothing. Called by a foreground
+// op holding the semaphore, so closing is race-free.
+func (e *ExecModule) drainCommittedGens() {
 	e.fgMu.Lock()
 	defer e.fgMu.Unlock()
-	if len(e.gens) == 0 {
-		return true
+	if len(e.gens) <= 1 {
+		return // nothing to retire — keep the (at most one) newest generation
 	}
 	for _, g := range e.gens {
 		if !g.committed {
-			return false
+			return // a commit is still in flight — leave the chain intact
 		}
 	}
-	gens := e.gens
-	e.gens = nil
-	// Detach + close oldest→newest; each generation's data is in the DB,
-	// so a reader that still walked the chain would get the same bytes.
-	for _, g := range gens {
+	newest := e.gens[len(e.gens)-1]
+	old := e.gens[:len(e.gens)-1]
+	e.gens = []*commitGen{newest}
+	newest.sd.SetParent(nil)
+	for _, g := range old {
 		g.sd.SetParent(nil)
 		g.sd.Close()
 	}
-	return true
+}
+
+// closeAllGens detaches + closes every remaining generation. Called only at
+// shutdown (after the commit worker has stopped) to release the newest
+// generation that drainCommittedGens deliberately keeps alive.
+func (e *ExecModule) closeAllGens() {
+	e.fgMu.Lock()
+	defer e.fgMu.Unlock()
+	for _, g := range e.gens {
+		g.sd.SetParent(nil)
+		g.sd.Close()
+	}
+	e.gens = nil
 }

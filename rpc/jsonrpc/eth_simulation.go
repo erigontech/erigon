@@ -128,7 +128,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, err
 	}

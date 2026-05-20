@@ -329,6 +329,10 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 	// Stop the background-commit worker and wait for it to drain its queue
 	// (including any in-flight commit tx) so DB-close does not race it.
 	e.stopCommitWorker()
+	// Close the generation(s) still held — drainCommittedGens deliberately
+	// keeps the newest alive as Events.LatestSD; release it now that the
+	// worker has stopped and no foreground/RPC reader can be in flight.
+	e.closeAllGens()
 }
 
 // stopCommitWorker signals the background-commit worker to drain and exit,

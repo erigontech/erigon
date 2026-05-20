@@ -376,7 +376,9 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	// Overlay-wrap so a freshly-FCU'd block whose background commit is still
+	// in flight is not mistaken for a future block (which would return null).
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, err
 	}

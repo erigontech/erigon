@@ -643,6 +643,13 @@ func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
+	// Route domain reads on overlay read views through this SharedDomains so
+	// consumers (RPC, txpool) reading "latest" state via the published overlay
+	// see sd.mem and the in-flight async-commit generation chain — not a DB
+	// that lags behind a not-yet-landed background commit.
+	overlay.SetDomainGetterFactory(func(roTx kv.TemporalTx) kv.TemporalGetter {
+		return sd.AsGetter(roTx)
+	})
 	sd.blockOverlay.Store(overlay)
 	return nil
 }

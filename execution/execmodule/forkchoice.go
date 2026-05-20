@@ -664,12 +664,38 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 
+		// Background commit (gate item 2): register the generation in the
+		// in-flight chain BEFORE dispatching notifications / publishing the
+		// overlay. The commit worker republishes the overlay as it commits
+		// each generation (bg_commit.go: latestUncommittedGenSD); if this
+		// generation were not yet in e.gens at that point, the worker would
+		// publish a stale (older or nil) overlay and clobber this FCU's.
+		var bgGen *commitGen
+		if e.fcuBackgroundCommit {
+			bgGen = &commitGen{
+				sd:                   currentContext,
+				roTx:                 roTx,
+				finishProgressBefore: finishProgressBefore,
+				isSynced:             isSynced,
+				initialCycle:         initialCycle,
+			}
+			e.addGen(bgGen)
+		}
+
 		// Dispatch notifications from the SD overlay (before flush/commit).
 		// After this, all consumers have the data — the semaphore can be
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
 		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+			// The generation is already registered; enqueue it so its commit
+			// still lands and the chain can drain — otherwise an uncommitted
+			// generation would block drainCommittedGens forever.
+			if bgGen != nil {
+				roTx = nil
+				currentContext = nil
+				e.enqueueCommit(bgGen)
+			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
 
@@ -685,19 +711,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// so the commit RwTx never overlaps a foreground roTx. The
 			// generation is added to the chain so the next FCU's SD can
 			// read its not-yet-committed domain state via SetParent.
-			bgRoTx := roTx
 			roTx = nil
-			bgSD := currentContext
 			currentContext = nil
-			gen := &commitGen{
-				sd:                   bgSD,
-				roTx:                 bgRoTx,
-				finishProgressBefore: finishProgressBefore,
-				isSynced:             isSynced,
-				initialCycle:         initialCycle,
-			}
-			e.addGen(gen)
-			e.enqueueCommit(gen)
+			e.enqueueCommit(bgGen)
 		} else {
 			// Foreground commit: pass the outer roTx so it gets released
 			// between Flush and Commit (same openTxs=2→1 optimization as

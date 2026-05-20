@@ -52,6 +52,20 @@ type MemoryMutation struct {
 	clearedTables    map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
+
+	// domainGetterFor, when set on a base overlay, produces a temporal domain
+	// getter bound to a given backing tx. The block overlay's owner
+	// (SharedDomains) installs it so that domain reads (GetLatest/HasPrefix)
+	// on an overlay *read view* see not-yet-committed SharedDomains state —
+	// sd.mem plus the in-flight async-commit generation chain — instead of
+	// only the committed DB. Without this, a consumer reading "latest" state
+	// through the overlay while a background commit is still in flight gets a
+	// value that lags by >=1 block. nil for plain mem-batches.
+	domainGetterFor func(tx kv.TemporalTx) kv.TemporalGetter
+	// domainGetter is the factory's result, resolved against this view's
+	// backing tx. Set only on read views created via newReadViewMut; nil on
+	// the base overlay.
+	domainGetter kv.TemporalGetter
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -906,6 +920,9 @@ func (m *MemoryMutation) AggTx() any {
 }
 
 func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+	if m.domainGetter != nil {
+		return m.domainGetter.GetLatest(name, k)
+	}
 	if m.db == nil {
 		return nil, 0, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
@@ -920,6 +937,9 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	if m.domainGetter != nil {
+		return m.domainGetter.HasPrefix(name, prefix)
+	}
 	if m.db == nil {
 		return nil, nil, false, nil
 	}
@@ -1053,16 +1073,36 @@ func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
 	}
-	return &MemoryMutation{
-		mu:             m.mu, // share parent's mutex for synchronization
-		memTx:          m.memTx,
-		memDb:          nil, // caller doesn't own the memDb
-		deletedEntries: m.deletedEntries,
-		deletedDups:    m.deletedDups,
-		clearedTables:  m.clearedTables,
-		db:             dbTx,
+	rv := &MemoryMutation{
+		mu:              m.mu, // share parent's mutex for synchronization
+		memTx:           m.memTx,
+		memDb:           nil, // caller doesn't own the memDb
+		deletedEntries:  m.deletedEntries,
+		deletedDups:     m.deletedDups,
+		clearedTables:   m.clearedTables,
+		db:              dbTx,
+		domainGetterFor: m.domainGetterFor,
 	}
+	// Resolve the SharedDomains-backed domain getter against this view's own
+	// backing tx so domain reads see uncommitted (in-flight) state.
+	if m.domainGetterFor != nil && dbTx != nil {
+		rv.domainGetter = m.domainGetterFor(dbTx)
+	}
+	return rv
 }
+
+// SetDomainGetterFactory installs the factory used to route domain reads on
+// read views through a SharedDomains-backed getter. See domainGetterFor.
+func (m *MemoryMutation) SetDomainGetterFactory(f func(tx kv.TemporalTx) kv.TemporalGetter) {
+	m.domainGetterFor = f
+}
+
+// HasOverlayDomainGetter reports whether this read view routes domain reads
+// through a SharedDomains-backed getter — i.e. it is an overlay view of an
+// in-flight async-commit generation. Callers use this to bypass caches whose
+// coherency is keyed to the committed DB and would otherwise serve a value
+// lagging a not-yet-landed background commit.
+func (m *MemoryMutation) HasOverlayDomainGetter() bool { return m.domainGetter != nil }
 
 // OverlayTemporalReadView extends an overlay read view with kv.TemporalTx
 // support. It embeds a *MemoryMutation for all overlay-aware KV methods
@@ -1111,9 +1151,15 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 // Temporal methods — delegate to the independent temporal tx.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+	if v.MemoryMutation.domainGetter != nil {
+		return v.MemoryMutation.domainGetter.GetLatest(name, k)
+	}
 	return v.temporalTx.GetLatest(name, k)
 }
 func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	if v.MemoryMutation.domainGetter != nil {
+		return v.MemoryMutation.domainGetter.HasPrefix(name, prefix)
+	}
 	return v.temporalTx.HasPrefix(name, prefix)
 }
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {

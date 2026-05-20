@@ -128,7 +128,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		end = num
 	} else {
 		// Convert the RPC block numbers into internal representations
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+		// Pass api.filters (not nil) so LatestExecutedBlockNumber resolves
+		// through the block overlay — otherwise a freshly-FCU'd block whose
+		// background commit is still in flight is invisible here.
+		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, api.filters)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +176,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(tx)
+		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +188,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	// Check if the requested blocks have been executed.
 	// This prevents returning empty results when blocks exist but haven't been executed yet.
-	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(tx)
+	// Overlay-wrap so an in-flight (not-yet-committed) FCU block counts as executed.
+	latestExecuted, err := rpchelper.GetLatestExecutedBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, err
 	}

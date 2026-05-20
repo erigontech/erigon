@@ -1113,7 +1113,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	postSdCtx.SetDeferBranchUpdates(false)
 
 	// Set up to read state at current block (after execution)
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)
 	}

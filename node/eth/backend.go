@@ -733,6 +733,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		go sentry_multi_client.NewBALDownloader(backend.sentryProvider.Client, backend.chainDB, logger).Run(backend.sentryCtx)
 	}
 
+	// SD-wrapper state cache, shared by the txpool and the embedded
+	// rpcdaemon. Both read account state from the authoritative in-flight
+	// SharedDomains rather than an async-notification-fed cache that can
+	// diverge from it during a background commit (gate item 2). execModule
+	// is wired later by NewExecModule; until then Cache.View falls back to
+	// the published SD via SetPublishedSD.
+	execmoduleCache := &execmodule.Cache{}
+	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
+
 	var txnProvider txnprovider.TxnProvider
 	if config.TxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -748,7 +757,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			ctx,
 			config.TxPool,
 			backend.chainDB,
-			kvcache.NewSimple(),
+			execmoduleCache,
 			sentries,
 			backend.stateDiffClient,
 			blockBuilderNotifyNewTxns,
@@ -762,8 +771,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.txPool
 	}
 
-	execmoduleCache := &execmodule.Cache{}
-	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = execmoduleCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
