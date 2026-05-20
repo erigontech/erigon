@@ -110,11 +110,22 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
-	AssertStateCache      = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead             = EnvBool("READ_AHEAD", true)
+	// BALDrivenCommitment: when true, a block carrying a BAL has its
+	// commitment folded from the BAL ahead of the per-tx result stream
+	// (overlapping execution). Default false — incremental commitment
+	// stays the consensus path until the shadow-compute check has proven
+	// the BAL-driven root matches across a full validation window.
+	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", false)
+	// BALShadowCompute: when true, every BAL-driven block is ALSO computed
+	// the incremental way and the two roots are asserted equal before the
+	// result is published — the dual-compute consistency net. Divergence
+	// fails the block. Doubles commitment work, so off for perf runs.
+	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead            = EnvBool("READ_AHEAD", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
