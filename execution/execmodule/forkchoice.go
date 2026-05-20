@@ -635,7 +635,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// creates a fresh overlay for the next block cycle. We close unconditionally:
 		// hasOverlay=true means block data was flushed from the overlay into the FCU
 		// rwTx above; hasOverlay=false means InsertBlocks already committed block data
-		// to MDBX and cleared the overlay, so the SD is stale either way.
+		// to DB and cleared the overlay, so the SD is stale either way.
 		if e.currentContext != nil {
 			e.currentContext.Close()
 			e.lock.Lock()

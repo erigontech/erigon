@@ -31,10 +31,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// flushBlockOverlayToMDBX commits the in-memory block overlay to MDBX so
+// flushBlockOverlayToDB commits the in-memory block overlay to the DB so
 // per-batch memory stays bounded. After the commit the overlay is closed;
 // the next InsertBlocks call opens a fresh RoTx that sees the committed TDs.
-func (e *ExecModule) flushBlockOverlayToMDBX(ctx context.Context, sd *execctx.SharedDomains, overlay interface {
+func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains, overlay interface {
 	Flush(context.Context, kv.RwTx) error
 }) (ExecutionStatus, error) {
 	rwTx, err := e.db.BeginTemporalRw(ctx)
@@ -147,12 +147,12 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Flush block overlay to MDBX so in-memory usage stays bounded to one batch.
+	// Flush block overlay to DB so in-memory usage stays bounded to one batch.
 	// After the commit, the next InsertBlocks call opens a fresh RoTx that sees
 	// the committed TDs, so parent TD lookups in subsequent batches still work.
-	// UpdateForkChoice detects hasOverlay=false and reads block data from MDBX.
+	// UpdateForkChoice detects hasOverlay=false and reads block data from DB.
 	if overlay := sd.BlockOverlay(); overlay != nil {
-		if status, err2 := e.flushBlockOverlayToMDBX(ctx, sd, overlay); err2 != nil {
+		if status, err2 := e.flushBlockOverlayToDB(ctx, sd, overlay); err2 != nil {
 			return status, err2
 		}
 	}
