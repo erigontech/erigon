@@ -36,13 +36,13 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 	for addr, account := range *so {
 		// Override account nonce.
 		if account.Nonce != nil {
-			if err := ibs.SetNonce(addr, uint64(*account.Nonce)); err != nil {
+			if err := ibs.SetNonce(addr, uint64(*account.Nonce), tracing.NonceChangeUnspecified); err != nil {
 				return err
 			}
 		}
 		// Override account (contract) code.
 		if account.Code != nil {
-			if err := ibs.SetCode(addr, *account.Code); err != nil {
+			if err := ibs.SetCode(addr, *account.Code, tracing.CodeChangeUnspecified); err != nil {
 				return err
 			}
 		}

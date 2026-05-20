@@ -3,7 +3,6 @@
 package benchmark
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -15,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/runtime"
@@ -33,7 +33,7 @@ var (
 // cancunConfig returns a chain config with all forks enabled through Cancun.
 func cancunConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:               big.NewInt(1),
+		ChainID:               uint256.NewInt(1),
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
 		SpuriousDragonBlock:   common.NewUint64(0),
@@ -84,13 +84,13 @@ func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBl
 // deployContract deploys code at the given address in the state.
 func deployContract(statedb *state.IntraBlockState, addr accounts.Address, code []byte) {
 	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code)
+	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
 }
 
 // deployContractWithBalance deploys code and sets an ETH balance.
 func deployContractWithBalance(statedb *state.IntraBlockState, addr accounts.Address, code []byte, balance *uint256.Int) {
 	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code)
+	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
 	statedb.SetBalance(addr, *balance, 0)
 }
 

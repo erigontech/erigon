@@ -167,6 +167,24 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 	return nil
 }
 
+// CheckBlockGasInclusion verifies that the supplied per-dimension gas
+// values fit in the remaining EIP-8037 reservoirs. Callers compute the
+// dimension contributions for their context: pre-execution uses
+// min(MaxTxnGasLimit, tx.gas) and tx.gas; post-execution uses the
+// realised BlockRegularGasUsed and BlockStateGasUsed.
+func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
+	if gp == nil {
+		return nil
+	}
+	if regularGas > gp.RegularGasAvailable() {
+		return ErrGasLimitReached
+	}
+	if stateGas > gp.StateGasAvailable() {
+		return ErrGasLimitReached
+	}
+	return nil
+}
+
 // BlobGas returns the blob gas remaining.
 func (gp *GasPool) BlobGas() uint64 {
 	if gp == nil {

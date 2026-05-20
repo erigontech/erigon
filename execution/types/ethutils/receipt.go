@@ -18,7 +18,6 @@ package ethutils
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -42,14 +41,14 @@ func MarshalReceipt(
 	signed bool,
 	withBlockTimestamp bool,
 ) map[string]any {
-	var chainId *big.Int
+	var chainId *uint256.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
 		if t.Protected() {
-			chainId = types.DeriveChainId(&t.V).ToBig()
+			chainId = types.DeriveChainId(&t.V)
 		}
 	default:
-		chainId = txn.GetChainID().ToBig()
+		chainId = txn.GetChainID()
 	}
 
 	var from accounts.Address

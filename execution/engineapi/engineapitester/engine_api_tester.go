@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -441,7 +442,7 @@ func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *t
 	test(t.Context(), t, eat)
 }
 
-func (eat EngineApiTester) ChainId() *big.Int {
+func (eat EngineApiTester) ChainId() *uint256.Int {
 	return eat.ChainConfig.ChainID
 }
 

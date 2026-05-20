@@ -25,13 +25,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
@@ -261,6 +262,13 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	go func() {
+		// warmup kzg init so first block doesn't suffer
+		t := time.Now()
+		kzg.InitKZGCtx()
+		logger.Info("KZG crypto context ready", "took", time.Since(t))
+	}()
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -1308,7 +1316,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	aggOpts := state.New(dirs).Logger(logger).GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
 	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 		v := *snConfig.ErigondbDomainStepsInFrozenFile
 		stepsStr := "Inf"
@@ -1431,7 +1439,7 @@ func (s *Ethereum) Start() error {
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
 
-	currentTDProvider := func() *big.Int {
+	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
 		if err != nil {
 			panic(err)
@@ -1632,8 +1640,8 @@ func RemoveContents(dirname string) error {
 	return nil
 }
 
-func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*big.Int, error) {
-	var currentTD *big.Int
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*uint256.Int, error) {
+	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
 		h, err := blockReader.CurrentBlock(tx)
 		if err != nil {
