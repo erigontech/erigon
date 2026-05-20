@@ -53,11 +53,6 @@ type HashBuilder struct {
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
 	topHashesCopy []byte
-
-	// proofElement is set when the next element computation should have its RLP
-	// encoding retained.  Additionally, the account root storage hash and storage
-	// values are stored into this field when set and in the relavent codepath.
-	proofElement *proofElement
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -78,13 +73,6 @@ func (hb *HashBuilder) Reset() {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
 	hb.topHashesCopy = hb.topHashesCopy[:0]
-	hb.proofElement = nil
-}
-
-// setProofElement sets the proofElement field in which the relevant methods
-// will check and additionally write the proof bytes to during trie computation.
-func (hb *HashBuilder) setProofElement(pe *proofElement) {
-	hb.proofElement = pe
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) error {
@@ -93,10 +81,6 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 	}
 	if length < 0 {
 		return fmt.Errorf("length %d", length)
-	}
-	if hb.proofElement != nil {
-		hb.proofElement.storageKey = common.Copy(keyHex[:len(keyHex)-1])
-		hb.proofElement.storageValue = new(uint256.Int).SetBytes(val.RawBytes())
 	}
 	key := keyHex[len(keyHex)-length:]
 	s := &ShortNode{Key: common.Copy(key), Val: ValueNode(common.Copy(val.RawBytes()))}
@@ -178,10 +162,6 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		writer = hb.sha
 		reader = hb.sha
 	}
-	// Collect a copy of the hash input if needed for an eth_getProof
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(writer, &hb.proofElement.proof)
-	}
 
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -230,7 +210,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
-	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
 	hb.acc.CodeHash = accounts.EmptyCodeHash
@@ -271,14 +250,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		popped++
 	}
 
-	if hb.proofElement != nil {
-		// The storageRoot is not stored with the account info, therefore
-		// we capture it with the account proof element.  Note, we also store the
-		// full key as this root could be for a different account in the negative
-		// case.
-		hb.proofElement.storageRootKey = common.Copy(fullKey)
-		hb.proofElement.storageRoot = hb.acc.Root
-	}
 	var accCopy accounts.Account
 	hb.acc.CodeHash = codeHash
 	accCopy.Copy(&hb.acc)
@@ -413,9 +384,6 @@ func (hb *HashBuilder) extension(key []byte) error {
 
 func (hb *HashBuilder) extensionHash(key []byte) error {
 	writer := io.Writer(hb.sha)
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(hb.sha, &hb.proofElement.proof)
-	}
 
 	if hb.trace {
 		fmt.Printf("EXTENSIONHASH %x\n", key)
@@ -531,9 +499,6 @@ func (hb *HashBuilder) branch(set uint16) error {
 
 func (hb *HashBuilder) branchHash(set uint16) error {
 	writer := io.Writer(hb.sha)
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(hb.sha, &hb.proofElement.proof)
-	}
 
 	if hb.trace {
 		fmt.Printf("BRANCHHASH (%b)\n", set)

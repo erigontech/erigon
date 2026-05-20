@@ -127,7 +127,6 @@ type TrieDbState struct {
 	currentBuffer     *Buffer
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	hashBuilder       *trie.HashBuilder
 }
 
 func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *TrieDbState {
@@ -138,7 +137,6 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	return tds
 }
@@ -166,10 +164,9 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 
 	n := tds.getBlockNr()
 	cpy := TrieDbState{
-		t:           &tcopy,
-		tMu:         new(sync.Mutex),
-		blockNr:     n,
-		hashBuilder: trie.NewHashBuilder(false),
+		t:       &tcopy,
+		tMu:     new(sync.Mutex),
+		blockNr: n,
 	}
 	return &cpy
 }
@@ -211,7 +208,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	tds.tMu.Unlock()
 
@@ -235,7 +231,6 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
-		hashBuilder:       trie.NewHashBuilder(false),
 	}
 }
 
