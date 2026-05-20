@@ -74,38 +74,57 @@ func (e *AdvertisementSelfCheckError) Error() string {
 	return sb.String()
 }
 
-// CheckOwnAdvertisement asserts that every entry in this node's
-// outgoing advertisement whose NAME appears in any canonical version
-// has a HASH matching at least one canonical version's hash for that
-// name. Entries whose names are NOT in any canonical pass through
-// silently — these are new files retired by this publisher, awaiting
-// promotion to canonical by the swarm-agreement layer.
+// MinorityVerdict is the non-fatal outcome of CheckOwnAdvertisement:
+// this node's advertisement disagrees with the canonical set ONLY at
+// quorum-promoted entries — never at the pinned genesis. The node is a
+// minority publisher whose retired bytes lost the quorum race; it is
+// recoverable by adopting the canonical hashes (Phase 7 staged
+// adoption). Contrast *AdvertisementSelfCheckError — a genesis-level
+// disagreement, which is fatal.
+type MinorityVerdict struct {
+	// Adopt lists each entry whose own hash must be replaced by the
+	// canonical (quorum-promoted) hash.
+	Adopt []AdvertisementMismatch
+}
+
+// CheckOwnAdvertisement classifies every entry in this node's outgoing
+// advertisement whose NAME appears in the canonical set: a HASH that
+// matches at least one canonical version passes; a HASH that matches
+// none is a mismatch. Entries whose names are NOT in any canonical
+// pass through silently — new files this publisher retired, awaiting
+// promotion by the swarm-agreement layer.
 //
-// Returns *AdvertisementSelfCheckError on divergence (fail loud:
-// "this node is producing files whose bytes don't match the swarm's
-// agreed-on hashes — retire is broken or the build is wrong").
-// Returns nil when adv is consistent with canonicals OR adds new
-// entries cleanly.
+// A mismatch splits two ways
+// (docs/plans/20260520-chaintoml-ucan-flow-spec.md, minority
+// transition):
+//
+//   - divergence — the mismatching name is in the pinned genesis v0.
+//     Genesis is immutable, so a disagreement means corrupt data or
+//     the wrong chain. Returned as *AdvertisementSelfCheckError; the
+//     caller must fail loud and halt.
+//   - minority — the mismatching name is canonical only via quorum
+//     promotion, not genesis. This node's retired bytes lost the
+//     quorum race; recoverable by adopting the canonical hashes.
+//     Returned as a non-nil *MinorityVerdict with a nil error.
+//
+// When a single advertisement has both kinds, divergence wins: the
+// error is returned and the minority verdict suppressed, because the
+// process halts anyway.
 //
 // This is the producer-side counterpart of ValidateAdvertisement:
 // ValidateAdvertisement (consumer) silently drops mismatched entries;
-// CheckOwnAdvertisement (producer) fails loudly on mismatched entries.
-// The asymmetry is deliberate: a consumer encountering a bad peer
-// filters and moves on; a producer encountering a bad own entry has
-// no useful next action besides halting and surfacing the bug.
+// CheckOwnAdvertisement (producer) halts on a genesis divergence and
+// flags a minority for adoption.
 //
-// Multi-canonical input from day one — same shape as
-// ValidateAdvertisement. During merge transitions, an entry whose
-// name appears in EITHER pre-merge OR post-merge canonical must match
-// THAT canonical's hash; doesn't have to match both.
+// Multi-canonical input from day one — during merge transitions, an
+// entry whose name appears in EITHER pre-merge OR post-merge canonical
+// must match THAT canonical's hash; it need not match both.
 //
-// When canonicals is empty (e.g., no canonical loaded yet), returns
-// nil — there's no basis on which to check. Production callers must
-// ensure canonical is loaded before invoking, but the helper itself
-// is defensive.
-func CheckOwnAdvertisement(adv snapcfg.PreverifiedItems, canonicals []snapcfg.PreverifiedItems) error {
+// When canonicals is empty (no canonical loaded yet) returns
+// (nil, nil) — there's no basis on which to check.
+func CheckOwnAdvertisement(adv, genesis snapcfg.PreverifiedItems, canonicals []snapcfg.PreverifiedItems) (*MinorityVerdict, error) {
 	if len(canonicals) == 0 || len(adv) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Build name → set-of-canonical-hashes lookup across all
@@ -134,7 +153,12 @@ func CheckOwnAdvertisement(adv snapcfg.PreverifiedItems, canonicals []snapcfg.Pr
 		}
 	}
 
-	var mismatches []AdvertisementMismatch
+	genesisNames := make(map[string]struct{}, len(genesis))
+	for _, p := range genesis {
+		genesisNames[p.Name] = struct{}{}
+	}
+
+	var divergences, minorities []AdvertisementMismatch
 	for _, p := range adv {
 		hashes, nameKnown := canon[p.Name]
 		if !nameKnown {
@@ -143,16 +167,26 @@ func CheckOwnAdvertisement(adv snapcfg.PreverifiedItems, canonicals []snapcfg.Pr
 		if _, hashOK := hashes[p.Hash]; hashOK {
 			continue // matches at least one canonical version
 		}
-		mismatches = append(mismatches, AdvertisementMismatch{
+		m := AdvertisementMismatch{
 			Name:          p.Name,
 			OwnHash:       p.Hash,
 			CanonicalHash: firstCanonicalHash[p.Name],
-		})
+		}
+		if _, isGenesis := genesisNames[p.Name]; isGenesis {
+			divergences = append(divergences, m)
+		} else {
+			minorities = append(minorities, m)
+		}
 	}
-	if len(mismatches) == 0 {
-		return nil
+	// Divergence wins: the process halts, so a co-occurring minority
+	// verdict would never be acted on.
+	if len(divergences) > 0 {
+		return nil, &AdvertisementSelfCheckError{Mismatches: divergences}
 	}
-	return &AdvertisementSelfCheckError{Mismatches: mismatches}
+	if len(minorities) > 0 {
+		return &MinorityVerdict{Adopt: minorities}, nil
+	}
+	return nil, nil
 }
 
 // IsAdvertisementSelfCheckError reports whether err is or wraps an

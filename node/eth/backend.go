@@ -515,10 +515,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			if !known || cfg == nil {
 				return nil // no canonical loaded → defensive no-op
 			}
-			return snapshotsync.CheckOwnAdvertisement(
+			// Phase 7a: CheckOwnAdvertisement splits a hash mismatch
+			// into a fatal genesis divergence and a non-fatal minority
+			// verdict. Wiring the minority path to the live canonical
+			// view + staged adoption is Phase 7b; until then the
+			// static preverified set is treated as genesis, so every
+			// mismatch is a divergence — behaviour is unchanged.
+			verdict, err := snapshotsync.CheckOwnAdvertisement(
 				downloader.ChainTomlV2ToItems(m),
+				cfg.Preverified.Items,
 				[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
 			)
+			if err != nil {
+				return err
+			}
+			if verdict != nil {
+				logger.Warn("publisher self-check: minority entries detected — staged adoption pending (Phase 7b)",
+					"count", len(verdict.Adopt))
+			}
+			return nil
 		})
 
 		// Wire the producer-side two-UCAN authentication

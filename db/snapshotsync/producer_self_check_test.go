@@ -28,7 +28,7 @@ import (
 )
 
 // TestCheckOwnAdvertisement_AllMatch pins the happy path: every entry
-// has a name in canonical AND a matching hash. nil error.
+// has a name in canonical AND a matching hash. nil verdict, nil error.
 func TestCheckOwnAdvertisement_AllMatch(t *testing.T) {
 	t.Parallel()
 
@@ -41,47 +41,101 @@ func TestCheckOwnAdvertisement_AllMatch(t *testing.T) {
 		preverified.Item{Name: "v1.1-000000-001000-bodies.seg", Hash: "bbb"},
 	}
 
-	require.NoError(t, CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{canonical}),
-		"all entries match canonical — no error")
+	verdict, err := CheckOwnAdvertisement(adv, canonical, []snapcfg.PreverifiedItems{canonical})
+	require.NoError(t, err, "all entries match canonical — no error")
+	require.Nil(t, verdict, "all entries match canonical — no minority verdict")
 }
 
-// TestCheckOwnAdvertisement_HashMismatch is the FAIL LOUD case: a
-// retire bug producing different bytes for a known canonical file.
-// Returns AdvertisementSelfCheckError with the mismatch details.
-func TestCheckOwnAdvertisement_HashMismatch(t *testing.T) {
+// TestCheckOwnAdvertisement_GenesisDivergence is the FAIL LOUD case: a
+// retire bug producing different bytes for a genesis file. Returns
+// AdvertisementSelfCheckError — genesis is immutable, so this is fatal.
+func TestCheckOwnAdvertisement_GenesisDivergence(t *testing.T) {
 	t.Parallel()
 
-	canonical := snapcfg.PreverifiedItems{
+	genesis := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "good"},
 		preverified.Item{Name: "v1.1-000000-001000-bodies.seg", Hash: "ok"},
 	}
-	// Publisher's retire produced wrong bytes for headers.
+	// Publisher's retire produced wrong bytes for a genesis file.
 	adv := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "BAD"},
 		preverified.Item{Name: "v1.1-000000-001000-bodies.seg", Hash: "ok"},
 	}
 
-	err := CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{canonical})
-	require.Error(t, err, "hash mismatch on known name returns error")
+	verdict, err := CheckOwnAdvertisement(adv, genesis, []snapcfg.PreverifiedItems{genesis})
+	require.Nil(t, verdict, "a genesis divergence is fatal, not an adoptable minority")
+	require.Error(t, err, "hash mismatch on a genesis name returns error")
 	require.True(t, IsAdvertisementSelfCheckError(err),
-		"error is/wraps AdvertisementSelfCheckError so callers can discriminate from generic errors")
+		"error is/wraps AdvertisementSelfCheckError so callers can discriminate")
 
 	var sce *AdvertisementSelfCheckError
 	require.True(t, errors.As(err, &sce))
 	require.Equal(t, []AdvertisementMismatch{
-		{
-			Name:          "v1.1-000000-001000-headers.seg",
-			OwnHash:       "BAD",
-			CanonicalHash: "good",
-		},
+		{Name: "v1.1-000000-001000-headers.seg", OwnHash: "BAD", CanonicalHash: "good"},
 	}, sce.Mismatches)
 }
 
-// TestCheckOwnAdvertisement_NewFileAllowed pins the asymmetry from
-// the design: an entry whose NAME is not in any canonical passes
-// silently. Publishers ARE the source of new files; requiring
-// canonical match would deadlock the swarm-agreement layer (nothing
-// new could ever enter canonical).
+// TestCheckOwnAdvertisement_MinorityVerdict: a mismatch on a name that
+// is canonical only via quorum promotion (not in genesis) is a
+// non-fatal minority verdict — the node lost the quorum race and must
+// adopt the canonical hash.
+func TestCheckOwnAdvertisement_MinorityVerdict(t *testing.T) {
+	t.Parallel()
+
+	genesis := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "g1"},
+	}
+	// canonical = genesis ∪ a quorum-promoted post-genesis entry.
+	canonical := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "g1"},
+		preverified.Item{Name: "v1.1-001000-002000-headers.seg", Hash: "quorum"},
+	}
+	// This node retired a different hash for the post-genesis file.
+	adv := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "g1"},
+		preverified.Item{Name: "v1.1-001000-002000-headers.seg", Hash: "lost-the-race"},
+	}
+
+	verdict, err := CheckOwnAdvertisement(adv, genesis, []snapcfg.PreverifiedItems{canonical})
+	require.NoError(t, err, "a quorum-only mismatch is non-fatal")
+	require.NotNil(t, verdict)
+	require.Equal(t, []AdvertisementMismatch{
+		{Name: "v1.1-001000-002000-headers.seg", OwnHash: "lost-the-race", CanonicalHash: "quorum"},
+	}, verdict.Adopt)
+}
+
+// TestCheckOwnAdvertisement_DivergenceBeatsMinority: when an
+// advertisement has both a genesis divergence and a quorum-only
+// minority mismatch, the fatal divergence is returned and the minority
+// verdict suppressed — the process halts anyway.
+func TestCheckOwnAdvertisement_DivergenceBeatsMinority(t *testing.T) {
+	t.Parallel()
+
+	genesis := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "genesis.seg", Hash: "g"},
+	}
+	canonical := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "genesis.seg", Hash: "g"},
+		preverified.Item{Name: "promoted.seg", Hash: "q"},
+	}
+	adv := snapcfg.PreverifiedItems{
+		preverified.Item{Name: "genesis.seg", Hash: "wrong-genesis"},
+		preverified.Item{Name: "promoted.seg", Hash: "wrong-promoted"},
+	}
+
+	verdict, err := CheckOwnAdvertisement(adv, genesis, []snapcfg.PreverifiedItems{canonical})
+	require.Nil(t, verdict, "minority verdict suppressed when a fatal divergence is present")
+	require.True(t, IsAdvertisementSelfCheckError(err))
+	var sce *AdvertisementSelfCheckError
+	require.True(t, errors.As(err, &sce))
+	require.Len(t, sce.Mismatches, 1)
+	require.Equal(t, "genesis.seg", sce.Mismatches[0].Name)
+}
+
+// TestCheckOwnAdvertisement_NewFileAllowed pins the asymmetry: an entry
+// whose NAME is not in any canonical passes silently. Publishers ARE
+// the source of new files; requiring canonical match would deadlock
+// the swarm-agreement layer.
 func TestCheckOwnAdvertisement_NewFileAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -90,22 +144,21 @@ func TestCheckOwnAdvertisement_NewFileAllowed(t *testing.T) {
 	}
 	adv := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "aaa"},
-		// New file the publisher just retired; canonical doesn't have it yet.
+		// New file the publisher just retired; canonical doesn't have it.
 		preverified.Item{Name: "v1.1-001000-002000-headers.seg", Hash: "newbie"},
 	}
 
-	require.NoError(t, CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{canonical}),
-		"new file (name not in canonical) passes silently — these are normal retire outputs awaiting promotion")
+	verdict, err := CheckOwnAdvertisement(adv, canonical, []snapcfg.PreverifiedItems{canonical})
+	require.NoError(t, err, "new file (name not in canonical) passes silently")
+	require.Nil(t, verdict)
 }
 
 // TestCheckOwnAdvertisement_MultipleMismatchesReported pins that EVERY
-// divergent entry is reported, not just the first. Operators need
-// the full picture to diagnose whether the retire bug is global or
-// scoped.
+// divergent entry is reported, not just the first.
 func TestCheckOwnAdvertisement_MultipleMismatchesReported(t *testing.T) {
 	t.Parallel()
 
-	canonical := snapcfg.PreverifiedItems{
+	genesis := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "g1"},
 		preverified.Item{Name: "v1.1-001000-002000-headers.seg", Hash: "g2"},
 		preverified.Item{Name: "v1.1-002000-003000-headers.seg", Hash: "g3"},
@@ -116,19 +169,15 @@ func TestCheckOwnAdvertisement_MultipleMismatchesReported(t *testing.T) {
 		preverified.Item{Name: "v1.1-002000-003000-headers.seg", Hash: "b3"},
 	}
 
-	err := CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{canonical})
+	_, err := CheckOwnAdvertisement(adv, genesis, []snapcfg.PreverifiedItems{genesis})
 	var sce *AdvertisementSelfCheckError
 	require.True(t, errors.As(err, &sce))
 	require.Len(t, sce.Mismatches, 3,
-		"all three divergent entries surfaced, not just the first — operator needs full picture")
+		"all three divergent entries surfaced, not just the first")
 }
 
 // TestCheckOwnAdvertisement_MultiCanonical pins that during a merge
-// transition, an entry valid under EITHER canonical passes. The
-// producer's advertisement may contain pre-merge files (still valid
-// while pre-merge canonical accepted) or post-merge file (valid
-// when post-merge canonical accepted) — both should pass during
-// the transition window.
+// transition, an entry valid under EITHER canonical passes.
 func TestCheckOwnAdvertisement_MultiCanonical(t *testing.T) {
 	t.Parallel()
 
@@ -139,23 +188,20 @@ func TestCheckOwnAdvertisement_MultiCanonical(t *testing.T) {
 	postMerge := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "domain/v2.0-commitment.0-16384.kv", Hash: "postX"},
 	}
-
-	// Publisher in transition holds BOTH forms (uploaded pre-merge,
-	// just produced post-merge merger output).
+	// Publisher in transition holds BOTH forms.
 	adv := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "domain/v2.0-commitment.0-8192.kv", Hash: "preA"},
 		preverified.Item{Name: "domain/v2.0-commitment.8192-16384.kv", Hash: "preB"},
 		preverified.Item{Name: "domain/v2.0-commitment.0-16384.kv", Hash: "postX"},
 	}
 
-	require.NoError(t, CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{preMerge, postMerge}),
-		"during merge transition, all three entries are valid under one or the other canonical")
+	verdict, err := CheckOwnAdvertisement(adv, preMerge, []snapcfg.PreverifiedItems{preMerge, postMerge})
+	require.NoError(t, err, "during merge transition all three entries are valid under one canonical")
+	require.Nil(t, verdict)
 }
 
-// TestCheckOwnAdvertisement_MultiCanonical_WrongMergeHash pins that
-// even with multiple canonicals accepted, a hash that matches NONE
-// of them fails. A publisher producing wrong merger output is
-// still a retire bug.
+// TestCheckOwnAdvertisement_MultiCanonical_WrongMergeHash pins that a
+// hash matching NONE of the accepted canonicals still fails.
 func TestCheckOwnAdvertisement_MultiCanonical_WrongMergeHash(t *testing.T) {
 	t.Parallel()
 
@@ -169,23 +215,26 @@ func TestCheckOwnAdvertisement_MultiCanonical_WrongMergeHash(t *testing.T) {
 		preverified.Item{Name: "domain/v2.0-commitment.0-16384.kv", Hash: "wrong"},
 	}
 
-	err := CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{preMerge, postMerge})
+	_, err := CheckOwnAdvertisement(adv, preMerge, []snapcfg.PreverifiedItems{preMerge, postMerge})
 	require.True(t, IsAdvertisementSelfCheckError(err),
-		"hash matching NEITHER canonical version still fails — multi-canonical accepts ANY of the agreed hashes, not arbitrary other hashes")
+		"hash matching NEITHER canonical version still fails")
 }
 
 // TestCheckOwnAdvertisement_NoCanonical pins defensive behaviour:
-// empty canonical list returns nil (no basis to check). Production
-// callers must ensure canonical is loaded; helper is defensive
-// rather than erroring on missing input.
+// empty canonical list returns (nil, nil).
 func TestCheckOwnAdvertisement_NoCanonical(t *testing.T) {
 	t.Parallel()
 
 	adv := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "aaa"},
 	}
-	require.NoError(t, CheckOwnAdvertisement(adv, nil))
-	require.NoError(t, CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{}))
+	verdict, err := CheckOwnAdvertisement(adv, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, verdict)
+
+	verdict, err = CheckOwnAdvertisement(adv, nil, []snapcfg.PreverifiedItems{})
+	require.NoError(t, err)
+	require.Nil(t, verdict)
 }
 
 // TestCheckOwnAdvertisement_EmptyAdv pins empty-advertisement case.
@@ -195,32 +244,28 @@ func TestCheckOwnAdvertisement_EmptyAdv(t *testing.T) {
 	canonical := snapcfg.PreverifiedItems{
 		preverified.Item{Name: "v1.1-000000-001000-headers.seg", Hash: "aaa"},
 	}
-	require.NoError(t, CheckOwnAdvertisement(nil, []snapcfg.PreverifiedItems{canonical}))
+	verdict, err := CheckOwnAdvertisement(nil, canonical, []snapcfg.PreverifiedItems{canonical})
+	require.NoError(t, err)
+	require.Nil(t, verdict)
 }
 
 // TestAdvertisementSelfCheckError_Truncates pins the error-message
-// formatting: when there are many mismatches, the message shows up
-// to 8 and indicates how many more are in the Mismatches slice.
-// This keeps log lines bounded while preserving the full structured
-// data for programmatic inspection.
+// formatting: many mismatches show up to 8 and a "N more" tail.
 func TestAdvertisementSelfCheckError_Truncates(t *testing.T) {
 	t.Parallel()
 
-	canonical := snapcfg.PreverifiedItems{}
+	genesis := snapcfg.PreverifiedItems{}
 	adv := snapcfg.PreverifiedItems{}
 	for i := 0; i < 20; i++ {
 		name := fmt.Sprintf("v1.1-%06d-%06d-headers.seg", i*1000, (i+1)*1000)
-		canonical = append(canonical, preverified.Item{Name: name, Hash: "good"})
+		genesis = append(genesis, preverified.Item{Name: name, Hash: "good"})
 		adv = append(adv, preverified.Item{Name: name, Hash: "bad"})
 	}
 
-	err := CheckOwnAdvertisement(adv, []snapcfg.PreverifiedItems{canonical})
+	_, err := CheckOwnAdvertisement(adv, genesis, []snapcfg.PreverifiedItems{genesis})
 	var sce *AdvertisementSelfCheckError
 	require.True(t, errors.As(err, &sce))
-	require.Len(t, sce.Mismatches, 20,
-		"full mismatch list available programmatically")
-	require.Contains(t, sce.Error(), "20 entries diverge",
-		"summary in error message reports total count")
-	require.Contains(t, sce.Error(), "12 more",
-		"message indicates remaining entries beyond the truncated display")
+	require.Len(t, sce.Mismatches, 20, "full mismatch list available programmatically")
+	require.Contains(t, sce.Error(), "20 entries diverge", "summary reports total count")
+	require.Contains(t, sce.Error(), "12 more", "message indicates remaining entries")
 }
