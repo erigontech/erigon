@@ -67,14 +67,13 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	}
 
 	// [REJECT] Check that the attester is from the PTC
-	ptcIndex := -1
+	var ptcIndices []int
 	for i, idx := range ptc {
 		if idx == msg.ValidatorIndex {
-			ptcIndex = i
-			break
+			ptcIndices = append(ptcIndices, i)
 		}
 	}
-	if ptcIndex == -1 {
+	if len(ptcIndices) == 0 {
 		return fmt.Errorf("validator %d is not in PTC for slot %d", msg.ValidatorIndex, data.Slot)
 	}
 
@@ -108,20 +107,19 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	// Load→modify→Store from losing votes. See also applyPayloadAttestationVote.
 	f.ptcVoteMu.Lock()
 
-	// Get or initialize the payload timeliness vote array for this block root
 	var timelinessVotes [clparams.PtcSize]bool
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
 		timelinessVotes = existing.([clparams.PtcSize]bool)
 	}
-	timelinessVotes[ptcIndex] = data.PayloadPresent
-	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
-
-	// Get or initialize the data availability vote array for this block root
 	var dataAvailabilityVotes [clparams.PtcSize]bool
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
 	}
-	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
+	for _, idx := range ptcIndices {
+		timelinessVotes[idx] = data.PayloadPresent
+		dataAvailabilityVotes[idx] = data.BlobDataAvailable
+	}
+	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
 	f.ptcVoteMu.Unlock()

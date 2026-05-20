@@ -313,7 +313,9 @@ func (a *PayloadAttributes) EncodeSSZ(dst []byte) ([]byte, error) {
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals)
 	case clparams.DenebVersion:
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:])
-	default:
+	case clparams.ElectraVersion, clparams.FuluVersion:
+		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot)
+	default: // GloasVersion+
 		return ssz2.MarshalSSZ(dst, uint64(a.Timestamp), a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], slot, targetGasLimit)
 	}
 }
@@ -341,7 +343,16 @@ func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 		}
 		a.Withdrawals = withdrawalsFromList(withdrawals)
 		a.ParentBeaconBlockRoot = &root
-	default:
+	case clparams.ElectraVersion, clparams.FuluVersion:
+		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot); err != nil {
+			return err
+		}
+		a.Withdrawals = withdrawalsFromList(withdrawals)
+		a.ParentBeaconBlockRoot = &root
+		slotNumber := hexutil.Uint64(slot)
+		a.SlotNumber = &slotNumber
+	default: // GloasVersion+
+		var targetGasLimit uint64
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:], withdrawals, root[:], &slot, &targetGasLimit); err != nil {
 			return err
 		}

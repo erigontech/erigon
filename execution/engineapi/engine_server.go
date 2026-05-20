@@ -831,6 +831,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		assembleParams.ParentBeaconBlockRoot = payloadAttributes.ParentBeaconBlockRoot
 	}
 
+	if version >= clparams.GloasVersion {
+		assembleParams.TargetGasLimit = (*uint64)(payloadAttributes.TargetGasLimit)
+	}
+
 	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.

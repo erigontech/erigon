@@ -817,8 +817,15 @@ func (a *ApiHandler) produceBeaconBody(
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			sn := hexutil.Uint64(targetSlot)
 			attrs.SlotNumber = &sn
-			tgl := hexutil.Uint64(a.beaconChainCfg.DefaultBuilderGasLimit)
-			attrs.TargetGasLimit = &tgl
+			if a.epbsPool != nil {
+				for _, pref := range a.epbsPool.GetPreferencesForSlot(targetSlot) {
+					if pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
+						tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
+						attrs.TargetGasLimit = &tgl
+						break
+					}
+				}
+			}
 		}
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,

@@ -219,9 +219,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			monitor.ObserveNewPayloadTime(timeStartExec)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
-			// Track payload status by execution block hash for GLOAS parent payload validation
+			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
 			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
 			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
 
 			switch payloadStatus {
 			case execution_client.PayloadStatusNone:

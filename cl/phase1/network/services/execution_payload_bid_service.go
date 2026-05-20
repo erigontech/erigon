@@ -178,12 +178,6 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	builderIndex := bid.BuilderIndex
 	prefs := preferences.Message
 
-	// [REJECT] bid.gas_limit matches preferences
-	if bid.GasLimit != prefs.GasLimit {
-		return fmt.Errorf("bid gas_limit %d does not match preferences %d",
-			bid.GasLimit, prefs.GasLimit)
-	}
-
 	// [IGNORE] First valid bid from this builder for this slot
 	seenKey := seenBidKey{builderIndex: builderIndex, slot: slot}
 	if s.seenCache.Contains(seenKey) {
@@ -244,6 +238,15 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
 		return fmt.Errorf("%w: parent_block_hash %v not known in fork choice",
 			ErrIgnore, bid.ParentBlockHash)
+	}
+
+	// [IGNORE] bid.gas_limit is compatible with target_gas_limit given parent gas limit
+	// (consensus-specs PR #5236: replaces the former REJECT on exact gas_limit match)
+	if parentGasLimit, ok := s.forkchoiceStore.GetExecutionPayloadGasLimit(bid.ParentBlockHash); ok {
+		if !IsGasLimitTargetCompatible(parentGasLimit, bid.GasLimit, prefs.TargetGasLimit) {
+			return fmt.Errorf("%w: bid gas_limit %d not compatible with target %d (parent %d)",
+				ErrIgnore, bid.GasLimit, prefs.TargetGasLimit, parentGasLimit)
+		}
 	}
 
 	// [IGNORE] parent_block_root is known in fork choice

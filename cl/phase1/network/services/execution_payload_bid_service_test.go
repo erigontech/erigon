@@ -82,7 +82,7 @@ func addPreferencesToPool(epbsPool *pool.EpbsPool, slot uint64) {
 			ProposalSlot:   slot,
 			ValidatorIndex: 99,
 			FeeRecipient:   common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 		},
 	})
 }
@@ -197,21 +197,28 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	require.False(t, found)
 }
 
-func TestExecutionPayloadBidServiceGasLimitMismatch(t *testing.T) {
+func TestExecutionPayloadBidServiceGasLimitIncompatible(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	service, mockSyncedData, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	msg.Message.GasLimit = 99_999 // Different from preferences (30_000_000)
+	msg.Message.GasLimit = 99_999 // Incompatible with target 30_000_000 given parent 30_000_000
 
 	addPreferencesToPool(epbsPool, 100)
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+
+	// Set up parent block hash as known with gas limit
+	fcMock.ExecutionPayloadStatusMap[common.HexToHash("0xaaaa")] = execution_client.PayloadStatusValidated
+	fcMock.ExecutionPayloadGasLimitMap[common.HexToHash("0xaaaa")] = 30_000_000
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
-	require.False(t, errors.Is(err, ErrIgnore)) // REJECT
+	require.True(t, errors.Is(err, ErrIgnore)) // Now IGNORE, not REJECT
 	require.Contains(t, err.Error(), "gas_limit")
 }
 

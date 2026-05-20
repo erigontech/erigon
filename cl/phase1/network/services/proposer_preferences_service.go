@@ -84,13 +84,12 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex)
 
-	// [IGNORE] preferences.proposal_slot is in the current or next epoch
-	// i.e. compute_epoch_at_slot(preferences.proposal_slot) in {get_current_epoch(state), get_current_epoch(state) + 1}
+	// [IGNORE] compute_epoch_at_slot(preferences.proposal_slot) in range(current_epoch, current_epoch + MIN_SEED_LOOKAHEAD + 1)
 	currentEpoch := s.ethClock.GetCurrentEpoch()
 	proposalEpoch := s.ethClock.GetEpochAtSlot(proposalSlot)
-	if proposalEpoch != currentEpoch && proposalEpoch != currentEpoch+1 {
-		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected current epoch %d or next epoch %d",
-			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+1)
+	if proposalEpoch < currentEpoch || proposalEpoch > currentEpoch+s.beaconCfg.MinSeedLookahead {
+		return fmt.Errorf("%w: proposal slot %d is in epoch %d, expected epoch in [%d, %d]",
+			ErrIgnore, proposalSlot, proposalEpoch, currentEpoch, currentEpoch+s.beaconCfg.MinSeedLookahead)
 	}
 
 	// [IGNORE] The proposal slot has not already passed
@@ -177,7 +176,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"proposalSlot", proposalSlot,
 		"validatorIndex", validatorIndex,
 		"feeRecipient", preferences.FeeRecipient,
-		"gasLimit", preferences.GasLimit)
+		"targetGasLimit", preferences.TargetGasLimit)
 
 	return nil
 }

@@ -174,24 +174,20 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	return total
 }
 
-// IsPendingValidator returns true if there's a pending deposit for the given pubkey
-// with a valid signature. This is used to prevent builder deposits from being applied
-// when there's already a valid pending validator deposit for the same pubkey.
+// IsPendingValidator returns true if any pending deposit in the list matches
+// the given pubkey AND has a valid deposit signature.
 // [New in Gloas:EIP7732]
-func IsPendingValidator(s abstract.BeaconState, pubkey common.Bytes48) bool {
-	pendingDeposits := s.GetPendingDeposits()
+func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pubkey common.Bytes48) bool {
 	if pendingDeposits == nil {
 		return false
 	}
-	cfg := s.BeaconConfig()
 	for i := 0; i < pendingDeposits.Len(); i++ {
-		deposit := pendingDeposits.Get(i)
-		if deposit.PubKey != pubkey {
+		d := pendingDeposits.Get(i)
+		if d.PubKey != pubkey {
 			continue
 		}
-		// Check if this pending deposit has a valid signature
-		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
-		if err == nil && valid {
+		valid, _ := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		if valid {
 			return true
 		}
 	}

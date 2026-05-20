@@ -34,6 +34,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return errors.New("request count exceeds MAX_REQUEST_BLOCKS_DENEB")
 	}
 
+	if cost := min(int(req.Count), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
 	minServeEpoch := c.beaconConfig.GloasForkEpoch
 	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
@@ -128,6 +132,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 
 	if req.Length() == 0 {
+		return nil
+	}
+
+	if cost := min(req.Length(), int(c.beaconConfig.MaxRequestBlocksDeneb)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 

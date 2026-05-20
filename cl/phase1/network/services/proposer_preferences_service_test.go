@@ -25,7 +25,8 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 	ethClockMock := eth_clock.NewMockEthereumClock(ctrl)
 	epbsPool := pool.NewEpbsPool()
 	beaconCfg := &clparams.BeaconChainConfig{
-		SlotsPerEpoch: 32,
+		SlotsPerEpoch:    32,
+		MinSeedLookahead: 1,
 	}
 	forkChoiceMock := &forkchoice_mock.ForkChoiceStorageMock{
 		Headers: map[common.Hash]*cltypes.BeaconBlockHeader{},
@@ -55,7 +56,7 @@ func newTestSignedProposerPreferences(proposalSlot, validatorIndex uint64) *clty
 			ProposalSlot:   proposalSlot,
 			ValidatorIndex: validatorIndex,
 			FeeRecipient:   common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-			GasLimit:       30_000_000,
+			TargetGasLimit: 30_000_000,
 			DependentRoot:  testDependentRoot,
 		},
 		Signature: common.Bytes96{},
@@ -106,7 +107,7 @@ func TestProposerPreferencesServiceWrongEpoch(t *testing.T) {
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
-	require.Contains(t, err.Error(), "expected current epoch")
+	require.Contains(t, err.Error(), "expected epoch in")
 }
 
 func TestProposerPreferencesServiceCurrentEpoch(t *testing.T) {
@@ -342,7 +343,7 @@ func TestProposerPreferencesServiceDecodeGossipMessage(t *testing.T) {
 	require.Equal(t, original.Message.ProposalSlot, decoded.Message.ProposalSlot)
 	require.Equal(t, original.Message.ValidatorIndex, decoded.Message.ValidatorIndex)
 	require.Equal(t, original.Message.FeeRecipient, decoded.Message.FeeRecipient)
-	require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
+	require.Equal(t, original.Message.TargetGasLimit, decoded.Message.TargetGasLimit)
 	require.Equal(t, original.Message.DependentRoot, decoded.Message.DependentRoot)
 }
 
