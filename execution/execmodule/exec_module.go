@@ -418,7 +418,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	defer e.fgRelease()
 
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
-	e.currentContext.ResetPendingUpdates()
+	// currentContext is nil while a background commit holds the previous
+	// FCU's SD (gate item 2) — guard the access.
+	if e.currentContext != nil {
+		e.currentContext.ResetPendingUpdates()
+	}
 	e.forkValidator.ClearWithUnwind()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
@@ -449,22 +453,31 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
-		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
-			if err != nil {
-				return err
-			}
-
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-			if err != nil {
-				return err
-			}
-			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
-			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
-		}); err != nil {
+		// currentContext is nil — read block data through the newest
+		// in-flight commit generation's overlay when one exists (gate item
+		// 2), so the previous FCU's not-yet-committed headers/bodies/TDs
+		// are visible; otherwise a plain DB read.
+		roTx, err := e.db.BeginTemporalRo(ctx)
+		if err != nil {
 			return ValidationResult{}, err
 		}
+		defer roTx.Rollback()
+		var src kv.TemporalTx = roTx
+		if parent := e.latestGen(); parent != nil {
+			if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+				src = v
+			}
+		}
+		header, err = e.blockReader.Header(ctx, src, blockHash, blockNumber)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		body, err = e.blockReader.BodyWithTransactions(ctx, src, blockHash, blockNumber)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(src)
 	}
 	if header == nil || body == nil {
 		return ValidationResult{
@@ -504,20 +517,21 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// We Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	// Back the validation overlay by the newest in-flight commit generation
+	// (gate item 2) so block-data reads cascade through its overlay instead
+	// of a stale DB while a background commit is in flight.
+	valOverlayBase := kv.TemporalTx(roTx)
+	if parent := e.latestGen(); parent != nil {
+		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+			valOverlayBase = v
+		}
+	}
+	if err := doms.InitBlockOverlay(valOverlayBase, roTx.Debug().Dirs().Tmp); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
-	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
-	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
-	// only gate has been intentionally widened back to "chain whenever a
-	// currentContext exists" because fork-payload caching needs the parent
-	// link too — see the two-role breakdown below. The narrower gate was
-	// merged from main during the post-#21017 rebase and is the WRONG choice
-	// for this branch; keep the wider gate.
-	//
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit
 	// generation (gate item 2 — the prior FCU cleared currentContext and
@@ -539,13 +553,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// unwindToCommonCanonical has run, doms.mem.unwindChangeset holds every
 	// key the unwound canonical blocks touched, and TemporalMemBatch.getLatest
 	// resolves those from the unwind set before ever consulting the parent.
-	//
-	// Cherry-pick note: the upstream commit also chained to e.latestGen()
-	// (the gate-2 in-flight commit generation) when currentContext is nil;
-	// that generation chain is not on this branch, so currentContext is the
-	// only canonical generation here.
 	if e.currentContext != nil {
 		doms.SetParent(e.currentContext)
+	} else if parent := e.latestGen(); parent != nil {
+		doms.SetParent(parent)
 	}
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into

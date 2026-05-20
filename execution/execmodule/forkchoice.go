@@ -252,7 +252,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
 	// pipeline reads cascade through the overlay to the RO tx; writes
 	// stay in memory until commit.
-	if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	// Back the block overlay by the newest in-flight commit generation's
+	// overlay when one exists (gate item 2): block data — headers, bodies,
+	// TDs, receipts — written by a not-yet-committed FCU lives in that
+	// generation's overlay. A concurrent-safe temporal read view lets this
+	// FCU read through to it instead of a stale DB. The generation chain
+	// (closed as a unit by drainCommittedGens) keeps the backing valid.
+	overlayBase := kv.TemporalTx(roTx)
+	if parent := e.latestGen(); parent != nil {
+		if v := parent.BlockOverlayTemporalTx(roTx); v != nil {
+			overlayBase = v
+		}
+	}
+	if err := currentContext.InitBlockOverlay(overlayBase, roTx.Debug().Dirs().Tmp); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: init block overlay: %w", err), false)
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
