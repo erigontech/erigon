@@ -812,6 +812,18 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// tipInsideBlock failing with gas exactly 4800 short under
 		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
 		destructTxIndex := res.DepIdx()
+		if !commited {
+			if vw, ok := s.versionedWrite(addr, path, key); ok {
+				// The current tx has itself written this field — a same-tx
+				// value-transfer or recreate that revived the account. A tx
+				// always observes its own write, regardless of a prior tx's
+				// self-destruct, so return it directly as WriteSetRead (issue
+				// #21319). Falling through to the normal read path instead
+				// would route an own-write read through the cross-tx
+				// dependency check and spuriously abort.
+				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+			}
+		}
 		// Cap the revival lookup at s.txIndex-1 so that a prior incarnation
 		// of the CURRENT tx — whose writes still sit in the versionMap at
 		// (s.txIndex, prevIncarnation) until the new incarnation rewrites
