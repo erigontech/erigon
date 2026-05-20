@@ -368,6 +368,12 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
 	}
+	// The forked tx is NOT overlay-wrapped — `head` was already resolved on the
+	// main backend (overlay-aware via api.filters.WithTemporalOverlay), and the
+	// helpers the forked backend dispatches to (BaseAPI.headerByNumber,
+	// blockByNumberWithSenders, blockWithSenders) re-wrap internally so reads
+	// of head=N during the bg-commit window still see overlay-backed data. Any
+	// future caller that bypasses those helpers must wrap explicitly.
 	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err

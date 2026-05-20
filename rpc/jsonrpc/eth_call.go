@@ -73,8 +73,17 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	}
 	defer roTx.Rollback()
 
-	// Use the block overlay if available — reads uncommitted data from the
-	// pre-commit overlay so consumers don't need to wait for DB commit.
+	// Use the block overlay if available so block-tag resolution and header/body
+	// reads see uncommitted data from the pre-commit overlay.
+	//
+	// Note: BlockOverlayTemporalTx wraps *table* reads (canonical hashes,
+	// headers, stage progress) but its temporal methods (GetLatest, GetAsOf,
+	// RangeAsOf, HistorySeek) delegate to the underlying roTx — the SD's domain
+	// mem batch is not exposed. During the bg-commit window (FcuBackgroundCommit),
+	// "latest" resolves to block N via the overlay tables, but state reads
+	// evaluate against block N-1's committed domain state. This is a bounded
+	// staleness (~50ms), not a divergence; the proper SD-aware temporal view is
+	// tracked in https://github.com/erigontech/erigon/issues/21314.
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
