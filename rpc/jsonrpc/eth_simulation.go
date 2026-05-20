@@ -398,9 +398,9 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
+		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
+		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
