@@ -441,6 +441,162 @@ func TestUCANGate_CachedTrustSkipsReverify(t *testing.T) {
 		"cached trust must short-circuit UCAN re-fetch")
 }
 
+// gateCaps is the standard advertise+serve capability set the trust
+// gate's RequiredCapabilities expects.
+var gateCaps = []string{
+	string(snapshotauth.CapAdvertise),
+	string(snapshotauth.CapServe),
+}
+
+// seedAuthAndV2 registers an Authority UCAN (root→peer, granting caps)
+// and a V2 manifest that references it, returning the V2 info-hash plus
+// the Authority and V2 bytes. Unlike seedPair it does NOT mint a
+// Content UCAN — the negative tests below each supply a deliberately
+// broken one.
+func (te *trustEnv) seedAuthAndV2(t *testing.T, peerKey *ecdsa.PrivateKey, caps []string, tag string) (v2Hash [20]byte, authBytes, v2Bytes []byte) {
+	t.Helper()
+	authBytes = te.harness.issueDelegation(t, peerKey, caps)
+	authHash := fakeHash("auth-" + tag)
+	te.ucanFetcher.register(authHash, authBytes)
+
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "v2-"+tag+".toml", hex.EncodeToString(authHash[:]))
+	v2Bytes, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
+	v2Hash = fakeHash("v2-" + tag)
+	te.fetcher.register(v2Hash, v2Path)
+	return v2Hash, authBytes, v2Bytes
+}
+
+// connectWithContentUCAN registers cuBytes as the peer's Content UCAN
+// and fires a PeerConnected for an ENR carrying both info-hashes.
+func (te *trustEnv) connectWithContentUCAN(t *testing.T, peerKey *ecdsa.PrivateKey, v2Hash [20]byte, cuBytes []byte, tag string) {
+	t.Helper()
+	cuHash := fakeHash("content-" + tag)
+	te.ucanFetcher.register(cuHash, cuBytes)
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
+	te.sentry.PublishPeerConnected(peer)
+	te.bus.WaitAsync()
+}
+
+// TestUCANGate_ContentUCANBadSignatureRejects: a Content UCAN whose
+// signature does not verify against its embedded issuer must be
+// rejected.
+func TestUCANGate_ContentUCANBadSignatureRejects(t *testing.T) {
+	te := newTrustEnv(t, nil)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	v2Hash, authBytes, v2Bytes := te.seedAuthAndV2(t, peerKey, gateCaps, "badsig")
+
+	// Mint a valid Content UCAN, then corrupt its signature so it no
+	// longer verifies against the (still-correct) issuer pubkey.
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytes, time.Now())
+	require.NoError(t, err)
+	cu, err := snapshotauth.Decode(cuBytes)
+	require.NoError(t, err)
+	cu.Signature[10] ^= 0xff
+	tampered, err := cu.Encode()
+	require.NoError(t, err)
+
+	te.connectWithContentUCAN(t, peerKey, v2Hash, tampered, "badsig")
+	require.Equal(t, 0, te.receivedCount(),
+		"Content UCAN with a bad signature must be rejected")
+}
+
+// TestUCANGate_ContentUCANNotSelfIssuedRejects: a Content UCAN issued
+// by a key other than the connecting peer — a replay of some other
+// operator's attestation — must be rejected even though its own
+// signature is valid.
+func TestUCANGate_ContentUCANNotSelfIssuedRejects(t *testing.T) {
+	te := newTrustEnv(t, nil)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	otherOperator, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	v2Hash, authBytes, v2Bytes := te.seedAuthAndV2(t, peerKey, gateCaps, "notself")
+
+	// Minted (and validly self-signed) by otherOperator, not the peer.
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, otherOperator, authBytes, time.Now())
+	require.NoError(t, err)
+
+	te.connectWithContentUCAN(t, peerKey, v2Hash, cuBytes, "notself")
+	require.Equal(t, 0, te.receivedCount(),
+		"Content UCAN not self-issued by the connecting peer must be rejected")
+}
+
+// TestUCANGate_ContentUCANWrongManifestRejects: a Content UCAN whose
+// content-hash capability attests a different manifest than the one
+// fetched must be rejected — the core anti-tamper check.
+func TestUCANGate_ContentUCANWrongManifestRejects(t *testing.T) {
+	te := newTrustEnv(t, nil)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	v2Hash, authBytes, _ := te.seedAuthAndV2(t, peerKey, gateCaps, "wrongman")
+
+	// Content UCAN minted over unrelated bytes — its chain.v2:hash:<H>
+	// capability will not match sha256(fetched manifest).
+	cuBytes, err := snapshotauth.MintContentUCAN([]byte("a different manifest"), peerKey, authBytes, time.Now())
+	require.NoError(t, err)
+
+	te.connectWithContentUCAN(t, peerKey, v2Hash, cuBytes, "wrongman")
+	require.Equal(t, 0, te.receivedCount(),
+		"Content UCAN attesting a different manifest must be rejected")
+}
+
+// TestUCANGate_ContentUCANOutsideValidityRejects: a Content UCAN that
+// is expired, or not yet valid, must be rejected.
+func TestUCANGate_ContentUCANOutsideValidityRejects(t *testing.T) {
+	for name, mintAt := range map[string]time.Time{
+		"expired":       time.Now().Add(-2 * snapshotauth.ContentUCANValidity),
+		"not yet valid": time.Now().Add(2 * snapshotauth.ContentUCANValidity),
+	} {
+		t.Run(name, func(t *testing.T) {
+			te := newTrustEnv(t, nil)
+
+			peerKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			v2Hash, authBytes, v2Bytes := te.seedAuthAndV2(t, peerKey, gateCaps, "time-"+name)
+
+			cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytes, mintAt)
+			require.NoError(t, err)
+
+			te.connectWithContentUCAN(t, peerKey, v2Hash, cuBytes, "time-"+name)
+			require.Equal(t, 0, te.receivedCount(),
+				"Content UCAN outside its validity window must be rejected")
+		})
+	}
+}
+
+// TestUCANGate_AuthorityParentMismatchRejects: a Content UCAN parented
+// to a different Authority UCAN than the one the manifest's
+// AuthorityUCANHash resolves to must be rejected — the ParentHash bind
+// is what stops a valid Content UCAN being re-pointed at an unrelated
+// authority.
+func TestUCANGate_AuthorityParentMismatchRejects(t *testing.T) {
+	te := newTrustEnv(t, nil)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	// The manifest references Authority UCAN A (advertise+serve).
+	v2Hash, _, v2Bytes := te.seedAuthAndV2(t, peerKey, gateCaps, "parent")
+
+	// The Content UCAN is parented to a DIFFERENT Authority UCAN B
+	// (advertise-only → distinct bytes → distinct hash).
+	authBytesB := te.harness.issueDelegation(t, peerKey, []string{string(snapshotauth.CapAdvertise)})
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytesB, time.Now())
+	require.NoError(t, err)
+
+	te.connectWithContentUCAN(t, peerKey, v2Hash, cuBytes, "parent")
+	require.Equal(t, 0, te.receivedCount(),
+		"Content UCAN parented to an Authority other than the manifest's must be rejected")
+}
+
 func TestUCANGate_ReverifyOnReconnectEvictsCache(t *testing.T) {
 	te := newTrustEnv(t, func(c *TrustConfig) {
 		c.ReverifyOnReconnect = true

@@ -306,6 +306,35 @@ func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestRollingV2Publisher_ENRUpdaterStampsContentUCANHash confirms that
+// when a content minter IS wired, Publish builds the Content UCAN
+// torrent and stamps its non-zero info-hash into the ENR — the
+// counterpart to ENRUpdaterFires, which only covers the no-minter case.
+func TestRollingV2Publisher_ENRUpdaterStampsContentUCANHash(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	var mintedOver []byte
+	pub.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
+		mintedOver = tomlBytes
+		return []byte("content-ucan-attestation-bytes"), nil
+	})
+
+	inv := rollingTestInventory(t, 0x70)
+
+	var lastCT enr.ChainToml
+	hash, err := pub.Publish(context.Background(), inv, 12345, func(ct enr.ChainToml) {
+		lastCT = ct
+	})
+	require.NoError(t, err)
+	require.Equal(t, [20]byte(hash), lastCT.InfoHash)
+	require.NotEqual(t, [20]byte{}, lastCT.ContentUCANHash,
+		"content minter wired → ENR carries the Content UCAN info-hash")
+	require.NotEmpty(t, mintedOver, "minter receives the manifest TOML bytes")
+}
+
 // TestParseChainTomlV2FileName covers the predicate's accept / reject
 // behaviour. Lock the wire format down so a typo elsewhere can't widen it.
 func TestParseChainTomlV2FileName(t *testing.T) {
