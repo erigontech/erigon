@@ -435,22 +435,23 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		defer valsCursor.Close()
 		var seqIDBuf [8]byte
 		var dupBuf [dupRecordLen]byte
-		// Debug: track cursor position to catch MDBX_EKEYMISMATCH before it happens.
-		// ETL delivers keys sorted by (bareKey,invStep); existing seqIDs for those keys
-		// may be non-monotonic, so Put on a shared cursor can violate MDBX ordering.
+		// Debug: Append uses MDBX_APPEND which requires key > last key in table.
+		// IncrementSequence is called in ETL delivery order (sorted by bareKey), so
+		// Append seqIDs must be monotonically increasing. Put/Delete use MDBX_UPSERT /
+		// mdbx.Set seek — they don't require monotonic order even on a shared cursor.
 		var (
-			lastCursorSeqID    uint64
-			hasLastCursorSeqID bool
+			lastAppendSeqID    uint64
+			hasLastAppendSeqID bool
 		)
-		assertSeqIDMonotone := func(op string, seqID uint64, bareKey []byte) {
-			if hasLastCursorSeqID && seqID < lastCursorSeqID {
+		assertAppendMonotone := func(op string, seqID uint64, bareKey []byte) {
+			if hasLastAppendSeqID && seqID < lastAppendSeqID {
 				panic(fmt.Sprintf(
-					"domain flush %s(%s): valsCursor seqID went backward: prev=%d cur=%d bareKey=%x — would cause MDBX_EKEYMISMATCH",
-					op, w.valsTable, lastCursorSeqID, seqID, bareKey,
+					"domain flush %s(%s): Append seqID went backward: prev=%d cur=%d bareKey=%x — MDBX_EKEYMISMATCH",
+					op, w.valsTable, lastAppendSeqID, seqID, bareKey,
 				))
 			}
-			lastCursorSeqID = seqID
-			hasLastCursorSeqID = true
+			lastAppendSeqID = seqID
+			hasLastAppendSeqID = true
 		}
 		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			bareKey := k[:len(k)-8]
@@ -468,13 +469,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				switch {
 				case !oldIsDeletion && !newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
-					seqID := binary.BigEndian.Uint64(seqIDBuf[:])
-					assertSeqIDMonotone("Put", seqID, bareKey)
 					return valsCursor.Put(seqIDBuf[:], v)
 				case !oldIsDeletion && newIsDeletion:
 					copy(seqIDBuf[:], existing[8:])
-					seqID := binary.BigEndian.Uint64(seqIDBuf[:])
-					assertSeqIDMonotone("Delete", seqID, bareKey)
 					if err := valsCursor.Delete(seqIDBuf[:]); err != nil {
 						return err
 					}
@@ -487,7 +484,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 						return err
 					}
 					binary.BigEndian.PutUint64(seqIDBuf[:], newSeqID)
-					assertSeqIDMonotone("Append(del->real)", newSeqID, bareKey)
+					assertAppendMonotone("Append(del->real)", newSeqID, bareKey)
 					if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 						return err
 					}
@@ -507,7 +504,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				}
 				seqID = id
 				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
-				assertSeqIDMonotone("Append(new)", seqID, bareKey)
+				assertAppendMonotone("Append(new)", seqID, bareKey)
 				if err := valsCursor.Append(seqIDBuf[:], v); err != nil {
 					return err
 				}
