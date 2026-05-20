@@ -323,6 +323,26 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_TopicNotFound() {
 	s.True(ok)
 }
 
+func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_TopicNotFound_KeepsMaxPendingExpiry() {
+	topic := "non_existent_topic"
+	longExpiry := time.Now().Add(2 * time.Hour)
+	shortExpiry := time.Now().Add(1 * time.Hour)
+
+	err := s.ts.SubscribeWithExpiry(topic, longExpiry)
+	s.Error(err)
+	s.Contains(err.Error(), "topic not found")
+
+	err = s.ts.SubscribeWithExpiry(topic, shortExpiry)
+	s.Error(err)
+	s.Contains(err.Error(), "topic not found")
+
+	s.ts.mutex.RLock()
+	pendingExpiry, ok := s.ts.toSubscribes[topic]
+	s.ts.mutex.RUnlock()
+	s.True(ok)
+	s.Equal(longExpiry.Unix(), pendingExpiry.Unix())
+}
+
 func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_ExpiryInPast() {
 	topic := "/eth2/abcd1234/beacon_block/ssz_snappy"
 	topicHandle, err := s.ps.Join(topic)
@@ -370,6 +390,31 @@ func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_UpdateExpiry() {
 	result = s.ts.Get(topic)
 	s.Equal(secondExpiry.Unix(), result.expiry.Unix())
 	s.NotNil(result.sub) // Should still be subscribed
+}
+
+func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_DoesNotShortenExpiry() {
+	topic := "/eth2/abcd1234/beacon_block/ssz_snappy"
+	topicHandle, err := s.ps.Join(topic)
+	s.Require().NoError(err)
+
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+
+	err = s.ts.Add(topic, topicHandle, validator)
+	s.Require().NoError(err)
+
+	longExpiry := time.Now().Add(2 * time.Hour)
+	err = s.ts.SubscribeWithExpiry(topic, longExpiry)
+	s.Require().NoError(err)
+
+	shortExpiry := time.Now().Add(1 * time.Hour)
+	err = s.ts.SubscribeWithExpiry(topic, shortExpiry)
+	s.NoError(err)
+
+	result := s.ts.Get(topic)
+	s.NotNil(result.sub)
+	s.Equal(longExpiry.Unix(), result.expiry.Unix())
 }
 
 func (s *TopicSubscriptionsTestSuite) TestSubscribeWithExpiry_BeaconAttestation() {

@@ -138,7 +138,9 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	defer t.mutex.Unlock()
 	sub, ok := t.subs[topic]
 	if !ok {
-		t.toSubscribes[topic] = expiry
+		if currentExpiry, exists := t.toSubscribes[topic]; !exists || expiry.After(currentExpiry) {
+			t.toSubscribes[topic] = expiry
+		}
 		return errors.New("topic not found")
 	}
 
@@ -163,7 +165,9 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 			t.p2p.UpdateENRSyncNets(extractSubnetIndexByGossipTopic(name), true)
 		}
 	}
-	sub.expiry = expiry
+	if expiry.After(sub.expiry) {
+		sub.expiry = expiry
+	}
 	return nil
 }
 
