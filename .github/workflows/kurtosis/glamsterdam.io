@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:bal-devnet-3
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-4
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
