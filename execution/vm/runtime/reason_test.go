@@ -62,7 +62,8 @@ func recordingTracer(nonceEvents *[]nonceChangeEvent, codeEvents *[]codeChangeEv
 
 // newTestIBS creates a fresh IntraBlockState backed by a temporary DB,
 // with the given tracing hooks wired into both the IBS and the returned
-// Config. The caller must defer cleanup of tx and sd.
+// Config. The tx and shared-domains lifecycles are registered with
+// t.Cleanup, so callers do not need to roll back or close them manually.
 func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	t.Helper()
 
