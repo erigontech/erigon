@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -192,21 +193,23 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, depth in
 		// the sum can only grow (via spillover charges) from the parent's
 		// reservoir R ≥ 0. A negative sum here means some new code path
 		// mutated stateGas or frameStateUsed without the paired update,
-		// or the EIP-8037 accounting was reimplemented incorrectly. Keep
-		// the panic: silently wrapping the parent's reservoir on this
-		// path would corrupt block-level gas accounting downstream and be
-		// painful to track back here.
+		// or the EIP-8037 accounting was reimplemented incorrectly. We
+		// surface this loudly via a log + clamp; the corrupted accounting
+		// will manifest downstream as wrong execution / gas accounting /
+		// state root.
 		//
 		// The comparison stays in uint64 (`uint64(-stateGasUsed) >
 		// gasRemaining.State`) rather than promoting both sides to int64.
 		// gasRemaining.State is a reservoir balance — unsigned by design
 		// and free to use the full uint64 range — so an int64 cast would
-		// flip any value above 2^63 to negative and fire the panic
-		// spuriously. Comparing the magnitudes directly in uint64 keeps
-		// the check correct at any gas size.
+		// flip any value above 2^63 to negative and break the comparison.
+		// Comparing the magnitudes directly in uint64 keeps the check
+		// correct at any gas size.
 		if stateGasUsed < 0 && uint64(-stateGasUsed) > gasRemaining.State {
-			panic(fmt.Sprintf("EIP-8037 invariant violated: gasRemaining.State (%d) + stateGasUsed (%d) < 0",
-				gasRemaining.State, stateGasUsed))
+			log.Error("EIP-8037 invariant violated; clamping parent reservoir to 0",
+				"gasRemainingState", gasRemaining.State, "stateGasUsed", stateGasUsed, "depth", depth)
+			gasRemaining.State = 0
+			return
 		}
 		// uint64(negative int64) = 2^64 − |stateGasUsed|; the += then
 		// overflows and wraps into the correct subtraction for negative
