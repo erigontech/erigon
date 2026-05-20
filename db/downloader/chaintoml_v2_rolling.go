@@ -43,13 +43,12 @@ package downloader
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -61,23 +60,31 @@ import (
 )
 
 // ChainTomlV2BaseName is the prefix every V2 manifest filename starts
-// with. Generations append `.<seq>.toml` so the .toml extension stays
+// with. Generations append `.<genID>.toml` so the .toml extension stays
 // terminal for tool recognition (parsers, IDEs, etc).
 const ChainTomlV2BaseName = "chain.v2"
 
 // ChainUCANBaseName is the prefix every UCAN sidecar filename starts
-// with. Pairs with ChainTomlV2BaseName at the same <seq> so a peer's
+// with. Pairs with ChainTomlV2BaseName at the same <genID> so a peer's
 // (V2 manifest, UCAN attestation) is one logical generation.
 const ChainUCANBaseName = "chain.ucan"
 
-// chainTomlV2NameRE matches chain.v2.<enr-fp>.<seq>.toml — the only
-// filename shape RollingV2Publisher emits and recognises. <enr-fp> is
-// 16 lowercase hex chars (see ENRFingerprint).
-var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.(\d+)\.toml$`)
+// GenIDLen is the byte length of a generation ID — an opaque random
+// token, NOT a counter. Each Publish mints a fresh one; it replaces a
+// monotonic <seq> precisely so a passive discv5 scraper cannot read a
+// publisher's republish rate or uptime from its ENR. 8 bytes renders
+// as 16 lowercase hex chars in filenames.
+const GenIDLen = 8
 
-// chainUCANNameRE matches chain.ucan.<enr-fp>.<seq>.bin — the UCAN
+// chainTomlV2NameRE matches chain.v2.<enr-fp>.<genID>.toml — the only
+// filename shape RollingV2Publisher emits and recognises. Both
+// <enr-fp> and <genID> are 16 lowercase hex chars (see ENRFingerprint,
+// newGenID).
+var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.([0-9a-f]{16})\.toml$`)
+
+// chainUCANNameRE matches chain.ucan.<enr-fp>.<genID>.bin — the UCAN
 // sidecar shape paired with each V2 generation.
-var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.([0-9a-f]{16})\.(\d+)\.bin$`)
+var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.([0-9a-f]{16})\.([0-9a-f]{16})\.bin$`)
 
 // ENRFingerprint formats the 16-hex-char node fingerprint used in
 // per-node advertisement filenames — the first 8 bytes of the node's
@@ -88,66 +95,71 @@ func ENRFingerprint(nodeID [32]byte) string {
 	return hex.EncodeToString(nodeID[:8])
 }
 
+// newGenID mints a fresh opaque generation ID — GenIDLen random bytes
+// rendered as lowercase hex. Not a counter: successive generations
+// from one publisher carry uncorrelated IDs so a passive ENR scraper
+// learns nothing about republish cadence.
+func newGenID() (string, error) {
+	var b [GenIDLen]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate generation ID: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
 // ChainTomlV2FileName formats the per-node advertisement filename for
-// the given ENR fingerprint and generation sequence:
-// chain.v2.<enr-fp>.<seq>.toml.
-func ChainTomlV2FileName(enrFP string, seq uint64) string {
-	return fmt.Sprintf("%s.%s.%d.toml", ChainTomlV2BaseName, enrFP, seq)
+// the given ENR fingerprint and generation ID:
+// chain.v2.<enr-fp>.<genID>.toml.
+func ChainTomlV2FileName(enrFP, genID string) string {
+	return fmt.Sprintf("%s.%s.%s.toml", ChainTomlV2BaseName, enrFP, genID)
 }
 
 // ChainUCANFileName formats the UCAN sidecar filename paired with the
-// V2 manifest at the same fingerprint + seq.
-func ChainUCANFileName(enrFP string, seq uint64) string {
-	return fmt.Sprintf("%s.%s.%d.bin", ChainUCANBaseName, enrFP, seq)
+// V2 manifest at the same fingerprint + genID.
+func ChainUCANFileName(enrFP, genID string) string {
+	return fmt.Sprintf("%s.%s.%s.bin", ChainUCANBaseName, enrFP, genID)
 }
 
 // ChainV2ContentUCANFileName formats the Content UCAN sidecar filename
-// paired with chain.v2.<enr-fp>.<seq>.toml. The Content UCAN is a
+// paired with chain.v2.<enr-fp>.<genID>.toml. The Content UCAN is a
 // self-issued snapshotauth delegation binding chain.v2:hash:<sha256>
 // to the .toml bytes; per
 // docs/plans/20260520-chaintoml-ucan-flow-spec.md it replaces the
-// interim .sig sidecar. Discovered by this name pattern — it carries
-// no manifest field.
-func ChainV2ContentUCANFileName(enrFP string, seq uint64) string {
-	return fmt.Sprintf("%s.%s.%d.ucan", ChainTomlV2BaseName, enrFP, seq)
+// interim .sig sidecar. A consumer name-derives it from the publisher
+// ENR fingerprint + the genID carried in the peer's ENR chain-toml
+// entry.
+func ChainV2ContentUCANFileName(enrFP, genID string) string {
+	return fmt.Sprintf("%s.%s.%s.ucan", ChainTomlV2BaseName, enrFP, genID)
 }
 
 // ParseChainTomlV2FileName extracts the ENR fingerprint and generation
-// seq from a filename matching chain.v2.<enr-fp>.<seq>.toml. ok=false
+// ID from a filename matching chain.v2.<enr-fp>.<genID>.toml. ok=false
 // for any other shape.
-func ParseChainTomlV2FileName(name string) (enrFP string, seq uint64, ok bool) {
+func ParseChainTomlV2FileName(name string) (enrFP, genID string, ok bool) {
 	m := chainTomlV2NameRE.FindStringSubmatch(name)
 	if m == nil {
-		return "", 0, false
+		return "", "", false
 	}
-	n, err := strconv.ParseUint(m[2], 10, 64)
-	if err != nil {
-		return "", 0, false
-	}
-	return m[1], n, true
+	return m[1], m[2], true
 }
 
 // ParseChainUCANFileName extracts the ENR fingerprint and generation
-// seq from a filename matching chain.ucan.<enr-fp>.<seq>.bin. ok=false
+// ID from a filename matching chain.ucan.<enr-fp>.<genID>.bin. ok=false
 // for any other shape.
-func ParseChainUCANFileName(name string) (enrFP string, seq uint64, ok bool) {
+func ParseChainUCANFileName(name string) (enrFP, genID string, ok bool) {
 	m := chainUCANNameRE.FindStringSubmatch(name)
 	if m == nil {
-		return "", 0, false
+		return "", "", false
 	}
-	n, err := strconv.ParseUint(m[2], 10, 64)
-	if err != nil {
-		return "", 0, false
-	}
-	return m[1], n, true
+	return m[1], m[2], true
 }
 
-// generationEntry caches the seq and the set of snapshot names a
-// retained chain.v2.<seq>.toml lists. The name-set drives the
+// generationEntry caches the genID and the set of snapshot names a
+// retained chain.v2.<genID>.toml lists. The name-set drives the
 // validity check on each Publish — keeping it in memory avoids
 // re-parsing each retained generation off disk every cycle.
 type generationEntry struct {
-	seq   uint64
+	genID string
 	names map[string]struct{}
 }
 
@@ -301,12 +313,17 @@ func (r *RollingV2Publisher) resolveENRFP() string {
 }
 
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
-// existing chain.v2.<seq>.toml files, parses each to recover its name
-// set, and seeds history (sorted oldest first). A generation whose
-// .toml is unparseable is skipped — Cleanup() will sweep the orphan.
+// existing chain.v2.<genID>.toml files and parses each to recover its
+// name set. A generation whose .toml is unparseable is skipped —
+// Cleanup() will sweep the orphan.
+//
+// Resumed generations have no recoverable order (genID is opaque, not a
+// counter) — history is in directory-scan order. That is harmless: the
+// first post-resume Publish appends the new canonical generation last,
+// and eviction keys on subset-validity, not ordering.
 //
 // Returns an error if snapDir can't be read. A snapDir with no existing
-// V2 generations is fine — the first Publish() writes seq 0.
+// V2 generations is fine.
 func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downloader) (*RollingV2Publisher, error) {
 	if torrentFS == nil {
 		return nil, fmt.Errorf("NewRollingV2Publisher: nil torrent fs")
@@ -321,7 +338,7 @@ func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downl
 		if e.IsDir() {
 			continue
 		}
-		_, seq, ok := ParseChainTomlV2FileName(e.Name())
+		_, genID, ok := ParseChainTomlV2FileName(e.Name())
 		if !ok {
 			continue
 		}
@@ -330,9 +347,8 @@ func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downl
 			// Unparseable — leave on disk, Cleanup() will sweep.
 			continue
 		}
-		history = append(history, generationEntry{seq: seq, names: names})
+		history = append(history, generationEntry{genID: genID, names: names})
 	}
-	sort.Slice(history, func(i, j int) bool { return history[i].seq < history[j].seq })
 
 	return &RollingV2Publisher{
 		snapDir:    snapDir,
@@ -427,11 +443,11 @@ func (r *RollingV2Publisher) Publish(
 		return metainfo.Hash{}, fmt.Errorf("RollingV2Publisher.Publish: ENR fingerprint not set (P2P not up, or SetENRFingerprint not called)")
 	}
 
-	var nextSeq uint64
-	if n := len(r.history); n > 0 {
-		nextSeq = r.history[n-1].seq + 1
+	genID, err := newGenID()
+	if err != nil {
+		return metainfo.Hash{}, err
 	}
-	name := ChainTomlV2FileName(enrFP, nextSeq)
+	name := ChainTomlV2FileName(enrFP, genID)
 	path := filepath.Join(r.snapDir, name)
 
 	// Write the UCAN sidecar first if a delegation source is wired.
@@ -444,7 +460,7 @@ func (r *RollingV2Publisher) Publish(
 			return metainfo.Hash{}, fmt.Errorf("delegation source: %w", err)
 		}
 		if len(ucanBytes) > 0 {
-			ucanName := ChainUCANFileName(enrFP, nextSeq)
+			ucanName := ChainUCANFileName(enrFP, genID)
 			ucanPath := filepath.Join(r.snapDir, ucanName)
 			if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
 				return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
@@ -515,7 +531,7 @@ func (r *RollingV2Publisher) Publish(
 			_ = dir.RemoveFile(path)
 			return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, err)
 		}
-		cucanName := ChainV2ContentUCANFileName(enrFP, nextSeq)
+		cucanName := ChainV2ContentUCANFileName(enrFP, genID)
 		cucanPath := filepath.Join(r.snapDir, cucanName)
 		if err := saveChainTomlFile(cucanPath, ucanBytes); err != nil {
 			_ = dir.RemoveFile(path)
@@ -557,11 +573,12 @@ func (r *RollingV2Publisher) Publish(
 			InfoHash:            spec.InfoHash,
 			DomainSteps:         domainSteps,
 			MergeDepth:          mergeDepth,
+			GenID:               genID,
 		})
 	}
 
 	canonical := manifestFileNames(manifest)
-	r.history = append(r.history, generationEntry{seq: nextSeq, names: canonical})
+	r.history = append(r.history, generationEntry{genID: genID, names: canonical})
 	r.evictInvalidLocked(enrFP, canonical)
 
 	return spec.InfoHash, nil
@@ -583,7 +600,6 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 	}
 
 	kept := r.history[:0:0]
-	kept = append(kept, r.history[len(r.history)-1]) // canonical (newest)
 	var evicted []generationEntry
 
 	for i := 0; i < len(r.history)-1; i++ {
@@ -599,8 +615,9 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 		return
 	}
 
-	// Restore chronological order: the canonical entry was prepended.
-	sort.Slice(kept, func(i, j int) bool { return kept[i].seq < kept[j].seq })
+	// Survivors keep their insertion order; the canonical entry (newest)
+	// is appended last so r.history's tail stays the most recent Publish.
+	kept = append(kept, r.history[len(r.history)-1])
 	r.history = kept
 
 	// Build the union of names still referenced by any retained
@@ -615,7 +632,7 @@ func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[stri
 
 	orphanNames := make(map[string]struct{})
 	for _, gen := range evicted {
-		r.evictGenerationLocked(enrFP, gen.seq)
+		r.evictGenerationLocked(enrFP, gen.genID)
 		for name := range gen.names {
 			if _, kept := stillReferenced[name]; kept {
 				continue
@@ -642,19 +659,19 @@ func isSubsetOf(a, b map[string]struct{}) bool {
 }
 
 // evictGenerationLocked removes the V2 manifest + its paired Content
-// UCAN + the paired Authority UCAN sidecar for a single seq. The UCAN
-// files may not exist (delegation source / content minter unset for
-// that generation); RemoveFile on a missing path is a silent no-op.
-// Caller must hold r.mu.
+// UCAN + the paired Authority UCAN sidecar for a single genID. The
+// UCAN files may not exist (delegation source / content minter unset
+// for that generation); RemoveFile on a missing path is a silent
+// no-op. Caller must hold r.mu.
 //
 // Only the per-generation artefacts (.toml + .ucan + .bin + their
 // .torrent sidecars) are removed here. Unseeding orphan snapshot files
 // is done by evictInvalidLocked once the full set of evictions for
 // this Publish is known.
-func (r *RollingV2Publisher) evictGenerationLocked(enrFP string, seq uint64) {
-	tomlName := ChainTomlV2FileName(enrFP, seq)
-	authorityUCANName := ChainUCANFileName(enrFP, seq)
-	contentUCANName := ChainV2ContentUCANFileName(enrFP, seq)
+func (r *RollingV2Publisher) evictGenerationLocked(enrFP, genID string) {
+	tomlName := ChainTomlV2FileName(enrFP, genID)
+	authorityUCANName := ChainUCANFileName(enrFP, genID)
+	contentUCANName := ChainV2ContentUCANFileName(enrFP, genID)
 	if r.downloader != nil {
 		r.downloader.DropTorrentByName(tomlName)
 		r.downloader.DropTorrentByName(authorityUCANName)
@@ -668,10 +685,10 @@ func (r *RollingV2Publisher) evictGenerationLocked(enrFP string, seq uint64) {
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName+".torrent"))
 }
 
-// Cleanup removes any chain.v2.<seq>.toml + chain.ucan.<seq>.bin file
-// (and their .torrent sidecars) in snapDir whose seq is not in the
-// current history. Useful after a crash mid-publish (file written but
-// seq never reached history). Idempotent.
+// Cleanup removes any chain.v2.<genID>.toml + chain.ucan.<genID>.bin
+// file (and their .torrent sidecars) in snapDir whose genID is not in
+// the current history. Useful after a crash mid-publish (file written
+// but the genID never reached history). Idempotent.
 //
 // The current generations stay registered in the torrent client; only
 // orphans are removed.
@@ -679,9 +696,9 @@ func (r *RollingV2Publisher) Cleanup() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	keep := make(map[uint64]struct{}, len(r.history))
+	keep := make(map[string]struct{}, len(r.history))
 	for _, gen := range r.history {
-		keep[gen.seq] = struct{}{}
+		keep[gen.genID] = struct{}{}
 	}
 
 	entries, err := os.ReadDir(r.snapDir)
@@ -692,15 +709,15 @@ func (r *RollingV2Publisher) Cleanup() error {
 		if e.IsDir() {
 			continue
 		}
-		var seq uint64
+		var genID string
 		var ok bool
-		if _, seq, ok = ParseChainTomlV2FileName(e.Name()); !ok {
-			_, seq, ok = ParseChainUCANFileName(e.Name())
+		if _, genID, ok = ParseChainTomlV2FileName(e.Name()); !ok {
+			_, genID, ok = ParseChainUCANFileName(e.Name())
 		}
 		if !ok {
 			continue
 		}
-		if _, kept := keep[seq]; kept {
+		if _, kept := keep[genID]; kept {
 			continue
 		}
 		// Orphan — drop torrent registration just in case, then
@@ -714,25 +731,27 @@ func (r *RollingV2Publisher) Cleanup() error {
 	return nil
 }
 
-// LatestSeq returns the most recent generation seq and ok=true. ok is
-// false if no generation has ever been published.
-func (r *RollingV2Publisher) LatestSeq() (seq uint64, ok bool) {
+// LatestGenID returns the most recent generation's genID and ok=true.
+// ok is false if no generation has ever been published. "Most recent"
+// is the last Publish in this process; after a resume with no Publish
+// yet it is whichever generation the directory scan saw last.
+func (r *RollingV2Publisher) LatestGenID() (genID string, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.history) == 0 {
-		return 0, false
+		return "", false
 	}
-	return r.history[len(r.history)-1].seq, true
+	return r.history[len(r.history)-1].genID, true
 }
 
-// History returns a copy of the current generation seqs in chronological
-// order (oldest first). For tests + diagnostics.
-func (r *RollingV2Publisher) History() []uint64 {
+// History returns a copy of the current generation IDs in history
+// order (most recent last). For tests + diagnostics.
+func (r *RollingV2Publisher) History() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]uint64, len(r.history))
+	out := make([]string, len(r.history))
 	for i, gen := range r.history {
-		out[i] = gen.seq
+		out[i] = gen.genID
 	}
 	return out
 }

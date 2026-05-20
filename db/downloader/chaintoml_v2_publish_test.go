@@ -101,8 +101,8 @@ func TestPublishChainTomlV2Roundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash, "infohash must be non-zero after publish")
 
-	// The file was written under the gen-0 name.
-	gen0 := ChainTomlV2FileName(testENRFP, 0)
+	// The file was written under the published generation's name.
+	gen0 := ChainTomlV2FileName(testENRFP, capturedENR.GenID)
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	require.NotEmpty(t, tomlBytes)
@@ -131,11 +131,9 @@ func TestPublishChainTomlV2NilEnrUpdaterSkipped(t *testing.T) {
 	_, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, testENRFP, nil)
 	require.NoError(t, err, "nil enrUpdater must be a tolerated no-op")
 
-	// File was still written under the gen-0 name.
-	gen0 := ChainTomlV2FileName(testENRFP, 0)
-	exists, err := dirExists(filepath.Join(snapDir, gen0))
-	require.NoError(t, err)
-	require.True(t, exists, "%s must be written even when ENR updater is nil", gen0)
+	// A chain.v2.*.toml was still written even with a nil ENR updater.
+	require.Len(t, listV2Generations(t, snapDir), 1,
+		"a chain.v2 manifest must be written even when ENR updater is nil")
 }
 
 func TestPublishChainTomlV2Regenerates(t *testing.T) {

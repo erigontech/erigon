@@ -21,7 +21,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -62,20 +61,19 @@ func rollingTestInventory(_ *testing.T, marker byte) *snapshotinv.Inventory {
 	return inv
 }
 
-// listV2Generations returns sorted seqs of chain.v2.<seq>.toml files in
-// snapDir.
-func listV2Generations(t *testing.T, snapDir string) []uint64 {
+// listV2Generations returns the genIDs of chain.v2.<genID>.toml files
+// in snapDir (unordered — genID is opaque, not a counter).
+func listV2Generations(t *testing.T, snapDir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(snapDir)
 	require.NoError(t, err)
-	var seqs []uint64
+	var genIDs []string
 	for _, e := range entries {
-		if _, seq, ok := ParseChainTomlV2FileName(e.Name()); ok {
-			seqs = append(seqs, seq)
+		if _, genID, ok := ParseChainTomlV2FileName(e.Name()); ok {
+			genIDs = append(genIDs, genID)
 		}
 	}
-	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
-	return seqs
+	return genIDs
 }
 
 // TestRollingV2Publisher_GenerationsAdvance covers the basic shape:
@@ -99,8 +97,8 @@ func TestRollingV2Publisher_GenerationsAdvance(t *testing.T) {
 		hashes[i] = h
 	}
 
-	require.Equal(t, []uint64{0, 1, 2, 3, 4}, pub.History())
-	require.Equal(t, []uint64{0, 1, 2, 3, 4}, listV2Generations(t, snapDir))
+	require.Len(t, pub.History(), 5)
+	require.ElementsMatch(t, pub.History(), listV2Generations(t, snapDir))
 	for i := 1; i < len(hashes); i++ {
 		require.NotEqual(t, hashes[i-1], hashes[i],
 			"publish %d shares infohash with %d — Name field must differ", i, i-1)
@@ -123,8 +121,8 @@ func TestRollingV2Publisher_KeepsSubsetValidGenerations(t *testing.T) {
 	}
 
 	// All 7 generations are subset-valid (same inv) — none evicted.
-	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6}, pub.History())
-	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6}, listV2Generations(t, snapDir))
+	require.Len(t, pub.History(), 7)
+	require.ElementsMatch(t, pub.History(), listV2Generations(t, snapDir))
 }
 
 // TestRollingV2Publisher_EvictsWhenReferencesRetired pins the other
@@ -143,7 +141,8 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 		_, err := pub.Publish(context.Background(), inv1, 0, nil)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint64{0, 1}, pub.History())
+	oldGenIDs := append([]string(nil), pub.History()...)
+	require.Len(t, oldGenIDs, 2)
 
 	// Simulate a merge: drop accounts.0-1024 and storage.0-1024,
 	// add a single merged file. Re-publish.
@@ -160,12 +159,13 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
 
-	// gen 0 and 1 listed accounts.0-1024 + storage.0-1024 — neither
-	// is in gen 2's manifest, so both are invalid and evicted.
-	require.Equal(t, []uint64{2}, pub.History())
-	require.Equal(t, []uint64{2}, listV2Generations(t, snapDir))
-	for _, oldSeq := range []uint64{0, 1} {
-		oldName := ChainTomlV2FileName(testENRFP, oldSeq)
+	// The two earlier generations listed accounts.0-1024 + storage.0-1024
+	// — neither is in the merged generation's manifest, so both are
+	// invalid and evicted.
+	require.Len(t, pub.History(), 1)
+	require.ElementsMatch(t, pub.History(), listV2Generations(t, snapDir))
+	for _, oldGenID := range oldGenIDs {
+		oldName := ChainTomlV2FileName(testENRFP, oldGenID)
 		_, err := os.Stat(filepath.Join(snapDir, oldName))
 		require.True(t, os.IsNotExist(err), "%s should have been evicted", oldName)
 		_, err = os.Stat(filepath.Join(snapDir, oldName+".torrent"))
@@ -173,10 +173,11 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	}
 }
 
-// TestRollingV2Publisher_RestartResumesSeq covers the discovery path:
-// a fresh publisher built against a snapDir that already contains
-// generations resumes seq numbering from max(existing)+1.
-func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
+// TestRollingV2Publisher_RestartResumesGenerations covers the discovery
+// path: a fresh publisher built against a snapDir that already contains
+// generations recovers them all into its history, and a further Publish
+// adds a new generation alongside.
+func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 	snapDir := t.TempDir()
 	inv := rollingTestInventory(t, 0x30)
 
@@ -188,18 +189,19 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint64{0, 1, 2}, first.History())
+	firstGenIDs := first.History()
+	require.Len(t, firstGenIDs, 3)
 
-	// New publisher discovers existing files, resumes from seq 3.
+	// New publisher discovers the existing files into its history.
 	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	second.SetENRFingerprint(testENRFP)
-	require.Equal(t, []uint64{0, 1, 2}, second.History())
+	require.ElementsMatch(t, firstGenIDs, second.History())
 
 	_, err = second.Publish(context.Background(), inv, 0, nil)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{0, 1, 2, 3}, second.History())
-	require.Equal(t, []uint64{0, 1, 2, 3}, listV2Generations(t, snapDir))
+	require.Len(t, second.History(), 4)
+	require.ElementsMatch(t, second.History(), listV2Generations(t, snapDir))
 }
 
 // TestRollingV2Publisher_RestartRecoversNameSets covers the discovery
@@ -217,14 +219,14 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint64{0, 1, 2}, first.History())
+	require.Len(t, first.History(), 3)
 
 	// Restart — discovery parses each chain.v2.*.toml and recovers
 	// name-sets so the next Publish can evaluate validity.
 	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	second.SetENRFingerprint(testENRFP)
-	require.Equal(t, []uint64{0, 1, 2}, second.History())
+	require.Len(t, second.History(), 3)
 
 	// Publish with a retiring inventory — every prior gen must evict.
 	inv2 := snapshotinv.NewInventory()
@@ -239,13 +241,13 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	})
 	_, err = second.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{3}, second.History())
-	require.Equal(t, []uint64{3}, listV2Generations(t, snapDir))
+	require.Len(t, second.History(), 1)
+	require.ElementsMatch(t, second.History(), listV2Generations(t, snapDir))
 }
 
-// TestRollingV2Publisher_CleanupOrphans drops chain.v2.<seq>.toml files
-// whose seq isn't in history — simulating a crash mid-publish that
-// wrote files but never advanced the in-memory state.
+// TestRollingV2Publisher_CleanupOrphans drops chain.v2.<genID>.toml
+// files whose genID isn't in history — simulating a crash mid-publish
+// that wrote files but never advanced the in-memory state.
 func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
@@ -259,17 +261,18 @@ func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pub.Publish(context.Background(), inv, 0, nil)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{0, 1}, pub.History())
+	require.Len(t, pub.History(), 2)
 
-	// Plant orphan files on disk (no .torrent sidecar, simulating a
-	// crash partway through Publish).
-	orphanName := ChainTomlV2FileName(testENRFP, 99)
+	// Plant an orphan file on disk under a valid-shape genID that no
+	// generation used (no .torrent sidecar, simulating a crash partway
+	// through Publish).
+	orphanName := ChainTomlV2FileName(testENRFP, "ffffffffffffffff")
 	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanName), []byte("stub"), 0o644))
 
 	// Cleanup removes the orphan, leaves history intact.
 	require.NoError(t, pub.Cleanup())
-	require.Equal(t, []uint64{0, 1}, pub.History())
-	require.Equal(t, []uint64{0, 1}, listV2Generations(t, snapDir))
+	require.Len(t, pub.History(), 2)
+	require.ElementsMatch(t, pub.History(), listV2Generations(t, snapDir))
 }
 
 // TestRollingV2Publisher_ENRUpdaterFires confirms enrUpdater is called
@@ -295,6 +298,8 @@ func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 	require.Equal(t, [20]byte(hash), lastCT.InfoHash)
 	require.Equal(t, uint64(12345), lastCT.AuthoritativeBlocks)
 	require.Equal(t, uint64(12345), lastCT.KnownBlocks)
+	require.Equal(t, pub.History()[0], lastCT.GenID,
+		"ENR carries the published generation's opaque genID")
 
 	// Nil updater: tolerated.
 	_, err = pub.Publish(context.Background(), inv, 0, nil)
@@ -308,33 +313,33 @@ func TestParseChainTomlV2FileName(t *testing.T) {
 		name      string
 		wantOK    bool
 		wantENRFP string
-		wantSeq   uint64
+		wantGenID string
 	}{
-		{"chain.v2.a1b2c3d4e5f60718.0.toml", true, "a1b2c3d4e5f60718", 0},
-		{"chain.v2.a1b2c3d4e5f60718.42.toml", true, "a1b2c3d4e5f60718", 42},
-		{"chain.v2.0123456789abcdef.18446744073709551614.toml", true, "0123456789abcdef", 18446744073709551614},
-		// Reject everything else — no fingerprint, wrong-length fingerprint,
-		// no leading dot, no v1, no missing seq, etc.
-		{"chain.v2.0.toml", false, "", 0},
-		{"chain.v2.42.toml", false, "", 0},
-		{"chain.v2.toml", false, "", 0},
-		{"chain.v2.a1b2c3d4e5f60718.0", false, "", 0},
-		{"chain.v2.a1b2c3d4e5f60718.0.tml", false, "", 0},
-		{"chain.v3.a1b2c3d4e5f60718.0.toml", false, "", 0},
-		{"chain.v2.a1b2c3d4e5f60718.-1.toml", false, "", 0},
-		{"chain.v2.a1b2c3d4e5f6071.0.toml", false, "", 0},   // 15-hex fingerprint
-		{"chain.v2.a1b2c3d4e5f607189.0.toml", false, "", 0}, // 17-hex fingerprint
-		{"chain.v2.A1B2C3D4E5F60718.0.toml", false, "", 0},  // uppercase rejected
-		{"chain.v2.a1b2c3d4e5f60718.0.toml.bak", false, "", 0},
-		{"prefix.chain.v2.a1b2c3d4e5f60718.0.toml", false, "", 0},
-		{"chain.v2.a1b2c3d4e5f60718.0.toml.torrent", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000ff.toml", true, "a1b2c3d4e5f60718", "00000000000000ff"},
+		{"chain.v2.0123456789abcdef.fedcba9876543210.toml", true, "0123456789abcdef", "fedcba9876543210"},
+		// Reject everything else — wrong-length fingerprint or genID,
+		// non-hex, no leading dot, no v1, missing genID, etc.
+		{"chain.v2.a1b2c3d4e5f60718.0.toml", false, "", ""},  // genID not 16 hex
+		{"chain.v2.a1b2c3d4e5f60718.42.toml", false, "", ""}, // genID not 16 hex
+		{"chain.v2.0.toml", false, "", ""},
+		{"chain.v2.toml", false, "", ""},
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000ff", false, "", ""},
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000ff.tml", false, "", ""},
+		{"chain.v3.a1b2c3d4e5f60718.00000000000000ff.toml", false, "", ""},
+		{"chain.v2.a1b2c3d4e5f6071.00000000000000ff.toml", false, "", ""},   // 15-hex fingerprint
+		{"chain.v2.a1b2c3d4e5f607189.00000000000000ff.toml", false, "", ""}, // 17-hex fingerprint
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000fg.toml", false, "", ""},  // non-hex genID
+		{"chain.v2.A1B2C3D4E5F60718.00000000000000ff.toml", false, "", ""},  // uppercase rejected
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000ff.toml.bak", false, "", ""},
+		{"prefix.chain.v2.a1b2c3d4e5f60718.00000000000000ff.toml", false, "", ""},
+		{"chain.v2.a1b2c3d4e5f60718.00000000000000ff.toml.torrent", false, "", ""},
 	}
 	for _, c := range cases {
-		enrFP, seq, ok := ParseChainTomlV2FileName(c.name)
+		enrFP, genID, ok := ParseChainTomlV2FileName(c.name)
 		require.Equal(t, c.wantOK, ok, "ok mismatch for %q", c.name)
 		if c.wantOK {
 			require.Equal(t, c.wantENRFP, enrFP, "enrFP mismatch for %q", c.name)
-			require.Equal(t, c.wantSeq, seq, "seq mismatch for %q", c.name)
+			require.Equal(t, c.wantGenID, genID, "genID mismatch for %q", c.name)
 		}
 	}
 }
@@ -387,7 +392,7 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash)
 
-	gen0 := ChainTomlV2FileName(testENRFP, 0)
+	gen0 := ChainTomlV2FileName(testENRFP, pub.History()[0])
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	m, err := ParseV2(tomlBytes)
@@ -418,7 +423,7 @@ func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
 	require.NotEqual(t, metainfo.Hash{}, hash)
 
 	// File was written.
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
 }
 
 // TestRollingV2Publisher_SelfCheck_PassPropagates pins that when the
@@ -442,7 +447,7 @@ func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, metainfo.Hash{}, hash)
 	require.True(t, called, "self-check callback was invoked")
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
 }
 
 // TestRollingV2Publisher_SelfCheck_FailLoud is the core invariant: a
@@ -469,10 +474,10 @@ func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
 		"self-check error propagates unchanged so callers can discriminate via errors.Is")
 
 	// No file written — the failed generation must not appear on disk.
-	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)),
-		"chain.v2.0.toml must NOT exist after self-check failure — failed generations don't pollute disk")
+	require.Empty(t, listV2Generations(t, snapDir),
+		"no chain.v2.*.toml must exist after self-check failure — failed generations don't pollute disk")
 	require.Empty(t, pub.History(),
-		"history not advanced — next Publish() retries with seq=0, not seq=1")
+		"history not advanced — the failed generation consumed nothing")
 }
 
 // TestRollingV2Publisher_SelfCheck_RetryAfterFailure pins recovery
@@ -497,8 +502,8 @@ func TestRollingV2Publisher_SelfCheck_RetryAfterFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, metainfo.Hash{}, hash)
 
-	require.Equal(t, []uint64{0}, pub.History(),
-		"first successful publish uses seq=0 — the failed first attempt did not consume a seq")
+	require.Len(t, pub.History(), 1,
+		"only the successful publish is in history — the failed first attempt consumed nothing")
 }
 
 // TestChainTomlV2ToItems_Flatten pins the flatten helper that
@@ -564,8 +569,9 @@ func TestRollingV2Publisher_ContentUCAN_NilDefault(t *testing.T) {
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
 	require.NoError(t, err)
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)),
+	genID := pub.History()[0]
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genID)))
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, genID)),
 		"no content minter configured → no .ucan sidecar written")
 }
 
@@ -589,8 +595,9 @@ func TestRollingV2Publisher_ContentUCAN_WritesSidecar(t *testing.T) {
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x31), 0, nil)
 	require.NoError(t, err)
+	genID := pub.History()[0]
 
-	ucanPath := filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0))
+	ucanPath := filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, genID))
 	require.FileExists(t, ucanPath, ".ucan sidecar must be written")
 
 	// Verify .ucan contains exactly what the minter returned.
@@ -601,7 +608,7 @@ func TestRollingV2Publisher_ContentUCAN_WritesSidecar(t *testing.T) {
 	// Verify the minter was called with the same bytes the .toml file
 	// on disk contains — the Content UCAN binds chain.v2:hash:<sha256>
 	// over the EXACT bytes any receiver will see.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genID)))
 	require.NoError(t, err)
 	require.Equal(t, tomlBytes, mintedOver,
 		"minter must receive the same bytes that get persisted — consumer verifies the attestation over file bytes")
@@ -626,10 +633,13 @@ func TestRollingV2Publisher_ContentUCAN_FailureRollsBack(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x32), 0, nil)
 	require.ErrorIs(t, err, sentinel)
 
-	// .toml that was just written must be removed (don't seed unattested).
-	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)),
+	// The .toml + .ucan just written must be removed (don't seed
+	// unattested content) — no manifest or UCAN of any genID survives.
+	require.Empty(t, listV2Generations(t, snapDir),
 		"minter failure rolls back the .toml — must not leave unattested content on disk")
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)))
+	ucans, err := filepath.Glob(filepath.Join(snapDir, "*.ucan"))
+	require.NoError(t, err)
+	require.Empty(t, ucans, "minter failure must not leave a .ucan on disk")
 	require.Empty(t, pub.History(),
 		"minter failure does not advance history")
 }
@@ -652,6 +662,7 @@ func TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN(t *testing.T) {
 	// gen 0: lists accounts.0-1024 + storage.0-1024.
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x60), 0, nil)
 	require.NoError(t, err)
+	gen0ID := pub.History()[0]
 
 	// gen 1: retires both names — gen 0 is now invalid.
 	inv2 := snapshotinv.NewInventory()
@@ -667,7 +678,10 @@ func TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN(t *testing.T) {
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
 
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)),
+	// gen 0 evicted; only the surviving generation remains in history.
+	require.Len(t, pub.History(), 1)
+	survivorID := pub.History()[0]
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, gen0ID)),
 		"evicted generation's Content UCAN is removed alongside its .toml")
-	require.FileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 1)))
+	require.FileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, survivorID)))
 }

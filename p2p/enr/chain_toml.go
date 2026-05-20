@@ -22,6 +22,13 @@ import (
 // extras (RLP tolerates trailing elements in lists). New nodes decoding an
 // old 3-field entry will see DomainSteps=0 and MergeDepth=0 (zero values).
 //
+// GenID is the opaque per-generation ID (16 hex chars) of the manifest
+// InfoHash points at — chain.v2.<enr-fp>.<genID>.toml. A consumer combines
+// it with the publisher's ENR fingerprint to name-derive the paired Content
+// UCAN sidecar (chain.v2.<enr-fp>.<genID>.ucan), which carries no manifest
+// field. GenID is random per generation, NOT a counter, so a passive discv5
+// scraper cannot read a publisher's republish cadence from it.
+//
 // RLP encoding is positional — field order must be preserved across versions.
 type ChainToml struct {
 	AuthoritativeBlocks uint64   // max block for entries from local disk + preverified.toml
@@ -29,6 +36,7 @@ type ChainToml struct {
 	InfoHash            [20]byte // BitTorrent V1 info-hash (SHA1) of the chain.toml torrent
 	DomainSteps         uint64   // total domain steps covered (0 = V1-only, no domain data)
 	MergeDepth          uint64   // largest canonical file size in steps (0 = unknown)
+	GenID               string   // opaque per-generation ID; "" = pre-GenID publisher
 }
 
 func (v ChainToml) ENRKey() string { return "chain-toml" }
@@ -41,6 +49,7 @@ func (v ChainToml) EncodeRLP(w io.Writer) error {
 		InfoHash:            v.InfoHash,
 		DomainSteps:         v.DomainSteps,
 		MergeDepth:          v.MergeDepth,
+		GenID:               v.GenID,
 	})
 }
 
@@ -56,6 +65,7 @@ func (v *ChainToml) DecodeRLP(s *rlp.Stream) error {
 	v.InfoHash = dec.InfoHash
 	v.DomainSteps = dec.DomainSteps
 	v.MergeDepth = dec.MergeDepth
+	v.GenID = dec.GenID
 	return nil
 }
 
@@ -68,4 +78,5 @@ type chainTomlRLP struct {
 	InfoHash            [20]byte
 	DomainSteps         uint64
 	MergeDepth          uint64
+	GenID               string
 }

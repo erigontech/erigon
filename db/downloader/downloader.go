@@ -814,8 +814,8 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	// upstream lost the torrent hashes — that's the gap-D2 failure mode
 	// and it silently starves every V2 consumer. Surface it loudly
 	// rather than letting consumers infer it from a 12-byte fetch.
-	if seq, ok := pub.LatestSeq(); ok && d.localInventoryFileCount(inv) > 0 {
-		p := filepath.Join(d.snapDir(), ChainTomlV2FileName(d.SelfENRFingerprint(), seq))
+	if genID, ok := pub.LatestGenID(); ok && d.localInventoryFileCount(inv) > 0 {
+		p := filepath.Join(d.snapDir(), ChainTomlV2FileName(d.SelfENRFingerprint(), genID))
 		if fi, statErr := os.Stat(p); statErr == nil && fi.Size() < 32 {
 			d.logger.Warn("[chaintoml] published an effectively empty v2 manifest while the inventory has local files — torrent hashes missing?",
 				"file", filepath.Base(p), "bytes", fi.Size())

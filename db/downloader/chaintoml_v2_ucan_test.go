@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,20 +29,19 @@ import (
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// listUCANGenerations returns sorted seqs of chain.ucan.<seq>.bin files
-// in snapDir.
-func listUCANGenerations(t *testing.T, snapDir string) []uint64 {
+// listUCANGenerations returns the genIDs of chain.ucan.<genID>.bin
+// files in snapDir (unordered — genID is opaque, not a counter).
+func listUCANGenerations(t *testing.T, snapDir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(snapDir)
 	require.NoError(t, err)
-	var seqs []uint64
+	var genIDs []string
 	for _, e := range entries {
-		if _, seq, ok := ParseChainUCANFileName(e.Name()); ok {
-			seqs = append(seqs, seq)
+		if _, genID, ok := ParseChainUCANFileName(e.Name()); ok {
+			genIDs = append(genIDs, genID)
 		}
 	}
-	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
-	return seqs
+	return genIDs
 }
 
 // TestRollingV2Publisher_NoDelegationSourceNoUCAN confirms the default
@@ -58,12 +56,12 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, []uint64{0}, listV2Generations(t, snapDir))
+	require.Len(t, listV2Generations(t, snapDir), 1)
 	require.Empty(t, listUCANGenerations(t, snapDir),
 		"no delegation source → no UCAN sidecar")
 
 	// The on-disk V2 manifest must carry an empty AuthorityUCANHash field.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
@@ -88,28 +86,29 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
 	require.NoError(t, err)
+	genID := pub.History()[0]
 
-	require.Equal(t, []uint64{0}, listV2Generations(t, snapDir))
-	require.Equal(t, []uint64{0}, listUCANGenerations(t, snapDir))
+	require.Len(t, listV2Generations(t, snapDir), 1)
+	require.ElementsMatch(t, []string{genID}, listUCANGenerations(t, snapDir))
 
 	// UCAN file content matches what the source returned.
-	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 0)))
+	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)))
 	require.NoError(t, err)
 	require.Equal(t, ucanBytes, gotUCAN)
 
 	// UCAN .torrent exists alongside.
-	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 0)+".torrent"))
+	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)+".torrent"))
 	require.NoError(t, err)
 
 	// V2 manifest's AuthorityUCANHash matches the UCAN torrent's infohash.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genID)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
 	require.NotEmpty(t, manifest.AuthorityUCANHash)
 
 	tf := NewAtomicTorrentFS(snapDir)
-	ucanSpec, err := tf.LoadByName(ChainUCANFileName(testENRFP, 0) + ".torrent")
+	ucanSpec, err := tf.LoadByName(ChainUCANFileName(testENRFP, genID) + ".torrent")
 	require.NoError(t, err)
 	require.Equal(t, hex.EncodeToString(ucanSpec.InfoHash[:]), manifest.AuthorityUCANHash,
 		"V2.AuthorityUCANHash must equal hex(UCAN torrent infohash)")
@@ -136,9 +135,12 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	}
 	require.Equal(t, 3, calls, "delegation source consulted once per Publish")
 
-	// Each generation's UCAN bytes match the rotation.
-	for i := 0; i < 3; i++ {
-		got, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, uint64(i))))
+	// Each generation's UCAN bytes match the rotation. History is in
+	// publish order, so History()[i] is the i-th generation's genID.
+	genIDs := pub.History()
+	require.Len(t, genIDs, 3)
+	for i, genID := range genIDs {
+		got, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)))
 		require.NoError(t, err, "read gen %d UCAN", i)
 		require.Equal(t, []byte(fmt.Sprintf("ucan-gen-%d", i+1)), got,
 			"gen %d UCAN content reflects the rotation", i)
@@ -162,6 +164,7 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	// rolling test inventory).
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
 	require.NoError(t, err)
+	gen0ID := pub.History()[0]
 
 	// gen 1: retires both names — gen 0 is invalid, must be evicted
 	// along with its UCAN sidecar.
@@ -178,11 +181,11 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, []uint64{1}, listV2Generations(t, snapDir))
-	require.Equal(t, []uint64{1}, listUCANGenerations(t, snapDir))
+	require.Len(t, listV2Generations(t, snapDir), 1)
+	require.Len(t, listUCANGenerations(t, snapDir), 1)
 
 	// Evicted UCAN + .torrent metafiles are gone too.
-	ucanName := ChainUCANFileName(testENRFP, 0)
+	ucanName := ChainUCANFileName(testENRFP, gen0ID)
 	_, err = os.Stat(filepath.Join(snapDir, ucanName))
 	require.True(t, os.IsNotExist(err), "evicted UCAN %s must be gone", ucanName)
 	_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
@@ -190,8 +193,8 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 }
 
 // TestRollingV2Publisher_CleanupHandlesOrphanUCAN confirms Cleanup()
-// also removes orphan chain.ucan.<seq>.bin files (and their torrents)
-// for seqs not in current history.
+// also removes orphan chain.ucan.<genID>.bin files (and their torrents)
+// for genIDs not in current history.
 func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
@@ -202,19 +205,17 @@ func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
 	require.NoError(t, err)
 
-	// Drop a stray orphan pair from a hypothetical crash.
-	require.NoError(t, os.WriteFile(
-		filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)),
-		[]byte("orphan"), 0o644))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)+".torrent"),
-		[]byte{}, 0o644))
+	// Drop a stray orphan pair under a valid-shape genID that no
+	// generation used (a hypothetical crash mid-publish).
+	orphanUCAN := ChainUCANFileName(testENRFP, "ffffffffffffffff")
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanUCAN), []byte("orphan"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanUCAN+".torrent"), []byte{}, 0o644))
 
 	require.NoError(t, pub.Cleanup())
 
-	require.Equal(t, []uint64{0}, listUCANGenerations(t, snapDir),
-		"Cleanup must drop orphan UCAN seqs not in history")
-	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)+".torrent"))
+	require.Len(t, listUCANGenerations(t, snapDir), 1,
+		"Cleanup must drop orphan UCAN genIDs not in history")
+	_, err = os.Stat(filepath.Join(snapDir, orphanUCAN+".torrent"))
 	require.True(t, os.IsNotExist(err), "orphan UCAN .torrent must be cleaned up")
 }
 
@@ -232,10 +233,10 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x40), 0, nil)
 	require.NoError(t, err)
 
-	require.Equal(t, []uint64{0}, listV2Generations(t, snapDir))
+	require.Len(t, listV2Generations(t, snapDir), 1)
 	require.Empty(t, listUCANGenerations(t, snapDir))
 
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
