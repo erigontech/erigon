@@ -23,7 +23,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -31,25 +30,26 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// flushBlockOverlayToDB commits the in-memory block overlay to the DB so
-// per-batch memory stays bounded. After the commit the overlay is closed;
-// the next InsertBlocks call opens a fresh RoTx that sees the committed TDs.
-func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains, overlay interface {
-	Flush(context.Context, kv.RwTx) error
-}) (ExecutionStatus, error) {
+// flushBlockOverlayToDB bounds per-batch memory: commits the overlay to DB and
+// closes it so the next InsertBlocks call starts fresh.
+func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil
+	}
 	rwTx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
 	}
 	defer rwTx.Rollback()
 	if err := overlay.Flush(ctx, rwTx); err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush overlay: %w", err)
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush overlay: %w", err)
 	}
 	if err := rwTx.Commit(); err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
+		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
 	}
 	sd.CloseBlockOverlay()
-	return ExecutionStatusSuccess, nil
+	return nil
 }
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
@@ -151,10 +151,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	// After the commit, the next InsertBlocks call opens a fresh RoTx that sees
 	// the committed TDs, so parent TD lookups in subsequent batches still work.
 	// UpdateForkChoice detects hasOverlay=false and reads block data from DB.
-	if overlay := sd.BlockOverlay(); overlay != nil {
-		if status, err2 := e.flushBlockOverlayToDB(ctx, sd, overlay); err2 != nil {
-			return status, err2
-		}
+	if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
+		return 0, err
 	}
 	return ExecutionStatusSuccess, nil
 }
