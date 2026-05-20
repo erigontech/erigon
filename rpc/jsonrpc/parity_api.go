@@ -80,6 +80,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	// are not yet visible to RangeAsOf, returning either an error or
 	// inconsistent storage.
 	bn := rawdb.ReadCurrentBlockNumber(tx)
+	if bn == nil {
+		return nil, errors.New("current block number not found")
+	}
 	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err
