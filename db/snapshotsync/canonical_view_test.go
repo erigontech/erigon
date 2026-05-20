@@ -176,6 +176,44 @@ func TestCanonicalView_VersionAdvancesPerBatch(t *testing.T) {
 	require.Equal(t, 1, v.Version(), "no new entry — version unchanged")
 }
 
+// TestCanonicalView_StateRoundTrip: MarshalState/RestoreState preserves
+// promotions, the version counter, the issuer set, and partial
+// (not-yet-quorum) observations.
+func TestCanonicalView_StateRoundTrip(t *testing.T) {
+	v := NewCanonicalView(items("g.seg", "gh"), snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	v.Observe(issuer(1), items("a.seg", "ha"), viewT0)
+	v.Observe(issuer(2), items("a.seg", "ha"), viewT0) // a.seg promoted
+	v.Observe(issuer(3), items("b.seg", "hb"), viewT0) // b.seg seen once only
+	require.Equal(t, 1, v.Version())
+
+	blob, err := v.MarshalState()
+	require.NoError(t, err)
+
+	restored := NewCanonicalView(items("g.seg", "gh"), snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	require.NoError(t, restored.RestoreState(blob))
+
+	require.Equal(t, 1, restored.Version())
+	require.True(t, canonicalHas(restored, "g.seg", "gh"))
+	require.True(t, canonicalHas(restored, "a.seg", "ha"))
+	require.False(t, canonicalHas(restored, "b.seg", "hb"))
+
+	// b.seg's single restored sighting still counts — a second distinct
+	// issuer promotes it.
+	require.True(t, restored.Observe(issuer(4), items("b.seg", "hb"), viewT0))
+	require.True(t, canonicalHas(restored, "b.seg", "hb"))
+	require.Equal(t, 2, restored.Version())
+
+	// issuer(3) was restored into the issuer set — re-observing adds nothing.
+	require.False(t, restored.Observe(issuer(3), items("b.seg", "hb"), viewT0))
+}
+
+// TestCanonicalView_RestoreRejectsCorrupt: a malformed snapshot is an
+// error so the caller can log and start fresh.
+func TestCanonicalView_RestoreRejectsCorrupt(t *testing.T) {
+	v := NewCanonicalView(nil, snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	require.Error(t, v.RestoreState([]byte("not json")))
+}
+
 // TestCanonicalView_DedupGenesisAndPromoted: an entry identical to a
 // genesis (name, hash) pair is not duplicated when also promoted.
 func TestCanonicalView_DedupGenesisAndPromoted(t *testing.T) {

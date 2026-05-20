@@ -17,6 +17,9 @@
 package snapshotsync
 
 import (
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -29,6 +32,11 @@ import (
 // the safety margin for a long-superseded merge form genuinely leaving
 // the swarm.
 const DefaultCanonicalGCWindow = 24 * time.Hour
+
+// CanonicalViewStateFile is the name of the on-disk snapshot of a
+// node's CanonicalView, written into the snapshot directory so quorum
+// progress survives a restart instead of rebuilding from zero.
+const CanonicalViewStateFile = "canonical.view-state.json"
 
 type canonicalEntry struct {
 	name string
@@ -197,4 +205,103 @@ func (v *CanonicalView) Version() int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.version
+}
+
+// canonicalViewState is the JSON-serialisable form of a CanonicalView's
+// mutable state. The genesis set, quorum config and GC window are NOT
+// persisted — they are re-supplied by the constructor on restore, so a
+// node may re-pin genesis or retune quorum without losing observations.
+type canonicalViewState struct {
+	Issuers  []string             `json:"issuers"` // hex-encoded issuer pubkeys
+	Observed []observedEntryState `json:"observed"`
+	Promoted []nameHashState      `json:"promoted"`
+	Version  int                  `json:"version"`
+}
+
+type observedEntryState struct {
+	Name      string           `json:"name"`
+	Hash      string           `json:"hash"`
+	Sightings []issuerSighting `json:"sightings"`
+}
+
+type issuerSighting struct {
+	Issuer string    `json:"issuer"` // hex-encoded
+	Seen   time.Time `json:"seen"`
+}
+
+type nameHashState struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+}
+
+// MarshalState serialises the view's observations, promotions, issuer
+// set and version counter so quorum progress can be persisted across a
+// restart (see CanonicalViewStateFile).
+func (v *CanonicalView) MarshalState() ([]byte, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	st := canonicalViewState{Version: v.version}
+	for iss := range v.issuers {
+		st.Issuers = append(st.Issuers, hex.EncodeToString([]byte(iss)))
+	}
+	for k, set := range v.observed {
+		e := observedEntryState{Name: k.name, Hash: k.hash}
+		for iss, ts := range set {
+			e.Sightings = append(e.Sightings, issuerSighting{
+				Issuer: hex.EncodeToString([]byte(iss)),
+				Seen:   ts,
+			})
+		}
+		st.Observed = append(st.Observed, e)
+	}
+	for k := range v.promoted {
+		st.Promoted = append(st.Promoted, nameHashState{Name: k.name, Hash: k.hash})
+	}
+	return json.Marshal(st)
+}
+
+// RestoreState replaces the view's mutable state with a previously
+// marshalled snapshot. Genesis, quorum config and GC window are
+// untouched. A corrupt snapshot is rejected with an error; the caller
+// should log and start fresh — the view rebuilds from live
+// observations regardless.
+func (v *CanonicalView) RestoreState(data []byte) error {
+	var st canonicalViewState
+	if err := json.Unmarshal(data, &st); err != nil {
+		return err
+	}
+
+	issuers := make(map[string]struct{}, len(st.Issuers))
+	for _, h := range st.Issuers {
+		b, err := hex.DecodeString(h)
+		if err != nil {
+			return fmt.Errorf("decode issuer %q: %w", h, err)
+		}
+		issuers[string(b)] = struct{}{}
+	}
+	observed := make(map[canonicalEntry]map[string]time.Time, len(st.Observed))
+	for _, e := range st.Observed {
+		set := make(map[string]time.Time, len(e.Sightings))
+		for _, s := range e.Sightings {
+			b, err := hex.DecodeString(s.Issuer)
+			if err != nil {
+				return fmt.Errorf("decode issuer %q: %w", s.Issuer, err)
+			}
+			set[string(b)] = s.Seen
+		}
+		observed[canonicalEntry{e.Name, e.Hash}] = set
+	}
+	promoted := make(map[canonicalEntry]struct{}, len(st.Promoted))
+	for _, p := range st.Promoted {
+		promoted[canonicalEntry{p.Name, p.Hash}] = struct{}{}
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.issuers = issuers
+	v.observed = observed
+	v.promoted = promoted
+	v.version = st.Version
+	return nil
 }

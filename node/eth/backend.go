@@ -648,8 +648,45 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					qc.QFloor = config.Snapshot.QuorumFloor
 				}
 				canonicalView = snapshotsync.NewCanonicalView(genesisItems, qc)
+
+				// Restore quorum progress across restarts: the view's
+				// observations and promotions are persisted to the
+				// snapshot dir and reloaded here so a restart does not
+				// reset the canonical view to bare genesis.
+				viewStatePath := filepath.Join(dirs.Snap, snapshotsync.CanonicalViewStateFile)
+				if data, rerr := os.ReadFile(viewStatePath); rerr == nil {
+					if rerr := canonicalView.RestoreState(data); rerr != nil {
+						logger.Warn("manifest_exchange: discarding unreadable canonical view state", "err", rerr)
+					}
+				}
 				logger.Info("manifest_exchange: canonical quorum view enabled",
-					"genesis_entries", len(genesisItems), "quorum_floor", qc.QFloor)
+					"genesis_entries", len(genesisItems), "quorum_floor", qc.QFloor,
+					"restored_version", canonicalView.Version())
+
+				view := canonicalView
+				go func() {
+					t := time.NewTicker(2 * time.Minute)
+					defer t.Stop()
+					flush := func() {
+						data, merr := view.MarshalState()
+						if merr != nil {
+							logger.Warn("manifest_exchange: marshal canonical view state", "err", merr)
+							return
+						}
+						if werr := os.WriteFile(viewStatePath, data, 0o644); werr != nil {
+							logger.Warn("manifest_exchange: persist canonical view state", "err", werr)
+						}
+					}
+					for {
+						select {
+						case <-ctx.Done():
+							flush()
+							return
+						case <-t.C:
+							flush()
+						}
+					}
+				}()
 			}
 
 			mx.SetCanonicalValidator(func(issuer []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
