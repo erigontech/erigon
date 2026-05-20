@@ -520,31 +520,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			)
 		})
 
-		// Wire the producer-side signer
-		// (docs/plans/20260515-three-layer-snapshot-distribution.md
-		// MITM-publisher defence): each chain.v2.<seq>.toml is paired
-		// with a chain.v2.<seq>.sig sidecar signed by the node's
-		// secp256k1 private key — the same key the ENR is keyed with,
-		// so consumers can verify the signature against the public key
-		// they already have from the peer's ENR. Without the
-		// signature, redistributor peers in the swarm could modify
-		// served manifests in transit; with it, any modification
-		// invalidates the .sig and the consumer rejects the file
-		// wholesale.
-		if stack.Config().P2P.PrivateKey != nil {
-			signKey := stack.Config().P2P.PrivateKey
-			backend.components.Downloader.Downloader.SetManifestSigner(func(data []byte) ([]byte, error) {
-				return snapshotsync.SignAdvertisement(data, signKey)
-			})
-		}
-
-		// Wire the producer-side Authority UCAN source. The operator's
-		// delegation — loaded from --snapshot.delegation, the default
-		// <datadir>/snapshot.ucan, or a self-signed bootstrap generated
-		// on first run (snapshotauth.LoadOrGenerateDelegation) — is
-		// paired with every published V2 generation. Consumers running
-		// with TrustConfig verify the manifest's Content UCAN chains to
-		// it. Empty bytes → V2-only publication (no AuthorityUCANHash).
+		// Wire the producer-side two-UCAN authentication
+		// (docs/plans/20260520-chaintoml-ucan-flow-spec.md). The
+		// Authority UCAN — loaded from --snapshot.delegation, the
+		// default <datadir>/snapshot.ucan, or a self-signed bootstrap
+		// generated on first run — roots this node's publish authority
+		// and is paired with every V2 generation. The Content UCAN is
+		// minted per generation: a self-issued attestation binding
+		// chain.v2:hash:<sha256(toml)> to the operator's secp256k1 key
+		// (the same key the ENR is keyed with), parented to the
+		// Authority UCAN. Together they replace the interim .sig
+		// sidecar; consumers running with TrustConfig verify the chain
+		// to a configured trust root. Empty delegation bytes →
+		// V2-only publication (no AuthorityUCANHash, no Content UCAN).
 		delegationBytes, derr := snapshotauth.LoadOrGenerateDelegation(
 			config.Snapshot.DelegationPath, dirs.DataDir, stack.Config().P2P.PrivateKey, logger)
 		if derr != nil {
@@ -554,6 +542,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.components.Downloader.Downloader.SetDelegationSource(func() ([]byte, error) {
 				return delegationBytes, nil
 			})
+			if signKey := stack.Config().P2P.PrivateKey; signKey != nil {
+				backend.components.Downloader.Downloader.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
+					return snapshotauth.MintContentUCAN(tomlBytes, signKey, delegationBytes, time.Now())
+				})
+			}
 		}
 	}
 
@@ -651,7 +644,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				// flat sets for fetch planning; the structured Coverage
 				// fields are recomputed downstream if needed.
 				out := &downloader.ChainTomlV2{
-					Version:  downloader.ChainTomlV2Version,
+					Version:           downloader.ChainTomlV2Version,
 					AuthorityUCANHash: adv.AuthorityUCANHash,
 				}
 				// Preserve the original section boundaries by checking

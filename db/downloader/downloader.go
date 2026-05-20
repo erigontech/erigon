@@ -152,9 +152,9 @@ type Downloader struct {
 	// DownloadComplete events emitted → orchestrator's statePending
 	// never drained → InitialStateReady never fired → exec never ran
 	// for 8h+.
-	publishStateMu  sync.Mutex
-	publishRunning  bool
-	publishPending  bool
+	publishStateMu sync.Mutex
+	publishRunning bool
+	publishPending bool
 
 	// manifestSelfCheck is the producer-side fail-loud callback wired
 	// by external setup code (which has access to both this package
@@ -166,14 +166,14 @@ type Downloader struct {
 	// is written.
 	manifestSelfCheck ManifestSelfCheckFn
 
-	// manifestSigner is the producer-side signing callback. Same
-	// rationale as manifestSelfCheck (cycle avoidance via callback).
-	// Production wires a closure that calls
-	// snapshotsync.SignAdvertisement with the node's secp256k1 key;
+	// contentMinter is the producer-side Content UCAN minting callback.
+	// Same rationale as manifestSelfCheck (cycle avoidance via
+	// callback). Production wires a closure that calls
+	// snapshotauth.MintContentUCAN with the node's secp256k1 key;
 	// tests/harness leave it nil. RollingV2Publisher.Publish persists
-	// the returned signature as chain.v2.<seq>.sig alongside the
-	// data file and registers it as seedable.
-	manifestSigner ManifestSignerFn
+	// the returned Content UCAN as chain.v2.<enr-fp>.<seq>.ucan
+	// alongside the manifest and registers it as seedable.
+	contentMinter ContentUCANMinterFn
 
 	// delegationSource is the producer-side Authority UCAN source.
 	// Same cycle-avoidance rationale as manifestSigner. Production
@@ -532,15 +532,15 @@ func (d *Downloader) SetManifestSelfCheck(fn ManifestSelfCheckFn) {
 	d.manifestSelfCheck = fn
 }
 
-// SetManifestSigner installs the producer-side signing callback used
-// by RollingV2Publisher.Publish to sign each generation's bytes and
-// persist a chain.v2.<seq>.sig sidecar. Wired from outside this
-// package (which holds the node's secp256k1 key material), typically
-// at node startup. Pass nil to disable (default).
-func (d *Downloader) SetManifestSigner(fn ManifestSignerFn) {
+// SetContentUCANMinter installs the producer-side Content UCAN minting
+// callback used by RollingV2Publisher.Publish to mint each
+// generation's chain.v2.<enr-fp>.<seq>.ucan sidecar. Wired from
+// outside this package (which holds the node's secp256k1 key
+// material), typically at node startup. Pass nil to disable (default).
+func (d *Downloader) SetContentUCANMinter(fn ContentUCANMinterFn) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	d.manifestSigner = fn
+	d.contentMinter = fn
 }
 
 // SetDelegationSource installs the producer-side Authority UCAN source
@@ -779,23 +779,23 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
 	}
-	// Wire the producer-side self-check + signer (if configured
-	// externally). Per
-	// docs/plans/20260515-three-layer-snapshot-distribution.md the
-	// self-check fail-loud halts the publish (caller at ~line 545
-	// logs Warn; node continues running); the signer produces the
-	// chain.v2.<seq>.sig sidecar that protects against MITM
-	// redistributors.
+	// Wire the producer-side self-check + Content UCAN minter +
+	// Authority UCAN source (if configured externally). The self-check
+	// fail-loud halts the publish (caller logs Warn; node continues
+	// running); the content minter produces the
+	// chain.v2.<enr-fp>.<seq>.ucan attestation; the delegation source
+	// pairs the Authority UCAN. See
+	// docs/plans/20260520-chaintoml-ucan-flow-spec.md.
 	d.lock.RLock()
 	selfCheck := d.manifestSelfCheck
-	signer := d.manifestSigner
+	contentMinter := d.contentMinter
 	delegationSource := d.delegationSource
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
 	}
-	if signer != nil {
-		pub.SetSigner(signer)
+	if contentMinter != nil {
+		pub.SetContentUCANMinter(contentMinter)
 	}
 	if delegationSource != nil {
 		pub.SetDelegationSource(delegationSource)

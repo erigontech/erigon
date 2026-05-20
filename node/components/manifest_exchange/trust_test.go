@@ -132,7 +132,7 @@ func compressedPub(p *ecdsa.PublicKey) []byte {
 func writeV2WithAuthorityUCANHash(t *testing.T, dir string, name string, ucanHashHex string) string {
 	t.Helper()
 	v2 := downloader.ChainTomlV2{
-		Version:  2,
+		Version:           2,
 		AuthorityUCANHash: ucanHashHex,
 		Domains: map[string]*downloader.DomainManifest{
 			"accounts": {

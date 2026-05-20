@@ -552,9 +552,10 @@ func TestChainTomlV2ToItems_Nil(t *testing.T) {
 	require.Nil(t, ChainTomlV2ToItems(nil))
 }
 
-// TestRollingV2Publisher_Signer_NilDefault pins that with no signer
-// configured, Publish proceeds unchanged and no .sig file is written.
-func TestRollingV2Publisher_Signer_NilDefault(t *testing.T) {
+// TestRollingV2Publisher_ContentUCAN_NilDefault pins that with no
+// content minter configured, Publish proceeds unchanged and no .ucan
+// sidecar is written.
+func TestRollingV2Publisher_ContentUCAN_NilDefault(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
@@ -564,91 +565,88 @@ func TestRollingV2Publisher_Signer_NilDefault(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)),
-		"no signer configured → no .sig sidecar written")
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)),
+		"no content minter configured → no .ucan sidecar written")
 }
 
-// TestRollingV2Publisher_Signer_WritesSidecar pins that a configured
-// signer produces a .sig sidecar next to the .toml file, carrying the
-// returned bytes.
-func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
+// TestRollingV2Publisher_ContentUCAN_WritesSidecar pins that a
+// configured content minter produces a .ucan sidecar next to the
+// .toml file, carrying the returned bytes, and is called with the
+// exact bytes the .toml file on disk holds.
+func TestRollingV2Publisher_ContentUCAN_WritesSidecar(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	var signedBytes []byte
-	pub.SetSigner(func(data []byte) ([]byte, error) {
-		signedBytes = data
-		// 64-byte deterministic stub — same length as a real ECDSA sig.
-		sig := make([]byte, 64)
-		for i := range sig {
-			sig[i] = byte(i)
-		}
-		return sig, nil
+	var mintedOver []byte
+	ucan := []byte("content-ucan-cbor-stub")
+	pub.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
+		mintedOver = tomlBytes
+		return ucan, nil
 	})
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x31), 0, nil)
 	require.NoError(t, err)
 
-	sigPath := filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0))
-	require.FileExists(t, sigPath, ".sig sidecar must be written")
+	ucanPath := filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0))
+	require.FileExists(t, ucanPath, ".ucan sidecar must be written")
 
-	// Verify .sig contains exactly what the signer returned.
-	got, err := os.ReadFile(sigPath)
+	// Verify .ucan contains exactly what the minter returned.
+	got, err := os.ReadFile(ucanPath)
 	require.NoError(t, err)
-	require.Len(t, got, 64, "signature length matches what signer returned")
+	require.Equal(t, ucan, got, ".ucan contains exactly what the minter returned")
 
-	// Verify the signer was called with the same bytes the .toml file
-	// on disk contains — this is the MITM-defence invariant: signature
-	// is over the EXACT bytes any receiver will see.
+	// Verify the minter was called with the same bytes the .toml file
+	// on disk contains — the Content UCAN binds chain.v2:hash:<sha256>
+	// over the EXACT bytes any receiver will see.
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
-	require.Equal(t, tomlBytes, signedBytes,
-		"signer must receive the same bytes that get persisted — consumer verifies signature over file bytes")
+	require.Equal(t, tomlBytes, mintedOver,
+		"minter must receive the same bytes that get persisted — consumer verifies the attestation over file bytes")
 }
 
-// TestRollingV2Publisher_Signer_FailureRollsBack pins that a signer
-// error aborts the publish cleanly: the .toml file just written gets
-// removed (don't seed unsigned content), no .sig is written, no
-// history is advanced.
-func TestRollingV2Publisher_Signer_FailureRollsBack(t *testing.T) {
+// TestRollingV2Publisher_ContentUCAN_FailureRollsBack pins that a
+// minter error aborts the publish cleanly: the .toml file just
+// written gets removed (don't seed unattested content), no .ucan is
+// written, no history is advanced.
+func TestRollingV2Publisher_ContentUCAN_FailureRollsBack(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	sentinel := errors.New("signing key unavailable")
-	pub.SetSigner(func(data []byte) ([]byte, error) {
+	sentinel := errors.New("operator key unavailable")
+	pub.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
 		return nil, sentinel
 	})
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x32), 0, nil)
 	require.ErrorIs(t, err, sentinel)
 
-	// .toml that was just written must be removed (don't seed unsigned).
+	// .toml that was just written must be removed (don't seed unattested).
 	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)),
-		"signer failure rolls back the .toml — must not leave unsigned content on disk")
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)))
+		"minter failure rolls back the .toml — must not leave unattested content on disk")
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)))
 	require.Empty(t, pub.History(),
-		"signer failure does not advance history")
+		"minter failure does not advance history")
 }
 
-// TestRollingV2Publisher_Signer_EvictionRemovesSig pins that when
-// the rolling buffer evicts a generation, the .sig sidecar is
-// removed alongside the .toml — no orphaned signatures left on disk.
-func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
+// TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN pins that
+// when the rolling buffer evicts a generation, its Content UCAN
+// sidecar is removed alongside the .toml — no orphaned attestations
+// left on disk.
+func TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	pub.SetSigner(func(data []byte) ([]byte, error) {
-		sig := make([]byte, 64)
-		return sig, nil
+	pub.SetContentUCANMinter(func(tomlBytes []byte) ([]byte, error) {
+		return []byte("u"), nil
 	})
 
 	// gen 0: lists accounts.0-1024 + storage.0-1024.
@@ -669,7 +667,7 @@ func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
 
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)),
-		"evicted generation's .sig is removed alongside its .toml")
-	require.FileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 1)))
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 0)),
+		"evicted generation's Content UCAN is removed alongside its .toml")
+	require.FileExists(t, filepath.Join(snapDir, ChainV2ContentUCANFileName(testENRFP, 1)))
 }

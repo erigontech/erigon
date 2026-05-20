@@ -25,7 +25,8 @@
 // is present in the publisher's current inventory (equivalently: in the
 // most recent generation written). The moment a merge retires a snapshot
 // file from inventory, any older generation that listed that name becomes
-// INVALID and is removed: the .toml + .sig + .ucan + their .torrent
+// INVALID and is removed: the .toml manifest, its Content UCAN, the
+// paired Authority UCAN, and their .torrent
 // sidecars are deleted from disk and dropped from the torrent client, and
 // the orphan snapshot names — names in the evicted generation that are
 // not in the current inventory and are therefore no longer seedable —
@@ -100,13 +101,15 @@ func ChainUCANFileName(enrFP string, seq uint64) string {
 	return fmt.Sprintf("%s.%s.%d.bin", ChainUCANBaseName, enrFP, seq)
 }
 
-// ChainV2SigFileName formats the signature sidecar filename paired with
-// chain.v2.<enr-fp>.<seq>.toml. The signature is over the .toml bytes;
-// per docs/plans/20260515-three-layer-snapshot-distribution.md it is
-// the MITM-publisher defence — any redistributor that modifies the
-// .toml content invalidates the .sig.
-func ChainV2SigFileName(enrFP string, seq uint64) string {
-	return fmt.Sprintf("%s.%s.%d.sig", ChainTomlV2BaseName, enrFP, seq)
+// ChainV2ContentUCANFileName formats the Content UCAN sidecar filename
+// paired with chain.v2.<enr-fp>.<seq>.toml. The Content UCAN is a
+// self-issued snapshotauth delegation binding chain.v2:hash:<sha256>
+// to the .toml bytes; per
+// docs/plans/20260520-chaintoml-ucan-flow-spec.md it replaces the
+// interim .sig sidecar. Discovered by this name pattern — it carries
+// no manifest field.
+func ChainV2ContentUCANFileName(enrFP string, seq uint64) string {
+	return fmt.Sprintf("%s.%s.%d.ucan", ChainTomlV2BaseName, enrFP, seq)
 }
 
 // ParseChainTomlV2FileName extracts the ENR fingerprint and generation
@@ -191,20 +194,21 @@ type RollingV2Publisher struct {
 	// running (per direction: "node stops publishing, can still run").
 	selfCheck ManifestSelfCheckFn
 
-	// signer signs the bytes of each chain.v2.<seq>.toml file
-	// immediately after they're written. The returned signature is
-	// persisted as chain.v2.<seq>.sig in the same directory and
-	// registered as a seedable file. Per
-	// docs/plans/20260515-three-layer-snapshot-distribution.md, the
-	// signature is the MITM-publisher defence: redistributor peers can
-	// re-serve the .toml but cannot modify its bytes without
-	// invalidating the .sig.
+	// contentMinter mints a Content UCAN over the bytes of each
+	// chain.v2.<seq>.toml file immediately after they're written. The
+	// returned canonical-CBOR delegation is persisted as
+	// chain.v2.<enr-fp>.<seq>.ucan in the same directory and registered
+	// as a seedable file. Per
+	// docs/plans/20260520-chaintoml-ucan-flow-spec.md the Content UCAN
+	// replaces the interim .sig sidecar: it binds chain.v2:hash:<sha256>
+	// to the .toml bytes so a redistributor cannot modify them without
+	// invalidating the attestation.
 	//
 	// Wired via a callback — production supplies a closure that calls
-	// snapshotsync.SignAdvertisement with the node's ENR-matching
-	// secp256k1 private key. nil means signing is skipped (fine for
-	// tests; production wires this via SetSigner).
-	signer ManifestSignerFn
+	// snapshotauth.MintContentUCAN with the node's ENR-matching
+	// secp256k1 key. nil means no Content UCAN is written (fine for
+	// tests; production wires this via SetContentUCANMinter).
+	contentMinter ContentUCANMinterFn
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -216,20 +220,19 @@ type RollingV2Publisher struct {
 // next inventory-change-triggered publish will retry.
 type ManifestSelfCheckFn func(manifest *ChainTomlV2) error
 
-// ManifestSignerFn is the type of the producer-side signing
-// callback (see RollingV2Publisher.signer). Receives the bytes of
-// the just-written chain.v2.<seq>.toml file; returns the
-// signature bytes (64 bytes [R||S] from
-// snapshotsync.SignAdvertisement). Persistence as
-// chain.v2.<seq>.sig sidecar and torrent registration happen
-// inside Publish — the signer is content-only.
+// ContentUCANMinterFn is the type of the producer-side Content UCAN
+// minting callback (see RollingV2Publisher.contentMinter). Receives
+// the bytes of the just-written chain.v2.<seq>.toml file; returns the
+// canonical-CBOR Content UCAN (from snapshotauth.MintContentUCAN).
+// Persistence as the chain.v2.<enr-fp>.<seq>.ucan sidecar and torrent
+// registration happen inside Publish — the minter is content-only.
 //
 // Returning an error aborts the publish for this generation: the
-// .toml file is removed (don't seed unsigned content), no .sig is
-// written, no .torrent is built, history is not advanced. The
-// publish caller logs at Warn and the node continues running, same
-// as for self-check failure.
-type ManifestSignerFn func(data []byte) ([]byte, error)
+// .toml file is removed (don't seed unattested content), no .ucan is
+// written, no .torrent is built, history is not advanced. The publish
+// caller logs at Warn and the node continues running, same as for
+// self-check failure.
+type ContentUCANMinterFn func(tomlBytes []byte) ([]byte, error)
 
 // DelegationSource yields the snapshotauth UCAN attestation bytes (canonical
 // CBOR) that should be paired with the next published V2 manifest. Returning
@@ -262,15 +265,16 @@ func (r *RollingV2Publisher) SetSelfCheck(fn ManifestSelfCheckFn) {
 	r.selfCheck = fn
 }
 
-// SetSigner configures the producer-side signing callback called
-// on every Publish() after the .toml file is written. Pass nil to
-// clear (no signing; default for tests/harness). Production callers
-// wire a closure that calls snapshotsync.SignAdvertisement with the
-// node's ENR-matching secp256k1 private key.
-func (r *RollingV2Publisher) SetSigner(fn ManifestSignerFn) {
+// SetContentUCANMinter configures the producer-side Content UCAN
+// minting callback called on every Publish() after the .toml file is
+// written. Pass nil to clear (no Content UCAN; default for
+// tests/harness). Production callers wire a closure that calls
+// snapshotauth.MintContentUCAN with the node's ENR-matching secp256k1
+// key.
+func (r *RollingV2Publisher) SetContentUCANMinter(fn ContentUCANMinterFn) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.signer = fn
+	r.contentMinter = fn
 }
 
 // SetENRFingerprint sets an explicit ENR fingerprint, overriding the
@@ -358,8 +362,8 @@ func loadManifestNames(path string) (map[string]struct{}, error) {
 // retained generation is valid iff its set ⊆ the current generation's
 // set.
 //
-// chain.v2.*.toml / .sig / .ucan sidecars are NOT in the result — they
-// are the publisher's own per-generation artefacts, not advertised
+// chain.v2.*.toml / .ucan + chain.ucan.* sidecars are NOT in the result
+// — they are the publisher's own per-generation artefacts, not advertised
 // snapshot files. Their lifecycle is handled by evictGenerationLocked.
 func manifestFileNames(m *ChainTomlV2) map[string]struct{} {
 	out := make(map[string]struct{})
@@ -496,37 +500,37 @@ func (r *RollingV2Publisher) Publish(
 		return metainfo.Hash{}, fmt.Errorf("save %s: %w", name, err)
 	}
 
-	// Producer signing: sign the just-written .toml bytes and persist
-	// chain.v2.<seq>.sig alongside. Per
-	// docs/plans/20260515-three-layer-snapshot-distribution.md the
-	// signature is the MITM-publisher defence — redistributors can
-	// re-serve the .toml but cannot modify its bytes without
-	// invalidating the .sig. Failure here removes the .toml that was
-	// just written (don't seed unsigned content) and aborts the
-	// publish for this generation; the caller logs at Warn and the
-	// node continues running.
-	if r.signer != nil {
-		sigBytes, err := r.signer(tomlBytes)
+	// Producer Content UCAN: mint a Content UCAN over the just-written
+	// .toml bytes and persist chain.v2.<enr-fp>.<seq>.ucan alongside.
+	// Per docs/plans/20260520-chaintoml-ucan-flow-spec.md the Content
+	// UCAN replaces the interim .sig — it binds chain.v2:hash:<sha256>
+	// to the .toml so a redistributor cannot modify the bytes without
+	// invalidating the attestation. Failure here removes the .toml that
+	// was just written (don't seed unattested content) and aborts the
+	// publish for this generation; the caller logs at Warn and the node
+	// continues running.
+	if r.contentMinter != nil {
+		ucanBytes, err := r.contentMinter(tomlBytes)
 		if err != nil {
 			_ = dir.RemoveFile(path)
-			return metainfo.Hash{}, fmt.Errorf("publisher signing %s: %w", name, err)
+			return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, err)
 		}
-		sigName := ChainV2SigFileName(enrFP, nextSeq)
-		sigPath := filepath.Join(r.snapDir, sigName)
-		if err := saveChainTomlFile(sigPath, sigBytes); err != nil {
+		cucanName := ChainV2ContentUCANFileName(enrFP, nextSeq)
+		cucanPath := filepath.Join(r.snapDir, cucanName)
+		if err := saveChainTomlFile(cucanPath, ucanBytes); err != nil {
 			_ = dir.RemoveFile(path)
-			return metainfo.Hash{}, fmt.Errorf("save %s: %w", sigName, err)
+			return metainfo.Hash{}, fmt.Errorf("save %s: %w", cucanName, err)
 		}
-		if _, err := BuildTorrentIfNeed(ctx, sigName, r.snapDir, r.torrentFS); err != nil {
+		if _, err := BuildTorrentIfNeed(ctx, cucanName, r.snapDir, r.torrentFS); err != nil {
 			_ = dir.RemoveFile(path)
-			_ = dir.RemoveFile(sigPath)
-			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", sigName, err)
+			_ = dir.RemoveFile(cucanPath)
+			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", cucanName, err)
 		}
 		if r.downloader != nil {
-			if err := r.downloader.AddNewSeedableFile(ctx, sigName); err != nil {
+			if err := r.downloader.AddNewSeedableFile(ctx, cucanName); err != nil {
 				_ = dir.RemoveFile(path)
-				_ = dir.RemoveFile(sigPath)
-				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", sigName, err)
+				_ = dir.RemoveFile(cucanPath)
+				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", cucanName, err)
 			}
 		}
 	}
@@ -637,31 +641,31 @@ func isSubsetOf(a, b map[string]struct{}) bool {
 	return true
 }
 
-// evictGenerationLocked removes the V2 + paired UCAN + paired
-// signature artefacts for a single seq. UCAN/.sig files may not
-// exist (delegation source / signer unset for that generation);
-// RemoveFile on a missing path is a silent no-op. Caller must hold
-// r.mu.
+// evictGenerationLocked removes the V2 manifest + its paired Content
+// UCAN + the paired Authority UCAN sidecar for a single seq. The UCAN
+// files may not exist (delegation source / content minter unset for
+// that generation); RemoveFile on a missing path is a silent no-op.
+// Caller must hold r.mu.
 //
-// Only the per-generation artefacts (.toml/.sig/.ucan + their
-// .torrent sidecars) are removed here. Unseeding orphan snapshot
-// files is done by evictInvalidLocked once the full set of evictions
-// for this Publish is known.
+// Only the per-generation artefacts (.toml + .ucan + .bin + their
+// .torrent sidecars) are removed here. Unseeding orphan snapshot files
+// is done by evictInvalidLocked once the full set of evictions for
+// this Publish is known.
 func (r *RollingV2Publisher) evictGenerationLocked(enrFP string, seq uint64) {
 	tomlName := ChainTomlV2FileName(enrFP, seq)
-	ucanName := ChainUCANFileName(enrFP, seq)
-	sigName := ChainV2SigFileName(enrFP, seq)
+	authorityUCANName := ChainUCANFileName(enrFP, seq)
+	contentUCANName := ChainV2ContentUCANFileName(enrFP, seq)
 	if r.downloader != nil {
 		r.downloader.DropTorrentByName(tomlName)
-		r.downloader.DropTorrentByName(ucanName)
-		r.downloader.DropTorrentByName(sigName)
+		r.downloader.DropTorrentByName(authorityUCANName)
+		r.downloader.DropTorrentByName(contentUCANName)
 	}
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName+".torrent"))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, ucanName+".torrent"))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, sigName))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, sigName+".torrent"))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, authorityUCANName))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, authorityUCANName+".torrent"))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName))
+	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName+".torrent"))
 }
 
 // Cleanup removes any chain.v2.<seq>.toml + chain.ucan.<seq>.bin file
