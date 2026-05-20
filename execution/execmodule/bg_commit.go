@@ -117,20 +117,44 @@ func (e *ExecModule) enqueueCommit(gen *commitGen) {
 // foreground execution is idle, so the commit never overlaps a foreground
 // roTx. An in-flight commit is never aborted; a foreground op that arrives
 // mid-commit makes the next iteration wait.
+//
+// On commitWorkerStop it drains any still-queued generations (so a shutdown
+// never drops a not-yet-landed commit) and exits; commitWg lets WaitIdle
+// block until the worker — and its in-flight commit tx — are done before
+// DB-close.
 func (e *ExecModule) commitWorker() {
-	for gen := range e.commitCh {
-		e.waitForegroundIdle()
-		err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			e.logger.Error("background commit failed", "err", err)
+	defer e.commitWg.Done()
+	for {
+		select {
+		case gen := <-e.commitCh:
+			e.runCommit(gen)
+		case <-e.commitWorkerStop:
+			for {
+				select {
+				case gen := <-e.commitCh:
+					e.runCommit(gen)
+				default:
+					return
+				}
+			}
 		}
-		// roTx is rolled back inside runForkchoiceFlushCommit between Flush
-		// and Commit; this is a safety net (Rollback is idempotent).
-		gen.roTx.Rollback()
-		e.markGenCommitted(gen)
-		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
-			dispatcher.PublishOverlay(nil)
-		}
+	}
+}
+
+// runCommit flushes + commits one generation's delta in a foreground-free
+// window. Called only by commitWorker.
+func (e *ExecModule) runCommit(gen *commitGen) {
+	e.waitForegroundIdle()
+	err := e.runPostForkchoice(gen.sd, gen.roTx, gen.finishProgressBefore, gen.isSynced, gen.initialCycle)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		e.logger.Error("background commit failed", "err", err)
+	}
+	// roTx is rolled back inside runForkchoiceFlushCommit between Flush and
+	// Commit; this is a safety net (Rollback is idempotent).
+	gen.roTx.Rollback()
+	e.markGenCommitted(gen)
+	if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+		dispatcher.PublishOverlay(nil)
 	}
 }
 

@@ -233,6 +233,12 @@ type ExecModule struct {
 	fgIdle   *sync.Cond
 	gens     []*commitGen
 	commitCh chan *commitGen
+	// commitWorker lifecycle: commitWorkerStop signals the worker to drain
+	// and exit; commitWg tracks it so shutdown (WaitIdle) waits for the
+	// worker — and its in-flight commit txs — to finish before DB-close.
+	commitWorkerStop chan struct{}
+	commitStopOnce   sync.Once
+	commitWg         sync.WaitGroup
 
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache  *cache.StateCache
@@ -303,9 +309,11 @@ func NewExecModule(
 	// Start the background-commit worker (gate item 2). It pulls completed
 	// generations off commitCh and commits each in a foreground-free
 	// window. The buffered channel keeps the foreground FCU's hand-off
-	// non-blocking.
+	// non-blocking. WaitIdle stops the worker before DB-close.
 	em.fgIdle = sync.NewCond(&em.fgMu)
 	em.commitCh = make(chan *commitGen, 1024)
+	em.commitWorkerStop = make(chan struct{})
+	em.commitWg.Add(1)
 	go em.commitWorker()
 
 	return em
@@ -318,6 +326,16 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 		return // context cancelled — best effort
 	}
 	e.fgRelease()
+	// Stop the background-commit worker and wait for it to drain its queue
+	// (including any in-flight commit tx) so DB-close does not race it.
+	e.stopCommitWorker()
+}
+
+// stopCommitWorker signals the background-commit worker to drain and exit,
+// then waits for it. Idempotent.
+func (e *ExecModule) stopCommitWorker() {
+	e.commitStopOnce.Do(func() { close(e.commitWorkerStop) })
+	e.commitWg.Wait()
 }
 
 // ForkValidator returns the fork validator owned by this module.
