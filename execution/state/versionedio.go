@@ -273,17 +273,25 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
 			if destructed, ok := res.Value().(bool); ok && destructed {
 				destructTxIndex := res.DepIdx()
+				// Cap at vr.txIndex-1 so a prior incarnation of the same
+				// tx (whose writes still sit in the versionMap at
+				// (vr.txIndex, prevIncarnation)) doesn't masquerade as
+				// a "later tx revived this account." versionMap.Read
+				// excludes the current tx via floor(txIdx-1); the
+				// LatestTxIndex bound is inclusive, so subtract one
+				// explicitly to keep both consistent.
+				revivalLimit := vr.txIndex - 1
 				revived := false
-				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+				if hi, ok := vr.versionMap.LatestTxIndex(address, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 					revived = true
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
 				if !revived {
-					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, vr.txIndex); ok && hi > destructTxIndex {
+					if hi, ok := vr.versionMap.LatestTxIndex(address, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 						revived = true
 					}
 				}
@@ -804,17 +812,32 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// tipInsideBlock failing with gas exactly 4800 short under
 		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
 		destructTxIndex := res.DepIdx()
+		// Cap the revival lookup at s.txIndex-1 so that a prior incarnation
+		// of the CURRENT tx — whose writes still sit in the versionMap at
+		// (s.txIndex, prevIncarnation) until the new incarnation rewrites
+		// them — doesn't masquerade as a "later tx revived this account."
+		// versionMap.Read uses floor(txIdx-1) for the same reason, but
+		// LatestTxIndex's upper bound is inclusive, so we have to subtract
+		// one explicitly. Without this, TX3 incarnation 1 of
+		// TestDeleteRecreateSlotsAcrossManyBlocks block 1 sees TX3
+		// incarnation 0's BalancePath write at txIndex=3, declares a
+		// spurious revival across TX2's SD at txIndex=2, falls through
+		// the SD short-circuit, reads TX1's stale hash(aaCode) for the
+		// CREATE2 collision check, fails the CREATE2 with
+		// ContractAddressCollision, and BB consumes the failed-child
+		// gas — that's the residual +1602 manifestation.
+		revivalLimit := s.txIndex - 1
 		revived := false
-		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 			revived = true
 		}
 		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 				revived = true
 			}
 		}
 		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, s.txIndex); ok && hi > destructTxIndex {
+			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
 				revived = true
 			}
 		}

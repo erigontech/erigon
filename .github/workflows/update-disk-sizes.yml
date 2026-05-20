@@ -162,9 +162,11 @@ jobs:
 
       - name: Configure git
         if: steps.diff.outputs.changed == 'true'
+        env:
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
+          git config user.name "github-workflow-update-disk-sizes-run-${RUN_ID}"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Commit and push to update branch
