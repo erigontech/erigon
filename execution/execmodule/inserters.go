@@ -118,14 +118,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			balBytes := block.BlockAccessList
-			if len(balBytes) == 0 {
-				balBytes, err = types.EncodeBlockAccessListBytes(nil)
-				if err != nil {
-					return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
-				}
-			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, balBytes); err != nil {
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, header.Hash(), height, block.BlockAccessList); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}
