@@ -289,14 +289,29 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 					fromStep, toStep, loadErr, validation.ErrPause)
 			}
 		case errors.Is(loadErr, integrity.ErrCommitmentRangeMismatch):
-			// GetLatestFromFiles returned the 'state' record from a
-			// wider, merged file — this step file has just been
-			// superseded by a merge. Transient: the stale step entry is
-			// dropped by the next disk-reconcile sweep. Pause rather
-			// than fail; a quarantine tick here would strand a file
-			// that is about to be removed anyway.
-			return fmt.Errorf("commitment step [%d, %d): %w; pausing: %w",
-				fromStep, toStep, loadErr, validation.ErrPause)
+			// The aggregator has merged this commitment file into a
+			// wider file: GetLatestFromFiles for this txnum range now
+			// returns the merged file's record, whose [start, end) is
+			// wider than this step file's. A strictly-wider returned
+			// range can only mean one thing — this step file was merged
+			// away. It is obsolete, NOT corrupt: the merged file is a
+			// separate inventory entry and is validated independently,
+			// and this entry is dropped by the storage Provider's
+			// onFilesDelete eager reconcile once the merge deletes the
+			// file from disk.
+			//
+			// Report success: validating a merged-away file is moot,
+			// and a merge must produce no validation noise. Failing
+			// would quarantine a perfectly good (if obsolete) file;
+			// pausing would re-run this every sweep until reconcile
+			// catches up — both are churn over a non-event. Return nil
+			// before the binding-registration block: the merged file
+			// registers the (step, block) binding for this range.
+			if v.Logger != nil {
+				v.Logger.Debug("[storage] commitment file superseded by merge — obsolete step entry, skipping validation",
+					"file", files[0].Name, "step", fmt.Sprintf("[%d, %d)", fromStep, toStep))
+			}
+			return nil
 		default:
 			// Phase A failure (ErrCommitmentRecordInvalid) or other
 			// real Phase C failure (ErrCommitmentTxNumRange) — propagate.
