@@ -14,7 +14,11 @@ jobs:
   claude-review:
     # Skip Dependabot PRs: the action rejects bot actors and CLAUDE_CODE_OAUTH_TOKEN
     # is not available to Dependabot workflows anyway.
-    if: github.actor != 'dependabot[bot]'
+    # Skip fork PRs: the action needs write access via OIDC token exchange,
+    # which fails on PRs from external forks with "User does not have write access".
+    if: >
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
