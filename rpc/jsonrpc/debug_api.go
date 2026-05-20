@@ -105,9 +105,12 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	// Stay on the committed view: api.ethBackend.SetHead operates on the
-	// committed DB, so the guard must agree with what setHead can see.
-	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
+	// Read head through the overlay so a no-op debug_setHead(N) issued during
+	// the bg-commit window (when the overlay says N but MDBX is still at N-1)
+	// doesn't false-positive "block N is in the future". The guard is a pure
+	// number comparison and SetHead itself runs through ethBackend on the
+	// committed DB after the bg goroutine releases the FCU semaphore.
+	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return err
 	}

@@ -94,10 +94,12 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
-	// Stay on the committed view: the binary search below calls HeaderByNumber
-	// against plain tx, so the upper bound must agree with what those reads
-	// can see.
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	// Route every block-table read (head, binary search, final block lookup)
+	// through the overlay so all bounds and reads agree on a single view
+	// during the bg-commit window. Only block tables are consulted — no
+	// SD-temporal reads — so overlay-aware is fully consistent here.
+	overlayTx := api.filters.WithOverlay(tx)
+	currentHeader := rawdb.ReadCurrentHeader(overlayTx)
 	if currentHeader == nil {
 		return nil, errors.New("current header not found")
 	}
@@ -116,7 +118,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	firstHeaderTime := firstHeader.Time
 
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +127,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, overlayTx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +136,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
-		currentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum))
+		currentHeader, err := api._blockReader.HeaderByNumber(ctx, overlayTx, uint64(blockNum))
 		if err != nil {
 			return false
 		}
@@ -173,7 +175,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	if err != nil {
 		return nil, err
 	}
-	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
+	response, err := buildBlockResponse(ctx, api._blockReader, overlayTx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
