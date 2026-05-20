@@ -5,9 +5,9 @@
     "size": 1025048557
   },
   "eest_devnet": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.1.1/fixtures_bal.tar.gz",
-    "sha256": "181946ec22da60bc5483a8ecb2e7f7dba02ae9c30183e7c02882a9d6a49f6eed",
-    "size": 609842087,
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests-bal%40v7.2.0/fixtures_bal.tar.gz",
+    "sha256": "fc1d9ae174cdd5db789068839999e6f83666cc79f7dac36e973d7616d9a2e2cf",
+    "size": 611743632,
     "branch": "devnets/bal/7"
   },
   "eest_stable": {

@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/runtime"
@@ -83,13 +84,13 @@ func benchConfig(b *testing.B, gasLimit uint64) (*runtime.Config, *state.IntraBl
 // deployContract deploys code at the given address in the state.
 func deployContract(statedb *state.IntraBlockState, addr accounts.Address, code []byte) {
 	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code)
+	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
 }
 
 // deployContractWithBalance deploys code and sets an ETH balance.
 func deployContractWithBalance(statedb *state.IntraBlockState, addr accounts.Address, code []byte, balance *uint256.Int) {
 	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code)
+	statedb.SetCode(addr, code, tracing.CodeChangeUnspecified)
 	statedb.SetBalance(addr, *balance, 0)
 }
 

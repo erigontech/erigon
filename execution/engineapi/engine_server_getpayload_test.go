@@ -24,7 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
@@ -72,6 +74,29 @@ func TestGetPayloadV4AcceptsEmptyRequestsBundle(t *testing.T) {
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.ExecutionRequests)
 	require.Len(t, resp.ExecutionRequests, 0)
+}
+
+func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
+	t.Parallel()
+
+	baseFee := uint256.NewInt(1_000_000_000)
+	emptyBALHash := empty.BlockAccessListHash
+	header := &types.Header{
+		Number:              *uint256.NewInt(101),
+		Time:                1,
+		BaseFee:             baseFee,
+		GasLimit:            30_000_000,
+		BlockAccessListHash: &emptyBALHash,
+	}
+	block := types.NewBlockWithHeader(header)
+	br := &types.BlockWithReceipts{Block: block, BlockAccessList: make(types.BlockAccessList, 0), Requests: make(types.FlatRequests, 0)}
+
+	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
+	require.NoError(t, err)
+
+	emptyBAL, err := types.EncodeBlockAccessListBytes(make(types.BlockAccessList, 0))
+	require.NoError(t, err)
+	require.Equal(t, hexutil.Bytes(emptyBAL), resp.ExecutionPayload.BlockAccessList)
 }
 
 func newProposingEngineServerForGetPayloadTests(stub execmodule.ExecutionModule) *EngineServer {
