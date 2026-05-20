@@ -210,6 +210,13 @@ type BlocksFreezing struct {
 	// per-chain default (snapcfg.GetEmbeddedTrustRoots). "any" → trust
 	// every peer even when the binary ships a populated default.
 	TrustRoots string
+
+	// QuorumFloor overrides the canonical quorum floor Q_floor — the
+	// minimum number of distinct trust-verified publishers that must
+	// advertise an entry before it is promoted to canonical
+	// (--snapshot.quorum). 0 → use the per-chain default
+	// (snapcfg.QuorumConfigFor).
+	QuorumFloor int
 }
 
 func (s BlocksFreezing) String() string {

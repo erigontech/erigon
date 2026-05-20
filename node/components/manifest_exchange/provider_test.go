@@ -390,7 +390,7 @@ func TestCanonicalValidatorFilters(t *testing.T) {
 	// Wire a validator that drops everything except a single block
 	// entry — simulates "every entry except headers.seg disagrees
 	// with canonical".
-	e.p.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+	e.p.SetCanonicalValidator(func(_ []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
 		require.NotNil(t, adv)
 		return &downloader.ChainTomlV2{
 			Version: downloader.ChainTomlV2Version,
@@ -431,7 +431,7 @@ func TestCanonicalValidatorFilters(t *testing.T) {
 func TestCanonicalValidatorRejectsFullyFiltered(t *testing.T) {
 	e := newEnv(t)
 
-	e.p.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+	e.p.SetCanonicalValidator(func(_ []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
 		return nil // entire manifest invalid against canonical
 	})
 

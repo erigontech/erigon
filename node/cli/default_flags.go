@@ -79,6 +79,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.JWTSecretPath,
 	&utils.SnapshotDelegationPath,
 	&utils.SnapshotTrustRoots,
+	&utils.SnapshotQuorumFlag,
 	&utils.HttpCompressionFlag,
 	&utils.HTTPCORSDomainFlag,
 	&utils.HTTPVirtualHostsFlag,

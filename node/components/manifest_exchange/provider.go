@@ -119,7 +119,13 @@ type Provider struct {
 // validated subset (entries whose (name, hash) appear in at least one
 // canonical version). Production wires this to a closure calling
 // snapshotsync.ValidateAdvertisement; tests/harness leave it nil.
-type CanonicalValidatorFn func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2
+//
+// issuer is the manifest publisher's trust-verified UCAN issuer pubkey
+// — the Sybil boundary the Layer 1 quorum view counts distinct
+// publishers by. It is empty when the trust gate is not configured (no
+// verified issuer), in which case the callback cannot feed the quorum
+// view and falls back to the static canonical set.
+type CanonicalValidatorFn func(issuer []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2
 
 // SetCanonicalValidator installs the consumer-side validation
 // callback called on every received peer manifest. The callback
@@ -418,11 +424,16 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash,
 		return
 	}
 
-	// Trust gate. Skipped entirely when trust is unconfigured.
+	// Trust gate. Skipped entirely when trust is unconfigured. On
+	// success the verified UCAN issuer is the compressed peer pubkey
+	// (gateOnUCAN step 3 enforces cu.Issuer == compressed(peerPub)); it
+	// is the Sybil identity the Layer 1 quorum view counts by.
+	var issuer []byte
 	if cfg != nil {
 		if !p.gateOnUCAN(ctx, peerID, data, manifest, contentUCANHash, peerIP, peerPort, peerPub, cfg, state, now, logger) {
 			return
 		}
+		issuer = compressedFromECDSA(peerPub)
 	}
 
 	// Consumer-side canonical validation per the three-layer model
@@ -431,7 +442,7 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash,
 	// canonical version. The peer's other valid entries pass through;
 	// only mismatches are filtered.
 	if validator != nil {
-		manifest = validator(manifest)
+		manifest = validator(issuer, manifest)
 		if manifest == nil {
 			logger.Warn("[manifest_exchange] peer manifest fully filtered against canonical",
 				"peer", peerID)

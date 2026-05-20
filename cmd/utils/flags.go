@@ -359,6 +359,12 @@ var (
 		Value: "",
 	}
 
+	SnapshotQuorumFlag = cli.IntFlag{
+		Name:  "snapshot.quorum",
+		Usage: "Override the canonical quorum floor — the minimum number of distinct trust-verified publishers that must advertise a snapshot before it is promoted to canonical. 0 uses the per-chain default.",
+		Value: 0,
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
@@ -1992,6 +1998,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
 	cfg.Snapshot.DelegationPath = ctx.String(SnapshotDelegationPath.Name)
 	cfg.Snapshot.TrustRoots = ctx.String(SnapshotTrustRoots.Name)
+	cfg.Snapshot.QuorumFloor = ctx.Int(SnapshotQuorumFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot

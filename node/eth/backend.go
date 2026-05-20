@@ -628,14 +628,48 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			// can re-seed peers' manifests for peers that have gone
 			// offline.
 			mxChainName := config.Genesis.Config.ChainName
-			mx.SetCanonicalValidator(func(adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
-				cfg, known := snapcfg.KnownCfg(mxChainName)
-				if !known || cfg == nil {
-					return adv // no canonical loaded → pass through (defensive)
+
+			// Layer 1 canonical quorum view
+			// (docs/plans/20260520-chaintoml-ucan-flow-spec.md). When a
+			// genesis v0 has been pinned into the datadir by
+			// `erigon snapshots genesis`, the consumer-side filter runs
+			// against a live view: genesis ∪ entries quorum-promoted
+			// from trust-verified peer advertisements. Absent a pinned
+			// genesis the filter uses the static embedded preverified
+			// set, unchanged.
+			genesisItems, genesisPinned, gerr := snapcfg.LoadPinnedGenesis(dirs.Snap)
+			if gerr != nil {
+				return nil, fmt.Errorf("loading pinned canonical genesis: %w", gerr)
+			}
+			var canonicalView *snapshotsync.CanonicalView
+			if genesisPinned {
+				qc := snapcfg.QuorumConfigFor(mxChainName)
+				if config.Snapshot.QuorumFloor > 0 {
+					qc.QFloor = config.Snapshot.QuorumFloor
+				}
+				canonicalView = snapshotsync.NewCanonicalView(genesisItems, qc)
+				logger.Info("manifest_exchange: canonical quorum view enabled",
+					"genesis_entries", len(genesisItems), "quorum_floor", qc.QFloor)
+			}
+
+			mx.SetCanonicalValidator(func(issuer []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
+				advItems := downloader.ChainTomlV2ToItems(adv)
+				var canon snapcfg.PreverifiedItems
+				if canonicalView != nil {
+					if len(issuer) > 0 {
+						canonicalView.Observe(issuer, advItems, time.Now())
+					}
+					canon = canonicalView.Canonical()
+				} else {
+					cfg, known := snapcfg.KnownCfg(mxChainName)
+					if !known || cfg == nil {
+						return adv // no canonical loaded → pass through (defensive)
+					}
+					canon = cfg.Preverified.Items
 				}
 				validItems := snapshotsync.ValidateAdvertisement(
-					downloader.ChainTomlV2ToItems(adv),
-					[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
+					advItems,
+					[]snapcfg.PreverifiedItems{canon},
 				)
 				if len(validItems) == 0 {
 					return nil // every entry filtered → reject wholesale
