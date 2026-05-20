@@ -19,6 +19,7 @@
 package era
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"os"
@@ -201,4 +202,113 @@ func TestReadReferenceEra1(t *testing.T) {
 		t.Fatal("no blocks verified against state.block_roots")
 	}
 	t.Logf("era-1: %d blocks decoded, %d verified against state.block_roots", len(e.Blocks), verified)
+}
+
+func TestRoundTripReferenceEra1(t *testing.T) {
+	path := referenceEra1Path(t)
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	_, cfg, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	if err != nil {
+		t.Fatalf("mainnet config: %v", err)
+	}
+
+	// Decode the reference file.
+	e1, err := ReadEra(f, cfg)
+	if err != nil {
+		t.Fatalf("ReadEra (reference): %v", err)
+	}
+
+	// Re-encode it with our writer.
+	var buf bytes.Buffer
+	if err := WriteEra(&buf, e1); err != nil {
+		t.Fatalf("WriteEra: %v", err)
+	}
+
+	// Our output must still scan as a structurally valid single-group .era.
+	groups, err := Scan(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("Scan (our output): %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("our output: %d groups, want 1", len(groups))
+	}
+
+	// Decode our output and compare to the reference, field by field.
+	e2, err := ReadEra(bytes.NewReader(buf.Bytes()), cfg)
+	if err != nil {
+		t.Fatalf("ReadEra (our output): %v", err)
+	}
+
+	if e2.Number != e1.Number {
+		t.Errorf("era number: ours %d, reference %d", e2.Number, e1.Number)
+	}
+	if len(e2.Blocks) != len(e1.Blocks) {
+		t.Fatalf("block count: ours %d, reference %d", len(e2.Blocks), len(e1.Blocks))
+	}
+
+	// SSZ is canonical: a decode→encode round-trip is byte-identical, so
+	// every block and the state must hash-tree-root identically.
+	for i := range e1.Blocks {
+		r1, err := e1.Blocks[i].Block.HashSSZ()
+		if err != nil {
+			t.Fatal(err)
+		}
+		r2, err := e2.Blocks[i].Block.HashSSZ()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r1 != r2 {
+			t.Fatalf("block %d (slot %d) root mismatch after round-trip: %x vs %x",
+				i, e1.Blocks[i].Block.Slot, r1, r2)
+		}
+	}
+
+	s1, err := e1.State.HashSSZ()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := e2.State.HashSSZ()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s1 != s2 {
+		t.Fatalf("state root mismatch after round-trip: %x vs %x", s1, s2)
+	}
+
+	// And our output independently satisfies the era-spec integrity rule.
+	for _, blk := range e2.Blocks {
+		slot := blk.Block.Slot
+		if slot < 1 || slot > SlotsPerHistoricalRoot-1 {
+			continue
+		}
+		want, err := e2.State.GetBlockRootAtSlot(slot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := blk.Block.HashSSZ()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want != got {
+			t.Fatalf("our output: block root mismatch at slot %d", slot)
+		}
+	}
+
+	t.Logf("round-trip ok: %d blocks + state re-encoded, all roots match; "+
+		"reference %d bytes, ours %d bytes (snappy framing differs, payloads identical)",
+		len(e2.Blocks), fileSize(t, path), buf.Len())
+}
+
+func fileSize(t *testing.T, path string) int64 {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi.Size()
 }
