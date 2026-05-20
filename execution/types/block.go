@@ -341,7 +341,25 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+// DecodeHeader decodes one RLP-encoded header from b into dst, calling
+// dst.DecodeRLP directly. Returns rlp.ErrMoreThanOneValue if b has
+// trailing data after the header.
+func DecodeHeader(b []byte, dst *Header) error {
+	stream := rlp.NewBytesStream(b)
+	defer rlp.PutStream(stream)
+	if err := dst.DecodeRLP(stream); err != nil {
+		return err
+	}
+	if stream.Remaining() != 0 {
+		return rlp.ErrMoreThanOneValue
+	}
+	return nil
+}
+
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	// Clear cached hash so a reused *Header doesn't return a stale value.
+	h.hash.Store(nil)
+
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -383,7 +401,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if h.Time, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Time: %w", err)
 	}
-	if h.Extra, err = s.Bytes(); err != nil {
+	if h.Extra, err = s.AppendBytes(h.Extra[:0]); err != nil {
 		return fmt.Errorf("read Extra: %w", err)
 	}
 
@@ -395,7 +413,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
-		if h.AuRaSeal, err = s.Bytes(); err != nil {
+		if h.AuRaSeal, err = s.AppendBytes(h.AuRaSeal[:0]); err != nil {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
@@ -411,7 +429,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.BaseFee = nil
 		return s.ListEnd()
 	}
-	h.BaseFee = new(uint256.Int)
+	if h.BaseFee == nil {
+		h.BaseFee = new(uint256.Int)
+	}
 	if err = s.ReadUint256(h.BaseFee); err != nil {
 		return fmt.Errorf("read BaseFee: %w", err)
 	}
@@ -421,7 +441,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.WithdrawalsHash = nil
 		return s.ListEnd()
 	}
-	h.WithdrawalsHash = new(common.Hash)
+	if h.WithdrawalsHash == nil {
+		h.WithdrawalsHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.WithdrawalsHash[:]); err != nil {
 		return fmt.Errorf("read WithdrawalsHash: %w", err)
 	}
@@ -430,28 +452,32 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.BlobGasUsed = nil
 		return s.ListEnd()
 	}
-	var blobGasUsed uint64
-	if blobGasUsed, err = s.Uint64(); err != nil {
+	if h.BlobGasUsed == nil {
+		h.BlobGasUsed = new(uint64)
+	}
+	if *h.BlobGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
-	h.BlobGasUsed = &blobGasUsed
 
 	if !s.MoreDataInList() {
 		h.ExcessBlobGas = nil
 		return s.ListEnd()
 	}
-	var excessBlobGas uint64
-	if excessBlobGas, err = s.Uint64(); err != nil {
+	if h.ExcessBlobGas == nil {
+		h.ExcessBlobGas = new(uint64)
+	}
+	if *h.ExcessBlobGas, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
-	h.ExcessBlobGas = &excessBlobGas
 
 	// ParentBeaconBlockRoot
 	if !s.MoreDataInList() {
 		h.ParentBeaconBlockRoot = nil
 		return s.ListEnd()
 	}
-	h.ParentBeaconBlockRoot = new(common.Hash)
+	if h.ParentBeaconBlockRoot == nil {
+		h.ParentBeaconBlockRoot = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.ParentBeaconBlockRoot[:]); err != nil {
 		return fmt.Errorf("read ParentBeaconBlockRoot: %w", err)
 	}
@@ -461,7 +487,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.RequestsHash = nil
 		return s.ListEnd()
 	}
-	h.RequestsHash = new(common.Hash)
+	if h.RequestsHash == nil {
+		h.RequestsHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.RequestsHash[:]); err != nil {
 		return fmt.Errorf("read RequestsHash: %w", err)
 	}
@@ -471,7 +499,9 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.BlockAccessListHash = nil
 		return s.ListEnd()
 	}
-	h.BlockAccessListHash = new(common.Hash)
+	if h.BlockAccessListHash == nil {
+		h.BlockAccessListHash = new(common.Hash)
+	}
 	if err = s.ReadBytes(h.BlockAccessListHash[:]); err != nil {
 		return fmt.Errorf("read BlockAccessListHash: %w", err)
 	}
@@ -480,11 +510,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		h.SlotNumber = nil
 		return s.ListEnd()
 	}
-	var slotNumber uint64
-	if slotNumber, err = s.Uint64(); err != nil {
+	if h.SlotNumber == nil {
+		h.SlotNumber = new(uint64)
+	}
+	if *h.SlotNumber, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
-	h.SlotNumber = &slotNumber
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
@@ -506,18 +537,23 @@ type headerMarshaling struct {
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
-// Hash returns the block hash of the header, which is simply the keccak256 hash of its
-// RLP encoding.
-func (h *Header) Hash() (hash common.Hash) {
-	if h.mutable {
-		return RlpHash(h)
+// Hash returns the keccak256 hash of the header's RLP encoding.
+//
+// The cacheEntry variable is intentionally scoped to the miss branch:
+// taking &cacheEntry there forces only cacheEntry to escape. An earlier
+// formulation with a single named return had `h.hash.Store(&hash)` force
+// the return value to escape on every path including the cache hit.
+func (h *Header) Hash() common.Hash {
+	if !h.mutable {
+		if cached := h.hash.Load(); cached != nil {
+			return *cached
+		}
+		computed := RlpHash(h)
+		cacheEntry := computed
+		h.hash.Store(&cacheEntry)
+		return computed
 	}
-	if hash := h.hash.Load(); hash != nil {
-		return *hash
-	}
-	hash = RlpHash(h)
-	h.hash.Store(&hash)
-	return hash
+	return RlpHash(h)
 }
 
 // CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its

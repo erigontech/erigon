@@ -628,9 +628,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
-		dbg.Exec3Parallel = true // default for integration tool
-	}
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -704,7 +701,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer func() { tx.Rollback() }()
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)

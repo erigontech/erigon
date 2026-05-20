@@ -25,7 +25,7 @@ jobs:
         id: erigon
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Only cache the .tar.gz; the extracted dir is recreated by
           # tools/test-fixtures.sh on each run from the cached tarball.
@@ -71,7 +71,7 @@ jobs:
         id: erigon
 
       - name: Cache cl_mainnet tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: test-fixtures-cache/cl_mainnet.tar.gz
           key: test-fixtures-cl-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}

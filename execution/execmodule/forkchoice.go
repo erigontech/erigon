@@ -498,35 +498,43 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
 	}
-	// Run the forkchoice
-	initialCycle := limitedBigJump
-	firstCycle := false
+	// Run the forkchoice.
+	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
+	const smallBlockJumpThreshold = 16
+	headNum := fcuHeader.Number.Uint64()
+	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
-		InitialCycle:    initialCycle,
-		FirstCycle:      firstCycle,
-		PruneTimeout:    500 * time.Millisecond,
-		BeforeIteration: nil,
-		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
-			// Release the old RO snapshot before the flush so MDBX can
-			// reclaim retired pages while the RwTx is writing.
+		InitialCycle: initialCycle,
+		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			// Chain tip (!initialCycle): no in-loop work — post-RunLoop path
+			// handles flush+commit+prune.
+			if !initialCycle {
+				return nil
+			}
+			// Catchup: drain the agg-level collation+prune on its own RW tx.
 			roTx.Rollback()
-			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
+				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
+			}
+			return nil
+		},
+		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+			// Chain tip: post-RunLoop path commits.
+			if !initialCycle {
+				return nil, nil
+			}
+			commitRwTx, err := e.db.BeginTemporalRw(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
+			defer commitRwTx.Rollback() // safety net; idempotent after successful Commit
 			if err := sd.Flush(ctx, commitRwTx); err != nil {
-				commitRwTx.Rollback()
 				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
 			}
 			sd.ClearRam(true)
-			if err = commitRwTx.Commit(); err != nil {
+			if err := commitRwTx.Commit(); err != nil {
 				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
-			}
-			// In-loop PruneExecutionStage runs on the overlay (RO-backed
-			// MemoryMutation) and silently no-ops. Drain here on a real RW tx.
-			if _, pruneErr := e.runForkchoicePrune(initialCycle); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
-				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
@@ -873,29 +881,6 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-
-	// Pre-check (read-only): skip work on short chains with no snapshots /
-	// no need for pruning. Same gate as before; just lifted out of the RW
-	// path so we don't hold a write tx unnecessarily.
-	roTx, err := e.db.BeginTemporalRo(e.bacgroundCtx) //nolint:gocritic // closed below before CollateAndPruneIfNeeded opens its own RW tx
-	if err != nil {
-		return nil, err
-	}
-	defer roTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-	skip := false
-	currentHeader := rawdb.ReadCurrentHeader(roTx)
-	if currentHeader == nil {
-		skip = true
-	} else {
-		maxTxNum, txNumErr := rawdbv3.TxNums.Max(e.bacgroundCtx, roTx, currentHeader.Number.Uint64())
-		if txNumErr != nil || maxTxNum < (roTx.Debug().StepSize()*5)/4 {
-			skip = true
-		}
-	}
-	roTx.Rollback()
-	if skip {
-		return nil, nil
-	}
 
 	// Kick collation (build files) + prune via the same path that
 	// stageloop.StageLoopIteration uses. Without this call from the FCU

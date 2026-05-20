@@ -862,7 +862,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 	// the block at t=5 is the first Amsterdam block.
 	amsterdamTime := uint64(5)
 	cfg := &chain.Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         chain.EtHashRules,
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
@@ -876,7 +876,7 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
