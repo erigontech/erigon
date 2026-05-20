@@ -31,6 +31,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -237,6 +238,19 @@ type Deps struct {
 	// BuildMissedAccessors interprets workers strictly).
 	IndexWorkers int
 
+	// PostIndexedSeed, when set, runs as part of the orchestrator's
+	// postIndexed pipeline AFTER snapshots.OpenFolder +
+	// aggregator.OpenFolder and BEFORE InitialStateReady fires. The
+	// callback owns its own RW tx; the storage component is agnostic to
+	// what gets seeded. Production wires this from backend.go to a
+	// closure invoking rawdbreset.FillDBFromSnapshots, which populates
+	// kv.HeaderTD, canonical-hash pointers, etc. from frozen headers —
+	// without it, Caplin's BlockCollector.Flush fails with "parent's
+	// total difficulty not found" for blocks at the snapshot tip. See
+	// docs/plans/20260518-storage-owns-post-download-pipeline.md (C
+	// Step 3). nil → no-op (tests / tools that don't need MDBX seeding).
+	PostIndexedSeed func(ctx context.Context) error
+
 	SegmentsBuildLimiter *semaphore.Weighted
 	Logger               log.Logger
 }
@@ -438,6 +452,7 @@ func (p *Provider) Initialize(deps Deps) error {
 				if config.Snapshot.NoDownloader {
 					return
 				}
+				snapDir := config.Dirs.Snap
 				var toSeed []string
 				visit := func(e *snapshot.FileEntry) {
 					if e == nil || !e.Local {
@@ -445,6 +460,24 @@ func (p *Provider) Initialize(deps Deps) error {
 					}
 					relPath := snapshot.RelPathForName(e.Name)
 					if _, seen := alreadySeeded[relPath]; seen {
+						return
+					}
+					// Inventory-vs-disk drift guard: if inventory says
+					// Local but the file is missing from disk (typical
+					// after a merge supersedes a step file and the
+					// deletedFiles callback hasn't run yet, or after an
+					// out-of-band cleanup), don't hand the missing path
+					// to the downloader. Without this guard,
+					// BuildTorrentIfNeed's lstat fails inside Seed and
+					// the batch-rollback below re-queues every file in
+					// the batch every 10s, producing a noisy WARN loop
+					// that hides the real inventory-vs-disk drift.
+					// Treat the discovery as authoritative: remove the
+					// stale entry so the inventory converges to the
+					// on-disk truth.
+					if _, err := os.Lstat(filepath.Join(snapDir, relPath)); os.IsNotExist(err) {
+						p.logger.Debug("[snapshots] inventory entry missing on disk; removing", "name", e.Name)
+						inv.RemoveFile(e.Name)
 						return
 					}
 					alreadySeeded[relPath] = struct{}{}
@@ -711,6 +744,25 @@ func (p *Provider) Initialize(deps Deps) error {
 		// are available (tools / tests may construct a Provider
 		// without them).
 		if p.ChainDB != nil && p.BlockReader != nil {
+			// State-domain validators (commitment, receipt) must not run
+			// until the aggregator has finished OpenFolder and the state
+			// domain is queryable — otherwise they read a half-loaded
+			// domain and fail spuriously toward quarantine. The signal is
+			// InitialStateReady; the closure reads p.InitialStateReady at
+			// call time (it is assigned later in Initialize, before any
+			// lifecycle sweep runs).
+			stateReady := func() bool {
+				ch := p.InitialStateReady
+				if ch == nil {
+					return false
+				}
+				select {
+				case <-ch:
+					return true
+				default:
+					return false
+				}
+			}
 			// Order matters: header chain runs before commitment so the
 			// commitment partial-block pause's blockNum lookup is on a
 			// chain whose continuity is already verified.
@@ -724,6 +776,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					Inventory:   deps.Inventory,
 					Logger:      logger,
 					PausedCache: p.pausedCommitmentCache,
+					StateReady:  stateReady,
 					// PruneMode lets the validator classify
 					// integrity.ErrAnchorBodyMissing: under minimal mode
 					// the body for an anchor below
@@ -738,6 +791,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					BlockReader: p.BlockReader,
 					ChainConfig: p.ChainConfig,
 					Logger:      logger,
+					StateReady:  stateReady,
 					// Same prune-mode treatment as
 					// CommitmentDomainValidator: skip Phase C cleanly
 					// when AtBlock body is intentionally absent under
@@ -780,6 +834,47 @@ func (p *Provider) Initialize(deps Deps) error {
 			flow.NewInventoryStorage(deps.Inventory, validation.DefaultStage1ChainWithDisk(snapDir), snapDir),
 			logger,
 		)
+
+		// (C) Step 2: wire the post-Indexed callback. Storage now owns
+		// the file-open work that previously lived in
+		// stage_snapshots.go (lines 339-350) — running it as a callback
+		// the orchestrator invokes AFTER every phase-1 file reaches
+		// LifecycleIndexed AND BEFORE InitialStateReady fires. This
+		// closes the 2026-05-18 race where stage_snapshots.go's
+		// OpenFolder lstat-failed on a not-yet-built .idx (the
+		// lifecycle driver finished the Indexing transition ~150ms
+		// after InitialStateReady fired under the older gate).
+		// See docs/plans/20260518-storage-owns-post-download-pipeline.md.
+		//
+		// FillDBFromSnapshots (Step 3) will join this closure in a
+		// later commit; for now stage_snapshots.go still owns it (its
+		// own bounded-retry stopgap rides on top of this gate).
+		blockReader := p.BlockReader
+		aggregator := deps.Aggregator
+		postIndexedSeed := deps.PostIndexedSeed
+		if err := p.Orchestrator.SetPostIndexed(func(ctx context.Context) error {
+			if blockReader != nil {
+				if err := blockReader.Snapshots().OpenFolder(); err != nil {
+					return fmt.Errorf("storage.postIndexed: snapshots.OpenFolder: %w", err)
+				}
+			}
+			if aggregator != nil {
+				if err := aggregator.OpenFolder(); err != nil {
+					return fmt.Errorf("storage.postIndexed: aggregator.OpenFolder: %w", err)
+				}
+			}
+			if postIndexedSeed != nil {
+				if err := postIndexedSeed(ctx); err != nil {
+					return fmt.Errorf("storage.postIndexed: seed: %w", err)
+				}
+			}
+			logger.Info("[storage] postIndexed: OpenFolder + aggregator.OpenFolder + seed done")
+			return nil
+		}); err != nil {
+			p.LifecycleDriver.Stop()
+			return fmt.Errorf("storage: orchestrator.SetPostIndexed: %w", err)
+		}
+
 		if err := p.Orchestrator.Start(ctx); err != nil {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)
@@ -961,6 +1056,21 @@ func (p *Provider) tryFireBlockHeadersReady(ctx context.Context, inv *snapshot.I
 	}
 
 	if p.indexBuilder != nil {
+		// Salt-arrival gate: BuildMissedIndices → GetIndexSalt reads
+		// salt-blocks.txt from snapDir. During bootstrap-from-preverified,
+		// the inventory's headers .seg arrives before salt-blocks.txt
+		// (just-in-time download order is parallel + size-driven, not
+		// dependency-aware). Every inventory ChangeSet that fires before
+		// salt arrives would hit GetIndexSalt's ERROR + full-stack log
+		// at type.go:134 — 630 ERROR-level lines observed during a single
+		// ~77s startup window on 2026-05-17. Gate the build silently
+		// until salt is on disk; the next ChangeSet after salt downloads
+		// will pick it up.
+		saltPath := filepath.Join(p.AllSnapshots.Dir(), "salt-blocks.txt")
+		if _, err := os.Stat(saltPath); os.IsNotExist(err) {
+			p.logger.Debug("[storage] BuildMissedIndices: waiting for salt to arrive", "file", tipHeader.Name)
+			return false
+		}
 		if err := p.indexBuilder.BuildMissedIndices(ctx, tipHeader); err != nil {
 			p.logger.Warn("[storage] BuildMissedIndices failed — will retry on next inventory ChangeSet",
 				"file", tipHeader.Name, "err", err)

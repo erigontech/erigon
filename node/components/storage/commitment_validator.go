@@ -109,6 +109,24 @@ type CommitmentDomainValidator struct {
 	// always-transient (ErrPause). Validators constructed by tools or
 	// by tests that don't care about pruning leave this zero-valued.
 	PruneMode prune.Mode
+
+	// StateReady reports whether the state domain (commitment, …) has
+	// finished loading into the queryable DB — i.e. the aggregator has
+	// OpenFolder'd and InitialStateReady has fired. The commitment
+	// validator's reads (GetLatestFromFiles on KeyCommitmentState) only
+	// return consistent results once the domain's visible-file set has
+	// stabilised; running against a half-loaded domain produces spurious
+	// "commitment root not found" / "startTxNum below step start" /
+	// "endTxNum past step end" errors. While !StateReady() the validator
+	// returns ErrPause (transient, no quarantine tick).
+	//
+	// The FrozenBlocks()==0 gate below only covers block-segment
+	// readiness — headers load before the state domain, so that gate
+	// passes while commitment is still pending. StateReady closes that
+	// gap.
+	//
+	// nil → gate disabled (tools / tests that load everything up front).
+	StateReady func() bool
 }
 
 // PausedCommitmentCache memoizes the read+decode+invariants result of
@@ -220,6 +238,14 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	// makes per-block detection awkward, so an early gate is cleaner.
 	if v.BlockReader.FrozenBlocks() == 0 {
 		return fmt.Errorf("BlockReader frozen tip = 0 (EL hasn't opened segments yet): %w", validation.ErrPause)
+	}
+
+	// State domain still loading — the aggregator hasn't finished
+	// OpenFolder, so GetLatestFromFiles on the commitment domain reads
+	// an unstable visible-file set. Pause rather than fail; a quarantine
+	// tick here would strand a perfectly good file.
+	if v.StateReady != nil && !v.StateReady() {
+		return fmt.Errorf("state domain not loaded yet (InitialStateReady not fired): %w", validation.ErrPause)
 	}
 
 	tx, err := v.DB.BeginTemporalRo(ctx)

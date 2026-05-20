@@ -62,6 +62,18 @@ type ReceiptRootValidator struct {
 	ChainConfig *chain.Config
 	Logger      log.Logger
 	PruneMode   prune.Mode
+
+	// StateReady reports whether the state/receipt domains have finished
+	// loading into the queryable DB (aggregator OpenFolder done,
+	// InitialStateReady fired). Headers load before the receipt domain,
+	// so the per-block FindBlockNum guards below pass while receipts are
+	// still pending — CheckRCacheRootAtBlkRange then computes DeriveSha
+	// over an empty receipt set, yielding the empty-trie root and a
+	// spurious mismatch. While !StateReady() the validator returns
+	// ErrPause (transient, no quarantine tick).
+	//
+	// nil → gate disabled (tools / tests that load everything up front).
+	StateReady func() bool
 }
 
 // Name implements validation.StepValidator.
@@ -99,6 +111,13 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 	}
 	if v.ChainConfig == nil {
 		return fmt.Errorf("ReceiptRootValidator: nil ChainConfig")
+	}
+
+	// Receipt domain still loading — CheckRCacheRootAtBlkRange would see
+	// an empty receipt set and compute the empty-trie root. Pause rather
+	// than fail; a quarantine tick here would strand a good file.
+	if v.StateReady != nil && !v.StateReady() {
+		return fmt.Errorf("receipt domain not loaded yet (InitialStateReady not fired): %w", validation.ErrPause)
 	}
 
 	fromStep := files[0].FromStep
