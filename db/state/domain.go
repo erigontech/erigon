@@ -456,39 +456,21 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 			hasDup := len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep)
 
-			if hasDup {
-				oldIsDeletion := binary.BigEndian.Uint64(existing[8:]) == deletionSeqID
-				switch {
-				case !oldIsDeletion && !newIsDeletion:
-					copy(seqIDBuf[:], existing[8:])
-					return valsCursorRW.Put(seqIDBuf[:], v)
-				case !oldIsDeletion && newIsDeletion:
-					copy(seqIDBuf[:], existing[8:])
-					if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
-						return err
-					}
-					copy(dupBuf[:8], invStep)
-					binary.BigEndian.PutUint64(dupBuf[8:], deletionSeqID)
-					return keysCursor.PutCurrent(bareKey, dupBuf[:])
-				case oldIsDeletion && !newIsDeletion:
-					newSeqID, err := tx.IncrementSequence(w.valsTable, 1)
-					if err != nil {
-						return err
-					}
-					binary.BigEndian.PutUint64(seqIDBuf[:], newSeqID)
-					if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
-						return err
-					}
-					copy(dupBuf[:8], invStep)
-					copy(dupBuf[8:], seqIDBuf[:])
-					return keysCursor.PutCurrent(bareKey, dupBuf[:])
-				default: // deletion -> deletion
-					return nil
-				}
+			// Hot path: in-place update — keysTable dup unchanged.
+			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
+				copy(seqIDBuf[:], existing[8:])
+				return valsCursorRW.Put(seqIDBuf[:], v)
 			}
 
 			seqID := uint64(deletionSeqID)
-			if !newIsDeletion {
+			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+				// real → deletion: remove from vals
+				copy(seqIDBuf[:], existing[8:])
+				if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
+					return err
+				}
+			} else if !newIsDeletion {
+				// new or resurrected: append to vals
 				id, err := tx.IncrementSequence(w.valsTable, 1)
 				if err != nil {
 					return err
@@ -499,8 +481,13 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			}
+			// else: del→del or !hasDup+deletion → write tombstone seqID to keysTable only
+
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
+			if hasDup {
+				return keysCursor.PutCurrent(bareKey, dupBuf[:])
+			}
 			return keysCursor.Put(bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
