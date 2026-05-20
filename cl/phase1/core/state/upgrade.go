@@ -399,7 +399,7 @@ func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
 		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
 
 		if isExistingBuilder || hasBuilderCredentials {
-			if IsPendingValidator(cfg, newPendingDeposits, deposit.PubKey) {
+			if IsPendingValidator(cfg, pendingDeposits, deposit.PubKey) {
 				newPendingDeposits.Append(deposit)
 			} else {
 				ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
