@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -705,6 +706,37 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return out
 			})
 			mx.SetCacheDir(filepath.Join(stack.Config().Dirs.Snap, "peer-manifests"))
+
+			// Consumer-side UCAN trust gate
+			// (docs/plans/20260520-chaintoml-ucan-flow-spec.md). Trust
+			// roots come from the compiled-in per-chain default
+			// (snapcfg.GetEmbeddedTrustRoots), overridden by
+			// --snapshot.trust-roots. A blank effective spec — or the
+			// explicit "any" opt-out — leaves the gate inert (SetTrust
+			// never called → trust every peer), preserving pre-UCAN
+			// behaviour; every chain currently ships blank. A non-blank
+			// spec roots gateOnUCAN's verify chain at the configured
+			// authorities.
+			trustSpec := snapcfg.GetEmbeddedTrustRoots(mxChainName)
+			if override := strings.TrimSpace(config.Snapshot.TrustRoots); override != "" {
+				trustSpec = override
+			}
+			if trustSpec != "" && !strings.EqualFold(trustSpec, "any") {
+				roots, terr := snapshotauth.ParseTrustRoots(trustSpec)
+				if terr != nil {
+					return nil, fmt.Errorf("parsing snapshot trust roots: %w", terr)
+				}
+				if len(roots) > 0 {
+					if terr := mx.SetTrust(&manifestexchange.TrustConfig{
+						Verifier:             snapshotauth.NewVerifier(roots),
+						Fetcher:              backend.components.Downloader,
+						RequiredCapabilities: []string{string(snapshotauth.CapAdvertise), string(snapshotauth.CapServe)},
+					}); terr != nil {
+						return nil, fmt.Errorf("configuring manifest_exchange trust gate: %w", terr)
+					}
+					logger.Info("manifest_exchange: UCAN trust gate enabled", "trust_roots", len(roots))
+				}
+			}
 
 			if err := mx.BindBus(ctx, bus, backend.components.Downloader, logger); err != nil {
 				return nil, fmt.Errorf("manifest_exchange BindBus: %w", err)

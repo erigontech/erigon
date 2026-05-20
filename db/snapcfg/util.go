@@ -515,6 +515,32 @@ func GetEmbeddedWebseeds(chain string) ([]string, bool) {
 	return s, ok
 }
 
+// EmbeddedTrustRoots holds the compiled-in default snapshot-distribution
+// trust root for each chain — the authority a consumer's UCAN gate
+// verifies peer Authority UCANs against, shipped in the binary like
+// chain config. The value is a --snapshot.trust-roots spec string (see
+// snapshotauth.ParseTrustRoots): a comma-separated list of
+// enr:/did:key:/hex-pubkey roots. A blank value means trust-everyone
+// (the UCAN gate stays inert).
+//
+// Every chain currently ships blank. A did:web:erigon.network root is
+// expected to be pinned here once the network DID is published; the
+// --snapshot.trust-roots flag overrides this default per deployment.
+var EmbeddedTrustRoots = map[string]string{
+	networkname.Mainnet:  "",
+	networkname.Sepolia:  "",
+	networkname.Gnosis:   "",
+	networkname.Chiado:   "",
+	networkname.Hoodi:    "",
+	networkname.Bloatnet: "",
+}
+
+// GetEmbeddedTrustRoots returns the compiled-in trust-root spec for a
+// chain. Missing chains and blank values both mean trust-everyone.
+func GetEmbeddedTrustRoots(chain string) string {
+	return EmbeddedTrustRoots[chain]
+}
+
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.

@@ -353,6 +353,12 @@ var (
 		Value: "",
 	}
 
+	SnapshotTrustRoots = cli.StringFlag{
+		Name:  "snapshot.trust-roots",
+		Usage: "Override the compiled-in trust roots the consumer UCAN gate verifies peer V2 manifests against: a comma-separated list of enr:/did:key:/33-byte-hex-pubkey roots. Empty uses the binary's per-chain default; \"any\" disables the gate (trust every peer).",
+		Value: "",
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
@@ -1985,6 +1991,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.LifecycleDrivenByStorage = ctx.Bool(SnapLifecycleDrivenByStorageFlag.Name)
 	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
 	cfg.Snapshot.DelegationPath = ctx.String(SnapshotDelegationPath.Name)
+	cfg.Snapshot.TrustRoots = ctx.String(SnapshotTrustRoots.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot

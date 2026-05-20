@@ -203,6 +203,13 @@ type BlocksFreezing struct {
 	// falls back to <datadir>/snapshot.ucan and self-signs a bootstrap
 	// delegation on first run.
 	DelegationPath string
+
+	// TrustRoots is the operator override for the consumer-side UCAN
+	// trust gate (--snapshot.trust-roots): a comma-separated list of
+	// enr:/did:key:/hex-pubkey roots. Empty → use the compiled-in
+	// per-chain default (snapcfg.GetEmbeddedTrustRoots). "any" → trust
+	// every peer even when the binary ships a populated default.
+	TrustRoots string
 }
 
 func (s BlocksFreezing) String() string {

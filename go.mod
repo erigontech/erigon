@@ -17,6 +17,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.89
+	github.com/BurntSushi/toml v1.6.0
 	github.com/FastFilter/xorfilter v0.5.1
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.16.0
@@ -83,6 +84,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/miekg/dns v1.1.72
+	github.com/mr-tron/base58 v1.2.0
 	github.com/multiformats/go-multiaddr v0.16.0
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -146,7 +148,6 @@ require (
 	github.com/Antonboom/errname v1.1.1 // indirect
 	github.com/Antonboom/nilnil v1.1.1 // indirect
 	github.com/Antonboom/testifylint v1.6.4 // indirect
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/ClickHouse/clickhouse-go-linter v1.2.0 // indirect
 	github.com/Djarvur/go-err113 v0.1.1 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
@@ -331,7 +332,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/moricho/tparallel v0.3.2 // indirect
-	github.com/mr-tron/base58 v1.2.0 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/multiformats/go-base32 v0.1.0 // indirect
