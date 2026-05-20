@@ -135,6 +135,27 @@ type Downloader struct {
 	// inside PublishChainToml doesn't leave the ENR pointing at V1.
 	lastV2InfoHash [20]byte
 
+	// publishStateMu, publishRunning, publishPending implement the
+	// single-flight + pending-follow-up pattern for PublishLocalChainToml.
+	// Coalesces concurrent callers (e.g. many DownloadSnapshots
+	// completions firing simultaneously at startup): only ONE publish
+	// runs at a time; subsequent callers record "pending" and return
+	// immediately. When the running publish finishes, if any caller
+	// requested another while it was running, it loops once more so the
+	// latest state is captured. Replaces the earlier serialising mutex
+	// which queued every concurrent caller and exposed a deadlock when
+	// downstream calls blocked on d.lock.
+	//
+	// Earlier symptom (2026-05-18 publisher6, PID 4192672): 277
+	// concurrent onDownloadRequested handlers all queued at the
+	// serialising mutex → publish goroutines indefinitely blocked → no
+	// DownloadComplete events emitted → orchestrator's statePending
+	// never drained → InitialStateReady never fired → exec never ran
+	// for 8h+.
+	publishStateMu  sync.Mutex
+	publishRunning  bool
+	publishPending  bool
+
 	// manifestSelfCheck is the producer-side fail-loud callback wired
 	// by external setup code (which has access to both this package
 	// and snapshotsync — db/snapshotsync imports db/downloader, so the
@@ -532,7 +553,54 @@ func (d *Downloader) SelfIP() net.IP {
 // builds its .torrent, and advertises the info-hash via ENR with AuthoritativeBlocks/KnownBlocks
 // derived from the preverified registry's ExpectBlocks.
 // It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
+//
+// Single-flight + pending-follow-up: only one publish runs at a time
+// across N concurrent callers. Subsequent callers record a "pending"
+// flag and return immediately; when the running publish finishes, if
+// any caller requested another, it loops once more so the latest
+// state is captured. This replaces the earlier serialising mutex,
+// which queued every caller and exposed a deadlock when the downstream
+// publish path blocked on other locks (publisher6 was stuck for 8h+
+// with no DownloadComplete events emerging from the bus handler).
 func (d *Downloader) PublishLocalChainToml() error {
+	d.publishStateMu.Lock()
+	if d.publishRunning {
+		// Another publish is in flight; record that we want a
+		// follow-up so it doesn't miss our changes, then return.
+		d.publishPending = true
+		d.publishStateMu.Unlock()
+		return nil
+	}
+	d.publishRunning = true
+	d.publishStateMu.Unlock()
+
+	var firstErr error
+	for {
+		err := d.publishLocalChainTomlInner()
+		if firstErr == nil {
+			firstErr = err
+		}
+
+		d.publishStateMu.Lock()
+		if !d.publishPending {
+			d.publishRunning = false
+			d.publishStateMu.Unlock()
+			return firstErr
+		}
+		// Another publish was requested while this one ran. Reset
+		// the flag and loop so the next iteration captures changes
+		// the running one missed.
+		d.publishPending = false
+		d.publishStateMu.Unlock()
+	}
+}
+
+// publishLocalChainTomlInner is the actual chain.toml regeneration
+// body. The exported PublishLocalChainToml wraps this with the
+// single-flight + pending-follow-up coordination so concurrent
+// callers don't queue, and one final pass runs to capture any
+// state-changes that happened during a previous pass.
+func (d *Downloader) publishLocalChainTomlInner() error {
 	d.lock.RLock()
 	updater := d.enrUpdater
 	d.lock.RUnlock()
@@ -661,7 +729,7 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	// helper passes a nil downloader — fine for tests, but in
 	// production it would leave the sidecar on disk + advertised in the
 	// ENR yet unseeded, so peers' GotInfo on its infohash never fires.
-	pub, err := NewRollingV2Publisher(d.snapDir(), d.torrentFS, d, 0)
+	pub, err := NewRollingV2Publisher(d.snapDir(), d.torrentFS, d)
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)
 	}
@@ -1049,6 +1117,13 @@ func (d *Downloader) VerifyData(
 // AddNewSeedableFile decides what we do depending on whether we have the .seg file or the .torrent file
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
+//
+// d.lock is held across addCompleteTorrent so the map write to d.torrentsByName
+// is synchronised with other callers (addPreverifiedSnapshotForDownload,
+// addTorrentIfComplete) and with allActiveSnapshots' read. BuildTorrentIfNeed
+// is the slow file-I/O step and runs before the lock is taken; addCompleteTorrent
+// itself does another loadMetainfoFromDisk + applyMetainfo under the lock,
+// matching the existing convention in addTorrentIfComplete.
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
@@ -1062,6 +1137,8 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
+	d.lock.Lock()
+	defer d.lock.Unlock()
 	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
 	_, _, err = d.addCompleteTorrent(name)
 	if err != nil {
@@ -1240,7 +1317,15 @@ func (d *Downloader) decDownloadRequests() {
 
 // Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
 // the name from there.
+//
+// Takes d.lock.RLock to read d.torrentsByName — concurrent map iteration races
+// with writes from addTorrent (e.g. AddNewSeedableFile → addCompleteTorrent
+// while backgroundLogging runs in its own goroutine). The "no active download
+// requests" check in the caller is racy: activeDownloadRequests can flip from
+// 0 to 1 between the check and the map read.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
 	for name, t := range d.torrentsByName {
 		ret = append(ret, snapshot{
 			Name:     name,

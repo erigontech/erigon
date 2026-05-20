@@ -26,6 +26,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // listUCANGenerations returns sorted seqs of chain.ucan.<seq>.bin files
@@ -49,7 +51,7 @@ func listUCANGenerations(t *testing.T, snapDir string) []uint64 {
 // files, and the V2 manifest's UCANHash is empty.
 func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
@@ -73,7 +75,7 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 // torrent's infohash.
 func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	// Distinctive bytes so the UCAN torrent has a stable, comparable
@@ -116,7 +118,7 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 // restarting the publisher.
 func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	calls := 0
@@ -142,34 +144,45 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 
 // TestRollingV2Publisher_UCANEvictedWithGeneration confirms eviction
 // removes both the V2 file and its paired UCAN sidecar (plus their
-// .torrent metafiles).
+// .torrent metafiles) when a generation goes invalid.
 func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 2)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	pub.SetDelegationSource(func() ([]byte, error) {
 		return []byte("u"), nil
 	})
 
-	for i := 0; i < 5; i++ {
-		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
-		require.NoError(t, err)
-	}
+	// gen 0: lists accounts.0-1024 + storage.0-1024 (the default
+	// rolling test inventory).
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
+	require.NoError(t, err)
 
-	// MaxRetained=2 → seqs 3, 4 survive. UCAN sidecars track the same
-	// retention window as the V2 manifests they pair with.
-	require.Equal(t, []uint64{3, 4}, listV2Generations(t, snapDir))
-	require.Equal(t, []uint64{3, 4}, listUCANGenerations(t, snapDir))
+	// gen 1: retires both names — gen 0 is invalid, must be evicted
+	// along with its UCAN sidecar.
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    0,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.0-2048.kv",
+		TorrentHash: [20]byte{0x20, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv2, 0, nil)
+	require.NoError(t, err)
 
-	// Evicted .torrent metafiles are gone too.
-	for _, evicted := range []uint64{0, 1, 2} {
-		ucanName := ChainUCANFileNameForSeq(evicted)
-		_, err := os.Stat(filepath.Join(snapDir, ucanName))
-		require.True(t, os.IsNotExist(err), "evicted UCAN %s must be gone", ucanName)
-		_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
-		require.True(t, os.IsNotExist(err), "evicted UCAN .torrent %s must be gone", ucanName)
-	}
+	require.Equal(t, []uint64{1}, listV2Generations(t, snapDir))
+	require.Equal(t, []uint64{1}, listUCANGenerations(t, snapDir))
+
+	// Evicted UCAN + .torrent metafiles are gone too.
+	ucanName := ChainUCANFileNameForSeq(0)
+	_, err = os.Stat(filepath.Join(snapDir, ucanName))
+	require.True(t, os.IsNotExist(err), "evicted UCAN %s must be gone", ucanName)
+	_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
+	require.True(t, os.IsNotExist(err), "evicted UCAN .torrent %s must be gone", ucanName)
 }
 
 // TestRollingV2Publisher_CleanupHandlesOrphanUCAN confirms Cleanup()
@@ -177,7 +190,7 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 // for seqs not in current history.
 func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	pub.SetDelegationSource(func() ([]byte, error) { return []byte("u"), nil })
@@ -205,7 +218,7 @@ func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 // generation" — V2 publishes without a UCAN sidecar.
 func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	pub.SetDelegationSource(func() ([]byte, error) { return nil, nil })
@@ -228,7 +241,7 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 // (or UCAN) files for that generation.
 func TestRollingV2Publisher_DelegationErrorAbortsPublish(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	pub.SetDelegationSource(func() ([]byte, error) {

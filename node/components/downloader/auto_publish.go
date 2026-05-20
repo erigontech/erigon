@@ -54,16 +54,6 @@ type AutoPublishOpts struct {
 	// Zero is fine when not exercising block-coverage advertisement.
 	AuthoritativeBlocks uint64
 
-	// MaxRetained caps the rolling buffer of generations kept on disk
-	// and registered with the torrent client. Zero selects the
-	// publisher's default (db/downloader.DefaultV2MaxRetained = 64).
-	// Old generations stay seedable so peers that captured a stale ENR
-	// snapshot can still fetch the infohash they asked for.
-	//
-	// Ignored when Publisher is supplied — the publisher's own
-	// MaxRetained governs eviction.
-	MaxRetained int
-
 	// Publisher, when non-nil, is the rolling publisher to drive from
 	// the auto-publish loop. Useful when the caller already holds a
 	// publisher (e.g. a test harness that called Publish() at startup
@@ -130,7 +120,7 @@ func (p *Provider) BindAutoPublish(ctx context.Context, opts AutoPublishOpts) er
 	publisher := opts.Publisher
 	if publisher == nil {
 		var err error
-		publisher, err = dl.NewRollingV2Publisher(p.dirs.Snap, dl.NewAtomicTorrentFS(p.dirs.Snap), p.Downloader, opts.MaxRetained)
+		publisher, err = dl.NewRollingV2Publisher(p.dirs.Snap, dl.NewAtomicTorrentFS(p.dirs.Snap), p.Downloader)
 		if err != nil {
 			return fmt.Errorf("constructing rolling V2 publisher: %w", err)
 		}

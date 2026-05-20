@@ -80,7 +80,7 @@ func listV2Generations(t *testing.T, snapDir string) []uint64 {
 // time).
 func TestRollingV2Publisher_GenerationsAdvance(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	require.Empty(t, pub.History())
 
@@ -102,12 +102,12 @@ func TestRollingV2Publisher_GenerationsAdvance(t *testing.T) {
 	}
 }
 
-// TestRollingV2Publisher_RollingBufferEvicts caps history at the
-// configured max and removes files for evicted generations.
-func TestRollingV2Publisher_RollingBufferEvicts(t *testing.T) {
+// TestRollingV2Publisher_KeepsSubsetValidGenerations pins the "stable
+// inventory" half of the validity rule: as long as every prior
+// generation's name-set is ⊆ the latest, nothing gets evicted.
+func TestRollingV2Publisher_KeepsSubsetValidGenerations(t *testing.T) {
 	snapDir := t.TempDir()
-	const cap = 3
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, cap)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	inv := rollingTestInventory(t, 0x20)
@@ -116,13 +116,48 @@ func TestRollingV2Publisher_RollingBufferEvicts(t *testing.T) {
 		require.NoError(t, err, "publish %d", i)
 	}
 
-	// History contains only the most recent `cap` generations.
-	require.Equal(t, []uint64{4, 5, 6}, pub.History())
+	// All 7 generations are subset-valid (same inv) — none evicted.
+	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6}, pub.History())
+	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5, 6}, listV2Generations(t, snapDir))
+}
 
-	// On disk: only those generations remain. Older files (and their
-	// .torrent sidecars) are gone.
-	require.Equal(t, []uint64{4, 5, 6}, listV2Generations(t, snapDir))
-	for _, oldSeq := range []uint64{0, 1, 2, 3} {
+// TestRollingV2Publisher_EvictsWhenReferencesRetired pins the other
+// half of the validity rule: the moment a merge retires a name from
+// inventory, every prior generation that listed it becomes invalid
+// and is removed from disk.
+func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+
+	// gen 0,1: inv lists {accounts.0-1024, storage.0-1024}.
+	inv1 := rollingTestInventory(t, 0x21)
+	for i := 0; i < 2; i++ {
+		_, err := pub.Publish(context.Background(), inv1, 0, nil)
+		require.NoError(t, err)
+	}
+	require.Equal(t, []uint64{0, 1}, pub.History())
+
+	// Simulate a merge: drop accounts.0-1024 and storage.0-1024,
+	// add a single merged file. Re-publish.
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    0,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.0-2048.kv",
+		TorrentHash: [20]byte{0x21, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv2, 0, nil)
+	require.NoError(t, err)
+
+	// gen 0 and 1 listed accounts.0-1024 + storage.0-1024 — neither
+	// is in gen 2's manifest, so both are invalid and evicted.
+	require.Equal(t, []uint64{2}, pub.History())
+	require.Equal(t, []uint64{2}, listV2Generations(t, snapDir))
+	for _, oldSeq := range []uint64{0, 1} {
 		oldName := ChainTomlV2FileNameForSeq(oldSeq)
 		_, err := os.Stat(filepath.Join(snapDir, oldName))
 		require.True(t, os.IsNotExist(err), "%s should have been evicted", oldName)
@@ -139,7 +174,7 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 	inv := rollingTestInventory(t, 0x30)
 
 	// Publish a few generations, then drop the publisher.
-	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	for i := 0; i < 3; i++ {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
@@ -148,7 +183,7 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 	require.Equal(t, []uint64{0, 1, 2}, first.History())
 
 	// New publisher discovers existing files, resumes from seq 3.
-	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	require.Equal(t, []uint64{0, 1, 2}, second.History())
 
@@ -158,32 +193,43 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 	require.Equal(t, []uint64{0, 1, 2, 3}, listV2Generations(t, snapDir))
 }
 
-// TestRollingV2Publisher_RestartShrinksCap covers the case where a
-// previous run wrote more generations than the new cap allows. The new
-// publisher discovers all of them, then evicts on the next Publish.
-func TestRollingV2Publisher_RestartShrinksCap(t *testing.T) {
+// TestRollingV2Publisher_RestartRecoversNameSets covers the discovery
+// path's validity behaviour: a fresh publisher built against a snapDir
+// with existing generations parses each manifest so the validity rule
+// is enforceable on the first post-restart Publish.
+func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	snapDir := t.TempDir()
 	inv := rollingTestInventory(t, 0x40)
 
-	// First run — cap of 10, publish 6 generations.
-	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 10)
+	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 3; i++ {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
 		require.NoError(t, err)
 	}
-	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5}, first.History())
+	require.Equal(t, []uint64{0, 1, 2}, first.History())
 
-	// Restart with a smaller cap — discovery sees all 6.
-	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 3)
+	// Restart — discovery parses each chain.v2.*.toml and recovers
+	// name-sets so the next Publish can evaluate validity.
+	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{0, 1, 2, 3, 4, 5}, second.History())
+	require.Equal(t, []uint64{0, 1, 2}, second.History())
 
-	// Next Publish triggers eviction down to 3 (counting the new entry).
-	_, err = second.Publish(context.Background(), inv, 0, nil)
+	// Publish with a retiring inventory — every prior gen must evict.
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    0,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.0-2048.kv",
+		TorrentHash: [20]byte{0x40, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = second.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{4, 5, 6}, second.History())
-	require.Equal(t, []uint64{4, 5, 6}, listV2Generations(t, snapDir))
+	require.Equal(t, []uint64{3}, second.History())
+	require.Equal(t, []uint64{3}, listV2Generations(t, snapDir))
 }
 
 // TestRollingV2Publisher_CleanupOrphans drops chain.v2.<seq>.toml files
@@ -191,7 +237,7 @@ func TestRollingV2Publisher_RestartShrinksCap(t *testing.T) {
 // wrote files but never advanced the in-memory state.
 func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	inv := rollingTestInventory(t, 0x50)
@@ -219,7 +265,7 @@ func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 // the auto-publisher integration regressing.
 func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	inv := rollingTestInventory(t, 0x60)
@@ -313,7 +359,7 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 	require.Empty(t, GenerateV2(inv).Domains,
 		"precondition: GenerateV2 on a zero-hash inventory must be empty")
 
-	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil)
 	require.NoError(t, err)
 	hash, err := pub.Publish(context.Background(), inv, 0, nil)
 	require.NoError(t, err)
@@ -340,7 +386,7 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	// selfCheck is nil — Publish proceeds normally.
@@ -358,7 +404,7 @@ func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
 func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	called := false
@@ -385,7 +431,7 @@ func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
 func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	sentinel := errors.New("retire bug: hash mismatch on v1.0-headers.seg")
@@ -411,7 +457,7 @@ func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
 func TestRollingV2Publisher_SelfCheck_RetryAfterFailure(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	fail := errors.New("first attempt fails")
@@ -485,7 +531,7 @@ func TestChainTomlV2ToItems_Nil(t *testing.T) {
 func TestRollingV2Publisher_Signer_NilDefault(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
@@ -501,7 +547,7 @@ func TestRollingV2Publisher_Signer_NilDefault(t *testing.T) {
 func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	var signedBytes []byte
@@ -542,7 +588,7 @@ func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
 func TestRollingV2Publisher_Signer_FailureRollsBack(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	sentinel := errors.New("signing key unavailable")
@@ -567,7 +613,7 @@ func TestRollingV2Publisher_Signer_FailureRollsBack(t *testing.T) {
 func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
 	t.Parallel()
 	snapDir := t.TempDir()
-	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil, 2)
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 
 	pub.SetSigner(func(data []byte) ([]byte, error) {
@@ -575,14 +621,25 @@ func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
 		return sig, nil
 	})
 
-	// 3 publishes with cap=2 → seq 0 is evicted, seq 1+2 retained.
-	for i := 0; i < 3; i++ {
-		_, err := pub.Publish(context.Background(), rollingTestInventory(t, byte(0x40+i)), 0, nil)
-		require.NoError(t, err)
-	}
+	// gen 0: lists accounts.0-1024 + storage.0-1024.
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x60), 0, nil)
+	require.NoError(t, err)
+
+	// gen 1: retires both names — gen 0 is now invalid.
+	inv2 := snapshotinv.NewInventory()
+	inv2.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    0,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.0-2048.kv",
+		TorrentHash: [20]byte{0x60, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv2, 0, nil)
+	require.NoError(t, err)
 
 	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(0)),
 		"evicted generation's .sig is removed alongside its .toml")
 	require.FileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(1)))
-	require.FileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(2)))
 }

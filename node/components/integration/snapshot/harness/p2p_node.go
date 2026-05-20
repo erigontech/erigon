@@ -282,10 +282,9 @@ func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *s
 // PublishV2Manifest writes the next chain.v2.<seq>.toml generation
 // from the node's inventory via a long-lived RollingV2Publisher, builds
 // + seeds its .torrent, and returns the new V2 infohash suitable for
-// the peer's ENR chain-toml entry. Subsequent calls advance seq, keeping
-// up to RollingV2Publisher.MaxRetained generations seedable so peers
-// holding stale ENR snapshots can still fetch the infohash they
-// captured at handshake time.
+// the peer's ENR chain-toml entry. Subsequent calls advance seq. Older
+// generations stay seedable as long as their name-sets remain a subset
+// of the current inventory (validity rule, see RollingV2Publisher).
 //
 // The publisher is constructed lazily on first call so tests that
 // never publish don't pay for it.
@@ -293,7 +292,7 @@ func (n *P2PNode) PublishV2Manifest() [20]byte {
 	n.T.Helper()
 	if n.v2Publisher == nil {
 		torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
-		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, torrentFS, n.dCore, 0)
+		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, torrentFS, n.dCore)
 		require.NoError(n.T, err)
 		n.v2Publisher = pub
 	}

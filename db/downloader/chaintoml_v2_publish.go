@@ -85,7 +85,7 @@ func PublishChainTomlV2(
 		return metainfo.Hash{}, fmt.Errorf("PublishChainTomlV2: nil torrent fs")
 	}
 
-	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil, 0)
+	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil)
 	if err != nil {
 		return metainfo.Hash{}, err
 	}

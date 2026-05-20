@@ -16,13 +16,27 @@
 
 // Versioned V2 chain manifest publish. Each call to RollingV2Publisher.Publish
 // creates a fresh chain.v2.<seq>.toml plus its .torrent sidecar, registers the
-// new torrent with the underlying Downloader, and (optionally) trims the oldest
-// retained generation. Old generations stay seedable for as long as they're in
-// the rolling window — peers that captured a stale ENR snapshot can still fetch
-// the infohash they advertised at handshake time.
+// new torrent with the underlying Downloader, and evicts any retained
+// generation that has gone out of scope.
 //
-// The rolling buffer is the bound on disk space; Cleanup() is the
-// defence-in-depth for crashed-mid-publish or shrunk-cap cases.
+// Validity rule
+//
+// A retained chain.v2.<seq>.toml is VALID iff every snapshot name it lists
+// is present in the publisher's current inventory (equivalently: in the
+// most recent generation written). The moment a merge retires a snapshot
+// file from inventory, any older generation that listed that name becomes
+// INVALID and is removed: the .toml + .sig + .ucan + their .torrent
+// sidecars are deleted from disk and dropped from the torrent client, and
+// the orphan snapshot names — names in the evicted generation that are
+// not in the current inventory and are therefore no longer seedable —
+// are also dropped from the torrent client.
+//
+// Older generations that remain a subset of the current inventory stay
+// seedable, so a peer that captured a stale ENR snapshot can still fetch
+// the infohash it handshaked on.
+//
+// Cleanup() is the defence-in-depth for crashed-mid-publish cases (file
+// written but the in-memory seq never advanced).
 
 package downloader
 
@@ -49,11 +63,6 @@ import (
 // with. Generations append `.<seq>.toml` so the .toml extension stays
 // terminal for tool recognition (parsers, IDEs, etc).
 const ChainTomlV2BaseName = "chain.v2"
-
-// DefaultV2MaxRetained is the rolling buffer cap when no override is
-// supplied. Bounds disk space deterministically even if Cleanup() is
-// never called.
-const DefaultV2MaxRetained = 64
 
 // ChainUCANBaseName is the prefix every UCAN sidecar filename starts
 // with. Pairs with ChainTomlV2BaseName at the same <seq> so a peer's
@@ -120,6 +129,15 @@ func ParseChainUCANFileName(name string) (seq uint64, ok bool) {
 	return n, true
 }
 
+// generationEntry caches the seq and the set of snapshot names a
+// retained chain.v2.<seq>.toml lists. The name-set drives the
+// validity check on each Publish — keeping it in memory avoids
+// re-parsing each retained generation off disk every cycle.
+type generationEntry struct {
+	seq   uint64
+	names map[string]struct{}
+}
+
 // RollingV2Publisher writes successive generations of the V2 chain
 // manifest into snapDir, each under a numbered filename. Construction
 // scans snapDir for existing generations and resumes numbering from
@@ -129,13 +147,12 @@ func ParseChainUCANFileName(name string) (seq uint64, ok bool) {
 // call from multiple goroutines. Publish() is the only mutator; Cleanup
 // and inspection helpers are read-mostly.
 type RollingV2Publisher struct {
-	snapDir     string
-	torrentFS   *AtomicTorrentFS
-	downloader  *Downloader
-	maxRetained int
+	snapDir    string
+	torrentFS  *AtomicTorrentFS
+	downloader *Downloader
 
 	mu               sync.Mutex
-	history          []uint64 // chronological, oldest first; capped at maxRetained
+	history          []generationEntry // chronological, oldest first
 	delegationSource DelegationSource
 
 	// selfCheck is invoked on every Publish() after the manifest has
@@ -240,15 +257,13 @@ func (r *RollingV2Publisher) SetSigner(fn ManifestSignerFn) {
 }
 
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
-// existing chain.v2.<seq>.toml files and seeds the rolling history with
-// their seqs (sorted oldest first). maxRetained=0 selects the default.
+// existing chain.v2.<seq>.toml files, parses each to recover its name
+// set, and seeds history (sorted oldest first). A generation whose
+// .toml is unparseable is skipped — Cleanup() will sweep the orphan.
 //
 // Returns an error if snapDir can't be read. A snapDir with no existing
 // V2 generations is fine — the first Publish() writes seq 0.
-func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downloader, maxRetained int) (*RollingV2Publisher, error) {
-	if maxRetained <= 0 {
-		maxRetained = DefaultV2MaxRetained
-	}
+func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downloader) (*RollingV2Publisher, error) {
 	if torrentFS == nil {
 		return nil, fmt.Errorf("NewRollingV2Publisher: nil torrent fs")
 	}
@@ -257,24 +272,81 @@ func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downl
 	if err != nil {
 		return nil, fmt.Errorf("NewRollingV2Publisher: scanning %s: %w", snapDir, err)
 	}
-	var seqs []uint64
+	var history []generationEntry
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		if seq, ok := ParseChainTomlV2FileName(e.Name()); ok {
-			seqs = append(seqs, seq)
+		seq, ok := ParseChainTomlV2FileName(e.Name())
+		if !ok {
+			continue
 		}
+		names, err := loadManifestNames(filepath.Join(snapDir, e.Name()))
+		if err != nil {
+			// Unparseable — leave on disk, Cleanup() will sweep.
+			continue
+		}
+		history = append(history, generationEntry{seq: seq, names: names})
 	}
-	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	sort.Slice(history, func(i, j int) bool { return history[i].seq < history[j].seq })
 
 	return &RollingV2Publisher{
-		snapDir:     snapDir,
-		torrentFS:   torrentFS,
-		downloader:  dl,
-		maxRetained: maxRetained,
-		history:     seqs,
+		snapDir:    snapDir,
+		torrentFS:  torrentFS,
+		downloader: dl,
+		history:    history,
 	}, nil
+}
+
+// loadManifestNames reads chain.v2.<seq>.toml at path and returns the
+// set of snapshot names it references (blocks + meta + salt + domain
+// kv/history/idx + caplin). Used during discovery and tests.
+func loadManifestNames(path string) (map[string]struct{}, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := ParseV2(data)
+	if err != nil {
+		return nil, err
+	}
+	return manifestFileNames(manifest), nil
+}
+
+// manifestFileNames collects every snapshot file name a V2 manifest
+// references. The result drives the validity check on each Publish: a
+// retained generation is valid iff its set ⊆ the current generation's
+// set.
+//
+// chain.v2.*.toml / .sig / .ucan sidecars are NOT in the result — they
+// are the publisher's own per-generation artefacts, not advertised
+// snapshot files. Their lifecycle is handled by evictGenerationLocked.
+func manifestFileNames(m *ChainTomlV2) map[string]struct{} {
+	out := make(map[string]struct{})
+	if m == nil {
+		return out
+	}
+	for name := range m.Blocks {
+		out[name] = struct{}{}
+	}
+	for name := range m.Meta {
+		out[name] = struct{}{}
+	}
+	for name := range m.Salt {
+		out[name] = struct{}{}
+	}
+	for _, dom := range m.Domains {
+		if dom == nil {
+			continue
+		}
+		for _, f := range dom.Files {
+			out[f.Name] = struct{}{}
+		}
+	}
+	for _, c := range m.Caplin {
+		out[c.Name] = struct{}{}
+	}
+	return out
 }
 
 // Publish generates a fresh V2 manifest from inv, writes it as
@@ -308,7 +380,7 @@ func (r *RollingV2Publisher) Publish(
 
 	var nextSeq uint64
 	if n := len(r.history); n > 0 {
-		nextSeq = r.history[n-1] + 1
+		nextSeq = r.history[n-1].seq + 1
 	}
 	name := ChainTomlV2FileNameForSeq(nextSeq)
 	path := filepath.Join(r.snapDir, name)
@@ -439,23 +511,85 @@ func (r *RollingV2Publisher) Publish(
 		})
 	}
 
-	r.history = append(r.history, nextSeq)
-	r.evictOldestLocked()
+	canonical := manifestFileNames(manifest)
+	r.history = append(r.history, generationEntry{seq: nextSeq, names: canonical})
+	r.evictInvalidLocked(canonical)
 
 	return spec.InfoHash, nil
 }
 
-// evictOldestLocked drops generations from the front of history until
-// len(history) <= maxRetained. Each evicted generation's torrent client
-// registration is dropped and its on-disk data + .torrent files are
-// removed — for both the V2 manifest and the paired UCAN sidecar (if
-// one was written). Caller must hold r.mu.
-func (r *RollingV2Publisher) evictOldestLocked() {
-	for len(r.history) > r.maxRetained {
-		oldest := r.history[0]
-		r.history = r.history[1:]
-		r.evictGenerationLocked(oldest)
+// evictInvalidLocked walks retained generations (excluding the latest,
+// which IS canonical) and evicts any whose name-set isn't a subset of
+// canonical. The latest is always kept. Caller must hold r.mu.
+//
+// After per-generation eviction the function unseeds orphan snapshot
+// names — names that appeared in an evicted generation but are not in
+// canonical and not in any surviving retained generation. The merger
+// is expected to delete those files from disk; this step ensures the
+// torrent client stops advertising them even if the merger didn't drop
+// the torrent registration.
+func (r *RollingV2Publisher) evictInvalidLocked(canonical map[string]struct{}) {
+	if len(r.history) <= 1 {
+		return
 	}
+
+	kept := r.history[:0:0]
+	kept = append(kept, r.history[len(r.history)-1]) // canonical (newest)
+	var evicted []generationEntry
+
+	for i := 0; i < len(r.history)-1; i++ {
+		gen := r.history[i]
+		if isSubsetOf(gen.names, canonical) {
+			kept = append(kept, gen)
+			continue
+		}
+		evicted = append(evicted, gen)
+	}
+
+	if len(evicted) == 0 {
+		return
+	}
+
+	// Restore chronological order: the canonical entry was prepended.
+	sort.Slice(kept, func(i, j int) bool { return kept[i].seq < kept[j].seq })
+	r.history = kept
+
+	// Build the union of names still referenced by any retained
+	// generation. Anything in an evicted gen but NOT in this union is
+	// an orphan — unseed it.
+	stillReferenced := make(map[string]struct{})
+	for _, gen := range r.history {
+		for name := range gen.names {
+			stillReferenced[name] = struct{}{}
+		}
+	}
+
+	orphanNames := make(map[string]struct{})
+	for _, gen := range evicted {
+		r.evictGenerationLocked(gen.seq)
+		for name := range gen.names {
+			if _, kept := stillReferenced[name]; kept {
+				continue
+			}
+			orphanNames[name] = struct{}{}
+		}
+	}
+
+	if r.downloader != nil {
+		for name := range orphanNames {
+			r.downloader.DropTorrentByName(name)
+		}
+	}
+}
+
+// isSubsetOf reports whether every key in a is also in b.
+func isSubsetOf(a, b map[string]struct{}) bool {
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // evictGenerationLocked removes the V2 + paired UCAN + paired
@@ -463,6 +597,11 @@ func (r *RollingV2Publisher) evictOldestLocked() {
 // exist (delegation source / signer unset for that generation);
 // RemoveFile on a missing path is a silent no-op. Caller must hold
 // r.mu.
+//
+// Only the per-generation artefacts (.toml/.sig/.ucan + their
+// .torrent sidecars) are removed here. Unseeding orphan snapshot
+// files is done by evictInvalidLocked once the full set of evictions
+// for this Publish is known.
 func (r *RollingV2Publisher) evictGenerationLocked(seq uint64) {
 	tomlName := ChainTomlV2FileNameForSeq(seq)
 	ucanName := ChainUCANFileNameForSeq(seq)
@@ -483,8 +622,7 @@ func (r *RollingV2Publisher) evictGenerationLocked(seq uint64) {
 // Cleanup removes any chain.v2.<seq>.toml + chain.ucan.<seq>.bin file
 // (and their .torrent sidecars) in snapDir whose seq is not in the
 // current history. Useful after a crash mid-publish (file written but
-// seq never reached history) or after maxRetained is reduced.
-// Idempotent.
+// seq never reached history). Idempotent.
 //
 // The current generations stay registered in the torrent client; only
 // orphans are removed.
@@ -493,8 +631,8 @@ func (r *RollingV2Publisher) Cleanup() error {
 	defer r.mu.Unlock()
 
 	keep := make(map[uint64]struct{}, len(r.history))
-	for _, s := range r.history {
-		keep[s] = struct{}{}
+	for _, gen := range r.history {
+		keep[gen.seq] = struct{}{}
 	}
 
 	entries, err := os.ReadDir(r.snapDir)
@@ -535,7 +673,7 @@ func (r *RollingV2Publisher) LatestSeq() (seq uint64, ok bool) {
 	if len(r.history) == 0 {
 		return 0, false
 	}
-	return r.history[len(r.history)-1], true
+	return r.history[len(r.history)-1].seq, true
 }
 
 // History returns a copy of the current generation seqs in chronological
@@ -544,13 +682,10 @@ func (r *RollingV2Publisher) History() []uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]uint64, len(r.history))
-	copy(out, r.history)
+	for i, gen := range r.history {
+		out[i] = gen.seq
+	}
 	return out
-}
-
-// MaxRetained returns the configured rolling-buffer cap.
-func (r *RollingV2Publisher) MaxRetained() int {
-	return r.maxRetained
 }
 
 // populateInventoryTorrentHashes scans snapDir (and the known state
