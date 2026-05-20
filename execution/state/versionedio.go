@@ -192,12 +192,13 @@ func (vr VersionedRead) String() string {
 }
 
 type VersionedWrite struct {
-	Address accounts.Address
-	Path    AccountPath
-	Key     accounts.StorageKey
-	Version Version
-	Val     any
-	Reason  tracing.BalanceChangeReason
+	Address             accounts.Address
+	Path                AccountPath
+	Key                 accounts.StorageKey
+	Version             Version
+	Val                 any
+	BalanceChangeReason tracing.BalanceChangeReason
+	NonceChangeReason   tracing.NonceChangeReason
 }
 
 func (vr VersionedWrite) String() string {
@@ -730,13 +731,13 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 	for _, w := range writes {
 		if w.Address == addr && w.Path == BalancePath {
 			w.Val = val
-			w.Reason = reason
+			w.BalanceChangeReason = reason
 			return writes
 		}
 	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
 		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
 		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
 		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},

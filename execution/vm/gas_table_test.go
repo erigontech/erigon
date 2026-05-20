@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -128,7 +129,7 @@ func TestEIP2200(t *testing.T) {
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input))
+			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
 			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
 
 			vmctx := evmtypes.BlockContext{
@@ -189,7 +190,7 @@ func TestCreateGas(t *testing.T) {
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
-		s.SetCode(address, hexutil.MustDecode(tt.code))
+		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
