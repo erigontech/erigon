@@ -784,7 +784,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					// Phase C (txnum-range cross-check) is skipped with
 					// a logged warning. Phase A (file-internal record)
 					// + Phase B (header.Root cross-check) still run.
-					PruneMode: p.bootstrapPruneMode,
+					PruneMode: config.Prune,
 				},
 				ReceiptRootValidator{
 					DB:          p.ChainDB,
@@ -799,7 +799,7 @@ func (p *Provider) Initialize(deps Deps) error {
 					// CheckRCacheRootAtBlkRange's
 					// TxnumReader.Min/Max fall back to the chain tip
 					// and produce 5 spurious failures + quarantine.
-					PruneMode: p.bootstrapPruneMode,
+					PruneMode: config.Prune,
 				},
 			)
 		}
