@@ -261,6 +261,11 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	// LifecycleIndexed — once it advances, the lifecycle dispatch
 	// won't call us again on this name.
 	info, cached := v.PausedCache.Get(files[0].Name)
+	// bodyPruned: the anchor block's body is intentionally absent under
+	// this prune mode, so Phase C could not run and PartialBlock()
+	// cannot be determined — Phase B must be skipped (see the
+	// ErrAnchorBodyMissing case below).
+	var bodyPruned bool
 	if !cached {
 		stepSize := tx.Debug().StepSize()
 		endTxNum := toStep * stepSize
@@ -278,13 +283,8 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 			// hasn't loaded yet).
 			//
 			// Phase A's info (RootHash, BlockNum, TxNum) is populated
-			// even on this error path — Phase B below uses it.
-			// Phase C's info (BlockMinTxNum, BlockMaxTxNum) stays
-			// zero; downstream consumers handle that correctly:
-			// PartialBlock() returns false when BlockMaxTxNum=0
-			// (txNum < 0 is unsignedly false), which is the right
-			// default for historical files (always block-aligned by
-			// retire-time convention).
+			// even on this error path. Phase C's info (BlockMinTxNum,
+			// BlockMaxTxNum) stays zero.
 			if !v.pruneModeExpectsBodyAbsent(info.BlockNum) {
 				// Post-horizon: body should be available. Treat as
 				// transient and retry on the next sweep.
@@ -292,13 +292,20 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 					fromStep, toStep, loadErr, validation.ErrPause)
 			}
 			// Pre-horizon: body is INTENTIONALLY absent under this
-			// prune mode. Phase C cannot run for this file — Phase B
-			// below still cross-checks ProofRoot against header.Root
-			// (headers are kept back to zero), so the cryptographic
-			// chain isn't broken; we just lose the txnum-range
-			// invariant check.
+			// prune mode. Phase C cannot run — and without
+			// BlockMaxTxNum, PartialBlock() cannot be determined.
+			// Phase B (header cross-check) is valid ONLY for full-block
+			// commitments: a deeply-merged commitment file records its
+			// state at a STEP boundary, which is not block-aligned, so
+			// the recorded state is frequently mid-block. Running
+			// Phase B on such a partial-block commitment compares a
+			// mid-block state root to a block header's stateRoot and
+			// always mismatches. With the body pruned we cannot tell
+			// full from partial, so Phase B is skipped too — the file
+			// is validated by Phase A (internal record) alone.
+			bodyPruned = true
 			if v.Logger != nil {
-				v.Logger.Info("[storage] commitment Phase C skipped (anchor body pruned)",
+				v.Logger.Info("[storage] commitment Phase B+C skipped (anchor body pruned — block alignment unknowable)",
 					"file", files[0].Name,
 					"atBlock", info.BlockNum, "atTxNum", info.TxNum,
 					"step", fmt.Sprintf("[%d, %d)", fromStep, toStep))
@@ -310,7 +317,7 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 		}
 	}
 
-	if !info.PartialBlock() {
+	if !bodyPruned && !info.PartialBlock() {
 		if err := integrity.VerifyCommitmentMatchesHeader(ctx, tx, v.BlockReader, info); err != nil {
 			// ErrAnchorHeaderMissing is transient — header segment not
 			// yet opened by EL. Pause and retry rather than quarantine.
