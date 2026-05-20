@@ -481,16 +481,32 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 	return m
 }
 
+// witnessBlockInfo bundles the inputs that downstream witness-building phases need
+// after resolving the target block: the block itself plus its txnum range and the
+// parent block number. BlockNum is stored as a field (rather than recomputed via
+// Block.NumberU64) because it's referenced in many downstream call sites.
+type witnessBlockInfo struct {
+	Block             *types.Block
+	BlockNum          uint64
+	FirstTxNumInBlock uint64
+	EndTxNum          uint64
+	ParentNum         uint64
+}
+
 // ExecutionWitnessResult is the response format for debug_executionWitness
 type ExecutionWitnessResult struct {
 	// State contains the list of RLP-encoded trie nodes in the witness trie
 	State []hexutil.Bytes `json:"state"`
-	// Codes is the list of accessed/created bytecodes during block execution
+	// Codes is the list of bytecodes accessed via GetCode/GetCodeSize during block execution,
+	// matching Geth's witness.AddCode semantics. Code that was deployed/modified but never
+	// read (e.g. CREATE without a subsequent call) is intentionally excluded.
 	Codes []hexutil.Bytes `json:"codes"`
 	// Keys is always null (reserved for future use, included for Geth compatibility)
 	Keys []hexutil.Bytes `json:"keys"`
 	// Headers is a list of block headers (as JSON objects) needed for BLOCKHASH opcode support.
-	// Always includes the parent block header; also includes any blocks accessed via BLOCKHASH.
+	// For blocks that touch state, always includes the parent block header plus any blocks accessed
+	// via BLOCKHASH. Omitted (nil) for empty-touch blocks, where ExecutionWitness returns early
+	// before headers are collected.
 	Headers []map[string]any `json:"headers,omitempty"`
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
@@ -522,18 +538,15 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("debug_executionWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	info, err := api.resolveWitnessBlock(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
-
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, fmt.Errorf("block %d not found", blockNum)
-	}
+	blockNum := info.BlockNum
+	block := info.Block
+	firstTxNumInBlock := info.FirstTxNumInBlock
+	endTxNum := info.EndTxNum
+	parentNum := info.ParentNum
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -542,33 +555,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	// Get first txnum of blockNum — this is the exact txnum of the parent block's
-	// final state (before any system txns in this block have been applied).
-	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	// last txnum in block used for commitment calculation and collapsed paths tracing
-	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	endTxNum := lastTxNumInBlock + 1
-	if blockNum == 0 {
-		firstTxNumInBlock = endTxNum
-	}
-
 	// Create a state reader at the parent block state using the exact txnum
-	var stateReader state.StateReader
-	var parentNum uint64
-	if blockNum == 0 {
-		parentNum = 0
-	} else {
-		parentNum = blockNum - 1
-	}
-	stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
+	var stateReader state.StateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
 	recordingState := NewRecordingState(stateReader)
@@ -654,95 +642,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
-	// Build the execution witness result
+	accessed := collectAccessedState(recordingState)
+
 	result := &ExecutionWitnessResult{
-		State: []hexutil.Bytes{},
-		Codes: []hexutil.Bytes{},
-
+		State:          []hexutil.Bytes{},
+		Codes:          accessed.SortedCodes,
 		headerByNumber: make(map[uint64]*types.Header),
-	}
-
-	readAddresses, readStorageKeys := recordingState.GetAccessedKeys()
-	writeAddresses, writeStorageKeys := recordingState.GetModifiedKeys()
-
-	// Merge read and write addresses into a deduplicated set
-	allAddresses := make(map[common.Address]struct{})
-	for _, addr := range readAddresses {
-		allAddresses[addr] = struct{}{}
-	}
-	for _, addr := range writeAddresses {
-		allAddresses[addr] = struct{}{}
-	}
-
-	// Merge read and write storage keys into a deduplicated set
-	allStorageKeys := make(map[common.Address]map[common.Hash]struct{})
-	for addr, keys := range readStorageKeys {
-		if allStorageKeys[addr] == nil {
-			allStorageKeys[addr] = make(map[common.Hash]struct{})
-		}
-		for _, key := range keys {
-			allStorageKeys[addr][key] = struct{}{}
-		}
-	}
-	for addr, keys := range writeStorageKeys {
-		if allStorageKeys[addr] == nil {
-			allStorageKeys[addr] = make(map[common.Hash]struct{})
-		}
-		for _, key := range keys {
-			allStorageKeys[addr][key] = struct{}{}
-		}
-	}
-
-	// Collect code from the recording state.
-	// preStateCode: code read from the inner reader (pre-block state only).
-	// modifiedCode: code written during execution (new deployments, EIP-7702).
-	// accessedCode: all code seen via GetCode/GetCodeSize during execution, including
-	//               cache-hits that bypass ReadAccountCode (tracked via OnCodeAccess hook).
-	preStateCode := recordingState.GetPreStateCode()
-	modifiedCode := recordingState.GetModifiedCode()
-	accessedCode := recordingState.GetAccessedCode()
-
-	// result.Codes: only code explicitly accessed during execution, matching Geth's
-	// witness.AddCode semantics (GetCode/GetCodeSize, not deployment alone).
-	type codeWithHash struct {
-		code []byte
-		hash common.Hash
-	}
-
-	allCodesByHash := make(map[common.Hash][]byte)
-	// TODO (awskii): accessedCode is a map addr->code, maybe worth collecting code hashes directly in recordingState.OnCodeAccess to avoid hashing here?
-	for _, code := range accessedCode {
-		if len(code) > 0 {
-			h := crypto.Keccak256Hash(code)
-			allCodesByHash[h] = code
-		}
-	}
-
-	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
-	for h, code := range allCodesByHash {
-		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
-	}
-	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
-		return bytes.Compare(a.hash[:], b.hash[:])
-	})
-	for _, c := range uniqueCodes {
-		result.Codes = append(result.Codes, c.code)
-	}
-
-	// codeReads: pre-block-state code keyed by address hash, used by
-	// GenerateWitness to populate AccountNodes in the witness trie.
-	// Must contain the code that existed at the START of the block only,
-	// so that CodeHash matches the account in the parent-state commitment.
-	codeReads := make(map[common.Hash]witnesstypes.CodeWithHash)
-	for addr, code := range preStateCode {
-		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
-			addrHash := crypto.Keccak256Hash(addr.Bytes())
-			codeReads[addrHash] = witnesstypes.CodeWithHash{
-				Code:     code,
-				CodeHash: accounts.InternCodeHash(codeHash),
-			}
-		}
 	}
 
 	// Build merkle proofs for all accessed accounts
@@ -774,57 +679,203 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	// allCodeAddrs: union of addresses with pre-state or modified code.
-	// The commitment needs to know about both existing code (pre-state reads)
-	// and newly created/modified code (e.g. contract deployments, EIP-7702 delegations).
-	allCodeAddrs := make(map[common.Address]struct{})
-	for addr := range preStateCode {
-		allCodeAddrs[addr] = struct{}{}
-	}
-	for addr := range modifiedCode {
-		allCodeAddrs[addr] = struct{}{}
-	}
-
-	if len(allAddresses)+len(allStorageKeys)+len(allCodeAddrs) == 0 { // nothing touched, return empty witness
+	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
 	}
 
-	// Helper to touch all accessed/modified accounts, storage keys, and code keys
-	touchAllKeys := func() {
-		for addr := range allAddresses {
-			sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+		firstTxNumInBlock, endTxNum, blockNum, parentNum,
+		block.Root(), accessed)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	if err != nil {
+		return nil, err
+	}
+	result.State = nodes
+
+	headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+	if err != nil {
+		return nil, err
+	}
+	result.Headers = headers
+	result.headerByNumber = byNumber
+
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// accessedState summarizes everything the witness needs from a recorded execution:
+// the deduplicated set of accessed accounts/storage/code addresses, the sorted code
+// blobs that go into result.Codes, and the pre-state code reads that feed witness
+// trie generation. SortedKeys is built for symmetry with PR #21227 but currently
+// vestigial — result.Keys is intentionally always null per Geth compatibility.
+type accessedState struct {
+	SortedKeys  []hexutil.Bytes
+	Addresses   map[common.Address]struct{}
+	Storage     map[common.Address]map[common.Hash]struct{}
+	CodeAddrs   map[common.Address]struct{}
+	SortedCodes []hexutil.Bytes
+	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+}
+
+// isEmpty reports whether no accounts, storage slots, or code addresses were touched.
+// Note: CodeReads / SortedCodes are intentionally NOT considered — a block can read
+// code without touching the underlying account if the bytecode was already cached.
+func (a *accessedState) isEmpty() bool {
+	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
+}
+
+// touchAll touches every accessed account, storage slot, and code address on the
+// commitment context. Order matches the original inline implementation: accounts
+// first, then storage, then code.
+func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
+	for addr := range a.Addresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
-		for addr, keys := range allStorageKeys {
-			for key := range keys {
-				storageKey := string(append(addr.Bytes(), key.Bytes()...))
-				sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+}
+
+// collectAccessedState rolls the RecordingState read/write maps and the three
+// code-tracking maps into a single accessedState. SortedCodes is sourced from
+// rs.GetAccessedCode() to match Geth's witness.AddCode semantics (only code
+// reached via GetCode/GetCodeSize, not all deployed code).
+//
+// SortedCodes is initialized to an empty (non-nil) slice so callers can assign
+// result.Codes = accessed.SortedCodes without risking a "codes": null JSON
+// regression for empty-touch blocks; the Codes field has no omitempty.
+func collectAccessedState(rs *RecordingState) *accessedState {
+	out := &accessedState{
+		Addresses:   make(map[common.Address]struct{}),
+		Storage:     make(map[common.Address]map[common.Hash]struct{}),
+		CodeAddrs:   make(map[common.Address]struct{}),
+		SortedCodes: []hexutil.Bytes{},
+		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
+	}
+
+	readAddresses, readStorageKeys := rs.GetAccessedKeys()
+	writeAddresses, writeStorageKeys := rs.GetModifiedKeys()
+
+	for _, addr := range readAddresses {
+		out.Addresses[addr] = struct{}{}
+	}
+	for _, addr := range writeAddresses {
+		out.Addresses[addr] = struct{}{}
+	}
+
+	for addr, keys := range readStorageKeys {
+		if out.Storage[addr] == nil {
+			out.Storage[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			out.Storage[addr][key] = struct{}{}
+		}
+	}
+	for addr, keys := range writeStorageKeys {
+		if out.Storage[addr] == nil {
+			out.Storage[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			out.Storage[addr][key] = struct{}{}
+		}
+	}
+
+	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
+	for addr := range out.Addresses {
+		sortedKeys = append(sortedKeys, addr.Bytes())
+	}
+	for addr, keys := range out.Storage {
+		for key := range keys {
+			composite := append(addr.Bytes(), key.Bytes()...)
+			sortedKeys = append(sortedKeys, composite)
+		}
+	}
+	slices.SortFunc(sortedKeys, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
+	out.SortedKeys = sortedKeys
+
+	type codeWithHash struct {
+		code []byte
+		hash common.Hash
+	}
+
+	accessedCode := rs.GetAccessedCode()
+	allCodesByHash := make(map[common.Hash][]byte)
+	for _, code := range accessedCode {
+		if len(code) > 0 {
+			h := crypto.Keccak256Hash(code)
+			allCodesByHash[h] = code
+		}
+	}
+
+	uniqueCodes := make([]codeWithHash, 0, len(allCodesByHash))
+	for h, code := range allCodesByHash {
+		uniqueCodes = append(uniqueCodes, codeWithHash{code: code, hash: h})
+	}
+	slices.SortFunc(uniqueCodes, func(a, b codeWithHash) int {
+		return bytes.Compare(a.hash[:], b.hash[:])
+	})
+	for _, c := range uniqueCodes {
+		out.SortedCodes = append(out.SortedCodes, c.code)
+	}
+
+	preCode := rs.GetPreStateCode()
+	for addr, code := range preCode {
+		if len(code) > 0 {
+			codeHash := crypto.Keccak256Hash(code)
+			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
+				Code:     code,
+				CodeHash: accounts.InternCodeHash(codeHash),
 			}
 		}
-		for addr := range allCodeAddrs {
-			sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-		}
 	}
 
-	// Helper to reset commitment to parent block state and re-seek
-	resetToParentState := func() (txNum uint64, blockNum uint64, err error) {
-		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
-		return domains.SeekCommitment(ctx, tx)
+	modCode := rs.GetModifiedCode()
+	for addr := range preCode {
+		out.CodeAddrs[addr] = struct{}{}
+	}
+	for addr := range modCode {
+		out.CodeAddrs[addr] = struct{}{}
 	}
 
-	// === STEP 1: Collapse Detection via ComputeCommitment ===
-	// Detect trie node collapses by running the full commitment calculation for this block.
-	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
-	// the remaining child's data must be included in the witness for correct
-	// state root computation during stateless execution.
-	//
-	// We only record sibling paths (without building any witness) in this first step, because the grid
-	// is mutated during ComputeCommitment and would produce incorrect root hashes.
-	var collapseSiblingPaths [][]byte
+	return out
+}
 
-	// Set up split reader: branch data from parent state, plain state from end of block
-
-	// Set up split reader: commitment from block beginning, plain state from block end
-	// need withHistory=false to have branch updates written using PutBranch() TODO (awskii): withHistory revisit, add another knob to disable writes.
+// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
+// commitment for this block against a split reader (commitment from parent state,
+// plain state from end of block) and record every sibling path the trie collapses
+// through. The collected paths are returned so STEP 2 can touch them while building
+// the witness — without those touches, collapsed-sibling data would be missing from
+// the witness and stateless re-execution would diverge from the canonical root.
+//
+// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
+// including the lupin012 seekBlockNum != parentNum guard.
+func detectCollapseSiblings(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	domains *execctx.SharedDomains,
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
+	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
+	expectedBlockRoot common.Hash,
+	accessed *accessedState,
+) (siblingPaths [][]byte, err error) {
+	// Set up split reader: commitment from block beginning, plain state from block end.
+	// withHistory=false so branch updates are written using PutBranch().
 	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
@@ -841,11 +892,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	touchAllKeys()
+	accessed.touchAll(sdCtx)
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
 		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
-		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
+		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
@@ -853,52 +904,132 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
 
-	if common.Hash(computedRootHash) != block.Root() {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
+	if common.Hash(computedRootHash) != expectedBlockRoot {
+		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
 	}
 
 	sdCtx.SetCollapseTracer(nil)
+	return siblingPaths, nil
+}
 
-	// === STEP 2: Generate witness for regular keys + siblings from collapses
-	if _, _, err := resetToParentState(); err != nil {
+// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
+// against the parent-state reader, touch every accessed key plus the sibling
+// paths collected during collapse detection, then generate the witness trie and
+// RLP-encode it. The pre-state root is verified against expectedParentRoot
+// before the encoded nodes are returned.
+//
+// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+func buildWitnessTrie(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	domains *execctx.SharedDomains,
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
+	firstTxNumInBlock uint64,
+	expectedParentRoot common.Hash,
+	siblingPaths [][]byte,
+	accessed *accessedState,
+) (encodedNodes []hexutil.Bytes, err error) {
+	encodedNodes = []hexutil.Bytes{}
+
+	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
-	touchAllKeys()
 
-	if len(collapseSiblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(collapseSiblingPaths))
+	accessed.touchAll(sdCtx)
 
-		for _, siblingPath := range collapseSiblingPaths {
+	if len(siblingPaths) > 0 {
+		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
+		for _, siblingPath := range siblingPaths {
 			compactSiblingPath := commitment.NibblesToString(siblingPath)
 			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_witness_construction")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
-	// pre-state root verification
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
-	// This avoids duplicates that would occur when calling Prove() separately for each key
 	allNodes, err := witnessTrie.RLPEncode()
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
 	}
 	for _, node := range allNodes {
-		result.State = append(result.State, common.Copy(node))
+		encodedNodes = append(encodedNodes, common.Copy(node))
+	}
+	return encodedNodes, nil
+}
+
+// resolveWitnessBlock resolves the target block from blockNrOrHash and computes
+// the txnum range and parent block number used by subsequent witness phases.
+// The genesis block has no parent and zero txns, so firstTxNumInBlock is collapsed
+// to endTxNum and parentNum is forced to 0.
+func (api *DebugAPIImpl) resolveWitnessBlock(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	blockNrOrHash rpc.BlockNumberOrHash,
+) (*witnessBlockInfo, error) {
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
 	}
 
-	// Collect headers needed by a stateless verifier:
-	// - always include the parent block header (needed to anchor the pre-state root)
-	// - include any additional blocks accessed via the BLOCKHASH opcode
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+
+	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	endTxNum := lastTxNumInBlock + 1
+	var parentNum uint64
+	if blockNum == 0 {
+		firstTxNumInBlock = endTxNum
+		parentNum = 0
+	} else {
+		parentNum = blockNum - 1
+	}
+
+	return &witnessBlockInfo{
+		Block:             block,
+		BlockNum:          blockNum,
+		FirstTxNumInBlock: firstTxNumInBlock,
+		EndTxNum:          endTxNum,
+		ParentNum:         parentNum,
+	}, nil
+}
+
+// collectAccessedHeaders gathers the headers a stateless verifier needs to anchor
+// pre-state and resolve BLOCKHASH lookups. The parent header is always included
+// first; remaining entries come from blocks accessed via the BLOCKHASH opcode and
+// are deduplicated against the parent and each other via byNumber.
+func (api *DebugAPIImpl) collectAccessedHeaders(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	parentNum uint64,
+	accessedBlockNums []uint64,
+) (headers []map[string]any, byNumber map[uint64]*types.Header, err error) {
+	headers = []map[string]any{}
+	byNumber = make(map[uint64]*types.Header)
+
 	addHeader := func(bn uint64) error {
-		if _, seen := result.headerByNumber[bn]; seen {
+		if _, seen := byNumber[bn]; seen {
 			return nil
 		}
 
@@ -909,43 +1040,55 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		if h == nil {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
-		result.Headers = append(result.Headers, marshalWitnessHeader(h))
-		result.headerByNumber[h.Number.Uint64()] = h
+		headers = append(headers, marshalWitnessHeader(h))
+		byNumber[h.Number.Uint64()] = h
 
 		return nil
 	}
 
-	if err = addHeader(parentNum); err != nil {
-		return nil, err
+	if err := addHeader(parentNum); err != nil {
+		return nil, nil, err
 	}
-	for _, bn := range accessedBlockHashes {
-		if err = addHeader(bn); err != nil {
-			return nil, err
+	for _, bn := range accessedBlockNums {
+		if err := addHeader(bn); err != nil {
+			return nil, nil, err
 		}
-	}
-
-	// Optionally verify the witness by re-executing the block statelessly.
-	// Verification doubles the execution cost; set ERIGON_WITNESS_NO_VERIFY=true to disable.
-	if !dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
-		chainCfg, err := api.chainConfig(ctx, tx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get chain config: %w", err)
-		}
-
-		newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
-		if err != nil {
-			return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
-		}
-
-		expectedRoot := block.Root()
-		if newStateRoot != expectedRoot {
-			return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
-		}
-
-		log.Debug("[debug_executionWitness] witness verified", "blockNum", blockNum)
 	}
 
-	return result, nil
+	return headers, byNumber, nil
+}
+
+// verifyWitnessStateless optionally re-executes the block statelessly against the
+// generated witness and asserts the resulting state root matches. Verification is
+// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+func (api *DebugAPIImpl) verifyWitnessStateless(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	result *ExecutionWitnessResult,
+	block *types.Block,
+	fullEngine rules.Engine,
+) error {
+	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+		return nil
+	}
+
+	chainCfg, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("failed to get chain config: %w", err)
+	}
+
+	newStateRoot, _, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	if err != nil {
+		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
+	}
+
+	expectedRoot := block.Root()
+	if newStateRoot != expectedRoot {
+		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
+	}
+
+	log.Debug("[debug_executionWitness] witness verified", "blockNum", block.NumberU64())
+	return nil
 }
 
 // buildExpectedPostState queries the actual state DB to build expected post-state for verification.
