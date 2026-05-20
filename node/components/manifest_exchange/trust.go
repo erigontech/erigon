@@ -25,11 +25,15 @@ import (
 	"github.com/erigontech/erigon/node/components/snapshotauth"
 )
 
-// UCANFetcher fetches the chain.ucan.<seq>.bin sidecar paired with a
-// peer's V2 manifest. Production wires downloader.Provider.FetchPeerUCAN;
-// tests can substitute a stub.
+// UCANFetcher fetches the two UCAN sidecars the consumer's trust gate
+// needs: the Authority UCAN (FetchPeerUCAN, by the V2 manifest's
+// AuthorityUCANHash) and the per-generation Content UCAN
+// (FetchPeerContentUCAN, by the peer ENR's ContentUCANHash). Production
+// wires downloader.Provider, which satisfies both; tests substitute a
+// stub.
 type UCANFetcher interface {
 	FetchPeerUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error)
+	FetchPeerContentUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error)
 }
 
 // DefaultBlacklistDuration is the time a peer stays on the blacklist

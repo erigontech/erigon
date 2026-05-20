@@ -70,6 +70,20 @@ func (m *mockUCANFetcher) FetchPeerUCAN(_ context.Context, _ string, infoHash [2
 	return bytes, nil
 }
 
+// FetchPeerContentUCAN resolves from the same registry as FetchPeerUCAN
+// — both are "fetch bytes by info-hash"; the test registers the
+// Authority and Content UCANs under distinct fake hashes.
+func (m *mockUCANFetcher) FetchPeerContentUCAN(_ context.Context, _ string, infoHash [20]byte, _ net.IP, _ uint16) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	bytes, ok := m.sources[infoHash]
+	if !ok {
+		return nil, fmt.Errorf("Content UCAN hash %x not registered", infoHash)
+	}
+	return bytes, nil
+}
+
 func (m *mockUCANFetcher) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -226,21 +240,37 @@ func newTrustEnv(t *testing.T, cfgMutate func(*TrustConfig)) *trustEnv {
 	return &trustEnv{env: e, ucanFetcher: ucanFetcher, harness: harness, dir: dir}
 }
 
-// seedPair returns the V2 infohash to wire into the peer's ENR. Both
-// the V2 file and the UCAN bytes are registered with their respective
-// mock fetchers under deterministic fake hashes — the test does not
-// exercise real torrent infohash computation, only the gate logic.
-func (te *trustEnv) seedPair(t *testing.T, peerKey *ecdsa.PrivateKey, caps []string) (v2Hash [20]byte) {
+// seedPair builds a full two-UCAN generation for peerKey: an Authority
+// UCAN (root→peer, granting caps), a V2 manifest that references it,
+// and a Content UCAN minted over the V2 bytes and parented to the
+// Authority UCAN. All three are registered with the mock fetchers
+// under deterministic fake hashes — the test exercises the gate logic,
+// not real torrent infohash computation. Returns the V2 info-hash and
+// the Content UCAN info-hash to wire into the peer's ENR chain-toml
+// entry (InfoHash and ContentUCANHash respectively).
+func (te *trustEnv) seedPair(t *testing.T, peerKey *ecdsa.PrivateKey, caps []string) (v2Hash, contentUCANHash [20]byte) {
 	t.Helper()
-	ucanBytes := te.harness.issueDelegation(t, peerKey, caps)
 	tag := fmt.Sprintf("%x", peerKey.PublicKey.X.Bytes()[:4])
-	ucanHash := fakeHash("ucan-" + tag)
-	te.ucanFetcher.register(ucanHash, ucanBytes)
 
-	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "v2-"+tag+".toml", hex.EncodeToString(ucanHash[:]))
+	// Authority UCAN: the trust root delegates to the peer.
+	authBytes := te.harness.issueDelegation(t, peerKey, caps)
+	authHash := fakeHash("auth-" + tag)
+	te.ucanFetcher.register(authHash, authBytes)
+
+	// V2 manifest referencing the Authority UCAN by info-hash.
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "v2-"+tag+".toml", hex.EncodeToString(authHash[:]))
+	v2Bytes, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
 	v2Hash = fakeHash("v2-" + tag)
 	te.fetcher.register(v2Hash, v2Path)
-	return v2Hash
+
+	// Content UCAN: the peer self-issues it, attesting the V2 bytes,
+	// parented to the Authority UCAN.
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytes, time.Now())
+	require.NoError(t, err)
+	contentUCANHash = fakeHash("content-" + tag)
+	te.ucanFetcher.register(contentUCANHash, cuBytes)
+	return v2Hash, contentUCANHash
 }
 
 func TestUCANGate_NilTrustPreservesOldBehaviour(t *testing.T) {
@@ -263,12 +293,12 @@ func TestUCANGate_ValidUCANIsAccepted(t *testing.T) {
 
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	v2Hash := te.seedPair(t, peerKey, []string{
+	v2Hash, cuHash := te.seedPair(t, peerKey, []string{
 		string(snapshotauth.CapAdvertise),
 		string(snapshotauth.CapServe),
 	})
 
-	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash})
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
 	te.sentry.PublishPeerConnected(peer)
 
 	waitFor(t, func() bool { return te.receivedCount() == 1 },
@@ -287,23 +317,36 @@ func TestUCANGate_InvalidUCANIsRejectedAndPeerBlacklisted(t *testing.T) {
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 
-	bogus, err := snapshotauth.New(
+	// Authority UCAN under an UNTRUSTED root — signature verifies but
+	// the chain has no matching trust root. depthCap 1 so it is a
+	// well-formed (if untrusted) authority.
+	bogusAuth, err := snapshotauth.New(
 		&rogueRoot.PublicKey, &peerKey.PublicKey,
 		[]string{string(snapshotauth.CapAdvertise), string(snapshotauth.CapServe)},
-		time.Time{}, time.Time{}, 0, nil,
+		time.Time{}, time.Time{}, 1, nil,
 	)
 	require.NoError(t, err)
-	require.NoError(t, bogus.Sign(rogueRoot))
-	bogusBytes, err := bogus.Encode()
+	require.NoError(t, bogusAuth.Sign(rogueRoot))
+	authBytes, err := bogusAuth.Encode()
 	require.NoError(t, err)
+	authHash := fakeHash("rogue-auth")
+	te.ucanFetcher.register(authHash, authBytes)
 
-	ucanHash := fakeHash("rogue-ucan")
-	te.ucanFetcher.register(ucanHash, bogusBytes)
-	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "rogue.toml", hex.EncodeToString(ucanHash[:]))
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "rogue.toml", hex.EncodeToString(authHash[:]))
+	v2Bytes, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
 	v2Hash := fakeHash("rogue-v2")
 	te.fetcher.register(v2Hash, v2Path)
 
-	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash})
+	// The Content UCAN is well-formed — the peer self-issues it and it
+	// attests the V2 bytes. The rejection must come from the Authority
+	// UCAN's untrusted root, not from the Content UCAN.
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytes, time.Now())
+	require.NoError(t, err)
+	cuHash := fakeHash("rogue-content")
+	te.ucanFetcher.register(cuHash, cuBytes)
+
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
 	te.sentry.PublishPeerConnected(peer)
 	te.bus.WaitAsync()
 
@@ -325,17 +368,49 @@ func TestUCANGate_MissingAuthorityUCANHashRejects(t *testing.T) {
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 
-	// V2 manifest has NO AuthorityUCANHash field.
-	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "no-ucan.toml", "")
-	v2Hash := fakeHash("no-ucan-v2")
+	// V2 manifest has NO AuthorityUCANHash field. The Content UCAN is
+	// well-formed — the rejection must come from the missing
+	// AuthorityUCANHash, reached only after the Content UCAN passes.
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "no-auth.toml", "")
+	v2Bytes, err := os.ReadFile(v2Path)
+	require.NoError(t, err)
+	v2Hash := fakeHash("no-auth-v2")
 	te.fetcher.register(v2Hash, v2Path)
 
+	authBytes := te.harness.issueDelegation(t, peerKey, []string{string(snapshotauth.CapAdvertise)})
+	cuBytes, err := snapshotauth.MintContentUCAN(v2Bytes, peerKey, authBytes, time.Now())
+	require.NoError(t, err)
+	cuHash := fakeHash("no-auth-content")
+	te.ucanFetcher.register(cuHash, cuBytes)
+
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
+	te.sentry.PublishPeerConnected(peer)
+	te.bus.WaitAsync()
+
+	require.Equal(t, 0, te.receivedCount(),
+		"manifest with no AuthorityUCANHash must be rejected when trust is configured")
+}
+
+// TestUCANGate_MissingContentUCANRejects pins that a peer whose ENR
+// carries no ContentUCANHash is rejected — the two-UCAN gate requires
+// the Content UCAN, fetched by that hash, as its first step.
+func TestUCANGate_MissingContentUCANRejects(t *testing.T) {
+	te := newTrustEnv(t, nil)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	v2Hash, _ := te.seedPair(t, peerKey, []string{
+		string(snapshotauth.CapAdvertise),
+		string(snapshotauth.CapServe),
+	})
+
+	// ENR carries the V2 info-hash but no ContentUCANHash.
 	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash})
 	te.sentry.PublishPeerConnected(peer)
 	te.bus.WaitAsync()
 
 	require.Equal(t, 0, te.receivedCount(),
-		"manifest with no UCAN reference must be rejected when trust is configured")
+		"peer advertising no Content UCAN must be rejected when trust is configured")
 }
 
 func TestUCANGate_CachedTrustSkipsReverify(t *testing.T) {
@@ -343,12 +418,12 @@ func TestUCANGate_CachedTrustSkipsReverify(t *testing.T) {
 
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	v2Hash := te.seedPair(t, peerKey, []string{
+	v2Hash, cuHash := te.seedPair(t, peerKey, []string{
 		string(snapshotauth.CapAdvertise),
 		string(snapshotauth.CapServe),
 	})
 
-	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash})
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
 
 	te.sentry.PublishPeerConnected(peer)
 	waitFor(t, func() bool { return te.receivedCount() == 1 },
@@ -373,12 +448,12 @@ func TestUCANGate_ReverifyOnReconnectEvictsCache(t *testing.T) {
 
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	v2Hash := te.seedPair(t, peerKey, []string{
+	v2Hash, cuHash := te.seedPair(t, peerKey, []string{
 		string(snapshotauth.CapAdvertise),
 		string(snapshotauth.CapServe),
 	})
 
-	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash})
+	peer := makeSignedPeer(t, peerKey, enr.ChainToml{InfoHash: v2Hash, ContentUCANHash: cuHash})
 
 	te.sentry.PublishPeerConnected(peer)
 	waitFor(t, func() bool { return te.receivedCount() == 1 },

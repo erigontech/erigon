@@ -26,23 +26,25 @@
 package manifest_exchange
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
-
-	dirutil "github.com/erigontech/erigon/common/dir"
 	"path/filepath"
 	"sync"
 	"time"
 
+	dirutil "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/sentry"
+	"github.com/erigontech/erigon/node/components/snapshotauth"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -348,7 +350,7 @@ func (p *Provider) onPeerConnected(e sentry.PeerConnected) {
 
 	go func() {
 		defer p.fetchWG.Done()
-		p.fetchAndPublish(ctx, peerID, ct.InfoHash, peerIP, uint16(btPort), peerPub)
+		p.fetchAndPublish(ctx, peerID, ct.InfoHash, ct.ContentUCANHash, peerIP, uint16(btPort), peerPub)
 	}()
 }
 
@@ -380,14 +382,14 @@ func (p *Provider) onPeerDisconnected(e sentry.PeerDisconnected) {
 // peer-connects can proceed in parallel without serialising on the
 // bus handler.
 //
-// When TrustConfig is set, the pipeline gains a UCAN-verification
-// step between parse and publish: fetch the chain.ucan.<seq>.bin
-// sidecar pointed to by the V2 manifest's AuthorityUCANHash field, run it
-// through the Verifier against the peer's pubkey from ENR, and only
+// When TrustConfig is set, the pipeline gains the two-UCAN
+// verification step between parse and publish (gateOnUCAN): fetch the
+// Content UCAN by the ENR's ContentUCANHash and the Authority UCAN by
+// the manifest's AuthorityUCANHash, run the full chain, and only
 // publish PeerManifestReceived on success. Failures are warn-logged
 // and the peer is added to the in-memory blacklist for
 // trust.BlacklistDuration.
-func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16, peerPub *ecdsa.PublicKey) {
+func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash, contentUCANHash [20]byte, peerIP net.IP, peerPort uint16, peerPub *ecdsa.PublicKey) {
 	defer p.clearInflight(peerID)
 
 	p.mu.Lock()
@@ -418,7 +420,7 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash 
 
 	// Trust gate. Skipped entirely when trust is unconfigured.
 	if cfg != nil {
-		if !p.gateOnUCAN(ctx, peerID, manifest, peerIP, peerPort, peerPub, cfg, state, now, logger) {
+		if !p.gateOnUCAN(ctx, peerID, data, manifest, contentUCANHash, peerIP, peerPort, peerPub, cfg, state, now, logger) {
 			return
 		}
 	}
@@ -476,19 +478,40 @@ func writePeerManifestCache(cacheDir, peerID string, data []byte) error {
 	return nil
 }
 
-// gateOnUCAN runs the manifest-side UCAN verification. Returns true iff
-// the peer is trusted (cache hit OR fresh verify success), in which
-// case fetchAndPublish should proceed with the orchestrator
+// gateOnUCAN runs the consumer's two-UCAN verification chain for a
+// peer (docs/plans/20260520-chaintoml-ucan-flow-spec.md). Returns true
+// iff the peer is trusted — a cache hit, or a fresh pass of the full
+// chain — in which case fetchAndPublish proceeds to the orchestrator
 // publication.
 //
-// On any failure path the peer is blacklisted for cfg.BlacklistDuration
-// and the function returns false. Success caches the verified-until
-// time so the next reconnect can short-circuit (unless
-// ReverifyOnReconnect cleared the cache on disconnect).
+// On any failure the peer is blacklisted for cfg.BlacklistDuration and
+// the function returns false. Success caches the verified-until time,
+// bounded by the earlier of the two UCANs' expiries, so the next
+// reconnect short-circuits (unless ReverifyOnReconnect cleared it).
+//
+// The chain:
+//  1. Fetch the Content UCAN by contentUCANHash (from the peer's ENR).
+//  2. Decode it; verify its signature against its own issuer.
+//  3. It must be self-issued by this peer (issuer == peer pubkey) — a
+//     peer cannot present another operator's Content UCAN.
+//  4. It must carry the capability chain.v2:hash:<sha256(manifest)> —
+//     i.e. it attests THESE manifest bytes, not some other manifest.
+//  5. Its NotBefore/Expires window must cover now.
+//  6. Fetch the Authority UCAN by manifest.AuthorityUCANHash and bind
+//     it: sha256(authority CBOR) must equal the Content UCAN's
+//     ParentHash, so the Content UCAN names this exact Authority UCAN.
+//  7. Verifier.Verify traces the Authority UCAN to a configured trust
+//     root, with audience == the Content UCAN's issuer (the Authority
+//     UCAN must delegate to the key that self-issued the Content UCAN)
+//     and the required capabilities. A nil parent resolver supports a
+//     root or single-link Authority UCAN; a multi-hop re-delegation
+//     fails closed.
 func (p *Provider) gateOnUCAN(
 	ctx context.Context,
 	peerID string,
+	manifestBytes []byte,
 	manifest *downloader.ChainTomlV2,
+	contentUCANHash [20]byte,
 	peerIP net.IP,
 	peerPort uint16,
 	peerPub *ecdsa.PublicKey,
@@ -498,63 +521,130 @@ func (p *Provider) gateOnUCAN(
 	logger log.Logger,
 ) bool {
 	if state.trusted(peerID, nowFn()) {
-		// Cache hit — UCAN previously verified, still in its
-		// validity window. Skip the re-fetch.
+		// Cache hit — chain previously verified, still in its validity
+		// window. Skip the re-fetch + re-verify.
 		return true
 	}
 
+	now := nowFn()
+	reject := func(msg string, args ...any) bool {
+		logger.Warn("[manifest_exchange] UCAN gate: "+msg, args...)
+		state.markBlacklisted(peerID, now.Add(cfg.blacklistDuration()))
+		return false
+	}
+
 	if peerPub == nil {
-		logger.Warn("[manifest_exchange] UCAN gate: peer has no pubkey",
-			"peer", peerID)
-		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
-		return false
+		return reject("peer has no pubkey", "peer", peerID)
+	}
+	if contentUCANHash == ([20]byte{}) {
+		return reject("peer ENR carries no Content UCAN hash", "peer", peerID)
 	}
 
+	// 1-2. Fetch + decode + signature.
+	cuBytes, err := cfg.Fetcher.FetchPeerContentUCAN(ctx, peerID, contentUCANHash, peerIP, peerPort)
+	if err != nil {
+		return reject("fetch Content UCAN", "peer", peerID, "err", err)
+	}
+	cu, err := snapshotauth.Decode(cuBytes)
+	if err != nil {
+		return reject("decode Content UCAN", "peer", peerID, "err", err)
+	}
+	if err := cu.VerifySignature(); err != nil {
+		return reject("Content UCAN signature", "peer", peerID, "err", err)
+	}
+
+	// 3. Self-issued by this peer.
+	if !bytes.Equal(cu.Issuer, compressedFromECDSA(peerPub)) {
+		return reject("Content UCAN not issued by this peer", "peer", peerID)
+	}
+
+	// 4. Attests THESE manifest bytes.
+	sum := sha256.Sum256(manifestBytes)
+	wantCap := snapshotauth.ContentHashCapability(hex.EncodeToString(sum[:]))
+	if !containsCapability(cu.Capabilities, wantCap) {
+		return reject("Content UCAN does not attest this manifest", "peer", peerID)
+	}
+
+	// 5. Content UCAN time window.
+	if !delegationTimeValid(cu, now) {
+		return reject("Content UCAN outside its validity window", "peer", peerID)
+	}
+
+	// 6. Resolve + bind the Authority UCAN.
+	if len(cu.ParentHash) == 0 {
+		return reject("Content UCAN has no Authority parent", "peer", peerID)
+	}
 	if manifest.AuthorityUCANHash == "" {
-		logger.Warn("[manifest_exchange] UCAN gate: peer manifest has no UCAN hash",
-			"peer", peerID)
-		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
-		return false
+		return reject("manifest carries no AuthorityUCANHash", "peer", peerID)
 	}
-	ucanHashBytes, err := hex.DecodeString(manifest.AuthorityUCANHash)
-	if err != nil || len(ucanHashBytes) != 20 {
-		logger.Warn("[manifest_exchange] UCAN gate: malformed AuthorityUCANHash",
-			"peer", peerID, "authority_ucan_hash", manifest.AuthorityUCANHash, "err", err)
-		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
-		return false
+	authHashBytes, err := hex.DecodeString(manifest.AuthorityUCANHash)
+	if err != nil || len(authHashBytes) != 20 {
+		return reject("malformed AuthorityUCANHash", "peer", peerID, "authority_ucan_hash", manifest.AuthorityUCANHash)
 	}
-	var ucanHash [20]byte
-	copy(ucanHash[:], ucanHashBytes)
-
-	ucanData, err := cfg.Fetcher.FetchPeerUCAN(ctx, peerID, ucanHash, peerIP, peerPort)
+	var authHash [20]byte
+	copy(authHash[:], authHashBytes)
+	authBytes, err := cfg.Fetcher.FetchPeerUCAN(ctx, peerID, authHash, peerIP, peerPort)
 	if err != nil {
-		logger.Warn("[manifest_exchange] UCAN gate: fetch sidecar",
-			"peer", peerID, "err", err)
-		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
-		return false
+		return reject("fetch Authority UCAN", "peer", peerID, "err", err)
+	}
+	if !bytes.Equal(snapshotauth.HashOf(authBytes), cu.ParentHash) {
+		return reject("Authority UCAN does not match the Content UCAN's ParentHash", "peer", peerID)
 	}
 
-	audience := compressedFromECDSA(peerPub)
-	// resolveParent is nil here: the current gate verifies a single
-	// delegation (no chain walk). The full two-UCAN verification chain
-	// — which resolves the Authority UCAN by ParentHash — is wired in
-	// Phase 5 (see docs/plans/20260520-chaintoml-ucan-flow-spec.md).
-	res, err := cfg.Verifier.Verify(ucanData, audience, cfg.RequiredCapabilities, nowFn(), nil)
+	// 7. Authority UCAN traces to a configured trust root.
+	res, err := cfg.Verifier.Verify(authBytes, cu.Issuer, cfg.RequiredCapabilities, now, nil)
 	if err != nil {
-		logger.Warn("[manifest_exchange] UCAN gate: verify",
-			"peer", peerID, "err", err)
-		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
-		return false
+		return reject("Authority UCAN verification", "peer", peerID, "err", err)
 	}
 
-	expiresAt := time.Time{}
-	if res.Leaf.Expires != 0 {
-		expiresAt = time.Unix(res.Leaf.Expires, 0)
-	}
-	state.markVerified(peerID, expiresAt)
-	logger.Debug("[manifest_exchange] UCAN gate: peer trusted",
+	// Trusted. Cache until the earlier of the two UCANs' expiries.
+	state.markVerified(peerID, earliestExpiry(cu.Expires, res.Leaf.Expires))
+	logger.Debug("[manifest_exchange] UCAN gate: peer trusted (two-UCAN chain)",
 		"peer", peerID, "root", res.MatchedRoot.Kind.String())
 	return true
+}
+
+// containsCapability reports whether caps includes want.
+func containsCapability(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// delegationTimeValid reports whether now is within d's
+// [NotBefore, Expires] window. Zero NotBefore means effective
+// immediately; zero Expires means indefinite.
+func delegationTimeValid(d *snapshotauth.Delegation, now time.Time) bool {
+	unix := now.Unix()
+	if d.NotBefore != 0 && unix < d.NotBefore {
+		return false
+	}
+	if d.Expires != 0 && unix > d.Expires {
+		return false
+	}
+	return true
+}
+
+// earliestExpiry returns the earlier of two unix-second expiry
+// timestamps as a time.Time, treating 0 as "indefinite". When both are
+// indefinite the result is the zero time — markVerified reads that as
+// never-expires.
+func earliestExpiry(a, b int64) time.Time {
+	switch {
+	case a == 0 && b == 0:
+		return time.Time{}
+	case a == 0:
+		return time.Unix(b, 0)
+	case b == 0:
+		return time.Unix(a, 0)
+	case a < b:
+		return time.Unix(a, 0)
+	default:
+		return time.Unix(b, 0)
+	}
 }
 
 // compressedFromECDSA returns the 33-byte compressed encoding of an

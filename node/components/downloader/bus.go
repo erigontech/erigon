@@ -91,15 +91,24 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarV2Manifest)
 }
 
-// FetchPeerUCAN downloads a peer's chain.ucan.<seq>.bin sidecar — the
-// snapshotauth delegation attestation paired with the V2 manifest at
-// the same generation. Same per-peer-scoped storage + inflight dedup
-// as FetchPeerManifestV2; only the file-name predicate differs.
-//
-// The infohash to fetch comes from the V2 manifest's AuthorityUCANHash field —
-// callers parse the V2 first, then call this with the embedded hash.
+// FetchPeerUCAN downloads a peer's Authority UCAN sidecar — the
+// snapshotauth delegation that roots the publisher's authority. The
+// infohash comes from the V2 manifest's AuthorityUCANHash field;
+// callers parse the V2 first. Same per-peer-scoped storage + inflight
+// dedup as FetchPeerManifestV2.
 func (p *Provider) FetchPeerUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
 	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarUCAN)
+}
+
+// FetchPeerContentUCAN downloads a peer's Content UCAN sidecar — the
+// per-generation attestation binding the V2 manifest's bytes. The
+// infohash comes from the peer's ENR chain-toml entry
+// (ChainToml.ContentUCANHash). Same per-peer-scoped storage + inflight
+// dedup as FetchPeerManifestV2; the fetched torrent's file name is not
+// predicate-checked — the Content UCAN's identity is its info-hash plus
+// the consumer's cryptographic verification, not its filename.
+func (p *Provider) FetchPeerContentUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
+	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarContentUCAN)
 }
 
 // peerSidecarKind identifies which sidecar artefact a fetch is
@@ -110,14 +119,17 @@ type peerSidecarKind int
 const (
 	sidecarV2Manifest peerSidecarKind = iota
 	sidecarUCAN
+	sidecarContentUCAN
 )
 
 func (k peerSidecarKind) label() string {
 	switch k {
 	case sidecarV2Manifest:
-		return "chain.v2.<seq>.toml"
+		return "chain.v2.<genID>.toml"
 	case sidecarUCAN:
-		return "chain.ucan.<seq>.bin"
+		return "chain.ucan.<genID>.bin"
+	case sidecarContentUCAN:
+		return "chain.v2.<genID>.ucan"
 	}
 	return "?"
 }
@@ -130,6 +142,11 @@ func (k peerSidecarKind) parseName(name string) bool {
 	case sidecarUCAN:
 		_, _, ok := dl.ParseChainUCANFileName(name)
 		return ok
+	case sidecarContentUCAN:
+		// The Content UCAN's filename is not enforced: it is fetched
+		// by info-hash and its authenticity is established by the
+		// consumer's signature + capability checks, not its name.
+		return true
 	}
 	return false
 }
