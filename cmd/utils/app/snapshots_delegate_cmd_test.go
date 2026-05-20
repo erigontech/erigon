@@ -83,7 +83,7 @@ func TestDoSnapshotDelegate_RootSignAndDecode(t *testing.T) {
 	require.Equal(t, []string{"snapshot:advertise", "snapshot:serve"}, d.Capabilities)
 	require.Equal(t, uint16(1), d.DepthCap)
 	require.Equal(t, int64(0), d.Expires, "indefinite expiry stored as zero sentinel")
-	require.Empty(t, d.Parent, "root delegation has no parent")
+	require.Empty(t, d.ParentHash, "root delegation has no parent")
 }
 
 func TestDoSnapshotDelegate_ChainsFromParent(t *testing.T) {
@@ -141,9 +141,15 @@ func TestDoSnapshotDelegate_ChainsFromParent(t *testing.T) {
 	leaf, err := snapshotauth.Decode(raw)
 	require.NoError(t, err)
 	require.NoError(t, leaf.VerifySignature())
-	require.NotEmpty(t, leaf.Parent)
+	require.NotEmpty(t, leaf.ParentHash)
 
-	parent, err := snapshotauth.Decode(leaf.Parent)
+	// v2 delegations link the parent by hash, not inline — resolve it
+	// from the on-disk parent artefact and bind it back to ParentHash.
+	parentRaw, err := os.ReadFile(rootOut)
+	require.NoError(t, err)
+	require.Equal(t, snapshotauth.HashOf(parentRaw), leaf.ParentHash,
+		"leaf.ParentHash must be sha256 of the parent's canonical CBOR")
+	parent, err := snapshotauth.Decode(parentRaw)
 	require.NoError(t, err)
 	require.NoError(t, parent.VerifySignature())
 	require.Equal(t, parent.Audience, leaf.Issuer,
