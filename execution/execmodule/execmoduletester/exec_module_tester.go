@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/builderstages"
@@ -321,6 +322,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithEnableDomain(domain kv.Domain) Option {
+	return func(opts *options) {
+		opts.enableDomains = append(opts.enableDomains, domain)
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
@@ -331,6 +338,7 @@ type options struct {
 	pruneMode       *prune.Mode
 	blockBufferSize int
 	withTxPool      bool
+	enableDomains   []kv.Domain
 }
 
 func applyOptions(opts []Option) options {
@@ -429,6 +437,13 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		db = temporaltest.NewTestDBWithStepSize(tb, dirs, *opt.stepSize)
 	} else {
 		db = temporaltest.NewTestDB(tb, dirs)
+	}
+
+	if len(opt.enableDomains) > 0 {
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		for _, domain := range opt.enableDomains {
+			agg.EnableDomain(domain)
+		}
 	}
 
 	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
