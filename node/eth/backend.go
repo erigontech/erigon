@@ -1469,7 +1469,7 @@ func (s *Ethereum) Start() error {
 		})
 	} else {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryProvider.Client.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryProvider.Client.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.Sync)
 	}
 
 	if s.txPool != nil {

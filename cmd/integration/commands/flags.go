@@ -58,7 +58,6 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode                    bool
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
@@ -238,6 +237,6 @@ func withTraceFlags(cmd *cobra.Command) {
 	withWorkers(cmd)
 }
 
-func withChainTipMode(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().UintVar(&syncCfg.LoopBlockLimit, cli.SyncLoopBlockLimitFlag.Name, cli.SyncLoopBlockLimitFlag.Value, cli.SyncLoopBlockLimitFlag.Usage)
 }

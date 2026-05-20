@@ -310,10 +310,11 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
+					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
@@ -834,6 +835,9 @@ func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenS
 
 func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
 	if cfg.syncCfg.AlwaysGenerateChangesets {
+		return true
+	}
+	if cfg.syncCfg.ChainTipMode() {
 		return true
 	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
