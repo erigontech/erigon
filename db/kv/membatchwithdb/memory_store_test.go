@@ -71,6 +71,41 @@ func TestMemStore_PutGetDelete(t *testing.T) {
 	require.NoError(t, s.Delete("test", []byte("nonexistent")))
 }
 
+func TestMemStoreSizeBytesResetsAfterClear(t *testing.T) {
+	s := newMemStore()
+
+	entries := []struct {
+		table string
+		key   []byte
+		value []byte
+	}{
+		{table: kv.Headers, key: []byte("header-1"), value: []byte("header-value-1")},
+		{table: kv.Headers, key: []byte("header-2"), value: []byte("header-value-2")},
+		{table: kv.HeaderTD, key: []byte("td-1"), value: []byte("td-value-1")},
+		{table: kv.BlockBody, key: []byte("body-1"), value: []byte("body-value-1")},
+	}
+
+	var expected uint64
+	for _, entry := range entries {
+		require.NoError(t, s.Put(entry.table, entry.key, entry.value))
+		expected += uint64(len(entry.key) + len(entry.value))
+	}
+	require.Equal(t, expected, s.SizeBytes())
+	require.Greater(t, s.SizeBytes(), uint64(0))
+
+	for _, table := range []string{kv.Headers, kv.HeaderTD, kv.BlockBody} {
+		require.NoError(t, s.ClearTable(table))
+	}
+	require.Equal(t, uint64(0), s.SizeBytes())
+
+	expected = 0
+	for _, entry := range entries {
+		require.NoError(t, s.Put(entry.table, entry.key, entry.value))
+		expected += uint64(len(entry.key) + len(entry.value))
+	}
+	require.Equal(t, expected, s.SizeBytes())
+}
+
 func TestMemStore_CursorIteration(t *testing.T) {
 	s := newMemStore()
 	require.NoError(t, s.Put("test", []byte("B"), []byte("2")))
@@ -428,6 +463,36 @@ func TestMemStore_TableOperations(t *testing.T) {
 	exists, err = s.ExistsTable("t2")
 	require.NoError(t, err)
 	assert.False(t, exists)
+}
+
+func TestMemStore_SizeBytesTracksPuts(t *testing.T) {
+	s := newMemStore()
+
+	require.Zero(t, s.SizeBytes())
+	require.NoError(t, s.Put("t1", []byte("key"), []byte("value")))
+	require.Equal(t, uint64(len("key")+len("value")), s.SizeBytes())
+
+	require.NoError(t, s.Put("t2", []byte("long-key"), []byte("v")))
+	require.Equal(t, uint64(len("key")+len("value")+len("long-key")+len("v")), s.SizeBytes())
+}
+
+func TestMemStore_SizeBytesTracksOverwritesDeletesAndClear(t *testing.T) {
+	s := newMemStore()
+
+	require.NoError(t, s.Put("t1", []byte("key"), []byte("old-value")))
+	require.Equal(t, uint64(len("key")+len("old-value")), s.SizeBytes())
+
+	require.NoError(t, s.Put("t1", []byte("key"), []byte("new")))
+	require.Equal(t, uint64(len("key")+len("new")), s.SizeBytes())
+
+	require.NoError(t, s.Put("t1", []byte("key2"), []byte("value2")))
+	require.Equal(t, uint64(len("key")+len("new")+len("key2")+len("value2")), s.SizeBytes())
+
+	require.NoError(t, s.Delete("t1", []byte("key")))
+	require.Equal(t, uint64(len("key2")+len("value2")), s.SizeBytes())
+
+	require.NoError(t, s.ClearTable("t1"))
+	require.Zero(t, s.SizeBytes())
 }
 
 func TestMemStore_ForEach(t *testing.T) {

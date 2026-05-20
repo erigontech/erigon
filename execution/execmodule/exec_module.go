@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
@@ -589,6 +590,27 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 		}
 
 		rawdb.DeleteHeader(tx, currentHash, currentNumber)
+		// Delete all tables that InsertBlocks writes (and may have flushed
+		// from the overlay to chaindata): HeaderTD, BlockBody, BlockAccessList,
+		// and the EthTx rows referenced by the body's BaseTxnID/TxCount.
+		if err := tx.Delete(kv.HeaderTD, dbutils.HeaderKey(currentNumber, currentHash)); err != nil {
+			return fmt.Errorf("purgeBadChain: delete HeaderTD at %d %x: %w", currentNumber, currentHash, err)
+		}
+		bodyKey := dbutils.BlockBodyKey(currentNumber, currentHash)
+		bodyForStorage, bfsErr := rawdb.ReadBodyForStorageByKey(tx, bodyKey)
+		if bfsErr != nil {
+			return fmt.Errorf("purgeBadChain: read body for storage at %d %x: %w", currentNumber, currentHash, bfsErr)
+		}
+		if bodyForStorage != nil && bodyForStorage.TxCount > 2 {
+			txIdKey := make([]byte, 8)
+			for i := 0; i < int(bodyForStorage.TxCount-2); i++ {
+				binary.BigEndian.PutUint64(txIdKey, bodyForStorage.BaseTxnID.At(i))
+				if err := tx.Delete(kv.EthTx, txIdKey); err != nil {
+					return fmt.Errorf("purgeBadChain: delete EthTx at %d %x idx %d: %w", currentNumber, currentHash, i, err)
+				}
+			}
+		}
+		rawdb.DeleteBody(tx, currentHash, currentNumber)
 		currentHash = currentHeader.ParentHash
 		currentNumber--
 	}

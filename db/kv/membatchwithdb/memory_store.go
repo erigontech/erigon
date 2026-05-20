@@ -78,9 +78,10 @@ func newMemTable(dupSort bool) *memTable {
 // Thread safety: all access is protected by mu. Btrees use NoLocks:true
 // because the store-level mutex serializes all operations.
 type memStore struct {
-	mu        sync.RWMutex
-	tables    map[string]*memTable
-	sequences map[string]uint64
+	mu         sync.RWMutex
+	tables     map[string]*memTable
+	sequences  map[string]uint64
+	totalBytes uint64
 }
 
 func newMemStore() *memStore {
@@ -96,6 +97,10 @@ func memTableIsDupSort(table string) bool {
 		return false
 	}
 	return config.Flags&kv.DupSort != 0
+}
+
+func memEntrySize(e memEntry) uint64 {
+	return uint64(len(e.k) + len(e.v))
 }
 
 // getOrCreateTable must be called with mu held (read or write).
@@ -203,8 +208,16 @@ func (s *memStore) ForAmount(table string, prefix []byte, amount uint32, walker 
 func (s *memStore) Put(table string, k, v []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.putLocked(table, k, v)
+}
+
+func (s *memStore) putLocked(table string, k, v []byte) error {
 	t := s.getOrCreateTable(table)
-	t.tree.Set(memEntry{k: common.Copy(k), v: common.Copy(v)})
+	entry := memEntry{k: common.Copy(k), v: common.Copy(v)}
+	if old, replaced := t.tree.Set(entry); replaced {
+		s.totalBytes -= memEntrySize(old)
+	}
+	s.totalBytes += memEntrySize(entry)
 	// Keep sequences map in sync when writing to the Sequence table.
 	if table == kv.Sequence && len(v) >= 8 {
 		s.sequences[string(k)] = binary.BigEndian.Uint64(v)
@@ -220,7 +233,9 @@ func (s *memStore) Delete(table string, k []byte) error {
 		return nil
 	}
 	if !t.dupSort {
-		t.tree.Delete(memEntry{k: k})
+		if old, deleted := t.tree.Delete(memEntry{k: k}); deleted {
+			s.totalBytes -= memEntrySize(old)
+		}
 		return nil
 	}
 	// DupSort: delete all entries with this key.
@@ -240,7 +255,9 @@ func (s *memStore) Delete(table string, k []byte) error {
 	}
 	iter.Release()
 	for _, item := range toDelete {
-		t.tree.Delete(item)
+		if old, deleted := t.tree.Delete(item); deleted {
+			s.totalBytes -= memEntrySize(old)
+		}
 	}
 	return nil
 }
@@ -253,9 +270,7 @@ func (s *memStore) IncrementSequence(bucket string, amount uint64) (uint64, erro
 	// Keep the Sequence table in sync for Flush.
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, current+amount)
-	t := s.getOrCreateTable(kv.Sequence)
-	t.tree.Set(memEntry{k: common.Copy([]byte(bucket)), v: v})
-	return current, nil
+	return current, s.putLocked(kv.Sequence, []byte(bucket), v)
 }
 
 func (s *memStore) ResetSequence(bucket string, newValue uint64) error {
@@ -264,9 +279,7 @@ func (s *memStore) ResetSequence(bucket string, newValue uint64) error {
 	s.sequences[bucket] = newValue
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, newValue)
-	t := s.getOrCreateTable(kv.Sequence)
-	t.tree.Set(memEntry{k: common.Copy([]byte(bucket)), v: v})
-	return nil
+	return s.putLocked(kv.Sequence, []byte(bucket), v)
 }
 
 // Append delegates to Put. Unlike MDBX's Append (which requires keys in
@@ -301,6 +314,9 @@ func (s *memStore) ListTables() ([]string, error) {
 func (s *memStore) DropTable(table string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if t, ok := s.tables[table]; ok {
+		s.totalBytes -= tableSizeBytes(t)
+	}
 	delete(s.tables, table)
 	return nil
 }
@@ -323,9 +339,26 @@ func (s *memStore) ClearTable(table string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t, ok := s.tables[table]; ok {
+		s.totalBytes -= tableSizeBytes(t)
 		t.tree.Clear()
 	}
 	return nil
+}
+
+func tableSizeBytes(t *memTable) uint64 {
+	var size uint64
+	iter := t.tree.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		size += memEntrySize(iter.Item())
+	}
+	return size
+}
+
+func (s *memStore) SizeBytes() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.totalBytes
 }
 
 // --- kv.Tx ---
@@ -736,14 +769,18 @@ func (c *memStoreCursor) DeleteCurrent() error {
 	}
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
-	c.table.tree.Delete(c.current)
+	if old, deleted := c.table.tree.Delete(c.current); deleted {
+		c.store.totalBytes -= memEntrySize(old)
+	}
 	return nil
 }
 
 func (c *memStoreCursor) DeleteExact(k, v []byte) error {
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()
-	c.table.tree.Delete(memEntry{k: k, v: v})
+	if old, deleted := c.table.tree.Delete(memEntry{k: k, v: v}); deleted {
+		c.store.totalBytes -= memEntrySize(old)
+	}
 	return nil
 }
 

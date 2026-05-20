@@ -30,6 +30,10 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+const defaultOverlayFlushThreshold = uint64(512 << 20)
+
+var overlayFlushThreshold = defaultOverlayFlushThreshold
+
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
@@ -45,7 +49,11 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	if err != nil {
 		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
-	defer roTx.Rollback()
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}()
 
 	// Ensure currentContext has a block overlay for accumulating writes.
 	sd := e.currentContext
@@ -125,8 +133,40 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Writes stay in the block overlay on currentContext — no flush or commit here.
-	// ValidateChain reads from the overlay; UpdateForkChoice flushes everything
-	// in a single commit at the end.
+	overlaySize := blockOverlay.SizeBytes()
+	if overlaySize > overlayFlushThreshold {
+		rwTx, err := e.db.BeginTemporalRw(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
+		}
+		defer rwTx.Rollback()
+		if err := blockOverlay.Flush(ctx, rwTx); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush block overlay: %w", err)
+		}
+		// Release the RO reader before committing so MDBX sees openTxs=1
+		// and can reclaim freed pages immediately. Same pattern as
+		// runForkchoiceFlushCommit. Flush only writes in-memory state to
+		// rwTx and does not read from the RO tx.
+		roTx.Rollback()
+		roTx = nil
+		if err := rwTx.Commit(); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit block overlay flush: %w", err)
+		}
+
+		newRoTx, err := e.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin ro after overlay flush: %w", err)
+		}
+		if err := sd.InitBlockOverlay(newRoTx, newRoTx.Debug().Dirs().Tmp); err != nil {
+			newRoTx.Rollback()
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: init overlay after flush: %w", err)
+		}
+		roTx = newRoTx
+		e.logger.Info("[InsertBlocks] Flushed overlay to DB", "sizeBytes", overlaySize, "blocks", len(blocks))
+	}
+
+	// Writes below the periodic flush threshold stay in the block overlay on
+	// currentContext. ValidateChain reads from the overlay; UpdateForkChoice
+	// flushes any remaining writes in a single commit at the end.
 	return ExecutionStatusSuccess, nil
 }

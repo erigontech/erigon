@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	engine_types "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -267,6 +268,95 @@ func TestFlushDupThenGapKeepsPostGapRows(t *testing.T) {
 	require.False(t, h.collector.HasBlock(1))
 	require.False(t, h.collector.HasBlock(2))
 	require.True(t, h.collector.HasBlock(4))
+}
+
+// TestFlushManyBlocksNoIntermediateFlush demonstrates the OOM root cause from
+// issue #21267: when the collector accumulates many blocks, Flush() sends all
+// of them through InsertBlocks in batches of 1000, but there is no intermediate
+// overlay flush between batches. The mock engine records every InsertBlocks
+// call, showing that N/batchSize calls happen before a single ForkChoiceUpdate.
+//
+// With a real ExecModule behind InsertBlocks, each batch accumulates data in
+// the in-memory MemoryMutation overlay. 50,000 blocks × ~740 bytes/block ≈
+// 37 MB of overlay data, never freed until the final FCU — causing OOM on
+// memory-constrained machines when catching up tens of thousands of blocks.
+func TestFlushManyBlocksNoIntermediateFlush(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+
+	const numBlocks = 5000
+	// Build a chain of blocks 1..numBlocks.
+	blocks := make([]*cltypes.BeaconBlock, numBlocks)
+	parentHash := common.Hash{}
+	for i := 0; i < numBlocks; i++ {
+		bb := makeBeaconBlock(t, uint64(i+1), 'a', parentHash)
+		parentHash = blockHash(bb)
+		blocks[i] = bb
+	}
+
+	// Track call ordering: each entry is "insert" or "fcu" in the order
+	// the mock receives calls. This lets us assert that all InsertBlocks
+	// calls precede the single ForkChoiceUpdate — the property that causes
+	// OOM when the overlay is never flushed between batches.
+	var callSequence []string
+	insertCallCount := 0
+	var batchSizes []int
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(uint64(0)).AnyTimes()
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blks []*types.Block, _ bool) error {
+			callSequence = append(callSequence, "insert")
+			insertCallCount++
+			batchSizes = append(batchSizes, len(blks))
+			h.inserted = append(h.inserted, blks...)
+			return nil
+		}).AnyTimes()
+	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _, _, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			callSequence = append(callSequence, "fcu")
+			return nil, nil
+		}).Times(1)
+
+	// Replace the engine in the collector.
+	h.collector.engine = engine
+
+	for _, bb := range blocks {
+		require.NoError(t, h.collector.AddBlock(bb))
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	// All blocks should have been inserted.
+	require.Equal(t, numBlocks, len(h.inserted))
+
+	// InsertBlocks is called ceil(numBlocks/batchSize) times.
+	// With batchSize=1000 and 5000 blocks: 5 calls.
+	expectedCalls := (numBlocks + batchSize - 1) / batchSize
+	require.Equal(t, expectedCalls, insertCallCount,
+		"InsertBlocks should be called %d times for %d blocks with batchSize=%d",
+		expectedCalls, numBlocks, batchSize)
+
+	// Verify call ordering: exactly 1 FCU and it must be the last call.
+	fcuCount := 0
+	for _, call := range callSequence {
+		if call == "fcu" {
+			fcuCount++
+		}
+	}
+	require.Equal(t, 1, fcuCount, "ForkChoiceUpdate must be called exactly once")
+	require.Equal(t, "fcu", callSequence[len(callSequence)-1],
+		"ForkChoiceUpdate must be the last engine call (after all InsertBlocks batches)")
+
+	t.Logf("Call sequence (%d calls): %v", len(callSequence), callSequence)
+	t.Logf("InsertBlocks called %d times with batch sizes: %v", insertCallCount, batchSizes)
+	t.Logf("WITHOUT intermediate flush, a real ExecModule would accumulate all %d blocks in the overlay", numBlocks)
+
+	// Verify block numbers are sequential.
+	for i, b := range h.inserted {
+		require.Equal(t, uint64(i+1), b.NumberU64(),
+			"inserted blocks should be sequential")
+	}
 }
 
 func TestFlushDropsRowsBelowFrozen(t *testing.T) {

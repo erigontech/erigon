@@ -166,6 +166,15 @@ func (m *MemoryMutation) DBSize() (uint64, error) {
 	panic("not implemented")
 }
 
+func (m *MemoryMutation) SizeBytes() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if memTx, ok := m.memTx.(*memStore); ok {
+		return memTx.SizeBytes()
+	}
+	return 0
+}
+
 func initSequences(db kv.Tx, memTx kv.RwTx) error {
 	cursor, err := db.Cursor(kv.Sequence)
 	if err != nil {

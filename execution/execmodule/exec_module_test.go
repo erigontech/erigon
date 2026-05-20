@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -1644,5 +1645,327 @@ func TestEIP7708BurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 
 	// Insert + validate + FCU proves the state root is computed correctly.
 	err = insertValidateAndUfc1By1(ctx, m.ExecModule, chainPack.Blocks)
+	require.NoError(t, err)
+}
+
+// TestInsertBlocksOverlayGrowsWithoutFCU reproduces the unbounded memory growth
+// described in https://github.com/erigontech/erigon/issues/21267.
+//
+// When InsertBlocks is called repeatedly without an intervening UpdateForkChoice,
+// each batch's writes accumulate in the in-memory block overlay (memStore btree)
+// and are never flushed. This test inserts 500 blocks in batches of 50 — mimicking
+// PersistentBlockCollector.Flush() — and asserts that the overlay entry count
+// grows proportionally to the number of blocks inserted.
+func TestInsertBlocksOverlayGrowsWithoutFCU(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	exec := m.ExecModule
+
+	const totalBlocks = 500
+	const batchSize = 50
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(1000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	entriesAfterBatch := make([]uint64, 0, totalBlocks/batchSize)
+
+	for start := 0; start < totalBlocks; start += batchSize {
+		end := start + batchSize
+		if end > totalBlocks {
+			end = totalBlocks
+		}
+		batch := chainPack.Blocks[start:end]
+
+		status, err := insertBlocks(ctx, exec, batch)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+
+		entries := exec.BlockOverlayTotalEntries()
+		entriesAfterBatch = append(entriesAfterBatch, entries)
+	}
+
+	t.Logf("Overlay entry growth over %d blocks (%d batches of %d):",
+		totalBlocks, totalBlocks/batchSize, batchSize)
+	for i, e := range entriesAfterBatch {
+		t.Logf("  batch %2d (%3d blocks total): overlay entries = %d",
+			i+1, (i+1)*batchSize, e)
+	}
+
+	// Each block writes to at least Headers, HeaderNumber, HeaderTD, and BlockBody.
+	// BucketSize returns tree.Len() * 64, so the total across 4 tables for N blocks
+	// should be at least 4 * N * 64.
+	expectedMinEntries := uint64(4 * totalBlocks * 64)
+	lastEntries := entriesAfterBatch[len(entriesAfterBatch)-1]
+	require.GreaterOrEqual(t, lastEntries, expectedMinEntries,
+		"overlay should hold at least 4 entries per block × %d blocks = %d (got %d) — "+
+			"this confirms data accumulates without bound (issue #21267)",
+		totalBlocks, expectedMinEntries, lastEntries)
+
+	// Verify monotonic growth: each batch should strictly increase the count.
+	for i := 1; i < len(entriesAfterBatch); i++ {
+		require.Greater(t, entriesAfterBatch[i], entriesAfterBatch[i-1],
+			"overlay entries should grow after each batch (batch %d → %d)", i, i+1)
+	}
+}
+
+func TestInsertBlocksOverlayPeriodicFlush(t *testing.T) {
+	ctx := t.Context()
+	restoreThreshold := execmodule.SetOverlayFlushThresholdForTest(8 << 10)
+	defer restoreThreshold()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	exec := m.ExecModule
+
+	const totalBlocks = 40
+	const batchSize = 10
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(1000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), []byte("overlay-flush-payload")),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	var sawFlush bool
+	for start := 0; start < totalBlocks; start += batchSize {
+		end := start + batchSize
+		batch := chainPack.Blocks[start:end]
+		status, err := insertBlocks(ctx, exec, batch)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		require.LessOrEqual(t, exec.BlockOverlaySizeBytes(), uint64(8<<10))
+
+		last := batch[len(batch)-1]
+		verifyTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		td, err := rawdb.ReadTd(verifyTx, last.Hash(), last.NumberU64())
+		verifyTx.Rollback()
+		require.NoError(t, err)
+		if td != nil {
+			sawFlush = true
+		}
+	}
+	require.True(t, sawFlush, "expected at least one InsertBlocks overlay flush")
+
+	head := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
+	validation, err := validateChain(ctx, exec, head)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	fcu, err := updateForkChoice(ctx, exec, head)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+}
+
+func TestOverlayFlushCrossBoundaryParentTdRead(t *testing.T) {
+	ctx := t.Context()
+	const threshold = uint64(4 << 10)
+	restoreThreshold := execmodule.SetOverlayFlushThresholdForTest(threshold)
+	defer restoreThreshold()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	exec := m.ExecModule
+
+	const totalBlocks = 60
+	const batchSize = 10
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, gen *blockgen.BlockGen) {
+		payload := bytes.Repeat([]byte{byte(i)}, 128)
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(1000), 100_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), payload),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	for start := 0; start < totalBlocks; start += batchSize {
+		end := start + batchSize
+		status, err := insertBlocks(ctx, exec, chainPack.Blocks[start:end])
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		require.LessOrEqual(t, exec.BlockOverlaySizeBytes(), threshold)
+	}
+
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		parentTd, err := rawdb.ReadTd(tx, m.Genesis.Hash(), m.Genesis.NumberU64())
+		require.NoError(t, err)
+		require.NotNil(t, parentTd, "genesis TD should be readable from DB")
+
+		for _, block := range chainPack.Blocks {
+			header := rawdb.ReadHeader(tx, block.Hash(), block.NumberU64())
+			require.NotNil(t, header, "block %d header should be materialized in DB", block.NumberU64())
+
+			td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+			require.NoError(t, err)
+			require.NotNil(t, td, "block %d TD should be materialized in DB", block.NumberU64())
+
+			expected := new(uint256.Int).Add(parentTd, &block.HeaderNoCopy().Difficulty)
+			require.Equal(t, expected, td, "block %d TD should extend parent TD", block.NumberU64())
+			parentTd = td
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	head := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
+	validation, err := validateChain(ctx, exec, head)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	fcu, err := updateForkChoice(ctx, exec, head)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+}
+
+func TestOverlayFlushPurgeBadChainCleansDB(t *testing.T) {
+	ctx := t.Context()
+	const threshold = uint64(4 << 10)
+	restoreThreshold := execmodule.SetOverlayFlushThresholdForTest(threshold)
+	defer restoreThreshold()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+
+	genesis := &types.Genesis{
+		Config: chain.AllProtocolChanges,
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+	)
+	exec := m.ExecModule
+
+	const totalBlocks = 30
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, gen *blockgen.BlockGen) {
+		payload := bytes.Repeat([]byte("purge"), 32)
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(1000), 100_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), payload),
+			*types.LatestSignerForChainID(nil),
+			privKey,
+		)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+
+	status, err := insertBlocks(ctx, exec, chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	require.LessOrEqual(t, exec.BlockOverlaySizeBytes(), threshold)
+
+	ethTxKeys := make([][]byte, 0, totalBlocks)
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		for _, block := range chainPack.Blocks {
+			require.NotNil(t, rawdb.ReadHeader(tx, block.Hash(), block.NumberU64()))
+			td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+			require.NoError(t, err)
+			require.NotNil(t, td)
+
+			bodyKey := dbutils.BlockBodyKey(block.NumberU64(), block.Hash())
+			bodyForStorage, err := rawdb.ReadBodyForStorageByKey(tx, bodyKey)
+			require.NoError(t, err)
+			require.NotNil(t, bodyForStorage)
+			require.Greater(t, bodyForStorage.TxCount, uint32(2))
+
+			for i := 0; i < int(bodyForStorage.TxCount-2); i++ {
+				txIDKey := make([]byte, 8)
+				binary.BigEndian.PutUint64(txIDKey, bodyForStorage.BaseTxnID.At(i))
+				rawTx, err := tx.GetOne(kv.EthTx, txIDKey)
+				require.NoError(t, err)
+				require.NotNil(t, rawTx)
+				ethTxKeys = append(ethTxKeys, txIDKey)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, ethTxKeys)
+
+	rwTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	err = execmodule.PurgeBadChainForTest(ctx, exec, rwTx, m.Genesis.Hash(), chainPack.TopBlock.Hash())
+	require.NoError(t, err)
+	require.NoError(t, rwTx.Commit())
+
+	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		for _, block := range chainPack.Blocks {
+			require.Nil(t, rawdb.ReadHeader(tx, block.Hash(), block.NumberU64()))
+
+			headerNumber := rawdb.ReadHeaderNumber(tx, block.Hash())
+			require.Nil(t, headerNumber)
+
+			td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+			require.NoError(t, err)
+			require.Nil(t, td)
+
+			bodyForStorage, err := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(block.NumberU64(), block.Hash()))
+			require.NoError(t, err)
+			require.Nil(t, bodyForStorage)
+		}
+		for _, txIDKey := range ethTxKeys {
+			rawTx, err := tx.GetOne(kv.EthTx, txIDKey)
+			require.NoError(t, err)
+			require.Nil(t, rawTx)
+		}
+		return nil
+	})
 	require.NoError(t, err)
 }
