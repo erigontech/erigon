@@ -24,10 +24,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -62,6 +64,14 @@ var engineXTestCommand = cli.Command{
 		&TimeFlag,
 		&VerbosityFlag,
 		&WorkersFlag,
+		&cli.StringFlag{
+			Name:  "pprof.cpu",
+			Usage: "directory in which to write one CPU profile per engine API request",
+		},
+		&cli.StringFlag{
+			Name:  "fgprof",
+			Usage: "directory in which to write one fgprof wall-clock profile per engine API request",
+		},
 	},
 }
 
@@ -98,6 +108,14 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+	cpuProfileDir := cliCtx.String("pprof.cpu")
+	wallProfileDir := cliCtx.String("fgprof")
+	profilingEnabled := cpuProfileDir != "" || wallProfileDir != ""
+	if profilingEnabled && workers > 1 {
+		// pprof.StartCPUProfile and fgprof.Start are process-global, so
+		// concurrent workers cannot produce isolated per-request profiles.
+		return fmt.Errorf("--pprof.cpu/--fgprof require --workers=1 (got %d)", workers)
+	}
 
 	ctx, cancel := context.WithCancel(cliCtx.Context)
 	defer cancel()
@@ -116,7 +134,24 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	runner, err := engineapitester.NewEngineXTestRunner(ctx, log.Root(), preAllocDir)
+	var runnerOpts []engineapitester.EngineXTestRunnerOption
+	if profilingEnabled {
+		if cpuProfileDir != "" {
+			err := os.MkdirAll(cpuProfileDir, 0o755)
+			if err != nil {
+				return fmt.Errorf("create cpu profile dir: %w", err)
+			}
+		}
+		if wallProfileDir != "" {
+			err := os.MkdirAll(wallProfileDir, 0o755)
+			if err != nil {
+				return fmt.Errorf("create wall profile dir: %w", err)
+			}
+		}
+		runnerOpts = append(runnerOpts, engineapitester.WithRequestProfileHook(makeRequestProfileHook(cpuProfileDir, wallProfileDir)))
+	}
+
+	runner, err := engineapitester.NewEngineXTestRunner(ctx, log.Root(), preAllocDir, runnerOpts...)
 	if err != nil {
 		return fmt.Errorf("create runner: %w", err)
 	}
@@ -269,22 +304,94 @@ func runEngineXGroup(
 	}()
 	for _, t := range tests {
 		r := testResult{Name: t.name, Pass: true}
+		// timedExec(bench=false): single execution with memstats. We
+		// deliberately don't expose bench=true (testing.Benchmark loop) for
+		// engine_x tests because NewPayload + FCU are idempotent for a block
+		// hash the EL has already processed — iterations 2..N would
+		// short-circuit through the already-known-block fast path instead of
+		// re-executing.
+		testCtx := engineapitester.ContextWithTestName(ctx, t.name)
 		var err error
 		if timeIt {
 			var stats execStats
 			_, stats, err = timedExec(false, func() ([]byte, uint64, error) {
-				return nil, 0, runner.Run(ctx, t.def)
+				return nil, 0, runner.Run(testCtx, t.def)
 			})
 			if err == nil {
 				r.Stats = &stats
 			}
 		} else {
-			err = runner.Run(ctx, t.def)
+			err = runner.Run(testCtx, t.def)
 		}
 		if err != nil {
 			r.Pass = false
 			r.Error = err.Error()
 		}
 		resultCh <- r
+	}
+}
+
+// safeFilenameRe matches characters that are unsafe in filenames across
+// macOS/Linux/Windows. Replaced with '_' in profileFilename so paths derived
+// from EEST test names (which contain `[`, `]`, `:`, `/`, ` `, etc.) remain
+// usable.
+var safeFilenameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+func profileFilename(dir, kind, id, ext string) string {
+	clean := safeFilenameRe.ReplaceAllString(id, "_")
+	return filepath.Join(dir, kind+"__"+clean+"."+ext)
+}
+
+// makeRequestProfileHook returns a hook that writes one CPU profile and/or
+// one fgprof profile per engine API request, keyed by the request kind +
+// per-request id supplied by the runner. The hook holds an internal mutex so
+// concurrent invocations serialise on the process-global pprof state — in
+// practice callers should pair profiling with --workers=1.
+func makeRequestProfileHook(cpuDir, wallDir string) engineapitester.RequestProfileHook {
+	var mu sync.Mutex
+	return func(kind, id string) func() {
+		mu.Lock()
+		var cpuFile, wallFile *os.File
+		var stopFgprof func() error
+		if cpuDir != "" {
+			path := profileFilename(cpuDir, kind, id, "pprof.cpu")
+			f, err := os.Create(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "create cpu profile %s: %v\n", path, err)
+			} else {
+				err = pprof.StartCPUProfile(f)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "start cpu profile %s: %v\n", path, err)
+					f.Close()
+				} else {
+					cpuFile = f
+				}
+			}
+		}
+		if wallDir != "" {
+			path := profileFilename(wallDir, kind, id, "fgprof")
+			f, err := os.Create(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "create fgprof %s: %v\n", path, err)
+			} else {
+				stopFgprof = fgprof.Start(f, fgprof.FormatPprof)
+				wallFile = f
+			}
+		}
+		return func() {
+			defer mu.Unlock()
+			if cpuFile != nil {
+				pprof.StopCPUProfile()
+				cpuFile.Close()
+			}
+			if stopFgprof != nil {
+				if err := stopFgprof(); err != nil {
+					fmt.Fprintf(os.Stderr, "stop fgprof: %v\n", err)
+				}
+				if wallFile != nil {
+					wallFile.Close()
+				}
+			}
+		}
 	}
 }
