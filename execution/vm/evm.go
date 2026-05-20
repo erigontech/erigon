@@ -359,6 +359,15 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			if err := evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules); err != nil {
 				return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
+			// Balance cache: a non-zero transfer changed both ends.
+			// Invalidate (revert-safe) so a later opBalance/opSelfBalance
+			// re-reads from IBS rather than serving a stale value.
+			if !value.IsZero() {
+				if cc := evm.currentCallContext; cc != nil {
+					cc.invalidateBalance(caller)
+					cc.invalidateBalance(addr)
+				}
+			}
 		}
 	} else if typ == STATICCALL {
 		// Trigger a touch on the callee so EIP-161 state clearing applies to
@@ -622,6 +631,14 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	// Balance cache: CREATE endowment moved value from caller to the new
+	// contract.  Invalidate both (revert-safe).
+	if !value.IsZero() {
+		if cc := evm.currentCallContext; cc != nil {
+			cc.invalidateBalance(caller)
+			cc.invalidateBalance(address)
+		}
 	}
 
 	// Initialise a new contract and set the code that is to be used by the EVM.

@@ -388,11 +388,19 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	slot := scope.Stack.peek()
 	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
 	// so the system address is included when explicitly queried by user txs.
+	// Mark unconditionally (idempotent set insert) — unlike the code cache we
+	// do NOT skip the mark on a balance-cache hit, because the cache can be
+	// populated by opSelfBalance, which does not mark.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
+	if balance, ok := scope.findBalance(address); ok {
+		slot.Set(&balance)
+		return pc, nil, nil
+	}
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
+	scope.cacheBalance(address, balance)
 	slot.Set(&balance)
 	return pc, nil, nil
 }
@@ -1467,6 +1475,11 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	ibs.Selfdestruct(self)
+	// Balance cache: self loses its balance, beneficiary gains it.
+	// Invalidate both across the frame chain (revert-safe — see the
+	// balanceCache field comment).
+	scope.invalidateBalance(self)
+	scope.invalidateBalance(beneficiaryAddr)
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {
 		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
@@ -1506,6 +1519,11 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
 		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	}
+	// Balance cache: invalidate both sides of the (possible) transfer.
+	// Unconditional — harmless when no transfer happened, and cheaper
+	// than branching to match the conditions above.
+	scope.invalidateBalance(self)
+	scope.invalidateBalance(beneficiaryAddr)
 	if evm.ChainRules().IsAmsterdam && !evm.ChainRules().IsEIPDisabled(7708) && !balance.IsZero() { // EIP-7708
 		if self != beneficiaryAddr {
 			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))

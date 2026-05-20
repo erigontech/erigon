@@ -178,6 +178,23 @@ type CallContext struct {
 	// the cache inline rather than through a CallContext field.
 	nonceCache map[accounts.Address]uint64
 
+	// balanceCache holds per-address balance reads for opBalance /
+	// opSelfBalance.  Value-typed (uint256.Int).
+	//
+	// REVERT DISCIPLINE: mutation sites (CALL/CREATE Transfer,
+	// SELFDESTRUCT) INVALIDATE rather than write through.  An
+	// invalidated entry re-reads from IBS on the next access, and IBS
+	// is always correct — whether the frame commits or reverts.
+	// Write-through would be revert-hazardous: a balance mutation done
+	// on the parent frame's context (CALL Transfer runs before the
+	// child frame is pushed) can be rewound by a child-frame revert
+	// while the parent frame's cache is not discarded — exactly the
+	// hazard that made the nonce cache skip its address-nonce path.
+	// Invalidation sidesteps it entirely.
+	//
+	// Per-frame; lookup walks the parent chain via findBalance.
+	balanceCache map[accounts.Address]uint256.Int
+
 	Stack    Stack
 	Contract Contract
 }
@@ -233,6 +250,18 @@ var (
 // DumpNonceCacheStats snapshots the frame-local nonce cache counters.
 func DumpNonceCacheStats() (hits, misses uint64) {
 	return nonceCacheHitCount.Load(), nonceCacheMissCount.Load()
+}
+
+// Frame-local balance cache hit/miss counters.  Same purpose as the other
+// per-field cache counters but for opBalance / opSelfBalance.
+var (
+	balanceCacheHitCount  atomic.Uint64
+	balanceCacheMissCount atomic.Uint64
+)
+
+// DumpBalanceCacheStats snapshots the frame-local balance cache counters.
+func DumpBalanceCacheStats() (hits, misses uint64) {
+	return balanceCacheHitCount.Load(), balanceCacheMissCount.Load()
 }
 
 // findSlotCell walks the parent chain from this frame upward looking for
@@ -324,6 +353,41 @@ func (ctx *CallContext) cacheNonce(addr accounts.Address, nonce uint64) {
 		ctx.nonceCache = map[accounts.Address]uint64{}
 	}
 	ctx.nonceCache[addr] = nonce
+}
+
+// findBalance walks the parent chain for a cached balance entry.
+func (ctx *CallContext) findBalance(addr accounts.Address) (uint256.Int, bool) {
+	for c := ctx; c != nil; c = c.parent {
+		if bal, ok := c.balanceCache[addr]; ok {
+			balanceCacheHitCount.Add(1)
+			return bal, true
+		}
+	}
+	balanceCacheMissCount.Add(1)
+	return uint256.Int{}, false
+}
+
+// cacheBalance records a balance read for addr in this frame's cache.
+// Populate-on-miss only — never a write-through (see balanceCache field
+// comment for the revert-discipline rationale).
+func (ctx *CallContext) cacheBalance(addr accounts.Address, bal uint256.Int) {
+	if ctx.balanceCache == nil {
+		ctx.balanceCache = map[accounts.Address]uint256.Int{}
+	}
+	ctx.balanceCache[addr] = bal
+}
+
+// invalidateBalance removes any cached balance for addr from this frame
+// and every ancestor.  Called after every balance mutation (CALL/CREATE
+// Transfer, SELFDESTRUCT).  Revert-safe: an invalidated entry forces a
+// fresh IBS read, and IBS is authoritative whether the mutating frame
+// commits or reverts.  Invalidations made on ancestor frames are not
+// rolled back when a child frame fails — that's fine, it only costs an
+// extra cache miss.
+func (ctx *CallContext) invalidateBalance(addr accounts.Address) {
+	for c := ctx; c != nil; c = c.parent {
+		delete(c.balanceCache, addr)
+	}
 }
 
 // internTableSize is the size of the direct-mapped intern caches on each
@@ -441,6 +505,9 @@ func (c *CallContext) put() {
 	}
 	if c.nonceCache != nil {
 		clear(c.nonceCache)
+	}
+	if c.balanceCache != nil {
+		clear(c.balanceCache)
 	}
 	c.cachedSlotCell = nil
 	c.cachedCodeEntry = nil
@@ -808,6 +875,20 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				parentNonceCache[addr] = n
 			}
 		}
+		// Balance-cache rollup: uint256.Int values.  On success the
+		// child's cache is consistent with the committed IBS state
+		// (every mutation in the child invalidated rather than wrote
+		// through), so the parent can safely inherit the warm view.
+		if err == nil && len(callContext.balanceCache) > 0 && callContext.parent != nil {
+			parentBalanceCache := callContext.parent.balanceCache
+			if parentBalanceCache == nil {
+				parentBalanceCache = map[accounts.Address]uint256.Int{}
+				callContext.parent.balanceCache = parentBalanceCache
+			}
+			for addr, bal := range callContext.balanceCache {
+				parentBalanceCache[addr] = bal
+			}
+		}
 		// Diagnostic dump of frame-local code-cache hit/miss counters at
 		// outer-frame return (one log line per tx).  Lets the bench
 		// harness confirm the cache is actually being exercised on a
@@ -824,6 +905,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if hits, misses := nonceCacheHitCount.Load(), nonceCacheMissCount.Load(); hits+misses > 0 {
 				ratio := float64(hits) * 100 / float64(hits+misses)
 				log.Info("[noncecache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
+			}
+			if hits, misses := balanceCacheHitCount.Load(), balanceCacheMissCount.Load(); hits+misses > 0 {
+				ratio := float64(hits) * 100 / float64(hits+misses)
+				log.Info("[balancecache] frame-local cache stats", "hits", hits, "misses", misses, "hit_pct", fmt.Sprintf("%.2f", ratio))
 			}
 		}
 		// Pop this frame.
