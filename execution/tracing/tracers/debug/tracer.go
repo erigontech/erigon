@@ -79,8 +79,8 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 		OnSystemCallEnd:     t.OnSystemCallEnd,
 		// State events
 		OnBalanceChange: t.OnBalanceChange,
-		OnNonceChange:   t.OnNonceChange,
-		OnCodeChange:    t.OnCodeChange,
+		OnNonceChangeV2: t.OnNonceChangeV2,
+		OnCodeChangeV2:  t.OnCodeChangeV2,
 		OnStorageChange: t.OnStorageChange,
 		OnLog:           t.OnLog,
 	}
@@ -424,13 +424,17 @@ func (t *Tracer) OnBalanceChange(address accounts.Address, oldBalance, newBalanc
 	})
 }
 
-func (t *Tracer) OnNonceChange(address accounts.Address, oldNonce, newNonce uint64) {
+func (t *Tracer) OnNonceChangeV2(address accounts.Address, oldNonce, newNonce uint64, reason tracing.NonceChangeReason) {
 	if t.recordOptions.DisableOnNonceChangeRecording {
 		return
 	}
 
-	if t.wrapped != nil && t.wrapped.OnNonceChange != nil {
-		t.wrapped.OnNonceChange(address, oldNonce, newNonce)
+	if t.wrapped != nil {
+		if t.wrapped.OnNonceChangeV2 != nil {
+			t.wrapped.OnNonceChangeV2(address, oldNonce, newNonce, reason)
+		} else if t.wrapped.OnNonceChange != nil {
+			t.wrapped.OnNonceChange(address, oldNonce, newNonce)
+		}
 	}
 
 	t.traces.Append(Trace{
@@ -438,17 +442,22 @@ func (t *Tracer) OnNonceChange(address accounts.Address, oldNonce, newNonce uint
 			Address:  address.Value(),
 			OldNonce: oldNonce,
 			NewNonce: newNonce,
+			Reason:   fmt.Sprintf("%v", reason),
 		},
 	})
 }
 
-func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, newCodeHash accounts.CodeHash, newCode []byte) {
+func (t *Tracer) OnCodeChangeV2(address accounts.Address, prevCodeHash accounts.CodeHash, prevCode []byte, newCodeHash accounts.CodeHash, newCode []byte, reason tracing.CodeChangeReason) {
 	if t.recordOptions.DisableOnCodeChangeRecording {
 		return
 	}
 
-	if t.wrapped != nil && t.wrapped.OnCodeChange != nil {
-		t.wrapped.OnCodeChange(address, prevCodeHash, prevCode, newCodeHash, newCode)
+	if t.wrapped != nil {
+		if t.wrapped.OnCodeChangeV2 != nil {
+			t.wrapped.OnCodeChangeV2(address, prevCodeHash, prevCode, newCodeHash, newCode, reason)
+		} else if t.wrapped.OnCodeChange != nil {
+			t.wrapped.OnCodeChange(address, prevCodeHash, prevCode, newCodeHash, newCode)
+		}
 	}
 
 	t.traces.Append(Trace{
@@ -458,6 +467,7 @@ func (t *Tracer) OnCodeChange(address accounts.Address, prevCodeHash accounts.Co
 			PrevCode:     prevCode,
 			NewCodeHash:  newCodeHash.Value(),
 			NewCode:      newCode,
+			Reason:       fmt.Sprintf("%v", reason),
 		},
 	})
 }
@@ -722,6 +732,7 @@ type OnNonceChangeTrace struct {
 	Address  common.Address `json:"address,omitempty"`
 	OldNonce uint64         `json:"oldNonce,omitempty"`
 	NewNonce uint64         `json:"newNonce,omitempty"`
+	Reason   string         `json:"reason,omitempty"`
 }
 
 type OnCodeChangeTrace struct {
@@ -730,6 +741,7 @@ type OnCodeChangeTrace struct {
 	PrevCode     hexutil.Bytes  `json:"prevCode,omitempty"`
 	NewCodeHash  common.Hash    `json:"newCodeHash,omitempty"`
 	NewCode      hexutil.Bytes  `json:"newCode,omitempty"`
+	Reason       string         `json:"reason,omitempty"`
 }
 
 type OnStorageChangeTrace struct {
