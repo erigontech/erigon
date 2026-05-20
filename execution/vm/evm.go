@@ -568,7 +568,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 			err = ErrNonceUintOverflow
 			return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, err
 		}
-		evm.intraBlockState.SetNonce(caller, nonce+1)
+		evm.intraBlockState.SetNonce(caller, nonce+1, tracing.NonceChangeContractCreator)
 	}
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
@@ -609,7 +609,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
-		evm.intraBlockState.SetNonce(address, 1)
+		evm.intraBlockState.SetNonce(address, 1, tracing.NonceChangeNewContract)
 	}
 	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -671,7 +671,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gas md
 		}
 
 		if stateGasOk && regularGasOk {
-			evm.intraBlockState.SetCode(address, ret)
+			evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation)
 			// EIP-8037: post-Run code-deposit state charge counts toward this
 			// frame's state-gas usage.
 			gasUsed.State += int64(stateGas)
