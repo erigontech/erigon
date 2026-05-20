@@ -762,47 +762,68 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-// FlushWithCallback updates a downstream cache via cb for each
-// (key, value, step) tuple in domain, then flushes the mem-batch to tx.
-// Cache-update is ordered BEFORE the MDBX flush so that during the
-// MDBX write window the cache still holds the entry — a reader that
-// goes (sd write buffer → cache → MDBX) never observes a key missing
-// from all three sources. The MDBX commit provides db-side atomicity
-// independently.
+// FlushWithCallback flushes the mem-batch to tx, but first invokes cb for
+// every (domain, key, latest-value, step) tuple so downstream caches can be
+// refreshed, then drains the in-memory latest/history state.
 //
-// Used by SharedDomains.Flush to keep an external BranchCache in sync
-// with commitment-domain writes.
+// The callback, the MDBX flush and the drain run under latestStateLock as
+// one atomic window: a concurrent reader sees either the full pre-flush mem
+// state or the fully-drained post-flush state, never a partial mix. cb runs
+// before the flush so that during the MDBX write window the cache already
+// holds the entry — a reader going mem → cache → MDBX never sees a key
+// missing from all three. data may be nil/empty for deletes — cb
+// distinguishes on len(v)==0.
 //
-// cb is called under latestStateLock so the snapshot it sees matches
-// the in-memory state at flush time. Flush itself runs under the same
-// lock to prevent concurrent DomainPut from interleaving with the
-// snapshot/cache-update/flush sequence.
-//
-// If Flush fails, the cache has already been updated for this batch.
-// That's the same invariant the cache maintains for any other write
-// path — values may exist in the cache before they reach disk; a
-// retry of Flush re-applies them.
+// Used by SharedDomains.Flush to keep the BranchCache (commitment domain)
+// and the StateCache (accounts/storage/code) in sync — refreshed only on
+// flush, so they hold committed, fork-agnostic state.
 func (sd *TemporalMemBatch) FlushWithCallback(
-	ctx context.Context, tx kv.RwTx, domain kv.Domain,
-	cb func(k []byte, v []byte, step kv.Step),
+	ctx context.Context, tx kv.RwTx,
+	cb func(domain kv.Domain, k []byte, v []byte, step kv.Step),
 ) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
 
-	// dir is unset on entries written via DomainPut/DomainDel (always
-	// default zero); the latest history entry per key is authoritative.
-	// data may be nil/empty for deletes — caller's cb is expected to
-	// distinguish (see SharedDomains.Flush, which Invalidate's on
-	// len(v)==0 and Put's otherwise).
-	for keyStr, history := range sd.domains[domain] {
+	for d := range sd.domains {
+		for keyStr, history := range sd.domains[d] {
+			if len(history) == 0 {
+				continue
+			}
+			latest := history[len(history)-1]
+			cb(kv.Domain(d), []byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+		}
+	}
+	// StorageDomain entries live in sd.storage (a btree), not sd.domains.
+	sd.storage.Scan(func(keyStr string, history []dataWithTxNum) bool {
 		if len(history) == 0 {
-			continue
+			return true
 		}
 		latest := history[len(history)-1]
-		cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
-	}
+		cb(kv.StorageDomain, []byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize))
+		return true
+	})
 
-	return sd.flushLocked(ctx, tx)
+	if err := sd.flushLocked(ctx, tx); err != nil {
+		return err
+	}
+	sd.drainLocked()
+	return nil
+}
+
+// drainLocked clears the in-memory latest/history state after a flush. The
+// caller must hold latestStateLock. Mirrors the data-clearing half of
+// ClearRam (without the metrics reset): once flushed, the mem-batch holds
+// no data — values now live in the DB and the refreshed caches, and a child
+// SD chained to this one as parent reads through instead of being shadowed
+// by stale, fork-specific bytes.
+func (sd *TemporalMemBatch) drainLocked() {
+	for i := range sd.domains {
+		sd.domains[i] = map[string][]dataWithTxNum{}
+	}
+	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
+	sd.unwindToTxNum = 0
+	sd.unwindChangeset = nil
+	sd.unwindChangesetRaw = nil
 }
 
 // flushLocked is the body of Flush, factored so FlushWithCallback can

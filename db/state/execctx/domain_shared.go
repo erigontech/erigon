@@ -780,91 +780,127 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	// Update the cache with the bytes about to land in MDBX, atomically
+	// Refresh the caches with the bytes about to land in MDBX, atomically
 	// with the flush. FlushWithCallback holds the latestState write lock
 	// for the full window so a concurrent DomainPut cannot interleave
 	// between the cache update and the MDBX write — readers see either
 	// the local sd.mem value (during the lock) or the cached/MDBX value
-	// (after release). No window where cache is stale vs MDBX.
-	if sd.branchCache != nil {
-		if err := sd.mem.FlushWithCallback(ctx, tx, kv.CommitmentDomain, func(k []byte, v []byte, step kv.Step) {
-			if len(v) == 0 {
-				sd.branchCache.Invalidate(k)
-				return
+	// (after release). The caches are refreshed ONLY here, on flush —
+	// never per-write — so they mirror committed, fork-agnostic state:
+	// CommitmentDomain → BranchCache, Accounts/Storage/Code → StateCache.
+	if sd.branchCache != nil || sd.stateCache != nil {
+		if err := sd.mem.FlushWithCallback(ctx, tx, func(domain kv.Domain, k []byte, v []byte, step kv.Step) {
+			switch domain {
+			case kv.CommitmentDomain:
+				if sd.branchCache != nil {
+					if len(v) == 0 {
+						sd.branchCache.Invalidate(k)
+					} else {
+						sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
+					}
+				}
+			case kv.AccountsDomain:
+				if sd.stateCache != nil {
+					if len(v) == 0 {
+						sd.stateCache.Delete(kv.AccountsDomain, k)
+						sd.stateCache.Delete(kv.CodeDomain, k)
+						sd.stateCache.DeleteAddrCodeHash(k)
+					} else {
+						sd.stateCache.Put(kv.AccountsDomain, k, v)
+						sd.stateCache.DeleteAddrCodeHash(k)
+					}
+				}
+			case kv.StorageDomain:
+				if sd.stateCache != nil {
+					if len(v) == 0 {
+						sd.stateCache.Delete(kv.StorageDomain, k)
+					} else {
+						sd.stateCache.Put(kv.StorageDomain, k, v)
+					}
+				}
+			case kv.CodeDomain:
+				if sd.stateCache != nil {
+					if len(v) == 0 {
+						sd.stateCache.Delete(kv.CodeDomain, k)
+					} else {
+						sd.stateCache.Put(kv.CodeDomain, k, v)
+					}
+				}
 			}
-			sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
 		}); err != nil {
 			return err
 		}
-		// Adaptive controller hook: now that the cache reflects this
-		// batch's writes, decide promotions / extensions / demotions
-		// for the contracts whose miss pressure crossed thresholds.
-		// The reader uses the in-flight Flush tx so pre-cache reads
-		// see the just-committed bytes (the tx's own writes are
-		// visible to itself).
-		if sd.adaptivePinController != nil {
-			if ttx, ok := tx.(kv.TemporalTx); ok {
-				reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-					v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
-					if err != nil {
-						return nil, 0, false, err
+		if sd.branchCache != nil {
+			// Adaptive controller hook: now that the cache reflects this
+			// batch's writes, decide promotions / extensions / demotions
+			// for the contracts whose miss pressure crossed thresholds.
+			// The reader uses the in-flight Flush tx so pre-cache reads
+			// see the just-committed bytes (the tx's own writes are
+			// visible to itself).
+			if sd.adaptivePinController != nil {
+				if ttx, ok := tx.(kv.TemporalTx); ok {
+					reader := func(prefix []byte) ([]byte, uint64, bool, error) {
+						v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
+						if err != nil {
+							return nil, 0, false, err
+						}
+						return v, uint64(step), len(v) > 0, nil
 					}
-					return v, uint64(step), len(v) > 0, nil
-				}
-				// Install per-call parallel-mode plumbing so the
-				// controller's promote/extend uses the wave-BFS file-only
-				// resolver. The factory captures ttx; cleared after the
-				// call so a future OnBlockComplete can't reach a stale tx.
-				factory := func() (commitment.BatchBranchResolver, func(), error) {
-					resolve := func(keys [][]byte) ([][]byte, error) {
-						d := ttx.Debug()
-						vals := make([][]byte, len(keys))
-						for i, k := range keys {
-							v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
-							if err != nil {
-								return nil, err
+					// Install per-call parallel-mode plumbing so the
+					// controller's promote/extend uses the wave-BFS file-only
+					// resolver. The factory captures ttx; cleared after the
+					// call so a future OnBlockComplete can't reach a stale tx.
+					factory := func() (commitment.BatchBranchResolver, func(), error) {
+						resolve := func(keys [][]byte) ([][]byte, error) {
+							d := ttx.Debug()
+							vals := make([][]byte, len(keys))
+							for i, k := range keys {
+								v, found, _, _, err := d.GetLatestFromFiles(kv.CommitmentDomain, k, 0)
+								if err != nil {
+									return nil, err
+								}
+								if found {
+									vc := make([]byte, len(v))
+									copy(vc, v)
+									vals[i] = vc
+								}
 							}
-							if found {
-								vc := make([]byte, len(v))
-								copy(vc, v)
-								vals[i] = vc
+							return vals, nil
+						}
+						return resolve, nil, nil
+					}
+					provider := func(contractHash []byte) map[string][]byte {
+						m := map[string][]byte{}
+						c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
+						if cerr != nil {
+							return m
+						}
+						defer c.Close()
+						evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
+						scan := func(from, to []byte) {
+							for k, v, err := c.Seek(from); k != nil && err == nil; k, v, err = c.NextNoDup() {
+								if bytes.Compare(k, to) >= 0 {
+									return
+								}
+								if len(v) < 8 {
+									continue
+								}
+								m[string(common.Copy(k))] = common.Copy(v[8:])
 							}
 						}
-						return vals, nil
-					}
-					return resolve, nil, nil
-				}
-				provider := func(contractHash []byte) map[string][]byte {
-					m := map[string][]byte{}
-					c, cerr := ttx.CursorDupSort(kv.TblCommitmentVals)
-					if cerr != nil {
+						scan(evenFrom, evenTo)
+						scan(oddFrom, oddTo)
 						return m
 					}
-					defer c.Close()
-					evenFrom, evenTo, oddFrom, oddTo := commitment.ContractTrunkKeyRanges(commitment.ContractNibbles(contractHash))
-					scan := func(from, to []byte) {
-						for k, v, err := c.Seek(from); k != nil && err == nil; k, v, err = c.NextNoDup() {
-							if bytes.Compare(k, to) >= 0 {
-								return
-							}
-							if len(v) < 8 {
-								continue
-							}
-							m[string(common.Copy(k))] = common.Copy(v[8:])
-						}
-					}
-					scan(evenFrom, evenTo)
-					scan(oddFrom, oddTo)
-					return m
+					sd.adaptivePinController.SetParallelMode(factory, provider)
+					sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
+					sd.adaptivePinController.SetParallelMode(nil, nil)
 				}
-				sd.adaptivePinController.SetParallelMode(factory, provider)
-				sd.adaptivePinController.OnBlockComplete(ctx, sd.txNum, reader)
-				sd.adaptivePinController.SetParallelMode(nil, nil)
 			}
+			// Refresh pinned-tier gauges once per Flush — once-per-batch
+			// cadence avoids per-lookup cost in the hot read path.
+			sd.branchCache.PublishMetrics()
 		}
-		// Refresh pinned-tier gauges once per Flush — once-per-batch
-		// cadence avoids per-lookup cost in the hot read path.
-		sd.branchCache.PublishMetrics()
 		return nil
 	}
 	return sd.mem.Flush(ctx, tx)
@@ -1256,17 +1292,12 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Update state cache when writing. For AccountsDomain, also invalidate
-	// the addr → codeHash LRU above SD because the codeHash may have
-	// changed (CREATE/CREATE2-replace; SELFDESTRUCT goes through DomainDel
-	// which has its own invalidation). The next codeHashForAddr lookup
-	// will repopulate from the freshly written account bytes.
-	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
-		if domain == kv.AccountsDomain {
-			sd.stateCache.DeleteAddrCodeHash(k)
-		}
-	}
+	// The state cache is NOT updated here. This write goes into sd.mem and
+	// is served from there (checked first on every read, fork-isolated via
+	// the parent chain); the shared cache is refreshed only on flush
+	// (SharedDomains.Flush → FlushWithCallback), so it mirrors committed,
+	// fork-agnostic state. A per-write update would leak non-flushed,
+	// fork-specific bytes into a sibling fork's reads.
 
 	// Serialize against the calculator's accumulator-swap window — see
 	// changesetMu doc on the SharedDomains struct. Skipped when the caller
@@ -1310,31 +1341,20 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
-		// Remove from state cache when account is deleted (including the
-		// nethermind-style addr → codeHash mapping; SELFDESTRUCT and
-		// CREATE-replace both reset the codeHash).
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.AccountsDomain, k)
-			sd.stateCache.Delete(kv.CodeDomain, k)
-			sd.stateCache.DeleteAddrCodeHash(k)
-		}
+		// State cache is refreshed on flush only — see DomainPut. The flush
+		// callback handles the empty-value (delete) case for accounts, code
+		// and the addr→codeHash mapping.
 		// AccountsDomain — apply-side. Serialize against swap window.
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
-		// Remove from state cache when storage is deleted
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.StorageDomain, k)
-		}
+		// State cache refreshed on flush only — see DomainPut.
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		// Remove from state cache when code is deleted
-		if sd.stateCache != nil {
-			sd.stateCache.Delete(kv.CodeDomain, k)
-		}
+		// State cache refreshed on flush only — see DomainPut.
 	default:
 		//noop
 	}

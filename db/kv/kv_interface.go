@@ -530,7 +530,7 @@ type TemporalMemBatch interface {
 	HasPrefixInRAM(domain Domain, prefix []byte) bool
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
-	FlushWithCallback(ctx context.Context, tx RwTx, domain Domain, cb func(k []byte, v []byte, step Step)) error
+	FlushWithCallback(ctx context.Context, tx RwTx, cb func(domain Domain, k []byte, v []byte, step Step)) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
 	DiscardWrites(domain Domain)
