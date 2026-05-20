@@ -288,6 +288,15 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 				return fmt.Errorf("commitment step [%d, %d): %w; pausing: %w",
 					fromStep, toStep, loadErr, validation.ErrPause)
 			}
+		case errors.Is(loadErr, integrity.ErrCommitmentRangeMismatch):
+			// GetLatestFromFiles returned the 'state' record from a
+			// wider, merged file — this step file has just been
+			// superseded by a merge. Transient: the stale step entry is
+			// dropped by the next disk-reconcile sweep. Pause rather
+			// than fail; a quarantine tick here would strand a file
+			// that is about to be removed anyway.
+			return fmt.Errorf("commitment step [%d, %d): %w; pausing: %w",
+				fromStep, toStep, loadErr, validation.ErrPause)
 		default:
 			// Phase A failure (ErrCommitmentRecordInvalid) or other
 			// real Phase C failure (ErrCommitmentTxNumRange) — propagate.

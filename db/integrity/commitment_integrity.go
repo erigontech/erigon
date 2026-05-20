@@ -180,10 +180,10 @@ func ExtractCommitmentRecord(ctx context.Context, tx kv.TemporalTx, startTxNum, 
 	// keep only the LATEST state, so the file's data range narrows
 	// while the merged-name range stays wide.
 	if start < startTxNum {
-		return info, fmt.Errorf("%w: commitment file startTxNum %d below step start %d", ErrCommitmentRecordInvalid, start, startTxNum)
+		return info, fmt.Errorf("%w: commitment file startTxNum %d below step start %d", ErrCommitmentRangeMismatch, start, startTxNum)
 	}
 	if end > endTxNum {
-		return info, fmt.Errorf("%w: commitment file endTxNum %d past step end %d", ErrCommitmentRecordInvalid, end, endTxNum)
+		return info, fmt.Errorf("%w: commitment file endTxNum %d past step end %d", ErrCommitmentRangeMismatch, end, endTxNum)
 	}
 	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 	if err != nil {

@@ -77,6 +77,16 @@ var (
 	// file corruption — quarantine.
 	ErrCommitmentRecordInvalid = fmt.Errorf("%w: commitment record invalid", ErrIntegrity)
 
+	// ErrCommitmentRangeMismatch: GetLatestFromFiles returned the
+	// KeyCommitmentState record from a file whose [start,end) range
+	// does NOT match the queried step range — the record came from a
+	// wider, merged file. This is the merge-transition signature: the
+	// small step file being validated has just been superseded by a
+	// merge (its 'state' now lives in the merged file). Not corruption
+	// — transient. Lifecycle callers pause; the stale step entry is
+	// dropped by the next disk-reconcile sweep.
+	ErrCommitmentRangeMismatch = fmt.Errorf("%w: commitment file range mismatch", ErrIntegrity)
+
 	// ErrAnchorHeaderMissing: header for the recorded AtBlock isn't
 	// in the local BlockReader yet. Transient (the EL hasn't opened
 	// the segment containing it) — caller should pause and retry.
