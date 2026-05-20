@@ -1588,13 +1588,16 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	sdb.stateReader.SetTrace(false, "")
 
+	accountSource := StorageRead
+	accountVersion := sdb.Version()
+
 	if err != nil {
 		return nil, err
 	}
 
 	if readAccount == nil {
 		if sdb.versionMap != nil {
-			readAccount, _, _, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
+			readAccount, accountSource, accountVersion, err = versionedRead[*accounts.Account](sdb, addr, AddressPath, accounts.NilKey, false, nil, nil, nil)
 
 			if readAccount == nil || err != nil {
 				return nil, err
@@ -1623,12 +1626,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	var code []byte
 
 	if sdb.versionMap != nil {
-		// refreshVersionedAccount is called for its side-effect of recording
-		// Balance/Nonce/Incarnation/CodeHash sub-reads into versionedReads
-		// and folding any newer field values into the returned account.
-		// UnknownVersion lets sub-reads at any prior-tx version promote
-		// (using sdb.Version() would gate them out).
-		account, _, _, err = sdb.refreshVersionedAccount(addr, readAccount, StorageRead, UnknownVersion)
+		account, accountSource, accountVersion, err = sdb.refreshVersionedAccount(addr, readAccount, accountSource, accountVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -1668,10 +1666,9 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		account = readAccount
 	}
 
-	// Synthetic AddressPath recording removed: it borrowed a sub-read's
-	// version and tripped the validator's path==AddressPath checks against
-	// an entry vm never wrote. Sub-reads are recorded by versionedRead.
-	_ = recordRead
+	if recordRead {
+		sdb.accountRead(addr, account, accountSource, accountVersion)
+	}
 	obj := newObject(sdb, addr, account, account)
 	if code != nil {
 		obj.code = code
