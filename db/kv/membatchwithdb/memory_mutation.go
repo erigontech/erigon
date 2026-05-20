@@ -562,6 +562,25 @@ func (m *MemoryMutation) Commit() error {
 	return nil
 }
 
+// Rollback releases this mutation's local cursor cache and forwards Rollback
+// to the backing in-memory tx / db.
+//
+// Concurrency invariant (load-bearing — see also Filters.WithOverlay): for a
+// MemoryMutation created via NewMemoryBatch (the pure-Go memStore backing
+// used by SharedDomains.blockOverlay), memTx.Rollback and memDb.Close are
+// no-ops on the in-memory data — see memory_store.go. That is what makes it
+// safe for the FCU bg-commit goroutine to call Close on the published
+// BlockOverlay while concurrent RPC readers are still iterating views
+// obtained via NewReadView / NewTemporalReadView: the views share memTx but
+// the data behind it is not destroyed. Statefulness affecting the parent's
+// own statelessCursors map below does not propagate to views (views inherit
+// an independent lazy cursor cache via newReadViewMut).
+//
+// If this MemoryMutation is ever switched to NewMemoryBatchMDBX (real MDBX
+// backing, where Rollback DOES invalidate cursors), the bg-commit close +
+// concurrent-RPC-reader pattern becomes unsafe and refcounting/drain logic
+// is required. newReadViewMut enforces this at runtime via the *memStore
+// type-assertion.
 func (m *MemoryMutation) Rollback() {
 	m.memTx.Rollback()
 	m.memDb.Close()
@@ -970,6 +989,12 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 // The returned kv.TemporalTx only exposes read methods. Callers cannot write
 // to the overlay through this view. The caller must not Close the returned
 // view (it doesn't own the memDb).
+//
+// Concurrency: the view remains safe to read even if the parent's Close /
+// Rollback runs concurrently (e.g. the FCU bg-commit goroutine closing the
+// published BlockOverlay) — but only because the parent is memStore-backed,
+// whose Rollback/Close are no-ops on the in-memory data. See newReadViewMut
+// for the runtime assertion enforcing that invariant.
 func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
@@ -977,6 +1002,16 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
+	// Enforce the safe-concurrent-close invariant documented on Rollback and
+	// on NewReadView: read views remain safe under a concurrent parent Close
+	// only because the pure-Go memStore's Rollback/Close are no-ops. An
+	// MDBX-backed memTx (NewMemoryBatchMDBX) would invalidate cursors on
+	// Rollback and break readers mid-iteration. If you need MDBX-backed
+	// overlays with concurrent readers, add a refcount/drain step at the
+	// parent's Close before relaxing this assertion.
+	if _, ok := m.memTx.(*memStore); !ok {
+		panic(fmt.Sprintf("MemoryMutation.newReadViewMut: shared-tx read views require pure-Go memStore backing; got %T (use NewMemoryBatch, not NewMemoryBatchMDBX)", m.memTx))
+	}
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t

@@ -624,6 +624,27 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 	return sd.mem.IteratePrefix(domain, prefix, roTx, it)
 }
 
+// Close releases this SD's in-memory state. Idempotent.
+//
+// Concurrency with RPC readers: when the FCU bg-commit goroutine calls Close
+// on the published SD (forkchoice.go bg path), concurrent RPC readers that
+// obtained a view via Filters.WithOverlay / WithTemporalOverlay /
+// SharedDomains.BlockOverlayTemporalTx remain safe. Why:
+//   - sd.mem (TemporalMemBatch) holds domain writes that are never exposed
+//     to RPC views — the temporal methods on the block overlay's views
+//     delegate to the caller's own tx, not to sd.mem. Closing sd.mem does
+//     not reach into any view.
+//   - sd.blockOverlay (MemoryMutation on memStore) has no-op Rollback/Close
+//     for its in-memory data — see MemoryMutation.Rollback. Views' shared
+//     memTx therefore keeps serving reads after the parent's Close.
+//   - sd.sdCtx is the commitment context, internal to this SD; views don't
+//     reference it.
+//
+// In other words: PublishOverlay(nil) before this Close blocks NEW readers
+// from acquiring the overlay, and the no-op-on-data semantics keeps already-
+// acquired views readable until the caller's own tx is rolled back. Do not
+// change BlockOverlay's backing store to one that destroys data on close
+// without adding a refcount/drain step here (see newReadViewMut).
 func (sd *SharedDomains) Close() {
 	if sd.sdCtx == nil { //idempotency
 		return

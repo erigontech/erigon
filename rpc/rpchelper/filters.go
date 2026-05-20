@@ -891,9 +891,23 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 
 // WithOverlay returns a read view backed by the latest block overlay if one
 // is available, otherwise returns the given tx unchanged. The read view uses
-// the overlay's in-memory data for table lookups, falling back to the caller's tx
-// for data not in the overlay.
+// the overlay's in-memory data for table lookups, falling back to the caller's
+// tx for data not in the overlay.
 // Safe to call on a nil receiver.
+//
+// Concurrency: the returned view stays safe to use even if the FCU bg-commit
+// goroutine concurrently closes the published SD (the typical lifecycle —
+// PublishOverlay(SD) → reader acquires view → reader uses view → bg goroutine
+// PublishOverlay(nil) + SD.Close → reader continues for some time → caller's
+// tx.Rollback). This is load-bearing on (a) the BlockOverlay being backed by
+// a pure-Go memStore whose Rollback/Close are no-ops on the in-memory data
+// (see MemoryMutation.Rollback and memory_store.go) and (b) the view holding
+// its own backing tx (the caller's tx, not the SD's). Both invariants are
+// asserted at view-construction time in MemoryMutation.newReadViewMut. Do
+// not relax either without adding refcount/drain logic to SharedDomains.Close.
+//
+// The standard tx lifecycle still applies: views must not be used after the
+// CALLER'S tx is rolled back.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if ff == nil {
 		return tx
@@ -910,6 +924,8 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
+// The same concurrent-close safety property as WithOverlay applies (see the
+// concurrency note there).
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 	if ff == nil {
 		return tx
