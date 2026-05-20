@@ -303,7 +303,11 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return err
 	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty.ToBig()); err != nil {
+	var genesisTd uint256.Int
+	if g.Difficulty != nil {
+		genesisTd = *g.Difficulty
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), genesisTd); err != nil {
 		return err
 	}
 	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
@@ -537,10 +541,12 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if g.BlockAccessListHash != nil {
-			head.BlockAccessListHash = g.BlockAccessListHash
-		} else {
-			head.BlockAccessListHash = &empty.BlockAccessListHash
+		if !g.Config.IsEIPDisabled(7928) {
+			if g.BlockAccessListHash != nil {
+				head.BlockAccessListHash = g.BlockAccessListHash
+			} else {
+				head.BlockAccessListHash = &empty.BlockAccessListHash
+			}
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber

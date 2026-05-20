@@ -1027,8 +1027,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		// EIP-8037: charge state gas for account creation after the static-context
 		// check so that it is not consumed on early failures where no state is
 		// created (per execution-specs#2608).
-		stateGas := uint64(params.StateBytesNewAccount) * evm.Context.CostPerStateByte
-		if !scope.useMdGas(evm, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+		if !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
 			return pc, nil, ErrOutOfGas
 		}
 	}
@@ -1045,7 +1044,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.useGas(gas.Regular, evm.Config().Tracer, gasChangeReason)
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
+	res, addr, returnGas, childUsed, suberr := evm.Create(scope.Contract.Address(), input, gas, value, salt, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1064,6 +1063,23 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	scope.Stack.push(result)
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
+
+	if evm.chainRules.IsAmsterdam {
+		if suberr != nil {
+			// EIP-8037: child CREATE failure refunds the NEW_ACCOUNT state gas
+			// the parent charged at entry. The reservoir was already restored
+			// to the parent via restoreChildGas (handleFrameRevert at depth>0
+			// added childUsed.State back to gas.State).
+			scope.creditStateGasRefund(params.StateGasNewAccount)
+		} else {
+			// EIP-8037: child success — fold child's net state-gas usage
+			// (signed: charges − inline refunds the child credited) into
+			// our frame. The child's reservoir leftover (which holds any
+			// refunded gas) has already been merged via restoreChildGas
+			// above.
+			scope.frameStateUsed += childUsed.State
+		}
+	}
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1108,17 +1124,11 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			return pc, nil, ErrWriteProtection
 		}
 		gas.Regular += params.CallStipend
-		// EIP-8037: The stipend is added to child gas but wasn't charged.
-		// In the Python spec, escrow_subcall_regular_gas includes the stipend,
-		// so we must deduct it from regularGasConsumed for correct block accounting.
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed -= params.CallStipend
-		}
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	ret, returnGas, childUsed, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -1132,7 +1142,9 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1161,15 +1173,11 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	if !value.IsZero() {
 		gas.Regular += params.CallStipend
-		// EIP-8037: See comment in opCall — stipend is part of escrow.
-		if evm.chainRules.IsAmsterdam {
-			evm.regularGasConsumed -= params.CallStipend
-		}
 	}
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	ret, returnGas, childUsed, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1182,7 +1190,9 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1211,7 +1221,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	ret, returnGas, childUsed, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1224,7 +1234,9 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1253,7 +1265,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
-	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	ret, returnGas, childUsed, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1265,7 +1277,9 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
-
+	if evm.chainRules.IsAmsterdam && err == nil {
+		scope.frameStateUsed += childUsed.State
+	}
 	evm.returnData = ret
 	return pc, ret, nil
 }
@@ -1355,7 +1369,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
 		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	}
-	if evm.ChainRules().IsAmsterdam && !balance.IsZero() { // EIP-7708
+	if evm.ChainRules().IsAmsterdam && !evm.ChainRules().IsEIPDisabled(7708) && !balance.IsZero() { // EIP-7708
 		if self != beneficiaryAddr {
 			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 		} else if newContract {

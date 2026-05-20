@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -163,7 +162,7 @@ type IntraBlockState struct {
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// The refund counter, also used by state transitioning.
-	refund mdgas.MdGas
+	refund uint64
 
 	txIndex  int
 	blockNum uint64
@@ -361,7 +360,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = mdgas.MdGas{}
+	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.accessList.Reset()
@@ -464,31 +463,17 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund.Regular += gas
+	sdb.refund += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund.Regular {
+	if gas > sdb.refund {
 		return errors.New("refund counter below zero")
 	}
-	sdb.refund.Regular -= gas
-	return nil
-}
-
-func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
-	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund.State += gas
-}
-
-func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
-	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund.State {
-		return errors.New("state refund counter below zero")
-	}
-	sdb.refund.State -= gas
+	sdb.refund -= gas
 	return nil
 }
 
@@ -643,6 +628,16 @@ func (sdb *IntraBlockState) TxnIndex() int {
 	return sdb.txIndex
 }
 
+type codeAccessTracker interface {
+	OnCodeAccess(accounts.Address, []byte)
+}
+
+func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
+	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
+		hook.OnCodeAccess(addr, code)
+	}
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	return sdb.getCode(addr, false)
@@ -663,6 +658,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
 			}
+			if err == nil {
+				sdb.callCodeAccessHook(addr, code)
+			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -678,6 +676,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	// not in a previous tx sharing the same IBS (block generator reuses IBS).
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			sdb.callCodeAccessHook(addr, so.code)
 			return so.code, nil
 		}
 	}
@@ -700,7 +699,9 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
 		}
 	}
-
+	if err == nil {
+		sdb.callCodeAccessHook(addr, code)
+	}
 	return code, err
 }
 
@@ -715,6 +716,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			return 0, nil
 		}
 		if stateObject.code != nil {
+			sdb.callCodeAccessHook(addr, stateObject.code)
 			return len(stateObject.code), nil
 		}
 		if stateObject.data.CodeHash.IsEmpty() {
@@ -730,6 +732,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 				return 0, nil
 			}
 			if s.code != nil {
+				sdb.callCodeAccessHook(addr, s.code)
 				return len(s.code), nil
 			}
 			if s.data.CodeHash.IsEmpty() {
@@ -1257,10 +1260,31 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		return err
 	}
 	if written {
-		if codeHash == baseCodeHash {
+		// SKIP when the new code matches either:
+		//   (1) the value seen by *this* SetCode call (revert-to-base — handles
+		//       the case where a prior SetCode in the same tx already wrote
+		//       a non-original value, and we now revert to it), or
+		//   (2) the pre-tx original (cumulative net-zero — e.g. EIP-7702
+		//       authority that sets a delegation then resets to no-delegation
+		//       within the same tx).
+		//
+		// Case (2) is disabled for newly-created stateObjects (CREATE2 after
+		// SELFDESTRUCT, or any contract creation). stateObject.original holds
+		// the PRE-CREATION account snapshot (carried over from the destructed
+		// previous incarnation by createObject(addr, previous)). New code that
+		// happens to match the destroyed contract's code is NOT a cumulative
+		// net-zero — it is a deploy of the same bytecode at a new incarnation,
+		// and the CodePath/CodeHashPath writes are load-bearing. Deleting them
+		// causes FlushVersionedWrites to omit them, so a later tx's read of
+		// CodeHashPath misses the versionMap and falls through to the recursive
+		// AddressPath read, which returns the stale snapshot captured at
+		// createObject time (CodeHash=EmptyCodeHash). That empty CodeHash then
+		// serialises into the account and corrupts the trie root.
+		matchesOriginal := !stateObject.newlyCreated && codeHash == stateObject.original.CodeHash
+		if codeHash == baseCodeHash || matchesOriginal {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
-				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x codeLen=%d\n",
-					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, len(code))
+				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
+					sdb.blockNum, sdb.txIndex, sdb.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
 			}
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeHashPath})
@@ -1431,14 +1455,15 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
-	// Record storage deletes for the parallel commitment calculator.
-	// When versionMap is active, the calculator needs explicit DELETE entries
-	// for each storage slot — it can't use DomainDelPrefix like the serial path.
-	if sdb.versionMap != nil {
-		for key := range stateObject.dirtyStorage {
-			versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
-		}
-	}
+	// NOTE: we intentionally do NOT versionWritten(StoragePath, key, 0) for the
+	// dirty slots here. Pre-Cancun (and for CALL-based SELFDESTRUCT generally)
+	// the account stays alive until end-of-tx, so a re-entry's GetState must
+	// still see the dirty values — and versionedRead consults versionedWrites
+	// before the stateObject, so a spurious StoragePath=0 here would make those
+	// reads return 0 (wrong gas: SSTORE_SET vs dirty-update, and wrong value).
+	// The parallel commitment calculator gets the per-slot DELETE entries from
+	// normalizeWriteSet's SD cascade (sdStorageSlots = vm.StorageKeys ∪
+	// domainStorageKeys), so they don't need to be emitted here.
 
 	return true, nil
 }
@@ -1847,6 +1872,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil && previous.selfdestructed {
+		// resetObjectChange.dirtied() returns false, so without this the
+		// parallel worker's MakeWriteSet drops the resurrect write
+		// (test_double_kill / EIP-6780 family on the parallel shard).
+		// Confined to CreateAccount — the GetOrNewStateObject AddBalance
+		// path must NOT mark dirty here (regresses TestSelfDestructReceive).
+		sdb.journal.dirty(addr)
+	}
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
@@ -1916,8 +1949,8 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 	}
 }
 
-// GetRefund returns the current value of the refund counter.
-func (sdb *IntraBlockState) GetRefund() mdgas.MdGas {
+// GetRefund returns the current value of the refund counter (regular gas only).
+func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
@@ -2011,6 +2044,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
+		}
+
+		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
+		// only for contracts created in the SAME transaction), storage is
+		// wiped at end-of-tx, so any intra-tx SSTORE has a net effect of zero
+		// (the slot returns to its pre-tx value). Emit the per-slot zero
+		// writes here, per-tx, so the BAL records the cascade as a read
+		// rather than reporting the intermediate SSTORE value.
+		//
+		// Must run BEFORE so.newlyCreated = false below. The newlyCreated
+		// guard is required: a SELFDESTRUCT against a pre-existing contract
+		// is an EIP-6780 no-op (storage persists), and emitting zeros would
+		// drop legitimate SSTORE entries from the BAL for state that is
+		// observable on-chain after the tx.
+		if sdb.versionMap != nil && so.selfdestructed && so.newlyCreated {
+			for key := range so.dirtyStorage {
+				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
+			}
 		}
 
 		so.newlyCreated = false
@@ -2138,6 +2189,27 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
+		// EIP-7928 BAL: when SELFDESTRUCT actually destroys (per EIP-6780,
+		// only for contracts created in the SAME transaction), storage is
+		// wiped at end-of-tx, so any intra-tx SSTORE has a net effect of zero
+		// (the slot returns to its pre-tx value). Emit the per-slot zero
+		// writes here, per-tx, so the BAL records the cascade as a read
+		// rather than reporting the intermediate SSTORE value.
+		//
+		// The newlyCreated guard is required: a SELFDESTRUCT against a
+		// pre-existing contract is an EIP-6780 no-op (storage persists), and
+		// emitting zeros would drop legitimate SSTORE entries from the BAL
+		// for state that is observable on-chain after the tx.
+		//
+		// The commitment-calculator side gets its own cascade from
+		// normalizeWriteSet's sdStorageSlots (vm.StorageKeys ∪ domainStorageKeys),
+		// which is wider — covers pre-block-committed storage that dirtyStorage
+		// misses.
+		if sdb.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
+			for key := range stateObject.dirtyStorage {
+				versionWritten(sdb, addr, StoragePath, key, uint256.Int{})
+			}
+		}
 	}
 
 	var reverted []accounts.Address
@@ -2198,7 +2270,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = mdgas.MdGas{}
+	sdb.refund = 0
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
