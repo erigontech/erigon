@@ -224,6 +224,16 @@ type ExecModule struct {
 	currentContext *execctx.SharedDomains
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
+	// Background-commit / foreground-priority coordination (gate item 2 —
+	// see bg_commit.go). fgMu guards fgCount + gens; fgIdle is signalled
+	// when fgCount reaches zero so the commit worker can run in a
+	// foreground-free window.
+	fgMu     sync.Mutex
+	fgCount  int
+	fgIdle   *sync.Cond
+	gens     []*commitGen
+	commitCh chan *commitGen
+
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache  *cache.StateCache
 	readAheader *exec.BlockReadAheader
@@ -289,16 +299,25 @@ func NewExecModule(
 	if stateCache != nil {
 		stateCache.execModule = em
 	}
+
+	// Start the background-commit worker (gate item 2). It pulls completed
+	// generations off commitCh and commits each in a foreground-free
+	// window. The buffered channel keeps the foreground FCU's hand-off
+	// non-blocking.
+	em.fgIdle = sync.NewCond(&em.fgMu)
+	em.commitCh = make(chan *commitGen, 1024)
+	go em.commitWorker()
+
 	return em
 }
 
 // WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
 // Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+	if err := e.fgAcquire(ctx); err != nil {
 		return // context cancelled — best effort
 	}
-	e.semaphore.Release(1)
+	e.fgRelease()
 }
 
 // ForkValidator returns the fork validator owned by this module.
@@ -390,13 +409,13 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 }
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
@@ -641,13 +660,13 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+	if err := e.fgAcquire(ctx); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
 		return
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
 		if !errors.Is(err, context.Canceled) {
@@ -693,11 +712,11 @@ func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return false, nil
 	}
-	defer e.semaphore.Release(1)
+	defer e.fgRelease()
 	return true, nil
 }
 

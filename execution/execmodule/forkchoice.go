@@ -155,7 +155,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.fgTryAcquire() {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 			LatestValidHash: common.Hash{},
@@ -163,12 +163,15 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
-	shouldReleaseSema := true
-	defer func() {
-		if shouldReleaseSema {
-			e.semaphore.Release(1)
-		}
-	}()
+	// The semaphore is always released when updateForkChoice returns — the
+	// background commit no longer holds it (gate item 2: the commit runs on
+	// the bg worker, decoupled from the foreground semaphore).
+	defer e.fgRelease()
+
+	// Retire the in-flight commit-generation chain if every generation has
+	// committed (gate item 2). Safe here: the foreground semaphore is held,
+	// so no concurrent op is reading a generation's SharedDomains.
+	e.drainCommittedGens()
 
 	defer UpdateForkChoiceDuration(time.Now())
 	defer e.forkValidator.ClearWithUnwind()
@@ -223,6 +226,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
 		// the canonical execution path running uncached against the aggTx.
 		currentContext.SetStateCache(e.stateCache)
+		// Chain to the newest in-flight commit generation (gate item 2):
+		// if a previous FCU's commit has not yet landed, its domain state
+		// lives only in that generation's sd.mem — SetParent lets this FCU
+		// read through to it instead of a stale DB. nil when the chain is
+		// empty (all prior commits landed → DB is current).
+		if parent := e.latestGen(); parent != nil {
+			currentContext.SetParent(parent)
+		}
 	}
 
 	defer func() {
@@ -654,31 +665,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// fcuBackgroundCommit is explicitly enabled.
 		var commitTimings []any
 		if e.fcuBackgroundCommit {
-			shouldReleaseSema = false
-			// Transfer roTx ownership to the goroutine so the outer defer
-			// (roTx.Rollback) becomes a no-op on nil.
+			// Hand the commit to the background worker (gate item 2).
+			// shouldReleaseSema stays true → the outer defer fgRelease()s
+			// the semaphore the moment updateForkChoice returns, so the
+			// next FCU is never blocked on this commit. The worker commits
+			// in a foreground-free window (commitWorker → waitForegroundIdle)
+			// so the commit RwTx never overlaps a foreground roTx. The
+			// generation is added to the chain so the next FCU's SD can
+			// read its not-yet-committed domain state via SetParent.
 			bgRoTx := roTx
 			roTx = nil
 			bgSD := currentContext
 			currentContext = nil
-			dispatcher := e.pipelineExecutor.Dispatcher()
-			go func() {
-				defer e.semaphore.Release(1)
-				defer bgSD.Close()
-				// bgRoTx is rolled back inside runForkchoiceFlushCommit between
-				// Flush and Commit so the commit sees openTxs=1 in MDBX. This
-				// defer is a safety net — Rollback is idempotent.
-				defer bgRoTx.Rollback()
-				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
-				if err != nil && !errors.Is(err, context.Canceled) {
-					e.logger.Error("Error running background post forkchoice", "err", err)
-				}
-				// Signal that the DB commit is done — RPC consumers can
-				// drop their SD reference and read from committed DB.
-				if dispatcher != nil {
-					dispatcher.PublishOverlay(nil)
-				}
-			}()
+			gen := &commitGen{
+				sd:                   bgSD,
+				roTx:                 bgRoTx,
+				finishProgressBefore: finishProgressBefore,
+				isSynced:             isSynced,
+				initialCycle:         initialCycle,
+			}
+			e.addGen(gen)
+			e.enqueueCommit(gen)
 		} else {
 			// Foreground commit: pass the outer roTx so it gets released
 			// between Flush and Commit (same openTxs=2→1 optimization as
