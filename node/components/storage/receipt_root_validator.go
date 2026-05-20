@@ -198,6 +198,26 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 			rangeEmpty = true
 			return nil
 		}
+
+		// RCache-progress gate. CheckRCacheRootAtBlkRange reads receipts
+		// from the RCache domain, which populates incrementally — its
+		// snapshot files open across the bootstrap window and live
+		// execution extends it. A step whose blocks reach beyond
+		// DomainProgress(RCacheDomain) has no receipts to read:
+		// CheckRCacheRootAtBlkRange computes DeriveSha over an empty set
+		// (the empty-trie root) and reports a spurious mismatch. Pause
+		// until the domain covers the step. Mirrors the rcacheTip clamp
+		// in db/integrity CheckRCacheRoot — InitialStateReady gates the
+		// state domain but not the receipt domain's per-block progress.
+		rcacheProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+		rcacheTip, ok, err := txNumReader.FindBlockNum(ctx, tx, rcacheProgress)
+		if err != nil {
+			return fmt.Errorf("FindBlockNum(rcacheProgress=%d): %w", rcacheProgress, err)
+		}
+		if !ok || tb > rcacheTip {
+			return fmt.Errorf("RCache domain progress (block %d) below step toBlock %d: %w", rcacheTip, tb, validation.ErrPause)
+		}
+
 		fromBlock, toBlock = fb, tb
 		return nil
 	}); err != nil {
