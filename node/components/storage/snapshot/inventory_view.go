@@ -135,6 +135,55 @@ func (v *InventoryView) BlockFiles() []*FileEntry {
 	return out
 }
 
+// MetaFiles returns the captured meta-kind entries (e.g. erigondb.toml).
+// Meta files have their own lifecycle path that's distinct from
+// indexing: they're the precursor input to BuildMissedIndices for other
+// files, not a target of indexing themselves. The lifecycle driver
+// dispatches them via a meta-specific transition rather than mixing
+// them into OnIndexing.
+func (v *InventoryView) MetaFiles() []*FileEntry {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make([]*FileEntry, 0, len(v.captured))
+	for _, e := range v.captured {
+		if e.Kind == KindMeta {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// SaltFiles returns the captured salt-kind entries (salt-blocks.txt,
+// salt-state.txt). Same dispatch shape as MetaFiles — salt is a
+// precursor to indexing (consumed by GetIndexSalt), not a target.
+func (v *InventoryView) SaltFiles() []*FileEntry {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make([]*FileEntry, 0, len(v.captured))
+	for _, e := range v.captured {
+		if e.Kind == KindSalt {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// CaplinFiles returns the captured caplin-kind entries. Caplin beacon
+// snapshots have no indexing or validation step in the EL lifecycle —
+// they're consumed by Caplin itself, not by execution. Same dispatch
+// shape as Meta/Salt.
+func (v *InventoryView) CaplinFiles() []*FileEntry {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	out := make([]*FileEntry, 0, len(v.captured))
+	for _, e := range v.captured {
+		if e.Kind == KindCaplin {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Get implements HeldView.
 func (v *InventoryView) Get(name string) (*FileEntry, bool) {
 	v.mu.Lock()

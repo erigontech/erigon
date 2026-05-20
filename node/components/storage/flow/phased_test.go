@@ -72,22 +72,24 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 	}))
 
 	// Peer advertises one state-domain file and one block file. The
-	// block is bodies.seg specifically — headers.seg files are phase 1
-	// (they carry header.stateRoot, the consensus anchor every state
-	// validator cross-references), so they no longer queue behind
-	// state-ready. Bodies have no such role and still queue.
+	// Phase semantics (post-2026-05-18 widening): phase-1 = state +
+	// meta + salt + ALL block file types (headers + bodies +
+	// transactions). Phase-2 = caplin only (Caplin has its own
+	// BlockHeadersReady signal). This test exercises a caplin file as
+	// the phase-2 entry queued behind state-ready, since blocks are
+	// no longer phase-2.
 	stateFile := &snapshot.FileEntry{
 		Domain: testDomain, FromStep: 0, ToStep: 256,
 		Name: "v1.0-accounts.0-256.kv",
 	}
-	blockFile := &snapshot.FileEntry{
-		FromStep: 0, ToStep: 500,
-		Name: "v1.0-000000-000500-bodies.seg",
+	caplinFile := &snapshot.FileEntry{
+		Kind: snapshot.KindCaplin,
+		Name: "caplin/v1.1-000000-000010-beaconblocks.seg",
 	}
 	bus.Publish(PeerManifestReceived{
 		PeerID:  "peer-1",
 		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateFile}},
-		Blocks:  []*snapshot.FileEntry{blockFile},
+		Caplin:  []*snapshot.FileEntry{caplinFile},
 	})
 
 	// Wait for the state DownloadRequested to have been observed.
@@ -96,15 +98,15 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 		return len(s) >= 1
 	}, 2*time.Second, "state DownloadRequested")
 
-	// At this moment, only state has fired — no block request, no state-ready.
+	// At this moment, only state has fired — no caplin request, no state-ready.
 	first := obs.snapshot()
 	require.Contains(t, first, "state:v1.0-accounts.0-256.kv")
 	require.NotContains(t, first, "state-ready", "state-ready must wait for state completion")
-	require.NotContains(t, first, "block:v1.0-000000-000500-bodies.seg",
-		"block request must be held until state-ready fires")
+	require.NotContains(t, first, "block:"+caplinFile.Name,
+		"caplin request must be held until state-ready fires")
 
 	// Now complete the state download. That should drain state-pending,
-	// fire InitialStateReady, and release the queued block request.
+	// fire InitialStateReady, and release the queued caplin request.
 	bus.Publish(DownloadComplete{
 		FileName: stateFile.Name,
 		InfoHash: stateFile.TorrentHash,
@@ -113,19 +115,17 @@ func TestPhasedScheduling_StateBeforeBlocks(t *testing.T) {
 
 	waitUntil(t, func() bool {
 		s := obs.snapshot()
-		return len(s) >= 3 // state, state-ready, block
-	}, 2*time.Second, "state-ready + block request to follow")
+		return len(s) >= 3 // state, state-ready, caplin
+	}, 2*time.Second, "state-ready + caplin request to follow")
 
 	got := obs.snapshot()
-	// Find the order of key events. state request must come before state-ready;
-	// state-ready must come before block request.
 	stateIdx := indexOf(got, "state:v1.0-accounts.0-256.kv")
 	readyIdx := indexOf(got, "state-ready")
-	blockIdx := indexOf(got, "block:v1.0-000000-000500-bodies.seg")
+	caplinIdx := indexOf(got, "block:"+caplinFile.Name)
 
 	require.GreaterOrEqual(t, stateIdx, 0, "state request observed")
 	require.Greater(t, readyIdx, stateIdx, "state-ready must follow state request")
-	require.Greater(t, blockIdx, readyIdx, "block request must follow state-ready")
+	require.Greater(t, caplinIdx, readyIdx, "caplin request must follow state-ready")
 }
 
 // TestPhasedScheduling_FiresImmediatelyWhenNoStateGap asserts that when a
@@ -157,33 +157,30 @@ func TestPhasedScheduling_FiresImmediatelyWhenNoStateGap(t *testing.T) {
 		obs.mu.Unlock()
 	}))
 
-	// Peer advertises only block files — no state, and no headers
-	// either (headers are phase 1 under piece A and would block this
-	// test's no-state-gap assertion). bodies.seg has no phase-1 role,
-	// so the no-state-gap path fires state-ready immediately and the
-	// queue drains.
+	// Peer advertises only caplin files — no state, no blocks. Caplin
+	// is the only phase-2 category (post-2026-05-18: ALL block files
+	// are phase 1). With nothing in phase 1, the no-state-gap path
+	// fires state-ready immediately and the caplin queue drains.
+	caplin1 := &snapshot.FileEntry{Kind: snapshot.KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg"}
+	caplin2 := &snapshot.FileEntry{Kind: snapshot.KindCaplin, Name: "caplin/v1.1-000010-000020-beaconblocks.seg"}
 	bus.Publish(PeerManifestReceived{
 		PeerID: "peer-1",
-		Blocks: []*snapshot.FileEntry{
-			{FromStep: 0, ToStep: 500, Name: "v1.0-000000-000500-bodies.seg"},
-			{FromStep: 500, ToStep: 1000, Name: "v1.0-000500-001000-bodies.seg"},
-		},
+		Caplin: []*snapshot.FileEntry{caplin1, caplin2},
 	})
 
 	waitUntil(t, func() bool {
 		s := obs.snapshot()
-		return len(s) >= 3 // state-ready + two block requests
-	}, 2*time.Second, "state-ready + block requests")
+		return len(s) >= 3 // state-ready + two caplin requests
+	}, 2*time.Second, "state-ready + caplin requests")
 
 	got := obs.snapshot()
 	readyIdx := indexOf(got, "state-ready")
-	block1Idx := indexOf(got, "block:v1.0-000500-001000-bodies.seg") // later range first
-	block2Idx := indexOf(got, "block:v1.0-000000-000500-bodies.seg")
+	c1Idx := indexOf(got, "block:"+caplin1.Name)
+	c2Idx := indexOf(got, "block:"+caplin2.Name)
 
 	require.GreaterOrEqual(t, readyIdx, 0, "state-ready fires on no-state-gap manifest")
-	require.Greater(t, block1Idx, readyIdx, "block request follows state-ready")
-	require.Greater(t, block2Idx, readyIdx, "block request follows state-ready")
-	require.Less(t, block1Idx, block2Idx, "later-range block still orders first within phase 2")
+	require.Greater(t, c1Idx, readyIdx, "caplin request follows state-ready")
+	require.Greater(t, c2Idx, readyIdx, "caplin request follows state-ready")
 }
 
 // TestPhasedScheduling_StateReadyFiresOnce asserts that InitialStateReady
@@ -205,12 +202,15 @@ func TestPhasedScheduling_StateReadyFiresOnce(t *testing.T) {
 		mu.Unlock()
 	}))
 
-	// Three manifests with no state gap — each would try to fire ready.
+	// Three manifests with no phase-1 gap — each would try to fire
+	// ready. Caplin-only manifests have nothing in phase-1, so
+	// statePending == 0 holds throughout; only the first one's fire
+	// should publish.
 	for i := 0; i < 3; i++ {
 		bus.Publish(PeerManifestReceived{
 			PeerID: "peer",
-			Blocks: []*snapshot.FileEntry{
-				{FromStep: uint64(i), ToStep: uint64(i + 500), Name: "b"},
+			Caplin: []*snapshot.FileEntry{
+				{Kind: snapshot.KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg"},
 			},
 		})
 	}

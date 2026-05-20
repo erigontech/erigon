@@ -49,6 +49,28 @@ type PipelineExecutor struct {
 	validationNotifications *shards.Notifications
 	dispatcher              *Dispatcher
 	logger                  log.Logger
+
+	// initialStateReady, when non-nil, is awaited in ProcessFrozenBlocks
+	// BEFORE BeginTemporalRw. The storage component (in V2 mode,
+	// --snap.lifecycle-driven-by-storage) owns post-download MDBX
+	// seeding (OpenFolder, FillDBFromSnapshots, etc.) and runs those
+	// in its own RW tx via the orchestrator's postIndexed callback.
+	// MDBX is single-writer; if ProcessFrozenBlocks opens its tx
+	// BEFORE the orchestrator's postIndexed completes, the two
+	// writers deadlock. Set via SetInitialStateReady from production
+	// wiring (backend.go) after the storage Provider's Initialize.
+	// nil → no wait (legacy mode, non-V2 paths).
+	initialStateReady <-chan struct{}
+}
+
+// SetInitialStateReady installs the orchestrator's "post-download work
+// complete" signal. ProcessFrozenBlocks awaits this BEFORE opening its
+// RW tx so the storage component's postIndexed callback (which needs
+// its own RW tx to run FillDBFromSnapshots) can complete first. Must
+// be called before any ProcessFrozenBlocks invocation; production
+// wires this in backend.go after storage.Initialize.
+func (pe *PipelineExecutor) SetInitialStateReady(ch <-chan struct{}) {
+	pe.initialStateReady = ch
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
@@ -189,6 +211,25 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 // all frozen blocks are processed.
 func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
 	sawZeroBlocksTimes := 0
+
+	// In V2 mode (storage owns post-download), wait for the storage
+	// component's InitialStateReady before opening our RW tx. The
+	// orchestrator's postIndexed callback runs FillDBFromSnapshots in
+	// its own RW tx during this window; opening ours concurrently
+	// would deadlock MDBX's single-writer slot (observed 2026-05-19:
+	// goroutine 142 stuck in mdbx_txn_begin for 43min behind
+	// stage_snapshots.go's open tx). By the time the signal fires,
+	// storage has committed all its writes; we open a fresh tx and
+	// run stages normally.
+	if pe.initialStateReady != nil {
+		select {
+		case <-pe.initialStateReady:
+			pe.logger.Info("[exec] storage signalled initialStateReady, opening framework tx")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err

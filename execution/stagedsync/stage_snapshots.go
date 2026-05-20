@@ -248,34 +248,32 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// .claude/plans/time-to-get-back-generic-mist.md).
 	storageDriven := cfg.lifecycleDrivenByStorage && cfg.initialStateReady != nil
 	if storageDriven {
-		// Bounded wait so a stuck/never-firing orchestrator surfaces
-		// instead of hanging the stage forever — but generous: a fresh
-		// mainnet consumer downloads the full minimal-pruned state set
-		// (tens of GB) over P2P before initialStateReady can fire, which
-		// is ~hours on a sparse fleet. 30m was sized for "discover +
-		// fetch a small set" and spuriously fails real downloads. 6h
-		// still surfaces a genuinely stalled orchestrator within a day.
-		// A heartbeat keeps the wait visible in the meantime.
-		const initialStateReadyTimeout = 6 * time.Hour
-		log.Info(fmt.Sprintf("[%s] Storage owns download — waiting on initialStateReady (timeout %s)", s.LogPrefix(), initialStateReadyTimeout))
-		heartbeat := time.NewTicker(2 * time.Minute)
-		defer heartbeat.Stop()
-		deadline := time.After(initialStateReadyTimeout)
-	waitLoop:
-		for {
-			select {
-			case <-cfg.initialStateReady:
-				log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, proceeding", s.LogPrefix()))
-				break waitLoop
-			case <-heartbeat.C:
-				log.Info(fmt.Sprintf("[%s] still waiting on initialStateReady (storage owns download)", s.LogPrefix()))
-			case <-deadline:
-				return fmt.Errorf("storage initialStateReady not signalled within %s — orchestrator may be stalled", initialStateReadyTimeout)
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		// (C) Step 4: OtterSync is a pure wait-and-return in
+		// storageDriven mode. The storage component owns ALL the
+		// post-download bookkeeping (OpenFolder, Aggregator.OpenFolder,
+		// FillDBFromSnapshots, etc.) and runs them via the orchestrator's
+		// postIndexed callback BEFORE InitialStateReady fires.
+		//
+		// The wait MUST happen with NO MDBX writer-tx held. Erigon's
+		// framework opens an RW tx in ProcessFrozenBlocks that wraps
+		// the entire stage loop including this stage; if we hold that
+		// tx here while waiting on initialStateReady, the orchestrator's
+		// postIndexed (running in its own goroutine) deadlocks trying
+		// to acquire its own MDBX writer slot. The fix lives in
+		// ProcessFrozenBlocks (executor.go): it waits on initialStateReady
+		// BEFORE BeginTemporalRw. By the time control reaches this stage,
+		// the signal has already fired and the channel-receive below
+		// returns immediately — no deadlock, no held lock, OtterSync
+		// returns instantly.
+		select {
+		case <-cfg.initialStateReady:
+			log.Info(fmt.Sprintf("[%s] Storage signalled minimal set ready, OtterSync DONE", s.LogPrefix()))
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-	} else if err := snapshotsync.SyncSnapshots(
+	}
+	if err := snapshotsync.SyncSnapshots(
 		ctx,
 		s.LogPrefix(),
 		"header-chain",
@@ -336,8 +334,35 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	{ // Now can open all files
-		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
-			return err
+		// (A) bridge for the InitialStateReady race: the orchestrator
+		// fires the signal when state-domain downloads are complete, but
+		// the per-file lifecycle's Indexing transitions for block-header
+		// .seg files (which produce .idx accessors) race the signal by
+		// ~hundreds of ms in practice. OpenFolder's openSegments path
+		// lstat's each .idx; if any is mid-build it fails the whole stage
+		// and the publisher errors out at startup. Retry until either
+		// OpenFolder succeeds (the .idx files have landed) or a generous
+		// budget expires. End-state (see
+		// docs/plans/20260518-storage-owns-post-download-pipeline.md) is
+		// for storage to run OpenFolder itself as part of the pre-signal
+		// pipeline; this retry is the stopgap.
+		const openFolderTimeout = 30 * time.Second
+		const openFolderBackoff = 100 * time.Millisecond
+		openFolderDeadline := time.Now().Add(openFolderTimeout)
+		for {
+			err := cfg.blockReader.Snapshots().OpenFolder()
+			if err == nil {
+				break
+			}
+			if time.Now().After(openFolderDeadline) {
+				return err
+			}
+			log.Debug(fmt.Sprintf("[%s] OpenFolder retry (lifecycle still indexing)", s.LogPrefix()), "err", err)
+			select {
+			case <-time.After(openFolderBackoff):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 
 		if cfg.chainConfig.Bor != nil {

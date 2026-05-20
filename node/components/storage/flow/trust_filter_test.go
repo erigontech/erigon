@@ -232,22 +232,25 @@ func TestTrustFilter_QueuedBlocksDroppedWhenTrustRevokedBeforeDrain(t *testing.T
 		Name:        "v1.0-accounts.0-2048.kv",
 		TorrentHash: [20]byte{0x01},
 	}
-	// bodies.seg (not headers.seg) so this exercises phase-2 queueing.
-	// Under piece A header files are phase 1 alongside state and would
-	// not enter the trust-drain queue this test targets.
-	blockEntry := &snapshot.FileEntry{
-		Name: "v1.0-000000-000500-bodies.seg", FromStep: 0, ToStep: 500,
+	// caplin .seg (not a block file) so this exercises phase-2
+	// queueing. Post-2026-05-18 phase-1 includes ALL block file types
+	// (headers + bodies + transactions) because FillDBFromSnapshots's
+	// alignMin=true FrozenBlocks gate would collapse to 0 if any block
+	// type is missing. Caplin is the only phase-2 category left.
+	caplinEntry := &snapshot.FileEntry{
+		Kind:        snapshot.KindCaplin,
+		Name:        "caplin/v1.1-000000-000010-beaconblocks.seg",
 		TorrentHash: [20]byte{0x02},
 	}
 
-	// Manifest carries state + blocks. Trust passes at entry; state
-	// is requested immediately, blocks queue behind InitialStateReady.
+	// Manifest carries state + caplin. Trust passes at entry; state
+	// is requested immediately, caplin queues behind InitialStateReady.
 	bus.Publish(PeerManifestReceived{
 		PeerID: "peer-A",
 		Domains: map[snapshot.Domain][]*snapshot.FileEntry{
 			testDomain: {stateEntry},
 		},
-		Blocks: []*snapshot.FileEntry{blockEntry},
+		Caplin: []*snapshot.FileEntry{caplinEntry},
 	})
 	waitUntil(t, func() bool {
 		mu.Lock()

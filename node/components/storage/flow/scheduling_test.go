@@ -133,25 +133,27 @@ func TestOrchestratorDownloadRequestedBlockFilesOrderedByName(t *testing.T) {
 	}, observed, "block files must be requested latest-first")
 }
 
-// TestOrchestratorHeaderFilesDispatchInPhase1 pins the contract that
-// block-header files (*-headers.seg) are part of phase 1 alongside
-// state-domain files. The reason: every cryptographic state validator
-// cross-references header.stateRoot for the snapshot tip block, so
-// "InitialStateReady" without headers landed would mean "state files
-// arrived and pass internal-consistency checks" — not "state is
-// validated against consensus". Including headers in phase 1 keeps the
-// gate's contract honest, and as a side-effect collapses Caplin's
-// historical-blocks wait (it targets the EL's frozen-headers tip as
-// lowestBlockToReach).
+// TestOrchestratorBlockFilesDispatchInPhase1 pins the (C)-era contract
+// that ALL block file types (headers + bodies + transactions) are part
+// of phase 1 alongside state-domain files. The reason:
+// rawdbreset.FillDBFromSnapshots in the postIndexed pipeline uses
+// blockReader.FrozenBlocks() which alignMin-collapses to
+// min(headers, bodies, transactions) — if any type is missing,
+// FrozenBlocks() is 0 and the seed is a no-op. Observed 2026-05-18:
+// kv.HeaderTD never populated, Caplin's BlockCollector.Flush failed for
+// 9.5h with "parent's total difficulty not found".
+//
+// Caplin's "headers only" needs are served by a SEPARATE earlier
+// signal, BlockHeadersReady, so it doesn't block on bodies/tx.
 //
 // Concrete shape verified here:
-//   - State entry + header entry dispatch immediately in parallel.
-//   - Bodies entry does NOT dispatch until InitialStateReady.
-//   - InitialStateReady does NOT fire until both state and header have
-//     completed.
-//   - Once both complete, InitialStateReady fires AND the bodies entry
-//     drains from the phase-2 queue.
-func TestOrchestratorHeaderFilesDispatchInPhase1(t *testing.T) {
+//   - State + header + body entries dispatch immediately in parallel
+//     (all phase-1).
+//   - Caplin entry does NOT dispatch until InitialStateReady (phase-2).
+//   - InitialStateReady does NOT fire until state + header + body all
+//     complete.
+//   - Once they complete, caplin drains from the phase-2 queue.
+func TestOrchestratorBlockFilesDispatchInPhase1(t *testing.T) {
 	bus := newBusForTest()
 	storage := &recordingStorage{inv: snapshot.NewInventory()}
 	o := NewWithStorage(bus, storage, logger())
@@ -187,71 +189,72 @@ func TestOrchestratorHeaderFilesDispatchInPhase1(t *testing.T) {
 		FromStep: 0, ToStep: 2000,
 		Name: "v1.0-000000-002000-bodies.seg",
 	}
+	caplinEntry := &snapshot.FileEntry{
+		Kind: snapshot.KindCaplin,
+		Name: "caplin/v1.1-000000-000010-beaconblocks.seg",
+	}
 
 	bus.Publish(PeerManifestReceived{
 		PeerID:  "peer-Z",
 		Domains: map[snapshot.Domain][]*snapshot.FileEntry{testDomain: {stateEntry}},
 		Blocks:  []*snapshot.FileEntry{headerEntry, bodyEntry},
+		Caplin:  []*snapshot.FileEntry{caplinEntry},
 	})
 
-	// State and header dispatch in parallel; bodies are held for phase 2.
+	// State + header + body all dispatch in parallel (all phase 1).
+	// Caplin is held for phase 2.
 	waitUntil(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(downloads) == 2
-	}, 2*time.Second, "state + header dispatched in phase 1")
+		return len(downloads) == 3
+	}, 2*time.Second, "state + header + body dispatched in phase 1")
 
 	mu.Lock()
 	require.ElementsMatch(t,
-		[]string{"v1.0-accounts.0-2048.kv", "v1.0-000000-002000-headers.seg"},
+		[]string{
+			"v1.0-accounts.0-2048.kv",
+			"v1.0-000000-002000-headers.seg",
+			"v1.0-000000-002000-bodies.seg",
+		},
 		downloads,
-		"phase 1 must include state + header, exclude bodies",
+		"phase 1 must include state + headers + bodies, exclude caplin",
 	)
 	require.False(t, stateReadyFired,
-		"InitialStateReady must wait while header is still pending")
+		"InitialStateReady must wait while any phase-1 file is still pending")
 	mu.Unlock()
 
-	// Complete the state file; header still pending → InitialStateReady
-	// must NOT fire yet. This is the contract change vs. pre-piece-A:
-	// state alone is no longer sufficient.
-	bus.Publish(DownloadComplete{
-		FileName: "v1.0-accounts.0-2048.kv",
-		InfoHash: [20]byte{0xaa},
-		Size:     1024,
-	})
+	// Complete state + header but NOT body — InitialStateReady must
+	// not fire yet. Bodies are now part of phase 1's FrozenBlocks gate.
+	bus.Publish(DownloadComplete{FileName: stateEntry.Name, InfoHash: [20]byte{0xaa}, Size: 1024})
+	bus.Publish(DownloadComplete{FileName: headerEntry.Name, InfoHash: [20]byte{0xbb}, Size: 2048})
 
-	// Brief settle window; assert the negative.
 	for i := 0; i < 5; i++ {
 		mu.Lock()
 		fired := stateReadyFired
 		mu.Unlock()
 		require.False(t, fired,
-			"InitialStateReady fired prematurely — header not yet landed")
+			"InitialStateReady fired prematurely — body not yet landed")
 		time.Sleep(20 * time.Millisecond)
 	}
 
-	// Complete the header; now phase 1 is done.
-	bus.Publish(DownloadComplete{
-		FileName: "v1.0-000000-002000-headers.seg",
-		InfoHash: [20]byte{0xbb},
-		Size:     2048,
-	})
+	// Complete the body — now all of phase 1 is done.
+	bus.Publish(DownloadComplete{FileName: bodyEntry.Name, InfoHash: [20]byte{0xcc}, Size: 4096})
 
 	waitUntil(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return stateReadyFired
-	}, 2*time.Second, "InitialStateReady fires after state + header complete")
+	}, 2*time.Second, "InitialStateReady fires after state + header + body complete")
 
 	waitUntil(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(downloads) == 3
-	}, 2*time.Second, "body drains from phase-2 queue after InitialStateReady")
+		return len(downloads) == 4
+	}, 2*time.Second, "caplin drains from phase-2 queue after InitialStateReady")
 
 	mu.Lock()
-	require.Contains(t, downloads, "v1.0-000000-002000-bodies.seg",
-		"body must dispatch from the phase-2 queue once state-ready fires")
+	require.Contains(t, downloads, caplinEntry.Name,
+		"caplin must dispatch from the phase-2 queue once state-ready fires")
 	mu.Unlock()
 }
 

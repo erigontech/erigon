@@ -147,6 +147,38 @@ type Orchestrator struct {
 	stateDomainsSeen map[snapshot.Domain]struct{}
 	blocksQueued     []queuedBlock
 
+	// phase1Files records the names of every file that contributes to
+	// InitialStateReady's "ready" condition: state-domain + meta + salt +
+	// block-header files. Populated by the request* paths AND by the
+	// haveLocally branches there so a locally-present file at startup
+	// still counts toward the indexing gate (its lifecycle still has to
+	// advance through BuildMissedIndices → LifecycleIndexed before
+	// downstream consumers can open it).
+	//
+	// Only used when postIndexed is non-nil — when nil (test harness,
+	// legacy callers), InitialStateReady fires on statePending == 0 alone,
+	// preserving pre-(C) behaviour.
+	phase1Files map[string]struct{}
+
+	// postIndexed is invoked once after every name in phase1Files has
+	// reached LifecycleIndexed in the inventory AND statePending == 0
+	// — i.e. all phase-1 downloads complete AND their accessors built.
+	// On nil return: orchestrator fires InitialStateReady. On error:
+	// orchestrator logs and waits for the next inventory ChangeSet to
+	// retry. nil = no-op (skip the post-Indexed step; fire on the older
+	// statePending == 0 gate alone). Production wires this via
+	// SetPostIndexed to a closure that runs Snapshots.OpenFolder() +
+	// agg.OpenFolder() + (future) FillDBFromSnapshots — the migration
+	// path from the OtterSync-owned post-download bookkeeping. See
+	// docs/plans/20260518-storage-owns-post-download-pipeline.md.
+	postIndexed     func(ctx context.Context) error
+	postIndexedDone bool
+
+	// ctx is captured at Start() so async re-checks triggered from the
+	// inventory ChangeSet subscription can call postIndexed with the
+	// orchestrator's lifecycle ctx.
+	ctx context.Context
+
 	// Handlers are materialised once so Subscribe and Unsubscribe see the
 	// same reflect.Value.Pointer(). Re-referencing a method value
 	// (o.onXxx) allocates a fresh closure whose pointer the event bus
@@ -179,6 +211,40 @@ func (o *Orchestrator) SetTrust(t TrustFilter) error {
 		return fmt.Errorf("flow.SetTrust: orchestrator already started")
 	}
 	o.trust = t
+	return nil
+}
+
+// SetPostIndexed attaches a callback invoked AFTER every phase-1 file
+// has reached LifecycleIndexed in the inventory AND statePending == 0,
+// but BEFORE InitialStateReady fires. The callback owns the
+// post-download "open files + seed MDBX" work that previously lived in
+// stage_snapshots.go (OpenFolder, agg.OpenFolder, eventually
+// FillDBFromSnapshots).
+//
+// Must be called before Start. nil disables the step (pre-(C) behaviour:
+// fire on statePending == 0 alone).
+//
+// Idempotent: if the callback succeeds and InitialStateReady has been
+// queued/fired, subsequent re-checks (triggered by inventory ChangeSets)
+// will NOT re-invoke the callback.
+//
+// On error: logged at Warn; the orchestrator waits for the next inventory
+// ChangeSet and retries. Persistent errors block InitialStateReady — a
+// fail-loud signal that the caller's pipeline (e.g. OpenFolder) has a
+// real problem to fix, NOT a hidden hang for the rest of the system.
+//
+// See docs/plans/20260518-storage-owns-post-download-pipeline.md for the
+// destination architecture this hook supports.
+func (o *Orchestrator) SetPostIndexed(fn func(ctx context.Context) error) error {
+	if o == nil {
+		return fmt.Errorf("flow.SetPostIndexed: nil orchestrator")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.started {
+		return fmt.Errorf("flow.SetPostIndexed: orchestrator already started")
+	}
+	o.postIndexed = fn
 	return nil
 }
 
@@ -242,6 +308,7 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		peerFiles:        make(map[string]*peerFileClaim),
 		pending:          make(map[string]*snapshot.FileEntry),
 		stateDomainsSeen: make(map[snapshot.Domain]struct{}),
+		phase1Files:      make(map[string]struct{}),
 	}
 	o.hBlocksFlushed = o.onBlocksFlushed
 	o.hPeerManifestReceived = o.onPeerManifestReceived
@@ -256,7 +323,7 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 //  2. Publishes InventoryLoaded with the current inventory state.
 //
 // Safe to call once per lifecycle. Returns an error on double-start.
-func (o *Orchestrator) Start(_ context.Context) error {
+func (o *Orchestrator) Start(ctx context.Context) error {
 	o.mu.Lock()
 	if o.started {
 		o.mu.Unlock()
@@ -279,12 +346,60 @@ func (o *Orchestrator) Start(_ context.Context) error {
 			return fmt.Errorf("subscribe handler %d: %w", i, err)
 		}
 	}
+	o.ctx = ctx
 	o.started = true
+	postIndexedWired := o.postIndexed != nil
 	o.mu.Unlock()
+
+	o.log.Info("[flow] orchestrator started", "handlers", len(subs), "postIndexed_wired", postIndexedWired)
+
+	// Inventory ChangeSet subscription: re-evaluate the post-Indexed
+	// gate on every inventory state transition (specifically, when a
+	// phase-1 file reaches LifecycleIndexed). The orchestrator does NOT
+	// use the inventory to learn about file arrivals — `DownloadComplete`
+	// on the bus is the sole authoritative signal for that, per the
+	// architectural contract that the downloader is the source of truth
+	// for "the file is ready" (see
+	// docs/plans/20260518-storage-owns-post-download-pipeline.md). The
+	// inventory may discover files on disk via its own scan, but those
+	// discoveries are "in an unknown state" until the downloader
+	// confirms via DownloadComplete; the orchestrator deliberately
+	// ignores Local=true that isn't backed by a DownloadComplete it
+	// processed. The watcher exits when ctx is done.
+	if o.postIndexed != nil {
+		if inv := o.storage.Inventory(); inv != nil {
+			sub, unsub := inv.Subscribe()
+			go o.watchInventoryForPostIndexed(ctx, sub, unsub)
+		}
+	}
 
 	// Publish without holding the lock — handlers may re-enter the orchestrator.
 	o.bus.Publish(InventoryLoaded{Inventory: o.storage.Inventory()})
 	return nil
+}
+
+// watchInventoryForPostIndexed re-evaluates the post-Indexed gate on
+// every inventory ChangeSet. Stops when ctx is done or the subscription
+// closes. The retry-on-error semantics for postIndexed live in
+// tryFireInitialStateReady — the watcher just triggers re-checks.
+//
+// File-arrival accounting is intentionally NOT done here: the
+// orchestrator learns about file arrivals exclusively via the bus
+// `DownloadComplete` path (onDownloadComplete). Disk-scan discoveries
+// in the inventory are not authoritative.
+func (o *Orchestrator) watchInventoryForPostIndexed(ctx context.Context, sub <-chan snapshot.ChangeSet, unsub func()) {
+	defer unsub()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-sub:
+			if !ok {
+				return
+			}
+			o.tryFireInitialStateReady(ctx)
+		}
+	}
 }
 
 // Close drains any in-flight async handlers, unsubscribes, and marks the
@@ -337,6 +452,12 @@ func (o *Orchestrator) onBlocksFlushed(e BlocksFlushed) {
 // only advertises blocks — InitialStateReady fires immediately at the
 // end of this call so the queue drains.
 func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
+	totalEntries := len(e.Blocks) + len(e.Meta) + len(e.Salt) + len(e.Caplin)
+	for _, d := range e.Domains {
+		totalEntries += len(d)
+	}
+	o.log.Info("[flow] onPeerManifestReceived", "peer", e.PeerID, "entries", totalEntries,
+		"domains", len(e.Domains), "blocks", len(e.Blocks), "meta", len(e.Meta), "salt", len(e.Salt), "caplin", len(e.Caplin))
 	for domain, peerEntries := range e.Domains {
 		o.requestGapsFor(domain, peerEntries, e.PeerID)
 	}
@@ -357,7 +478,7 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	shouldFire := !o.stateReadyFired && o.statePending == 0
 	o.peerMu.Unlock()
 	if shouldFire {
-		o.fireInitialStateReady()
+		o.tryFireInitialStateReady(o.ctx)
 	}
 }
 
@@ -394,6 +515,14 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
+		// Track phase-1 file names regardless of locality so the
+		// post-Indexed gate in tryFireInitialStateReady waits for the
+		// lifecycle to advance EVERY known phase-1 file to Indexed —
+		// including ones that were locally present at startup but
+		// haven't yet been indexed by the lifecycle driver.
+		if phase1 {
+			o.phase1Files[entry.Name] = struct{}{}
+		}
 		if o.haveLocally("", entry.Name) {
 			continue
 		}
@@ -441,6 +570,21 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		o.recordPeerClaimLocked(entry, peerID)
+		// Track phase-1 file names regardless of locality so the
+		// post-Indexed gate in tryFireInitialStateReady waits for the
+		// lifecycle to advance EVERY known phase-1 file to Indexed —
+		// including locally-present files. Phase-1 = state-domain +
+		// ALL block file types (headers + bodies + transactions). This
+		// is what InitialStateReady gates on: the EL's RoSnapshots
+		// OpenFolder uses alignMin=true and FrozenBlocks collapses to
+		// min(headers, bodies, transactions) — so all three types must
+		// be Indexed before postIndexed's FillDBFromSnapshots can see
+		// a non-zero blocksAvailable. Caplin's "headers only" path
+		// uses BlockHeadersReady (a SEPARATE earlier signal), so it's
+		// not blocked by bodies/tx; it can start its work in parallel.
+		if domain != "" || entry.Kind != snapshot.KindCaplin {
+			o.phase1Files[entry.Name] = struct{}{}
+		}
 	}
 	o.peerMu.Unlock()
 
@@ -489,30 +633,30 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	// Phase routing.
 	//   - State-domain files: phase 1. Publish now, count toward
 	//     statePending so InitialStateReady gates on them.
-	//   - Block-header files (*-headers.seg): also phase 1. Every
-	//     cryptographic state validator cross-references
-	//     header.stateRoot as the consensus anchor for the commitment
-	//     root recorded inside the state files; without the headers
-	//     landed, "state ready" would mean "state files have arrived
-	//     and pass internal-consistency checks" — not actually
-	//     validated against consensus. Including them keeps the
-	//     InitialStateReady contract honest and unblocks Caplin
-	//     (which uses the EL's frozen-headers tip as its
-	//     lowestBlockToReach) without waiting for bodies/transactions.
-	//   - Other block files (bodies, transactions) and caplin: phase 2.
-	//     Queue if InitialStateReady hasn't fired; publish now if it has.
+	//   - ALL block files (headers + bodies + transactions): also
+	//     phase 1. InitialStateReady is the gate for stages 2-6
+	//     (exec etc.); they call rawdbreset.FillDBFromSnapshots which
+	//     uses blockReader.FrozenBlocks() — itself computed under
+	//     alignMin=true as min(headers, bodies, transactions). If any
+	//     type is missing, FrozenBlocks() collapses to 0 and the seed
+	//     is a no-op (observed 2026-05-18: kv.HeaderTD never
+	//     populated, Caplin's BlockCollector.Flush failed for 9.5h
+	//     with "parent's total difficulty not found"). Caplin doesn't
+	//     need bodies/tx and has its own earlier signal
+	//     BlockHeadersReady — it starts as soon as headers are open
+	//     and downloads its own block stream regardless of bodies/tx
+	//     phase-1 progress.
+	//   - Caplin .seg files: phase 2. EL doesn't need them; queue
+	//     until InitialStateReady fires, then drain.
 	isState := domain != ""
 	var phase1, phase2 []*snapshot.FileEntry
 	if isState {
 		phase1 = toRequest
 	} else {
-		for _, e := range toRequest {
-			if isBlockHeader(e.Name) {
-				phase1 = append(phase1, e)
-			} else {
-				phase2 = append(phase2, e)
-			}
-		}
+		// Block files (Domain == ""): all of headers/bodies/tx go to
+		// phase 1. requestSimpleGaps handles caplin separately with
+		// phase1=false; nothing else reaches this branch.
+		phase1 = toRequest
 	}
 
 	o.peerMu.Lock()
@@ -563,6 +707,84 @@ func isBlockHeader(name string) bool {
 
 // fireInitialStateReady publishes InitialStateReady exactly once and
 // drains any block-file DownloadRequested events queued while the state
+// tryFireInitialStateReady evaluates all gates and, if every gate passes,
+// runs postIndexed (once) and then fireInitialStateReady. Safe to call
+// from any goroutine and at any time — re-entrant invocations are
+// no-ops when the signal has already fired or gates are unsatisfied.
+//
+// Gate stack (all must hold before InitialStateReady fires):
+//  1. !stateReadyFired                  — fire-once
+//  2. statePending == 0                  — all phase-1 downloads done
+//  3. every name in phase1Files is at LifecycleIndexed in the inventory
+//     — accessors built, files openable
+//  4. postIndexed(ctx) returns nil       — post-download bookkeeping done
+//
+// Gates 3 and 4 are skipped when postIndexed is nil (pre-(C) callers).
+// In that mode, statePending == 0 alone triggers the fire, matching the
+// historical semantics.
+func (o *Orchestrator) tryFireInitialStateReady(ctx context.Context) {
+	o.peerMu.Lock()
+	if o.stateReadyFired {
+		o.peerMu.Unlock()
+		return
+	}
+	statePending := o.statePending
+	if statePending > 0 {
+		o.log.Debug("[flow] tryFireInitialStateReady: blocked", "reason", "statePending>0", "statePending", statePending)
+		o.peerMu.Unlock()
+		return
+	}
+	postIndexed := o.postIndexed
+	postIndexedDone := o.postIndexedDone
+	phase1 := o.phase1Files
+	phase1Count := len(phase1)
+	o.peerMu.Unlock()
+
+	// Path A — no postIndexed wired: preserve the older semantics
+	// (fire on statePending == 0). Tests + harness that don't set
+	// postIndexed see no behaviour change.
+	if postIndexed == nil {
+		o.fireInitialStateReady()
+		return
+	}
+
+	// Path B — postIndexed wired. Require all phase-1 files at
+	// LifecycleIndexed before running postIndexed.
+	indexedCount := 0
+	var firstNotIndexed string
+	if inv := o.storage.Inventory(); inv != nil {
+		for name := range phase1 {
+			e, ok := inv.GetByName(name)
+			if !ok || e.State < snapshot.LifecycleIndexed {
+				if firstNotIndexed == "" {
+					firstNotIndexed = name
+				}
+				continue
+			}
+			indexedCount++
+		}
+		if indexedCount < phase1Count {
+			o.log.Debug("[flow] tryFireInitialStateReady: blocked", "reason", "phase1 not all Indexed",
+				"phase1_total", phase1Count, "phase1_indexed", indexedCount, "first_not_indexed", firstNotIndexed)
+			return // not yet — next ChangeSet will re-trigger
+		}
+	}
+
+	o.log.Info("[flow] tryFireInitialStateReady: gate open, invoking postIndexed", "phase1_total", phase1Count, "postIndexedDone", postIndexedDone)
+
+	if !postIndexedDone {
+		if err := postIndexed(ctx); err != nil {
+			o.log.Warn("[flow] postIndexed failed; will retry on next ChangeSet", "err", err)
+			return
+		}
+		o.peerMu.Lock()
+		o.postIndexedDone = true
+		o.peerMu.Unlock()
+	}
+
+	o.fireInitialStateReady()
+}
+
 // phase was in flight. Safe to call concurrently — the state-ready flag
 // serialises.
 func (o *Orchestrator) fireInitialStateReady() {
@@ -608,10 +830,10 @@ func (o *Orchestrator) fireInitialStateReady() {
 // retry (from this or another peer) isn't silently suppressed by the
 // role-coverage check.
 func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
+	o.log.Warn("[flow] onDownloadFailed", "file", e.FileName, "reason", e.Reason)
 	o.peerMu.Lock()
 	delete(o.pending, e.FileName)
 	o.peerMu.Unlock()
-	o.log.Warn("[flow] download failed", "file", e.FileName, "reason", e.Reason)
 }
 
 // fileRole extracts a role token that distinguishes non-interchangeable
@@ -790,6 +1012,7 @@ func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
 // and publishes TrustPromoted to signal the transition from peer-claim trust
 // to locally-verified content.
 func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
+	o.log.Debug("[flow] onDownloadComplete", "file", e.FileName, "size", e.Size)
 	o.peerMu.RLock()
 	claim, ok := o.peerFiles[e.FileName]
 	o.peerMu.RUnlock()
@@ -823,19 +1046,17 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 		delete(o.peerFiles, e.FileName)
 	}
 	// Decrement state-phase pending count for state-phase completions.
-	// State-phase = state-domain files (Domain != "") + the phase-1
-	// non-ranged entries Meta and Salt (prerequisites for state to be
-	// usable — ReloadSalt needs salt on disk before OtterSync's
-	// bookkeeping can run) + block-header files (*-headers.seg) which
-	// requestGapsFor moved into phase 1 because they carry
-	// header.stateRoot, the consensus anchor every cryptographic state
-	// validator cross-references. Without including any of these here,
-	// statePending would never drain for them and InitialStateReady
-	// would hang forever.
-	isStatePhase := peerEntry.Domain != "" ||
-		peerEntry.Kind == snapshot.KindMeta ||
-		peerEntry.Kind == snapshot.KindSalt ||
-		isBlockHeader(peerEntry.Name)
+	// Phase-1 = state-domain files (Domain != "") + the non-ranged
+	// entries Meta and Salt + ALL block file types (headers + bodies +
+	// transactions). InitialStateReady gates stages 2-6 which run
+	// FillDBFromSnapshots — that's a no-op when blockReader.FrozenBlocks
+	// (alignMin=true) collapses to 0 due to any block type being
+	// missing. Phase-2 = Caplin only; it has its own BlockHeadersReady
+	// signal and doesn't gate the EL.
+	// Phase-1 = NOT Caplin. Everything else (state-domain, meta, salt,
+	// block headers/bodies/transactions) must complete before
+	// InitialStateReady fires.
+	isStatePhase := peerEntry.Kind != snapshot.KindCaplin
 	var shouldFireStateReady bool
 	if isStatePhase {
 		if o.statePending > 0 {
@@ -854,6 +1075,6 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	})
 
 	if shouldFireStateReady {
-		o.fireInitialStateReady()
+		o.tryFireInitialStateReady(o.ctx)
 	}
 }
