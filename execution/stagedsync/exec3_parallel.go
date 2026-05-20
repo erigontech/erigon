@@ -1784,11 +1784,11 @@ func (result *execResult) finalizeTx(
 	copy(allWrites, result.TxOut)
 	if coinbaseChanged {
 		allWrites = append(allWrites, &state.VersionedWrite{
-			Address: result.Coinbase,
-			Path:    state.BalancePath,
-			Val:     newCoinbaseBalance,
-			Version: task.Version(),
-			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+			Address:             result.Coinbase,
+			Path:                state.BalancePath,
+			Val:                 newCoinbaseBalance,
+			Version:             task.Version(),
+			BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 		})
 	}
 	if hasBurnt {
@@ -1798,11 +1798,11 @@ func (result *execResult) finalizeTx(
 		}
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceDecreaseGasBuy,
+				Address:             burntAddr,
+				Path:                state.BalancePath,
+				Val:                 newBurntBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
 			})
 		}
 	}
@@ -2099,11 +2099,11 @@ func (result *execResult) finalizeTxSimple(
 			})
 		} else {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: result.Coinbase,
-				Path:    state.BalancePath,
-				Val:     newCoinbaseBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+				Address:             result.Coinbase,
+				Path:                state.BalancePath,
+				Val:                 newCoinbaseBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 			})
 		}
 	}
@@ -2114,11 +2114,11 @@ func (result *execResult) finalizeTxSimple(
 		}
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceDecreaseGasBuy,
+				Address:             burntAddr,
+				Path:                state.BalancePath,
+				Val:                 newBurntBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
 			})
 		}
 	}
@@ -2762,9 +2762,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							}
 							if i, found := balIdx[w.Address]; found {
 								txResult.CollectorWrites[i].Val = bal
-								txResult.CollectorWrites[i].Reason = w.Reason
+								txResult.CollectorWrites[i].BalanceChangeReason = w.BalanceChangeReason
 							} else {
-								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, Reason: w.Reason})
+								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, BalanceChangeReason: w.BalanceChangeReason})
 								balIdx[w.Address] = len(txResult.CollectorWrites) - 1
 							}
 						}
