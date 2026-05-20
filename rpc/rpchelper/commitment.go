@@ -95,7 +95,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	}
 	defer ttx.Rollback()
 
-	tsd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, ttx, r.logger, commitment.NonDeferredTrieConfig())
+	tsd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, ttx, r.logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, err
 	}

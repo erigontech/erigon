@@ -161,11 +161,22 @@ type SharedDomains struct {
 	changesetMu sync.Mutex
 }
 
+// PickTrieVariant returns the commitment trie variant selected by the
+// process-wide statecfg.ExperimentalConcurrentCommitment flag. Callers that
+// build a commitment.TrieConfig inline (e.g. short-lived RPC/builder/integrity
+// SharedDomains) should use this so the flag is honored consistently across
+// entry points instead of leaving Variant unset and relying on an implicit
+// fallback inside the trie constructor.
+func PickTrieVariant() commitment.TrieVariant {
+	if statecfg.ExperimentalConcurrentCommitment {
+		return commitment.VariantConcurrentHexPatricia
+	}
+	return commitment.VariantHexPatriciaTrie
+}
+
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	trieCfg := commitment.DefaultTrieConfig()
-	if statecfg.ExperimentalConcurrentCommitment {
-		trieCfg.Variant = commitment.VariantConcurrentHexPatricia
-	}
+	trieCfg.Variant = PickTrieVariant()
 	return NewSharedDomainsWithTrieConfig(ctx, tx, logger, trieCfg)
 }
 

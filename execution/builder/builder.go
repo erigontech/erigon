@@ -146,7 +146,7 @@ func (b *Builder) Build(param *Parameters, interrupt *atomic.Bool) (result *type
 		}
 	}
 
-	sd, err := execctx.NewSharedDomainsWithTrieConfig(b.ctx, compositeTx, b.logger, commitment.NonDeferredTrieConfig())
+	sd, err := execctx.NewSharedDomainsWithTrieConfig(b.ctx, compositeTx, b.logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, err
 	}

@@ -43,16 +43,19 @@ type sd interface {
 }
 
 type SharedDomainsCommitmentContext struct {
-	sharedDomains    sd
-	updates          *commitment.Updates
-	patriciaTrie     commitment.Trie
-	justRestored     atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace            bool
-	stateReader      StateReader
-	paraTrieDB       kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
-	trieWarmup       bool            // toggle for parallel trie warmup of MDBX page cache during commitment
-	warmupNumWorkers int             // number of workers for the warmup pool; 0 = use commitment.DefaultWarmupNumWorkers
-	tmpDir           string          // temp directory for ETL collectors
+	sharedDomains sd
+	updates       *commitment.Updates
+	patriciaTrie  commitment.Trie
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace         bool
+	stateReader   StateReader
+	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
+	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers is stored raw
+	// (0 means "use commitment.DefaultWarmupNumWorkers" — defaulted at the use site).
+	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
+	warmupBase commitment.WarmupConfig
+	tmpDir     string // temp directory for ETL collectors
 
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
@@ -73,7 +76,7 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // It requires a DB to be set by calling EnableParaTrieDB
 func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
-	sdc.trieWarmup = trieWarmup
+	sdc.warmupBase.Enabled = trieWarmup
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
@@ -183,15 +186,17 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 	// Preserve the legacy TIP_TRIE_WARMUPERS env override at the construction
 	// boundary: TrieConfig stays the single source of truth inside the trie, but
 	// an unset WarmupNumWorkers falls back to dbg.TipTrieWarmupers (env-tunable,
-	// defaults to NumCPU*8) before defaulting further down.
+	// defaults to NumCPU*8) before the use-site default of DefaultWarmupNumWorkers.
 	if cfg.WarmupNumWorkers == 0 && dbg.TipTrieWarmupers > 0 {
 		cfg.WarmupNumWorkers = dbg.TipTrieWarmupers
 	}
 	ctx := &SharedDomainsCommitmentContext{
-		sharedDomains:    sd,
-		tmpDir:           tmpDir,
-		trieWarmup:       cfg.EnableTrieWarmup,
-		warmupNumWorkers: cfg.WarmupNumWorkersOrDefault(),
+		sharedDomains: sd,
+		tmpDir:        tmpDir,
+		warmupBase: commitment.WarmupConfig{
+			Enabled:    cfg.EnableTrieWarmup,
+			NumWorkers: cfg.WarmupNumWorkers,
+		},
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
@@ -410,15 +415,17 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	var warmupConfig commitment.WarmupConfig
 	var drainCollectors func() []*etl.Collector
 	if sdc.paraTrieDB != nil {
+		warmupConfig = sdc.warmupBase
+		if warmupConfig.NumWorkers == 0 {
+			warmupConfig.NumWorkers = commitment.DefaultWarmupNumWorkers
+		}
+		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
+		warmupConfig.LogPrefix = logPrefix
 		if _, ok := sdc.patriciaTrie.(*commitment.ConcurrentPatriciaHashed); ok && sdc.updates.IsConcurrentCommitment() {
 			warmupConfig.CtxFactory, drainCollectors = sdc.concurrentTrieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		} else {
 			warmupConfig.CtxFactory = sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
 		}
-		warmupConfig.Enabled = sdc.trieWarmup
-		warmupConfig.NumWorkers = sdc.warmupNumWorkers
-		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
-		warmupConfig.LogPrefix = logPrefix
 	}
 
 	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment

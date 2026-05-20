@@ -652,7 +652,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context
-	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.NonDeferredTrieConfig())
+	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, err
 	}
@@ -1103,7 +1103,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
 	// Create commitment context for accurate storage roots (since they are not stored explicitly)
-	postDomains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.NonDeferredTrieConfig())
+	postDomains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}

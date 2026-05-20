@@ -129,7 +129,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	defer filterMb.Close()
-	filterSd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, filterMb, logger, commitment.NonDeferredTrieConfig())
+	filterSd, err := execctx.NewSharedDomainsWithTrieConfig(ctx, filterMb, logger, commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return err
 	}

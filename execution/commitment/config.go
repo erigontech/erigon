@@ -68,12 +68,3 @@ func (c TrieConfig) WarmupNumWorkersOrDefault() int {
 	}
 	return c.WarmupNumWorkers
 }
-
-// NonDeferredTrieConfig returns a TrieConfig with deferred branch updates and
-// warmup disabled. Used by RPC handlers, block builder, integrity checks, and
-// other short-lived SharedDomains that don't need production commitment features.
-func NonDeferredTrieConfig() TrieConfig {
-	return TrieConfig{
-		Variant: VariantHexPatriciaTrie,
-	}
-}

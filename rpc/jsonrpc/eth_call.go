@@ -461,7 +461,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.NonDeferredTrieConfig())
+	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, tx, log.New(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, err
 	}
@@ -711,7 +711,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer txBatch2.Rollback()
 
-	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, txBatch2, log.New(), commitment.NonDeferredTrieConfig())
+	domains, err := execctx.NewSharedDomainsWithTrieConfig(ctx, txBatch2, log.New(), commitment.TrieConfig{Variant: execctx.PickTrieVariant()})
 	if err != nil {
 		return nil, err
 	}
