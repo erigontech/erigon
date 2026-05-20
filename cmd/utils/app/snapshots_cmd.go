@@ -659,6 +659,16 @@ var snapshotCommand = cli.Command{
 				&delegateJSONFlag,
 			},
 		},
+		{
+			Name:   "genesis",
+			Usage:  "Pin canonical genesis v0 into the datadir (snapDir/canonical.v0.toml)",
+			Action: doSnapshotGenesis,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&utils.ChainFlag,
+				&genesisLocationFlag,
+			}),
+		},
 	},
 }
 

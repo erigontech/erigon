@@ -541,6 +541,96 @@ func GetEmbeddedTrustRoots(chain string) string {
 	return EmbeddedTrustRoots[chain]
 }
 
+// QuorumConfig parameterises the consumer-computed canonical quorum
+// view (docs/plans/20260520-chaintoml-ucan-flow-spec.md, Layer 1). An
+// entry (name, hash) is promoted to canonical once observed in
+// Q = max(QFloor, ceil(F * N_authorised)) distinct trust-verified
+// publisher advertisements, where N_authorised is the number of
+// distinct trust-verified UCAN issuers the consumer has observed.
+type QuorumConfig struct {
+	// F is the fraction of observed authorised publishers an entry must
+	// appear in to be promoted.
+	F float64
+	// QFloor is the absolute minimum quorum — below it no entry is ever
+	// promoted, so one buggy node can never self-promote.
+	QFloor int
+}
+
+// DefaultQuorumConfig is the quorum policy for every chain not present
+// in EmbeddedQuorumConfig. F=0.5 / QFloor=2 degrades gracefully: small
+// swarms use the floor, large swarms the fraction.
+var DefaultQuorumConfig = QuorumConfig{F: 0.5, QFloor: 2}
+
+// EmbeddedQuorumConfig holds per-chain quorum overrides. Chains absent
+// from the map use DefaultQuorumConfig.
+var EmbeddedQuorumConfig = map[string]QuorumConfig{}
+
+// QuorumConfigFor returns the quorum policy for a chain.
+func QuorumConfigFor(chain string) QuorumConfig {
+	if c, ok := EmbeddedQuorumConfig[chain]; ok {
+		return c
+	}
+	return DefaultQuorumConfig
+}
+
+// GenesisFileName is the pinned canonical genesis (v0) artefact a node
+// records into its snapshot directory via `erigon snapshots genesis`.
+// Its presence is the signal that the node anchors its canonical view
+// on a pinned v0 (docs/plans/20260520-chaintoml-ucan-flow-spec.md,
+// Layer 2); absence means legacy static-preverified behaviour.
+const GenesisFileName = "canonical.v0.toml"
+
+// ParsePreverifiedItems parses preverified.toml bytes (a name→hash
+// TOML map) into sorted items, returning an error rather than
+// panicking — used by the genesis subcommand to validate an operator-
+// supplied source file.
+func ParsePreverifiedItems(data []byte) (PreverifiedItems, error) {
+	var outMap map[string]string
+	if err := toml.Unmarshal(data, &outMap); err != nil {
+		return nil, err
+	}
+	return preverified.ItemsFromMap(outMap), nil
+}
+
+// WritePinnedGenesis records items as the pinned canonical genesis v0
+// at <snapDir>/canonical.v0.toml. Used by the genesis subcommand;
+// pinning is a deliberate, segregated act, not a runtime flag.
+func WritePinnedGenesis(snapDir string, items PreverifiedItems) error {
+	out := make(map[string]string, len(items))
+	for _, it := range items {
+		out[it.Name] = it.Hash
+	}
+	data, err := toml.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("marshal genesis: %w", err)
+	}
+	path := filepath.Join(snapDir, GenesisFileName)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// LoadPinnedGenesis reads the pinned canonical genesis v0 from
+// <snapDir>/canonical.v0.toml. present reports whether the file
+// exists; when false the node has not pinned a genesis and falls back
+// to legacy static-preverified behaviour.
+func LoadPinnedGenesis(snapDir string) (items PreverifiedItems, present bool, err error) {
+	path := filepath.Join(snapDir, GenesisFileName)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read %s: %w", path, err)
+	}
+	var outMap map[string]string
+	if err := toml.Unmarshal(data, &outMap); err != nil {
+		return nil, false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return preverified.ItemsFromMap(outMap), true, nil
+}
+
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
 // FetchChainToml fetches a single chain's TOML file from the snapshot CDN.
