@@ -169,7 +169,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		// Stay on the committed view: the GetLatestExecutedBlockNumber guard
+		// below uses plain tx, and getLogsV3 scans logs against the same tx,
+		// so the latest cap must agree with both.
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}

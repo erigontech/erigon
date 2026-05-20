@@ -105,7 +105,9 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	// Stay on the committed view: api.ethBackend.SetHead operates on the
+	// committed DB, so the guard must agree with what setHead can see.
+	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err
 	}

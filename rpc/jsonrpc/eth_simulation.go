@@ -129,7 +129,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	// Stay on the committed view: blockWithSenders below reads via plain tx,
+	// so the guard must agree with what that read can see.
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
 	}

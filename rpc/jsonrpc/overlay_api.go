@@ -628,7 +628,9 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
-		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		// Stay on the committed view: the caller scans logs/receipts against
+		// the same tx, so the upper bound must agree with what the scan can see.
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err
 		}

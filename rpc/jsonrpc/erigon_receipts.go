@@ -97,8 +97,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		end = header.Number.Uint64()
 
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		// Stay on the committed view: getLogsV3 scans logs against the same tx,
+		// so the latest cap and the scan must agree.
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}
@@ -192,8 +193,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		begin = header.Number.Uint64()
 		end = header.Number.Uint64()
 	} else {
-		// Convert the RPC block numbers into internal representations
-		latest, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+		// Stay on the committed view: getLogsV3 scans against the same tx.
+		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err
 		}

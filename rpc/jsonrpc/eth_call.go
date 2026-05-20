@@ -467,7 +467,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	sdCtx := domains.GetCommitmentContext()
 	sdCtx.SetDeferBranchUpdates(false)
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(roTx))
+	// Stay on the committed view: the downstream proof computation reads
+	// txnums, history, and state through roTx + the SD without consulting
+	// the overlay, so latestBlock must match that view to keep the guard
+	// consistent.
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +678,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("transaction index out of bounds: %d", txIndex)
 	}
 
-	latestBlock, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(roTx))
+	// Stay on the committed view: regenerateHash / the witness rewind below
+	// operate against roTx without overlay awareness.
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
 		return nil, err
 	}
