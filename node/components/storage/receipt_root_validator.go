@@ -74,6 +74,16 @@ type ReceiptRootValidator struct {
 	//
 	// nil → gate disabled (tools / tests that load everything up front).
 	StateReady func() bool
+
+	// PersistReceipts mirrors config.PersistReceiptsCacheV2 — the
+	// --persist.receipts flag, which is independent of prune mode.
+	// Historical receipts (the RCache history domain) are retained ONLY
+	// when it is set; the default leaves SnapshotsDisabled=true on the
+	// RCache domain. Without persisted receipts the per-block
+	// receipt-root cross-check has nothing to read, so the validator
+	// skips entirely — receipt snapshot files are optional and an
+	// unvalidatable optional file is not a validation failure.
+	PersistReceipts bool
 }
 
 // Name implements validation.StepValidator.
@@ -103,6 +113,22 @@ func (v ReceiptRootValidator) ValidateStep(ctx context.Context, files []*snapsho
 	if len(files) == 0 || files[0].Domain != snapshot.DomainReceipt {
 		return nil
 	}
+
+	// Historical receipts are retained only with --persist.receipts
+	// (independent of prune mode). Without it the RCache history domain
+	// is disabled, so CheckRCacheRootAtBlkRange has no receipts to read
+	// and would compute the empty-trie root for every block. Receipt
+	// snapshot files are optional — skip the per-block cross-check
+	// rather than fail; an optional file we cannot validate is not a
+	// validation failure.
+	if !v.PersistReceipts {
+		if v.Logger != nil {
+			v.Logger.Debug("[storage] receipt-root check skipped — historical receipts not persisted (--persist.receipts off)",
+				"file", files[0].Name)
+		}
+		return nil
+	}
+
 	if v.DB == nil {
 		return fmt.Errorf("ReceiptRootValidator: nil DB")
 	}
