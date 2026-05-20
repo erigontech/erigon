@@ -10,8 +10,10 @@ const (
 	DefaultWarmupNumWorkers       = 16
 )
 
-// TrieConfig holds static, set-once configuration for commitment tries.
-// It is passed through the constructor chain and should not be modified after construction.
+// TrieConfig holds configuration for commitment tries. It is passed through the
+// constructor chain and is mostly treated as set-once, but a few operational
+// toggles (warmup cache, CSV metrics) may be flipped at runtime by the trie
+// implementations via dedicated setters.
 type TrieConfig struct {
 	Variant                TrieVariant // selects trie implementation (default: VariantHexPatriciaTrie)
 	DeferBranchUpdates     bool        // collect branch updates and apply them at the end of Process (default: true)
@@ -27,11 +29,6 @@ type TrieConfig struct {
 	// commitment files in db/state/squeeze.go. The actual size is min(largest pow-2 ≤ stepsInShard, this).
 	// 0 = use DefaultRebuildShardMaxSteps (16).
 	RebuildShardMaxSteps uint64
-
-	// KeyReferencingMinSteps is the minimum step span at which the merge encoder replaces
-	// full account/storage keys in commitment branch values with file-offset references.
-	// 0 = use DefaultKeyReferencingMinSteps (2).
-	KeyReferencingMinSteps uint64
 
 	// WarmupNumWorkers is the number of parallel workers used by the MDBX page-cache
 	// warmup during commitment. 0 = use DefaultWarmupNumWorkers (16).
@@ -62,14 +59,6 @@ func (c TrieConfig) RebuildShardMaxStepsOrDefault() uint64 {
 		return DefaultRebuildShardMaxSteps
 	}
 	return c.RebuildShardMaxSteps
-}
-
-// KeyReferencingMinStepsOrDefault returns KeyReferencingMinSteps if set, otherwise DefaultKeyReferencingMinSteps.
-func (c TrieConfig) KeyReferencingMinStepsOrDefault() uint64 {
-	if c.KeyReferencingMinSteps == 0 {
-		return DefaultKeyReferencingMinSteps
-	}
-	return c.KeyReferencingMinSteps
 }
 
 // WarmupNumWorkersOrDefault returns WarmupNumWorkers if set, otherwise DefaultWarmupNumWorkers.

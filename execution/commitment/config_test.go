@@ -39,9 +39,6 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.RebuildShardMaxSteps != 0 {
 		t.Errorf("RebuildShardMaxSteps should default to 0 (use default), got %d", cfg.RebuildShardMaxSteps)
 	}
-	if cfg.KeyReferencingMinSteps != 0 {
-		t.Errorf("KeyReferencingMinSteps should default to 0 (use default), got %d", cfg.KeyReferencingMinSteps)
-	}
 	if cfg.WarmupNumWorkers != 0 {
 		t.Errorf("WarmupNumWorkers should default to 0 (use default), got %d", cfg.WarmupNumWorkers)
 	}
@@ -52,19 +49,13 @@ func TestTrieConfig_OrDefaultHelpers(t *testing.T) {
 	if got := cfg.RebuildShardMaxStepsOrDefault(); got != DefaultRebuildShardMaxSteps {
 		t.Errorf("RebuildShardMaxStepsOrDefault: expected %d, got %d", DefaultRebuildShardMaxSteps, got)
 	}
-	if got := cfg.KeyReferencingMinStepsOrDefault(); got != DefaultKeyReferencingMinSteps {
-		t.Errorf("KeyReferencingMinStepsOrDefault: expected %d, got %d", DefaultKeyReferencingMinSteps, got)
-	}
 	if got := cfg.WarmupNumWorkersOrDefault(); got != DefaultWarmupNumWorkers {
 		t.Errorf("WarmupNumWorkersOrDefault: expected %d, got %d", DefaultWarmupNumWorkers, got)
 	}
 
-	cfg = TrieConfig{RebuildShardMaxSteps: 7, KeyReferencingMinSteps: 4, WarmupNumWorkers: 3}
+	cfg = TrieConfig{RebuildShardMaxSteps: 7, WarmupNumWorkers: 3}
 	if got := cfg.RebuildShardMaxStepsOrDefault(); got != 7 {
 		t.Errorf("RebuildShardMaxStepsOrDefault: expected 7, got %d", got)
-	}
-	if got := cfg.KeyReferencingMinStepsOrDefault(); got != 4 {
-		t.Errorf("KeyReferencingMinStepsOrDefault: expected 4, got %d", got)
 	}
 	if got := cfg.WarmupNumWorkersOrDefault(); got != 3 {
 		t.Errorf("WarmupNumWorkersOrDefault: expected 3, got %d", got)

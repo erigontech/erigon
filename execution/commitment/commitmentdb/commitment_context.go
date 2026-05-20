@@ -180,6 +180,13 @@ func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
+	// Preserve the legacy TIP_TRIE_WARMUPERS env override at the construction
+	// boundary: TrieConfig stays the single source of truth inside the trie, but
+	// an unset WarmupNumWorkers falls back to dbg.TipTrieWarmupers (env-tunable,
+	// defaults to NumCPU*8) before defaulting further down.
+	if cfg.WarmupNumWorkers == 0 && dbg.TipTrieWarmupers > 0 {
+		cfg.WarmupNumWorkers = dbg.TipTrieWarmupers
+	}
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains:    sd,
 		tmpDir:           tmpDir,

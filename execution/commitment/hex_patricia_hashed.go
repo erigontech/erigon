@@ -128,11 +128,12 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 	if hph.cfg.SubtrieConfig != nil {
 		subCfg = *hph.cfg.SubtrieConfig
 	} else {
-		// Sub-tries inherit parent config but must never defer branch updates:
-		// they fold directly into the parent and their deferred updates would never be applied.
 		subCfg = hph.cfg
-		subCfg.DeferBranchUpdates = false
 	}
+	// Sub-tries fold directly into the parent; only the root's deferred updates
+	// are flushed, so any deferred updates collected on a sub-trie would be lost.
+	// Force-disable here regardless of where subCfg came from (inherited or explicit SubtrieConfig).
+	subCfg.DeferBranchUpdates = false
 	subCfg.SubtrieConfig = nil // no further nesting
 	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx, subCfg)
 
