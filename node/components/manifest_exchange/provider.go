@@ -382,7 +382,7 @@ func (p *Provider) onPeerDisconnected(e sentry.PeerDisconnected) {
 //
 // When TrustConfig is set, the pipeline gains a UCAN-verification
 // step between parse and publish: fetch the chain.ucan.<seq>.bin
-// sidecar pointed to by the V2 manifest's UCANHash field, run it
+// sidecar pointed to by the V2 manifest's AuthorityUCANHash field, run it
 // through the Verifier against the peer's pubkey from ENR, and only
 // publish PeerManifestReceived on success. Failures are warn-logged
 // and the peer is added to the in-memory blacklist for
@@ -510,16 +510,16 @@ func (p *Provider) gateOnUCAN(
 		return false
 	}
 
-	if manifest.UCANHash == "" {
+	if manifest.AuthorityUCANHash == "" {
 		logger.Warn("[manifest_exchange] UCAN gate: peer manifest has no UCAN hash",
 			"peer", peerID)
 		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
 		return false
 	}
-	ucanHashBytes, err := hex.DecodeString(manifest.UCANHash)
+	ucanHashBytes, err := hex.DecodeString(manifest.AuthorityUCANHash)
 	if err != nil || len(ucanHashBytes) != 20 {
-		logger.Warn("[manifest_exchange] UCAN gate: malformed UCANHash",
-			"peer", peerID, "ucan_hash", manifest.UCANHash, "err", err)
+		logger.Warn("[manifest_exchange] UCAN gate: malformed AuthorityUCANHash",
+			"peer", peerID, "authority_ucan_hash", manifest.AuthorityUCANHash, "err", err)
 		state.markBlacklisted(peerID, nowFn().Add(cfg.blacklistDuration()))
 		return false
 	}

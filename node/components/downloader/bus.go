@@ -96,7 +96,7 @@ func (p *Provider) FetchPeerManifestV2(ctx context.Context, peerID string, infoH
 // the same generation. Same per-peer-scoped storage + inflight dedup
 // as FetchPeerManifestV2; only the file-name predicate differs.
 //
-// The infohash to fetch comes from the V2 manifest's UCANHash field —
+// The infohash to fetch comes from the V2 manifest's AuthorityUCANHash field —
 // callers parse the V2 first, then call this with the embedded hash.
 func (p *Provider) FetchPeerUCAN(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16) ([]byte, error) {
 	return p.fetchPeerSidecar(ctx, peerID, infoHash, peerIP, peerPort, sidecarUCAN)

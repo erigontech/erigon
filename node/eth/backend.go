@@ -633,7 +633,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				// fields are recomputed downstream if needed.
 				out := &downloader.ChainTomlV2{
 					Version:  downloader.ChainTomlV2Version,
-					UCANHash: adv.UCANHash,
+					AuthorityUCANHash: adv.AuthorityUCANHash,
 				}
 				// Preserve the original section boundaries by checking
 				// each name against the original ChainTomlV2.

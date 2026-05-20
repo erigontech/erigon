@@ -234,7 +234,7 @@ type ManifestSignerFn func(data []byte) ([]byte, error)
 // DelegationSource yields the snapshotauth UCAN attestation bytes (canonical
 // CBOR) that should be paired with the next published V2 manifest. Returning
 // (nil, nil) means "no delegation this generation" — Publish() writes the V2
-// without a UCAN sidecar and leaves UCANHash empty. An error aborts Publish.
+// without a UCAN sidecar and leaves AuthorityUCANHash empty. An error aborts Publish.
 //
 // The source is consulted on every Publish() call so operators can rotate
 // delegations without restarting the publisher (e.g. when the operator's
@@ -397,7 +397,7 @@ func manifestFileNames(m *ChainTomlV2) map[string]struct{} {
 //
 // When a DelegationSource is configured, Publish ALSO writes
 // chain.ucan.<seq>.bin (the snapshotauth attestation paired with this
-// generation) and stamps the V2 manifest's UCANHash field with the
+// generation) and stamps the V2 manifest's AuthorityUCANHash field with the
 // UCAN torrent's infohash so consumers can fetch the sidecar by that
 // hash. The pair is registered, evicted, and cleaned up together —
 // they are one logical generation on disk.
@@ -471,7 +471,7 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
-	manifest.UCANHash = ucanHashHex
+	manifest.AuthorityUCANHash = ucanHashHex
 
 	// Producer self-check: fail loud if this manifest disagrees with
 	// canonical for any known-canonical name. The check happens BEFORE

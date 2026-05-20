@@ -125,15 +125,15 @@ func compressedPub(p *ecdsa.PublicKey) []byte {
 	return elliptic.MarshalCompressed(p.Curve, p.X, p.Y)
 }
 
-// writeV2WithUCANHash writes a V2 manifest TOML carrying the given
-// UCANHash into dir and returns the path. dir is supplied by the caller
+// writeV2WithAuthorityUCANHash writes a V2 manifest TOML carrying the given
+// AuthorityUCANHash into dir and returns the path. dir is supplied by the caller
 // so its lifetime is controlled (avoids cleanup-vs-fetch races at test
 // teardown). The manifest body is the standard makeInventory shape.
-func writeV2WithUCANHash(t *testing.T, dir string, name string, ucanHashHex string) string {
+func writeV2WithAuthorityUCANHash(t *testing.T, dir string, name string, ucanHashHex string) string {
 	t.Helper()
 	v2 := downloader.ChainTomlV2{
 		Version:  2,
-		UCANHash: ucanHashHex,
+		AuthorityUCANHash: ucanHashHex,
 		Domains: map[string]*downloader.DomainManifest{
 			"accounts": {
 				Coverage: [2]uint64{0, 2048},
@@ -237,7 +237,7 @@ func (te *trustEnv) seedPair(t *testing.T, peerKey *ecdsa.PrivateKey, caps []str
 	ucanHash := fakeHash("ucan-" + tag)
 	te.ucanFetcher.register(ucanHash, ucanBytes)
 
-	v2Path := writeV2WithUCANHash(t, te.dir, "v2-"+tag+".toml", hex.EncodeToString(ucanHash[:]))
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "v2-"+tag+".toml", hex.EncodeToString(ucanHash[:]))
 	v2Hash = fakeHash("v2-" + tag)
 	te.fetcher.register(v2Hash, v2Path)
 	return v2Hash
@@ -299,7 +299,7 @@ func TestUCANGate_InvalidUCANIsRejectedAndPeerBlacklisted(t *testing.T) {
 
 	ucanHash := fakeHash("rogue-ucan")
 	te.ucanFetcher.register(ucanHash, bogusBytes)
-	v2Path := writeV2WithUCANHash(t, te.dir, "rogue.toml", hex.EncodeToString(ucanHash[:]))
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "rogue.toml", hex.EncodeToString(ucanHash[:]))
 	v2Hash := fakeHash("rogue-v2")
 	te.fetcher.register(v2Hash, v2Path)
 
@@ -319,14 +319,14 @@ func TestUCANGate_InvalidUCANIsRejectedAndPeerBlacklisted(t *testing.T) {
 		"blacklisted peer must not re-trigger UCAN fetch")
 }
 
-func TestUCANGate_MissingUCANHashRejects(t *testing.T) {
+func TestUCANGate_MissingAuthorityUCANHashRejects(t *testing.T) {
 	te := newTrustEnv(t, nil)
 
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 
-	// V2 manifest has NO UCANHash field.
-	v2Path := writeV2WithUCANHash(t, te.dir, "no-ucan.toml", "")
+	// V2 manifest has NO AuthorityUCANHash field.
+	v2Path := writeV2WithAuthorityUCANHash(t, te.dir, "no-ucan.toml", "")
 	v2Hash := fakeHash("no-ucan-v2")
 	te.fetcher.register(v2Hash, v2Path)
 

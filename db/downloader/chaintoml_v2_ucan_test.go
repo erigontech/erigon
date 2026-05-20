@@ -48,7 +48,7 @@ func listUCANGenerations(t *testing.T, snapDir string) []uint64 {
 
 // TestRollingV2Publisher_NoDelegationSourceNoUCAN confirms the default
 // publisher (no delegation source set) writes V2 only — no UCAN sidecar
-// files, and the V2 manifest's UCANHash is empty.
+// files, and the V2 manifest's AuthorityUCANHash is empty.
 func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
@@ -62,17 +62,17 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	require.Empty(t, listUCANGenerations(t, snapDir),
 		"no delegation source → no UCAN sidecar")
 
-	// The on-disk V2 manifest must carry an empty UCANHash field.
+	// The on-disk V2 manifest must carry an empty AuthorityUCANHash field.
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
-	require.Empty(t, manifest.UCANHash)
+	require.Empty(t, manifest.AuthorityUCANHash)
 }
 
 // TestRollingV2Publisher_DelegationSourceWritesPair confirms that with
 // a delegation source configured, every Publish() writes the paired
-// (V2, UCAN) generation and the V2's UCANHash matches the UCAN
+// (V2, UCAN) generation and the V2's AuthorityUCANHash matches the UCAN
 // torrent's infohash.
 func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	snapDir := t.TempDir()
@@ -101,18 +101,18 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 0)+".torrent"))
 	require.NoError(t, err)
 
-	// V2 manifest's UCANHash matches the UCAN torrent's infohash.
+	// V2 manifest's AuthorityUCANHash matches the UCAN torrent's infohash.
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
-	require.NotEmpty(t, manifest.UCANHash)
+	require.NotEmpty(t, manifest.AuthorityUCANHash)
 
 	tf := NewAtomicTorrentFS(snapDir)
 	ucanSpec, err := tf.LoadByName(ChainUCANFileName(testENRFP, 0) + ".torrent")
 	require.NoError(t, err)
-	require.Equal(t, hex.EncodeToString(ucanSpec.InfoHash[:]), manifest.UCANHash,
-		"V2.UCANHash must equal hex(UCAN torrent infohash)")
+	require.Equal(t, hex.EncodeToString(ucanSpec.InfoHash[:]), manifest.AuthorityUCANHash,
+		"V2.AuthorityUCANHash must equal hex(UCAN torrent infohash)")
 }
 
 // TestRollingV2Publisher_RotatingDelegation confirms the source is
@@ -239,7 +239,7 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
-	require.Empty(t, manifest.UCANHash)
+	require.Empty(t, manifest.AuthorityUCANHash)
 }
 
 // TestRollingV2Publisher_DelegationErrorAbortsPublish confirms a
