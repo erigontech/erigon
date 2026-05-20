@@ -382,6 +382,17 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 	readVal any,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
+	return vm.validateReadImpl(txIndex, addr, path, key, source, version, readVal, checkVersion, traceInvalid, tracePrefix, false)
+}
+
+// recursive is true when called from cross-validate of another outer path:
+// the BalancePath-presence check targets a top-level AddressPath nil-read,
+// and the source!=MapRead+nil-readVal tiebreaker assumes an actual recorded
+// read — both produce false positives when invoked as a synthetic probe.
+func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
+	readVal any,
+	checkVersion func(readVersion, writeVersion Version) VersionValidity,
+	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
 
 	valid := VersionValid
 
@@ -391,31 +402,46 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		if source != MapRead {
 			// When BAL is present, significant writes for BalancePath,
 			// NoncePath, CodePath and StoragePath are pre-populated in the
-			// VersionMap before execution.  If a read of one of those paths
-			// was from storage (no VersionMap entry at execution time) but
-			// the VersionMap now has an entry from a concurrent worker
-			// flush, the entry is a BAL-filtered no-op write and the read
-			// value is still correct.
-			//
-			// AddressPath and other paths are NOT pre-populated by the BAL,
-			// so a new VersionMap entry means a real state change from a
-			// concurrent worker (e.g. account creation) and must trigger
-			// invalidation.
+			// VersionMap before execution.
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
-				// Value tiebreaker: if the StorageRead value matches the
-				// versionMap Done value, the read is still valid despite
-				// the source mismatch. This avoids unnecessary invalidation
-				// when a prior TX wrote the same value that was in storage.
-				if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
-					// Values match — read is valid
+				if recursive && readVal == nil {
+					// Synthetic probe — outer entry's own validation covers it.
+				} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
 				} else {
 					valid = VersionInvalid
 				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+		}
+		// SD-staleness: a later tx self-destructed (with no Balance/Nonce/
+		// CodeHashPath revival), so this read predates the destruct. The
+		// serial path returns zero via the SD-zero short-circuit; checkVersion
+		// alone misses it because SD doesn't write the read's own path.
+		// revivalLimit excludes our own writes (validation runs post-flush).
+		if valid == VersionValid && path != SelfDestructPath && path != AddressPath &&
+			path != IncarnationPath && path != CreateContractPath && path != CodePath {
+			sdRR := vm.Read(addr, SelfDestructPath, accounts.NilKey, txIndex)
+			if sdRR.Status() == MVReadResultDone {
+				if sdVal, ok := sdRR.value.(bool); ok && sdVal {
+					destructTxIndex := sdRR.DepIdx()
+					if destructTxIndex > rr.Version().TxIndex {
+						revivalLimit := txIndex - 1
+						revived := false
+						for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+							if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+								revived = true
+								break
+							}
+						}
+						if !revived {
+							valid = VersionInvalid
+						}
+					}
+				}
+			}
 		}
 	case MVReadResultDependency:
 		valid = VersionInvalid
@@ -429,23 +455,22 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				// self-destructed the account, invalidating storage reads of
 				// any property (code, storage slots, balance, nonce, etc.).
 				if path != AddressPath && path != SelfDestructPath {
-					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
-						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix)
+					if valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, nil, checkVersion, traceInvalid, tracePrefix, true); valid == VersionValid {
+						valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					} else {
-						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-							version, nil, checkVersion, traceInvalid, tracePrefix)
+						vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, nil, checkVersion, traceInvalid, tracePrefix, true)
 					}
 				} else if path == AddressPath {
-					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
-						version, nil, checkVersion, traceInvalid, tracePrefix)
-
-					// If a prior tx created this account, BalancePath will
-					// have an entry at a lower txIndex (from BAL pre-population
-					// or worker flush). A nil AddressPath read from storage
-					// is then stale and must be invalidated.
-					if valid == VersionValid {
+					valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+						version, nil, checkVersion, traceInvalid, tracePrefix, true)
+					// Top-level AddressPath nil-read: a BalancePath entry from
+					// a prior tx means the account was created since the read.
+					// Skip when recursive — BalancePath presence is normal for
+					// any pre-existing account, not a staleness signal.
+					if !recursive && valid == VersionValid {
 						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
 						if balRR.Status() == MVReadResultDone {
 							valid = VersionInvalid
@@ -492,7 +517,6 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 			return valid == VersionValid
 		})
 	}
-
 	return
 }
 

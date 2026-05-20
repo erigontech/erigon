@@ -999,19 +999,19 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		if readStorage == nil {
-			// Record reads so that ValidateVersion can detect when a prior
-			// transaction modifies any account property.  Without tracking
-			// these reads, validation misses conflicts where a prior tx
-			// changes an account's balance/nonce/etc. — causing later txs
-			// to execute against stale data.
+			// Record the probe so ValidateVersion sees prior-tx writes that
+			// invalidate later reads of the same account property.
 			//
-			// Do NOT cache CodePath: getStateObject calls versionedRead for
-			// CodePath with readStorage=nil to check if a prior tx wrote
-			// code (EIP-7702).  Caching defaultV (nil) would poison the
-			// ReadSet, causing subsequent getCode calls (which pass a real
-			// readStorage callback) to return empty code instead of loading
-			// it from the DB — breaking deposit contract execution, etc.
-			if !commited && path != CodePath {
+			// Exclude CodePath: getStateObject calls versionedRead(CodePath,
+			// readStorage=nil) to check for EIP-7702 writes; caching the
+			// nil defaultV would poison subsequent getCode calls.
+			//
+			// Exclude AddressPath: getStateObject probes vm for AddressPath
+			// then falls back to the stateReader (the account does exist).
+			// Recording the nil probe makes the validator's path==Address
+			// branch invalidate the account whenever any prior tx in the
+			// block wrote BalancePath/etc — which is normal state.
+			if !commited && path != CodePath && path != AddressPath {
 				vr.Source = StorageRead
 				vr.Val = defaultV
 				if s.versionedReads == nil {
