@@ -468,23 +468,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	// Run the forkchoice.
 	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
-	initialCycle := time.Since(time.Unix(int64(fcuHeader.Time), 0)) > time.Duration(10*e.config.SecondsPerSlot())*time.Second
+	const smallBlockJumpThreshold = 16
+	headNum := fcuHeader.Number.Uint64()
+	initialCycle := headNum > finishProgressBefore && headNum-finishProgressBefore > smallBlockJumpThreshold
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			// Chain tip (!initialCycle): only one block per FCU, so skip the
-			// in-loop work entirely — the post-RunLoop path handles
-			// flush+commit+prune. In catchup, run on every iter so the last
-			// batch gets the in-loop furious prune treatment too.
+			// Chain tip (!initialCycle): no in-loop work — post-RunLoop path
+			// handles flush+commit+prune.
 			if !initialCycle {
 				return nil
 			}
-			// Release the old RO snapshot so MDBX can reclaim retired pages.
+			// Catchup: drain pipeline prune on a real RW tx (own tx via
+			// UpdateTemporal in runForkchoicePrune). initialCycle=true so
+			// PruneExecutionStage uses the catchup budget.
 			roTx.Rollback()
-			// In-loop PruneExecutionStage no-ops on the overlay; drain here on
-			// a real RW tx. Force initialCycle=false to always use the
-			// furious-prune budget (CollateAndPruneIfNeeded, own RW tx).
 			if _, pruneErr := e.runForkchoicePrune(true); pruneErr != nil && !errors.Is(pruneErr, context.Canceled) {
 				e.logger.Warn("[commit-cycle] prune failed", "err", pruneErr)
 			}
@@ -807,18 +806,6 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
 	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
-		// check that the current header isn't less than a step, this
-		// is mainly to prevent noise in testing on short chains with
-		// no snapshots and no need for pruning
-		currentHeader := rawdb.ReadCurrentHeader(tx)
-		if currentHeader == nil {
-			return nil
-		}
-		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
-		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
-			return nil
-		}
-
 		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
 		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
