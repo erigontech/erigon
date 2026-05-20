@@ -289,14 +289,18 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 // getFilteredBlockTree filters out dumb blocks.
 func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
-	f.getFilterBlockTree(base, blocks)
+	// Snapshot the store epoch once for the whole walk: OnTick updates f.time
+	// without holding f.mu, so calling f.Slot() per-leaf can mix epochs across
+	// leaves around a slot boundary.
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	f.getFilterBlockTree(base, blocks, currentEpoch)
 	return blocks
 }
 
 // getFilterBlockTree recursively traverses the block tree to identify viable blocks.
 // It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
 // whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader) bool {
+func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
 		return false
@@ -308,7 +312,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	if len(children) > 0 {
 		isAnyViable := false
 		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks) {
+			if f.getFilterBlockTree(child, blocks, currentEpoch) {
 				isAnyViable = true
 			}
 		}
@@ -317,18 +321,16 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
-	// Leaf node — check viability per spec filter_block_tree
-	//
-	// Justified check (spec): voting_source.epoch >= store.justified_checkpoint.epoch
-	// Note: the spec uses >= (not ==) so blocks with higher unrealized justification are viable.
-	// Also implements is_previous_epoch_justified fallback.
-	//
-	// Finalized check (spec): store.finalized_checkpoint.root == get_ancestor(store, block_root, finalized_slot)
-	// Note: checks that the block descends from the finalized block, not checkpoint equality.
-
-	// Get voting source (unrealized justification for this block)
-	votingSource, has := f.getUnrealizedJustification(blockRoot)
-	if !has {
+	blockEpoch := f.computeEpochAtSlot(header.Slot)
+	var votingSource solid.Checkpoint
+	if currentEpoch > blockEpoch {
+		var has bool
+		votingSource, has = f.getUnrealizedJustification(blockRoot)
+		if !has {
+			return false
+		}
+	} else {
+		var has bool
 		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
 		if !has {
 			return false
@@ -336,28 +338,10 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-
-	// Spec: correct_justified = store.justified_checkpoint.epoch == GENESIS_EPOCH
-	//       or voting_source.epoch >= store.justified_checkpoint.epoch
 	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch ||
-		votingSource.Epoch >= justifiedCheckpoint.Epoch
+		votingSource.Epoch == justifiedCheckpoint.Epoch ||
+		votingSource.Epoch+2 >= currentEpoch
 
-	// is_previous_epoch_justified fallback:
-	// If not correct_justified and previous epoch is justified, check that
-	// the voting source is not more than two epochs ago.
-	if !justifiedOk {
-		currentEpoch := f.computeEpochAtSlot(f.Slot())
-		previousEpoch := currentEpoch - 1
-		if previousEpoch > currentEpoch { // underflow guard
-			previousEpoch = 0
-		}
-		if justifiedCheckpoint.Epoch == previousEpoch {
-			justifiedOk = votingSource.Epoch+2 >= currentEpoch
-		}
-	}
-
-	// Spec: correct_finalized = store.finalized_checkpoint.epoch == GENESIS_EPOCH
-	//       or store.finalized_checkpoint.root == get_ancestor(store, block_root, finalized_slot)
 	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
 	if !finalizedOk {
 		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
