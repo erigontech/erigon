@@ -525,6 +525,11 @@ func (r *RollingV2Publisher) Publish(
 	// was just written (don't seed unattested content) and aborts the
 	// publish for this generation; the caller logs at Warn and the node
 	// continues running.
+	// contentUCANHash is the info-hash of the Content UCAN torrent. It
+	// is stamped into the ENR (ChainToml.ContentUCANHash) so a consumer
+	// can fetch the Content UCAN by hash to run the verification chain.
+	// Stays zero when no content minter is wired.
+	var contentUCANHash metainfo.Hash
 	if r.contentMinter != nil {
 		ucanBytes, err := r.contentMinter(tomlBytes)
 		if err != nil {
@@ -542,6 +547,13 @@ func (r *RollingV2Publisher) Publish(
 			_ = dir.RemoveFile(cucanPath)
 			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", cucanName, err)
 		}
+		cucanSpec, err := r.torrentFS.LoadByName(cucanName + ".torrent")
+		if err != nil {
+			_ = dir.RemoveFile(path)
+			_ = dir.RemoveFile(cucanPath)
+			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", cucanName, err)
+		}
+		contentUCANHash = cucanSpec.InfoHash
 		if r.downloader != nil {
 			if err := r.downloader.AddNewSeedableFile(ctx, cucanName); err != nil {
 				_ = dir.RemoveFile(path)
@@ -573,7 +585,7 @@ func (r *RollingV2Publisher) Publish(
 			InfoHash:            spec.InfoHash,
 			DomainSteps:         domainSteps,
 			MergeDepth:          mergeDepth,
-			GenID:               genID,
+			ContentUCANHash:     contentUCANHash,
 		})
 	}
 

@@ -114,12 +114,14 @@ func seedPeerManifest(t *testing.T, seedDir string, inv *snapshot.Inventory) (st
 	t.Helper()
 	torrentFS := downloader.NewAtomicTorrentFS(seedDir)
 	const enrFP = "a1b2c3d4e5f60718"
-	var genID string
-	hash, err := downloader.PublishChainTomlV2(seedDir, torrentFS, inv, 0, enrFP, func(ct enr.ChainToml) {
-		genID = ct.GenID
-	})
+	hash, err := downloader.PublishChainTomlV2(seedDir, torrentFS, inv, 0, enrFP, nil)
 	require.NoError(t, err)
-	return filepath.Join(seedDir, downloader.ChainTomlV2FileName(enrFP, genID)), [20]byte(hash)
+	// The generation ID in the filename is random; locate the single
+	// chain.v2.*.toml that PublishChainTomlV2 just wrote.
+	matches, err := filepath.Glob(filepath.Join(seedDir, "chain.v2.*.toml"))
+	require.NoError(t, err)
+	require.Len(t, matches, 1, "exactly one chain.v2 manifest written")
+	return matches[0], [20]byte(hash)
 }
 
 func makeInventory(t *testing.T) *snapshot.Inventory {

@@ -298,8 +298,8 @@ func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 	require.Equal(t, [20]byte(hash), lastCT.InfoHash)
 	require.Equal(t, uint64(12345), lastCT.AuthoritativeBlocks)
 	require.Equal(t, uint64(12345), lastCT.KnownBlocks)
-	require.Equal(t, pub.History()[0], lastCT.GenID,
-		"ENR carries the published generation's opaque genID")
+	require.Equal(t, [20]byte{}, lastCT.ContentUCANHash,
+		"no content minter wired → ENR carries no Content UCAN hash")
 
 	// Nil updater: tolerated.
 	_, err = pub.Publish(context.Background(), inv, 0, nil)

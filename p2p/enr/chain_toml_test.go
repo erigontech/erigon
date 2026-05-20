@@ -12,7 +12,7 @@ func TestGetSetChainToml(t *testing.T) {
 		AuthoritativeBlocks: 123456789,
 		KnownBlocks:         234567890,
 		InfoHash:            [20]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14},
-		GenID:               "0123456789abcdef",
+		ContentUCANHash:     [20]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e},
 	}
 
 	var r Record
@@ -23,7 +23,7 @@ func TestGetSetChainToml(t *testing.T) {
 	assert.Equal(t, ct.AuthoritativeBlocks, ct2.AuthoritativeBlocks)
 	assert.Equal(t, ct.KnownBlocks, ct2.KnownBlocks)
 	assert.Equal(t, ct.InfoHash, ct2.InfoHash)
-	assert.Equal(t, ct.GenID, ct2.GenID)
+	assert.Equal(t, ct.ContentUCANHash, ct2.ContentUCANHash)
 }
 
 func TestChainTomlENRKey(t *testing.T) {

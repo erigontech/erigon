@@ -101,8 +101,10 @@ func TestPublishChainTomlV2Roundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash, "infohash must be non-zero after publish")
 
-	// The file was written under the published generation's name.
-	gen0 := ChainTomlV2FileName(testENRFP, capturedENR.GenID)
+	// The file was written — exactly one chain.v2.*.toml generation.
+	genIDs := listV2Generations(t, snapDir)
+	require.Len(t, genIDs, 1)
+	gen0 := ChainTomlV2FileName(testENRFP, genIDs[0])
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	require.NotEmpty(t, tomlBytes)
