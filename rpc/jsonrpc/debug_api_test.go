@@ -799,6 +799,10 @@ func TestExecutionWitness(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
+		require.Nil(t, result.Keys, "Keys must remain nil (Geth compatibility)")
+		if len(result.Headers) > 0 {
+			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
+		}
 	})
 
 	t.Run("by block hash", func(t *testing.T) {
