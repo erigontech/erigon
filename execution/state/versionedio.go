@@ -1027,7 +1027,15 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 			// transaction modifies any account property.  Without tracking
 			// these reads, validation misses conflicts where a prior tx
 			// changes an account's balance/nonce/etc. — causing later txs
-			// to execute against stale data.
+			// to execute against stale data, and the parallel-built block
+			// access list (AsBlockAccessList) to diverge from the header.
+			//
+			// AddressPath probes MUST be recorded: getStateObject probes the
+			// versionMap for AddressPath before falling back to the
+			// stateReader. The validator's path==AddressPath branch cross-
+			// checks the precise IncarnationPath signal (account create /
+			// destruct), so the recorded probe does not over-invalidate on
+			// ordinary BalancePath/NoncePath writes.
 			//
 			// Do NOT cache CodePath: getStateObject calls versionedRead for
 			// CodePath with readStorage=nil to check if a prior tx wrote

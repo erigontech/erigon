@@ -783,3 +783,89 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 		"invalid TX flush should produce Estimate entries")
 	require.Equal(t, 7, res2.DepIdx())
 }
+
+// TestValidateRead_SDStaleness_InvalidatesPreDestructRead verifies the
+// SD-staleness cross-check: a MapRead that is version-consistent on its own
+// path must still be invalidated when a later tx self-destructed the account
+// (with no subsequent revival). The serial path returns zero via the SD-zero
+// short-circuit, so the read predates the destruct and is stale.
+func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(77)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+
+	// tx 0 wrote the account's balance; tx 2 self-destructed it.
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 2, Incarnation: 0}, true, true)
+
+	// tx 5 read BalancePath as a MapRead at (0,0) — version-consistent on
+	// BalancePath alone, but stale because tx 2's destruct came after.
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Source:  MapRead,
+		Version: Version{TxIndex: 0, Incarnation: 0},
+		Val:     *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(5, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"tx 5: a later tx self-destructed the account with no revival — the pre-destruct BalancePath read must invalidate")
+}
+
+// TestValidateRead_SDStaleness_RevivalKeepsReadValid verifies the revival
+// exemption of the SD-staleness check: when a tx after the destruct writes
+// BalancePath/NoncePath/CodeHashPath (re-creating the account), the read is
+// not stale and stays valid.
+func TestValidateRead_SDStaleness_RevivalKeepsReadValid(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(78)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+
+	// tx 0 wrote balance; tx 2 self-destructed; tx 3 revived the account by
+	// writing NoncePath (a non-SelfDestruct write at a higher TxIndex).
+	vm.Write(addr, BalancePath, accounts.NilKey,
+		Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.Write(addr, SelfDestructPath, accounts.NilKey,
+		Version{TxIndex: 2, Incarnation: 0}, true, true)
+	vm.Write(addr, NoncePath, accounts.NilKey,
+		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+
+	// tx 5 read BalancePath as a MapRead at (0,0). The destruct is followed
+	// by a revival, so the read is not stale.
+	io := NewVersionedIO(5)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    BalancePath,
+		Source:  MapRead,
+		Version: Version{TxIndex: 0, Incarnation: 0},
+		Val:     *uint256.NewInt(1_000),
+	})
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+
+	valid := vm.ValidateVersion(5, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionValid, valid,
+		"tx 5: a revival write after the destruct re-creates the account — the BalancePath read stays valid")
+}
