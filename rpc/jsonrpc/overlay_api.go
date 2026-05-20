@@ -589,7 +589,11 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		begin = num
 		end = num
 	} else {
-		// Convert the RPC block numbers into internal representations
+		// Resolve block tags on the committed view: the caller scans logs/
+		// receipts against the same tx (and the MaxUint32 cap below also reads
+		// `latest` from plain tx), so all references must agree. Passing
+		// api.filters would route "latest" through the SD overlay during the
+		// bg-commit window, landing on N while the scan and caps are at N-1.
 		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return 0, 0, err
@@ -602,7 +606,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 				begin = uint64(fromBlock)
 			} else {
 				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 				if err != nil {
 					return 0, 0, err
 				}
@@ -616,7 +620,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 				end = uint64(toBlock)
 			} else {
 				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 				if err != nil {
 					return 0, 0, err
 				}

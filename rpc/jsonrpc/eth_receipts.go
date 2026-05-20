@@ -123,7 +123,13 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		begin = num
 		end = num
 	} else {
-		// Convert the RPC block numbers into internal representations
+		// Resolve block tags on the committed view: getLogsV3 scans logs against
+		// the plain tx and the begin > latest / end > latest guards below compare
+		// against `latest` resolved here, so all three must agree. Passing
+		// api.filters would route "latest"/"safe"/"finalized" through the SD
+		// overlay during the bg-commit window, leaving begin or end at N while
+		// `latest` and the scan are still at N-1 — the range check would then
+		// false-positive errBlockRangeIntoFuture.
 		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 		if err != nil {
 			return nil, err
@@ -136,7 +142,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				begin = uint64(fromBlock)
 			} else {
 				blockNum := rpc.BlockNumber(fromBlock)
-				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -153,7 +159,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 				end = uint64(toBlock)
 			} else {
 				blockNum := rpc.BlockNumber(toBlock)
-				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+				end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 				if err != nil {
 					return nil, err
 				}
