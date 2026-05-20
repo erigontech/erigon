@@ -95,7 +95,11 @@ type forkGraphDisk struct {
 	headers   sync.Map // set of headers
 	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
 
-	// current state data
+	// current state data — dual-protected. AddChainSegment is the sole writer
+	// and runs under the outer forkchoice f.mu, so reads taken under f.mu are
+	// already serialized against the writer and don't need currentStateMu.
+	// Reads outside f.mu (e.g. getCheckpointState) must take currentStateMu.
+	currentStateMu        sync.RWMutex
 	currentState          *state.CachingBeaconState
 	currentStateBlockRoot common.Hash // block root of the last processed block (avoids BlockRoot() zeroed-StateRoot issue)
 
@@ -325,21 +329,25 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", common.Bytes2Hex(blockRoot[:]), "reason", invalidBlockErr)
 			f.blocks.Delete(common.Hash(blockRoot)) // remove early-stored block
 			f.badBlocks.Store(common.Hash(blockRoot), struct{}{})
+			f.currentStateMu.Lock()
 			f.currentState = nil
 			f.currentStateBlockRoot = common.Hash{}
+			f.currentStateMu.Unlock()
 			return nil, InvalidBlock, invalidBlockErr
 		}
 		f.blockRewards.Store(common.Hash(blockRoot), blockRewardsCollector)
 	}
 
+	f.currentStateMu.Lock()
 	f.currentState = newState
 	f.currentStateBlockRoot = common.Hash(blockRoot)
+	f.currentStateMu.Unlock()
 
 	// Verify currentState.BlockRoot() matches the actual block root.
-	if computedRoot, cerr := f.currentState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
+	if computedRoot, cerr := newState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
 		// Detailed diagnostics: compare state header fields with block fields.
-		hdr := f.currentState.LatestBlockHeader()
-		stateHashSSZ, _ := f.currentState.HashSSZ()
+		hdr := newState.LatestBlockHeader()
+		stateHashSSZ, _ := newState.HashSSZ()
 		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
@@ -477,14 +485,22 @@ func (f *forkGraphDisk) useCachedStateIfPossible(blockRoot common.Hash, in *stat
 }
 
 func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChainSegment bool) (*state.CachingBeaconState, error) {
-	if f.currentState != nil && f.currentStateBlockRoot == blockRoot {
+	// Snapshot currentState/currentStateBlockRoot under RLock so that
+	// concurrent callers (getCheckpointState outside forkchoice mu)
+	// don't race with AddChainSegment writes.
+	f.currentStateMu.RLock()
+	cs := f.currentState
+	csRoot := f.currentStateBlockRoot
+	f.currentStateMu.RUnlock()
+
+	if cs != nil && csRoot == blockRoot {
 		if alwaysCopy {
-			return f.currentState.Copy()
+			return cs.Copy()
 		}
-		return f.currentState, nil
+		return cs, nil
 	}
 	if addChainSegment && !alwaysCopy {
-		if state, ok, err := f.useCachedStateIfPossible(blockRoot, f.currentState); ok {
+		if state, ok, err := f.useCachedStateIfPossible(blockRoot, cs); ok {
 			return state, err
 		}
 	}
@@ -535,8 +551,10 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
 		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
 			if addChainSegment {
-				f.currentState = nil // reset the state if it fails here.
+				f.currentStateMu.Lock()
+				f.currentState = nil
 				f.currentStateBlockRoot = common.Hash{}
+				f.currentStateMu.Unlock()
 			}
 			return nil, err
 		}
