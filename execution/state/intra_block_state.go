@@ -1850,9 +1850,18 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		prevInc = previous.data.PrevIncarnation
 	}
 	// Read IncarnationPath directly from the versionMap to get the
-	// incarnation written by the prior CreateAccount, giving the correct prevInc.
+	// incarnation written by the prior CreateAccount, giving the correct
+	// prevInc. Capture that entry's own version: the synthetic IncarnationPath
+	// read below must be stamped with the IncarnationPath cell's coordinates,
+	// not the account-record version (which refreshVersionedAccount may have
+	// promoted to a sub-read's version vm never wrote for IncarnationPath) —
+	// otherwise validation's checkVersion mismatches and the recreate tx spins
+	// in a non-converging validator-invalid retry loop.
+	incSource, incVersion := source, version
 	if sdb.versionMap != nil && (previous == nil || previous.selfdestructed) {
 		if res := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			incSource = MapRead
+			incVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			if inc, ok := res.value.(uint64); ok && inc > prevInc {
 				prevInc = inc
 			}
@@ -1902,7 +1911,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
 	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
-	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
+	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, incSource, incVersion, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
 	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {

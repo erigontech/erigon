@@ -2310,9 +2310,35 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// For a task that runs only after all of its preceding tasks have finished and passed validation,
-	// its result will be absolutely valid and therefore its validation could be skipped.
-	// This map stores the boolean value indicating whether a task satisfy this condition (absolutely valid).
+	// skipCheck — how and why it works (reference).
+	//
+	// WHAT: skipCheck[tx]==true marks a task whose result the apply loop
+	// accepts without trusting the validator verdict:
+	//
+	//   valid := be.skipCheck[tx] || validity == state.VersionValid
+	//
+	// HOW it is set: scheduleExecution dispatches task `tx` and sets
+	// skipCheck[tx]=true exactly when `tx == maxValidated+1` (isNextValidated)
+	// — i.e. every preceding task 0..tx-1 has already finished AND passed
+	// validation at the moment `tx` is dispatched. The MVCC state `tx` reads
+	// is therefore fully settled: no lower-indexed worker can still be in
+	// flight, so nothing `tx` reads can change after it starts. Under that
+	// precondition `tx`'s result is correct by construction and re-validating
+	// it is pure overhead — hence the optimisation.
+	//
+	// WHY it is also a hazard: the `||` means a `true` here OVERRIDES a
+	// validator `VersionInvalid` verdict. The isNextValidated precondition
+	// holds at *dispatch* time; the verdict is computed later, against the
+	// post-flush versionMap. When the two disagree, skipCheck silently
+	// commits the result the validator rejected. In practice the disagreements
+	// are validator false positives (the validator over-invalidates — see the
+	// fold / SD-dependency / synthetic-version recording fixes that this
+	// shipped alongside), so the override is "correct" — but it means the
+	// validator has never been the forcing function for its own correctness,
+	// and downstream heuristics have accreted around skip-overridden results.
+	// Removing skipCheck (so the validator is the single source of truth) and
+	// removing those heuristics is tracked separately. Do not extend skipCheck
+	// to mask new failures: investigate the validator/recording instead.
 	skipCheck map[int]bool
 
 	// Execution tasks stores the state of each execution task
@@ -2658,7 +2684,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			continue
 		}
 
-		valid := be.skipCheck[tx] || validity == state.VersionValid
+		// skipCheck-removal stream WIP: skipCheck no longer masks an explicit
+		// VersionInvalid verdict (it only short-circuits VersionValid). See the
+		// skipCheck doc on the blockExecutor.skipCheck field.
+		valid := validity == state.VersionValid ||
+			(be.skipCheck[tx] && validity != state.VersionInvalid)
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
