@@ -1,5 +1,10 @@
 # Two-UCAN shape — design questions
 
+> **Superseded (2026-05-20)** by
+> `20260520-chaintoml-ucan-flow-spec.md`, which resolves all 7 open
+> questions below and is the authoritative two-UCAN design. Retained
+> for historical context.
+
 **Status**: design pending. Recording the questions now so when we
 return to it after the current re-test cycle, the framing is in
 place.

@@ -1,5 +1,10 @@
 # Three-layer snapshot distribution — design
 
+> **Superseded (2026-05-20)** by
+> `20260520-chaintoml-ucan-flow-spec.md`, which carries the three-layer
+> model forward and specifies Layer 1 (swarm agreement), deferred here.
+> Retained for historical context.
+
 ## Why this document exists
 
 The snapshot-flow work to date conflated three concerns that need to be
