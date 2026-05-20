@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -319,6 +320,69 @@ func (cs *calcState) ApplyWrites(writes state.VersionedWrites) {
 			acc.dirty = true
 		}
 	}
+}
+
+// finalChange returns the change carrying the highest tx Index from a BAL
+// per-field / per-slot change list — i.e. the block-end value, since the
+// BAL stores changes tx-indexed and the highest index is the last write in
+// the block. Scans for the max rather than assuming the list is sorted.
+// Returns (zero, false) for an empty list.
+func finalChange[T interface{ GetIndex() uint32 }](changes []T) (T, bool) {
+	var best T
+	var bestIdx uint32
+	found := false
+	for _, c := range changes {
+		if idx := c.GetIndex(); !found || idx >= bestIdx {
+			best, bestIdx, found = c, idx, true
+		}
+	}
+	return best, found
+}
+
+// LoadFromBAL populates calcState from an EIP-7928 Block Access List
+// instead of the per-tx VersionedWrites stream. The BAL declares the
+// block's post-state up front, so the commitment calculator can build the
+// trie without waiting for execution to stream writes tx-by-tx.
+//
+// For each touched account it takes the block-end value per field — the
+// highest-tx-indexed change — and feeds the existing ApplyWrites, so the
+// SELFDESTRUCT / Deleted / EIP-161 routing is reused unchanged rather than
+// reimplemented.
+//
+// Storage *reads* are ignored: commitment only consumes the changed
+// (dirty) set. NOT yet modelled — the BAL carries no explicit
+// SelfDestructPath or incarnation field, so blocks exercising account
+// deletion or fresh-contract incarnation diverge from the incremental
+// path; that divergence is the differential test's job to surface and is
+// a tracked Stage-1 follow-up.
+func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
+	var writes state.VersionedWrites
+	for _, ac := range bal {
+		addr := ac.Address
+		if bc, ok := finalChange(ac.BalanceChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.BalancePath, Val: bc.Value,
+			})
+		}
+		if nc, ok := finalChange(ac.NonceChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.NoncePath, Val: nc.Value,
+			})
+		}
+		if cc, ok := finalChange(ac.CodeChanges); ok {
+			writes = append(writes, &state.VersionedWrite{
+				Address: addr, Path: state.CodePath, Val: cc.Bytecode,
+			})
+		}
+		for _, sc := range ac.StorageChanges {
+			if chg, ok := finalChange(sc.Changes); ok {
+				writes = append(writes, &state.VersionedWrite{
+					Address: addr, Path: state.StoragePath, Key: sc.Slot, Val: chg.Value,
+				})
+			}
+		}
+	}
+	cs.ApplyWrites(writes)
 }
 
 // FlushToUpdates writes the accumulated dirty state to a commitment.Updates
