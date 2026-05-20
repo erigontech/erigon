@@ -350,11 +350,15 @@ func finalChange[T interface{ GetIndex() uint32 }](changes []T) (T, bool) {
 // reimplemented.
 //
 // Storage *reads* are ignored: commitment only consumes the changed
-// (dirty) set. NOT yet modelled — the BAL carries no explicit
-// SelfDestructPath or incarnation field, so blocks exercising account
-// deletion or fresh-contract incarnation diverge from the incremental
-// path; that divergence is the differential test's job to surface and is
-// a tracked Stage-1 follow-up.
+// (dirty) set.
+//
+// Account deletion and fresh-contract incarnation are not modelled, and by
+// design need not be: BALs exist only for Amsterdam+ blocks, and
+// post-EIP-6780 SELFDESTRUCT removes an account only when it was created in
+// the same transaction — so no pre-existing account is deleted at block
+// scope, and a destroy+recreate (incarnation bump) cannot span a block
+// boundary. Pre-Amsterdam blocks, where unconditional SELFDESTRUCT could
+// delete any account, carry no BAL and never reach this path.
 func (cs *calcState) LoadFromBAL(bal types.BlockAccessList) {
 	var writes state.VersionedWrites
 	for _, ac := range bal {

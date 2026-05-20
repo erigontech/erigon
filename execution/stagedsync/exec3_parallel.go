@@ -94,6 +94,10 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
+	// blockRequestsCh feeds the calculator per-block heads-up messages on
+	// its own channel, so a blockRequest is never trapped behind a block's
+	// txResults on the result fan-out. Closed by closeApplyChannels.
+	blockRequestsCh chan *blockRequest
 	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
 	// reachedMaxBlock is set by the exec loop when it exits cleanly because
 	// blockResult.BlockNum >= maxBlockNum (i.e. all requested work is done),
@@ -166,6 +170,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
 	commitResults := make(chan applyResult, 2_048)
+	blockRequests := make(chan *blockRequest, 2_048)
 
 	// rootResults receives per-block commitment roots from the calculator.
 	rootResults := make(chan commitmentResult, 64)
@@ -232,6 +237,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// Store channels and limits on pe so execLoop can access them.
 	pe.applyResultsCh = applyResults
 	pe.commitResultsCh = commitResults
+	pe.blockRequestsCh = blockRequests
 	pe.maxBlockNum = maxBlockNum
 
 	// Configure changeset capture and seed the initial accumulator BEFORE
@@ -250,14 +256,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// batch and flushes them all into the last block's changeset, which
 	// fails on subsequent reorgs.
 	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, blockRequests, rootResults)
 	if err != nil {
 		return nil, nil, err
 	}
 	calculator.Start(executorContext)
 	defer calculator.Stop()
 
-	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, commitResults); err != nil {
+	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, blockRequests, commitResults); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -1271,6 +1277,13 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 		safeClose(pe.commitResultsCh, "commitResults")
 		pe.commitResultsCh = nil
 	}
+	// blockRequests has a single sender (executeBlocks), so a plain close is
+	// race-free; the nil-guard keeps closeApplyChannels idempotent.
+	if pe.blockRequestsCh != nil {
+		close(pe.blockRequestsCh)
+		pe.blockRequestsCh = nil
+		closedOrder = append(closedOrder, "blockRequests")
+	}
 	if pe.applyResultsCh != nil {
 		safeClose(pe.applyResultsCh, "applyResults")
 		pe.applyResultsCh = nil
@@ -1489,6 +1502,32 @@ type txResult struct {
 	rules                 *chain.Rules
 	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
+
+// blockRequest is the commitment calculator's per-block heads-up, sent by the
+// dispatch layer on its own channel — ahead of, and separate from, the
+// block's txResult/blockResult stream so it is never trapped behind a prior
+// block's results. It carries the block identity and the block's BAL (nil
+// when none), from which the calculator selects its per-block mode.
+type blockRequest struct {
+	blockNum  uint64
+	blockHash common.Hash
+	stateRoot common.Hash
+	bal       types.BlockAccessList
+}
+
+// calcMode is the commitment calculator's per-block strategy.
+type calcMode uint8
+
+const (
+	// calcModeIncremental accumulates per-tx writes from the result stream
+	// then computes — today's behaviour, and the fallback when a block has
+	// no BAL.
+	calcModeIncremental calcMode = iota
+	// calcModeBALDriven loads the changed-key set from the block's BAL up
+	// front so the trie fold need not wait for the per-tx stream. Selected
+	// when the block carries a BAL and BAL I/O is enabled.
+	calcModeBALDriven
+)
 
 type execTask struct {
 	exec.Task
