@@ -408,6 +408,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				if recursive && readVal == nil {
 					// Synthetic probe — outer entry's own validation covers it.
 				} else if readVal != nil && rr.Value() != nil && valuesEqual(path, readVal, rr.Value()) {
+					// Value tiebreaker: a Done entry now exists where the read
+					// saw storage, but it holds the same value — read stays valid.
 				} else {
 					valid = VersionInvalid
 				}
