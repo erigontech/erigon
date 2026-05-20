@@ -85,6 +85,46 @@ func TestDiscoverNewFiles_PreservesExistingState(t *testing.T) {
 		"discover must not regress an entry already past Downloaded")
 }
 
+// TestSweep_RemovesEntryWhenFileGoneFromDisk pins the merge-retire
+// reconciliation: a file discovered Local, then deleted from disk (the
+// merger retiring a source file), must be dropped from the inventory on
+// the next sweep — otherwise the stale Local entry fails the
+// all_files_present validator forever.
+func TestSweep_RemovesEntryWhenFileGoneFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.seg")
+	require.NoError(t, os.WriteFile(path, []byte{}, 0644))
+
+	inv := snapshot.NewInventory()
+	d := &Driver{Inv: inv, SnapDir: dir}
+	d.Sweep(context.Background(), nil)
+
+	_, ok := inv.LifecycleState("a.seg")
+	require.True(t, ok, "file must be discovered while on disk")
+
+	// Merger retires the file: gone from disk.
+	require.NoError(t, os.Remove(path))
+	d.Sweep(context.Background(), nil)
+
+	_, ok = inv.LifecycleState("a.seg")
+	require.False(t, ok, "entry must be dropped once its file is gone from disk")
+}
+
+// TestSweep_KeepsDeclaredEntryNotYetOnDisk confirms removeGoneFiles only
+// drops Local entries — a declared/downloading file legitimately not yet
+// on disk must survive the sweep.
+func TestSweep_KeepsDeclaredEntryNotYetOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	inv := snapshot.NewInventory()
+	inv.AddFile(&snapshot.FileEntry{Name: "pending.seg", Local: false})
+
+	d := &Driver{Inv: inv, SnapDir: dir}
+	d.Sweep(context.Background(), nil)
+
+	_, ok := inv.LifecycleState("pending.seg")
+	require.True(t, ok, "a not-yet-downloaded entry must not be dropped")
+}
+
 func TestDiscoverNewFiles_EmptySnapDirNoOp(t *testing.T) {
 	inv := snapshot.NewInventory()
 	d := &Driver{Inv: inv} // no SnapDir
@@ -154,20 +194,36 @@ func TestDiscoverNewFiles_PicksUpConfigAndSubdirs(t *testing.T) {
 	// the bare basename. The disk-scan and the aggregator's
 	// onFilesChange callback both use this convention so the keyspace
 	// stays consistent.
-	for _, key := range []string{
-		"salt-blocks.txt",
-		"salt-state.txt",
-		"erigondb.toml",
+	//
+	// Post-Meta-lifecycle-event: Sweep dispatches every discovered
+	// entry. State/block files land at LifecycleDownloaded and stay
+	// there until OnIndexing runs (no handler in this test → no
+	// advance). Meta/salt/caplin files auto-advance to
+	// LifecycleAdvertisable via the meta-path because they have no
+	// real indexing step and no handler is wired (default behaviour).
+	stayDownloaded := []string{
 		"v1.0-000000-000500-headers.seg",
 		"v1.0-000000-000500-bodies.seg",
 		"domain/v1.0-accounts.0-256.kv",
 		"history/v1.0-accountsHistory.0-256.v",
 		"idx/v1.0-accountsIdx.0-256.ef",
-		"caplin/v1.1-000000-000010-beaconblocks.seg",
-	} {
+	}
+	for _, key := range stayDownloaded {
 		state, ok := inv.LifecycleState(key)
 		require.Truef(t, ok, "must be discovered: %s", key)
 		require.Equalf(t, snapshot.LifecycleDownloaded, state,
 			"must land at Downloaded: %s (got %s)", key, state)
+	}
+	autoAdvanced := []string{
+		"salt-blocks.txt",
+		"salt-state.txt",
+		"erigondb.toml",
+		"caplin/v1.1-000000-000010-beaconblocks.seg",
+	}
+	for _, key := range autoAdvanced {
+		state, ok := inv.LifecycleState(key)
+		require.Truef(t, ok, "must be discovered: %s", key)
+		require.Equalf(t, snapshot.LifecycleAdvertisable, state,
+			"meta-path file must auto-advance to Advertisable: %s (got %s)", key, state)
 	}
 }

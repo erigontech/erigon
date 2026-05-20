@@ -95,7 +95,32 @@ type Driver struct {
 	// db/snapshotsync (BuildMissedIndices) and db/state (accessor
 	// builders), invoked from the storage component's clock instead
 	// of from execution/stagedsync.
+	//
+	// Dispatched only for state-domain (Domain != "") and block
+	// (Kind == KindKV with Domain == "") files. Meta and salt files
+	// use OnMetaReady instead — they're precursors to indexing, not
+	// targets.
 	OnIndexing Handler
+
+	// OnMetaReady handles the Downloaded → Advertisable transition
+	// for Meta and Salt files (and Caplin, which the EL doesn't index).
+	// These files have no indices of their own to build and no
+	// validation defined; they ARE the input consumed by
+	// BuildMissedIndices for OTHER files (erigondb.toml carries
+	// step_size; salt-blocks.txt / salt-state.txt carry the hash
+	// salts). Mixing them into OnIndexing would either:
+	//   (a) leave them stuck at Downloaded forever (if OnIndexing's
+	//       handler short-circuits on empty Dependencies without
+	//       advancing — which is what the live publisher6 wedge
+	//       hit), or
+	//   (b) misclassify them as indexing targets, conflating two
+	//       lifecycle phases.
+	//
+	// OnMetaReady is the meta-specific transition. nil → driver
+	// auto-advances to LifecycleAdvertisable (the simple production
+	// shape). Implementations that want to gate publish (e.g. parse
+	// erigondb.toml and reject malformed) can replace this.
+	OnMetaReady Handler
 
 	// OnValidation handles the Indexed → Advertisable transition: run
 	// the producer-side validator chain. nil → no-op. Step 5 wires
@@ -244,6 +269,7 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 		logger = log.Root()
 	}
 	d.discoverNewFiles(logger)
+	d.removeGoneFiles(logger)
 	view := d.Inv.View()
 	defer view.Close()
 
@@ -253,6 +279,20 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 		}
 	}
 	for _, e := range view.BlockFiles() {
+		d.dispatch(ctx, e, logger)
+	}
+	// Meta + salt + caplin files have their own lifecycle path —
+	// dispatched via OnMetaReady (auto-advance to Advertisable if no
+	// handler wired), not OnIndexing. Without iterating these here,
+	// they sit at LifecycleDownloaded forever and any downstream gate
+	// requiring "all phase-1 files at Indexed+" hangs.
+	for _, e := range view.MetaFiles() {
+		d.dispatch(ctx, e, logger)
+	}
+	for _, e := range view.SaltFiles() {
+		d.dispatch(ctx, e, logger)
+	}
+	for _, e := range view.CaplinFiles() {
 		d.dispatch(ctx, e, logger)
 	}
 }
@@ -372,6 +412,62 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 	}
 }
 
+// removeGoneFiles drops inventory entries marked Local whose file is no
+// longer on disk. The merger deletes source files after a merge; if the
+// inventory-update notification is missed (it is, under the
+// storage-owned-pipeline path — the aggregator's onFilesDelete callback
+// doesn't reach the inventory there), a stale Local entry fails the
+// all_files_present validator on every sweep. Statting each Local entry
+// here makes Sweep self-healing: the first sweep after a merge
+// reconciles the inventory to disk reality.
+//
+// Local=false entries are skipped — those are declared/downloading
+// files legitimately not yet on disk. ResolveExistingPath tolerates
+// both the kind-subdir and flat layouts, so an entry is dropped only
+// when its file is absent from both — a genuinely retired file, not a
+// layout mismatch.
+func (d *Driver) removeGoneFiles(logger log.Logger) {
+	if d.SnapDir == "" || d.Inv == nil {
+		return
+	}
+	var gone []string
+	check := func(e *snapshot.FileEntry) {
+		if !e.Local {
+			return
+		}
+		if _, err := os.Stat(snapshot.ResolveExistingPath(d.SnapDir, e.Name)); errors.Is(err, os.ErrNotExist) {
+			gone = append(gone, e.Name)
+		}
+	}
+	view := d.Inv.View()
+	for _, domain := range snapshot.AllDomains {
+		for _, e := range view.Files(domain) {
+			check(e)
+		}
+	}
+	for _, e := range view.BlockFiles() {
+		check(e)
+	}
+	for _, e := range view.MetaFiles() {
+		check(e)
+	}
+	for _, e := range view.SaltFiles() {
+		check(e)
+	}
+	for _, e := range view.CaplinFiles() {
+		check(e)
+	}
+	view.Close()
+
+	for _, name := range gone {
+		d.Inv.RemoveFile(name)
+	}
+	if len(gone) > 0 {
+		logger.Info("[storage-lifecycle] dropped inventory entries — files gone from disk (merge-retired)",
+			"count", len(gone), "first", gone[0])
+	}
+}
+
 // dispatch routes a single entry to the handler for its current state.
 // Each handler is responsible for advancing the entry on success via
 // Inv.AdvanceTo; on handler failure the entry stays at its current
@@ -392,6 +488,34 @@ func (d *Driver) dispatch(ctx context.Context, e *snapshot.FileEntry, logger log
 	}
 	switch e.State {
 	case snapshot.LifecycleDownloaded:
+		// Meta / salt / caplin files have a different lifecycle path
+		// from indexing targets. They're precursors (meta+salt) or
+		// EL-irrelevant (caplin), with no indices to build and no
+		// validation defined here. Advance directly past Indexing and
+		// Validating to Advertisable. If a caller wires a custom
+		// OnMetaReady (e.g. to parse erigondb.toml and reject
+		// malformed), invoke it; otherwise auto-advance.
+		if e.Kind == snapshot.KindMeta || e.Kind == snapshot.KindSalt || e.Kind == snapshot.KindCaplin {
+			if d.OnMetaReady != nil {
+				logger.Debug("[storage-lifecycle] dispatch OnMetaReady", "name", e.Name, "kind", e.Kind)
+				if err := d.OnMetaReady(ctx, e); err != nil {
+					if errors.Is(err, validation.ErrPause) {
+						logger.Debug("[storage-lifecycle] OnMetaReady paused (transient)", "name", e.Name, "err", err)
+						return
+					}
+					logger.Debug("[storage-lifecycle] OnMetaReady failed", "name", e.Name, "err", err)
+					d.recordFailure(e.Name, "OnMetaReady", logger)
+				} else {
+					d.clearFailure(e.Name)
+				}
+				return
+			}
+			// No handler wired — auto-advance. Production shape.
+			if d.Inv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable) {
+				logger.Info("[storage-lifecycle] advanced", "file", e.Name, "to", "Advertisable", "via", "meta-path")
+			}
+			return
+		}
 		if d.OnIndexing == nil {
 			return
 		}
