@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -114,6 +115,18 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 		return f.headHash, f.headSlot, nil
 	}
 	f.mu.RUnlock()
+
+	// After checkpoint sync the justified root may predate the anchor and
+	// not exist in the fork graph. Both getHead and getHeadGloas depend on
+	// the justified root being present (for getCheckpointState and
+	// getFilteredBlockTree respectively). Return the anchor as head until
+	// forward sync produces a resolvable justified checkpoint.
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	if _, hasJustified := f.forkGraph.GetHeader(justifiedCheckpoint.Root); !hasJustified {
+		log.Debug("GetHead: justified root not in fork graph, using anchor as head",
+			"justifiedRoot", justifiedCheckpoint.Root)
+		return f.forkGraph.AnchorRoot(), f.forkGraph.AnchorSlot(), nil
+	}
 
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
@@ -206,16 +219,17 @@ func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (co
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error
-	// Take write lock here
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	if auxilliaryState == nil {
-		// See which validators can be used for attestation score
+		// Compute checkpoint state BEFORE acquiring f.mu: this operation
+		// can read a large state from disk, which would block the OnTick
+		// goroutine if done under the lock.
 		justificationState, err = f.getCheckpointState(justifiedCheckpoint)
 		if err != nil {
 			return common.Hash{}, 0, err
 		}
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	// Retrieve att
 	f.headHash = justifiedCheckpoint.Root
