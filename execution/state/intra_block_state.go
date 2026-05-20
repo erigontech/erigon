@@ -2523,6 +2523,17 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 
 func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
 	sdb.MarkAddressAccess(addr, true)
+	if source == WriteSetRead {
+		// A synthetic read satisfied by the tx's own earlier write carries
+		// no cross-transaction dependency — it is internally consistent by
+		// construction. Recording it in the readSet would make the validator
+		// re-check it against the version map (which, floored below the tx's
+		// own writes, returns None) and wrongly invalidate the tx — e.g. a
+		// genesis alloc whose Constructor CREATEs the pre-funded account, so
+		// CreateAccount's synthetic BalancePath read sees its own funding
+		// write (issue #21319).
+		return
+	}
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
