@@ -28,6 +28,13 @@ type commitmentResult struct {
 // the calculator sees it, all prior touches have been accumulated.
 type commitComputeRequest struct{}
 
+// pendingBlock is a blockRequest the calculator has received but not yet
+// computed, together with the mode selected for it.
+type pendingBlock struct {
+	req  *blockRequest
+	mode calcMode
+}
+
 // commitmentCalculator receives the same txResult/blockResult stream as the
 // apply loop (via a fan-out channel). For each txResult it accumulates key
 // touches from the writes. It contains the break logic that decides when
@@ -93,8 +100,16 @@ type commitmentCalculator struct {
 	// in receives the same applyResult stream as the apply loop,
 	// plus commitComputeRequest messages for explicit compute triggers.
 	in chan applyResult
+	// blockRequests is the per-block heads-up channel — separate from `in`
+	// so a blockRequest is never trapped behind a block's txResults.
+	blockRequests chan *blockRequest
 	// out publishes commitment roots.
 	out chan commitmentResult
+
+	// pending records the per-block mode selected from each blockRequest,
+	// keyed by block number — populated from blockRequests, cleared on the
+	// matching blockResult.
+	pending map[uint64]*pendingBlock
 
 	// forcePerBlockCompute overrides dbg.BatchCommitments and triggers a
 	// ComputeCommitment at every block boundary. Mirrors serial's
@@ -120,6 +135,7 @@ func newCommitmentCalculator(
 	logger log.Logger,
 	forcePerBlockCompute bool,
 	in chan applyResult,
+	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
 	// Create the calculator's own Updates buffer in ModeUpdate.
@@ -159,7 +175,9 @@ func newCommitmentCalculator(
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
 		in:                   in,
+		blockRequests:        blockRequests,
 		out:                  out,
+		pending:              map[uint64]*pendingBlock{},
 		forcePerBlockCompute: forcePerBlockCompute,
 		done:                 make(chan struct{}),
 	}, nil
@@ -189,9 +207,40 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	// must process ALL buffered items before exiting.
 	// Context cancellation is handled by the exec loop which closes
 	// cc.in after stopping.
-	for result := range cc.in {
-		cc.handleMessage(ctx, result)
+	//
+	// blockRequests is multiplexed alongside cc.in so a blockRequest never
+	// waits behind a block's txResults. When it closes (dispatch done) it
+	// is set to nil so the select ignores it; the loop still runs until
+	// cc.in closes and drains.
+	in, reqs := cc.in, cc.blockRequests
+	for in != nil {
+		select {
+		case result, ok := <-in:
+			if !ok {
+				in = nil
+				continue
+			}
+			cc.handleMessage(ctx, result)
+		case req, ok := <-reqs:
+			if !ok {
+				reqs = nil
+				continue
+			}
+			cc.handleBlockRequest(req)
+		}
 	}
+}
+
+// handleBlockRequest records the per-block mode from a blockRequest:
+// BAL-driven when the block carries a BAL and BAL I/O is enabled, else
+// incremental (today's per-tx accumulation). Stage 2 only records the
+// choice — later stages act on it (gated BAL fold, per-tx cross-check).
+func (cc *commitmentCalculator) handleBlockRequest(req *blockRequest) {
+	mode := calcModeIncremental
+	if req.bal != nil && !dbg.IgnoreBAL {
+		mode = calcModeBALDriven
+	}
+	cc.pending[req.blockNum] = &pendingBlock{req: req, mode: mode}
 }
 
 // handleMessage contains the break logic — decides what to do with each
@@ -224,6 +273,8 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 	case *blockResult:
 		// Track the latest block boundary.
 		cc.lastBlockResult = r
+		// The block is computed at this boundary — drop its pending entry.
+		delete(cc.pending, r.BlockNum)
 
 		// Break logic: in per-block mode, compute at every block boundary.
 		// Skip the first block if it's a partial block (resumed mid-block).
