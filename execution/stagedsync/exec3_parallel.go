@@ -275,9 +275,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// || KeepExecutionProofs`): blocks from the changeset window onward must
 	// compute per-block — otherwise batch-mode dedupes branch updates across
 	// the batch and flushes them all into one block's changeset, which fails
-	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests.
+	// on subsequent reorgs. blockRequests feeds it BAL-declared block requests;
+	// executorCancel lets a fold/root mismatch halt execution eagerly.
 	forcePerBlockCompute := pe.cfg.syncCfg.KeepExecutionProofs
-	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
+	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults, executorCancel)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1559,6 +1560,10 @@ type blockRequest struct {
 	blockNum  uint64
 	blockHash common.Hash
 	stateRoot common.Hash
+	// lastTxNum is the block's final txNum (block-end system tx). The
+	// calculator needs it to position asOfReader and ComputeCommitment
+	// when folding the block ahead of its blockResult.
+	lastTxNum uint64
 	bal       types.BlockAccessList
 }
 

@@ -61,7 +61,7 @@ func TestFinalChange(t *testing.T) {
 	assert.Equal(t, uint64(500), outOfOrder.Value.Uint64())
 }
 
-// TestLoadFromBAL_MatchesApplyWrites is the Stage-1 differential test:
+// TestLoadFromBAL_MatchesApplyWrites is a differential test:
 // loading calcState from a BAL must produce exactly the same accumulated
 // state as feeding the equivalent per-tx VersionedWrites stream through
 // ApplyWrites. The BAL carries multiple tx-indexed changes per key; the
