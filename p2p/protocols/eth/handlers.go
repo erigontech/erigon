@@ -222,7 +222,6 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 	return bals
 }
 
-// ReceiptsOpts carries per-call options for GetReceipts.
 // Using a struct keeps the ReceiptsGetter interface stable when new options are added.
 type ReceiptsOpts struct {
 	CommitmentHistoryEnabled bool
