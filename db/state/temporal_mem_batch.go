@@ -764,15 +764,22 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 
 // FlushWithCallback flushes the mem-batch to tx, but first invokes cb for
 // every (domain, key, latest-value, step) tuple so downstream caches can be
-// refreshed, then drains the in-memory latest/history state.
+// refreshed. When drain is true it then drains the in-memory latest/history
+// state; when false the mem-batch is kept intact after the flush.
 //
-// The callback, the MDBX flush and the drain run under latestStateLock as
-// one atomic window: a concurrent reader sees either the full pre-flush mem
-// state or the fully-drained post-flush state, never a partial mix. cb runs
-// before the flush so that during the MDBX write window the cache already
-// holds the entry — a reader going mem → cache → MDBX never sees a key
-// missing from all three. data may be nil/empty for deletes — cb
+// The callback, the MDBX flush and the (optional) drain run under
+// latestStateLock as one atomic window: a concurrent reader sees either the
+// full pre-flush mem state or the fully-drained post-flush state, never a
+// partial mix. cb runs before the flush so that during the MDBX write window
+// the cache already holds the entry — a reader going mem → cache → MDBX never
+// sees a key missing from all three. data may be nil/empty for deletes — cb
 // distinguishes on len(v)==0.
+//
+// drain=false is used for a published generation's commit (gate item 2): the
+// generation's SharedDomains remains Events.LatestSD — the latest executed
+// block's stable snapshot — so its mem must survive the flush and answer
+// reads from its own immutable delta rather than falling through to the
+// shared, concurrently-mutated caches. Such a mem-batch is freed at Close.
 //
 // Used by SharedDomains.Flush to keep the BranchCache (commitment domain)
 // and the StateCache (accounts/storage/code) in sync — refreshed only on
@@ -780,6 +787,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 func (sd *TemporalMemBatch) FlushWithCallback(
 	ctx context.Context, tx kv.RwTx,
 	cb func(domain kv.Domain, k []byte, v []byte, step kv.Step),
+	drain bool,
 ) error {
 	sd.latestStateLock.Lock()
 	defer sd.latestStateLock.Unlock()
@@ -806,7 +814,9 @@ func (sd *TemporalMemBatch) FlushWithCallback(
 	if err := sd.flushLocked(ctx, tx); err != nil {
 		return err
 	}
-	sd.drainLocked()
+	if drain {
+		sd.drainLocked()
+	}
 	return nil
 }
 

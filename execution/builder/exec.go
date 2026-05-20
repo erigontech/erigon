@@ -97,7 +97,7 @@ func StageBuilderExecCfg(
 //
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
+func execBlock(ctx context0.Context, sd *execctx.SharedDomains, parentSD *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
 	const logPrefix = "BuilderExec"
 
 	// Copy vmConfig to avoid mutating the shared struct across concurrent Build calls.
@@ -134,6 +134,16 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		return err
 	}
 	defer filterSd.Close()
+	// Chain filterSd to the parent generation (gate item 2): like the main
+	// sd, the filter must read the latest executed block's not-yet-committed
+	// domain state. Without this, filterBadTransactions resolves the sender
+	// nonce from committed files only — stale during a background commit —
+	// and drops valid spill-over txns as nonce-gapped (block built empty).
+	// filterSd's own speculative writes stay in filterSd.mem; the parent is
+	// read-only here, so sd's commitment is unaffected.
+	if parentSD != nil {
+		filterSd.SetParent(parentSD)
+	}
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
 	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
 

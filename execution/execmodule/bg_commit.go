@@ -190,42 +190,27 @@ func (e *ExecModule) addGen(gen *commitGen) {
 	e.fgMu.Unlock()
 }
 
-// drainCommittedGens retires fully-committed generations, but ALWAYS keeps
-// the newest one alive. The newest generation's SharedDomains is what the
-// foreground published as Events.LatestSD — the latest executed block's
-// state — and the block builder + RPC caches read through it until a newer
-// block supersedes it. Retiring it here would make LatestSD point at a
-// closed SD (the root cause of the builder reading a stale DB).
+// drainCommittedGens is intentionally a no-op for now (model A).
 //
-// Older generations are detached + closed only once EVERY generation has
-// committed: each closed generation's delta is durably in the DB, and the
-// kept newest generation reads its own committed delta via the stateCache /
-// files, so detaching the parent chain loses nothing. Called by a foreground
-// op holding the semaphore, so closing is race-free.
+// Each generation's SharedDomains.mem is kept after commit (FlushKeepMem) so
+// the generation stays a stable, self-contained snapshot — it may still be
+// Events.LatestSD, or a parent in some reader's chain. Freeing one mid-run
+// would need to prove no consumer (block builder, RPC cache, txpool) is still
+// reading it; LatestSD hands out a bare pointer, so that proof needs a
+// refcount / scoped-read primitive we have not built yet. Until then,
+// generations are released as a unit at shutdown by closeAllGens.
+//
+// Precise per-generation freeing — a refcounted/scoped-read lifetime, or a
+// shallow COW snapshot decoupled from the generation — is the explicit
+// memory-coordination follow-up (next optimization phase). The call site is
+// kept as the documented hook for that work.
 func (e *ExecModule) drainCommittedGens() {
-	e.fgMu.Lock()
-	defer e.fgMu.Unlock()
-	if len(e.gens) <= 1 {
-		return // nothing to retire — keep the (at most one) newest generation
-	}
-	for _, g := range e.gens {
-		if !g.committed {
-			return // a commit is still in flight — leave the chain intact
-		}
-	}
-	newest := e.gens[len(e.gens)-1]
-	old := e.gens[:len(e.gens)-1]
-	e.gens = []*commitGen{newest}
-	newest.sd.SetParent(nil)
-	for _, g := range old {
-		g.sd.SetParent(nil)
-		g.sd.Close()
-	}
+	// no-op — see closeAllGens and the memory-coordination follow-up
 }
 
 // closeAllGens detaches + closes every remaining generation. Called only at
-// shutdown (after the commit worker has stopped) to release the newest
-// generation that drainCommittedGens deliberately keeps alive.
+// shutdown (after the commit worker has stopped) to release the generations
+// that drainCommittedGens deliberately keeps alive for the lifetime of the run.
 func (e *ExecModule) closeAllGens() {
 	e.fgMu.Lock()
 	defer e.fgMu.Unlock()

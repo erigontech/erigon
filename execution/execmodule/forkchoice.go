@@ -853,7 +853,7 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	}
 	defer rwTx.Rollback()
 	flushStart := time.Now()
-	if err := sd.Flush(e.bacgroundCtx, rwTx); err != nil {
+	if err := sd.FlushKeepMem(e.bacgroundCtx, rwTx); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))

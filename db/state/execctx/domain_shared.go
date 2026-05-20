@@ -772,7 +772,23 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
+// Flush writes the mem-batch to tx, refreshes the caches, and drains the
+// mem-batch (frees its in-memory delta).
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	return sd.flush(ctx, tx, true)
+}
+
+// FlushKeepMem is Flush without the post-flush drain: the mem-batch is kept
+// intact so this SharedDomains stays a stable, self-contained snapshot after
+// commit. Used for a published commit generation (gate item 2) — it remains
+// Events.LatestSD and must answer reads from its own immutable delta, not
+// fall through to the shared concurrently-mutated caches. The mem is freed
+// at Close.
+func (sd *SharedDomains) FlushKeepMem(ctx context.Context, tx kv.RwTx) error {
+	return sd.flush(ctx, tx, false)
+}
+
+func (sd *SharedDomains) flush(ctx context.Context, tx kv.RwTx, drain bool) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 
 	if sd.sdCtx.HasPendingUpdate() {
@@ -834,7 +850,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 					}
 				}
 			}
-		}); err != nil {
+		}, drain); err != nil {
 			return err
 		}
 		if sd.branchCache != nil {

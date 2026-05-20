@@ -120,15 +120,16 @@ var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
 func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	// Read the latest *published* SharedDomains — the most recently executed
+	// block's stable leaf snapshot. Deliberately NOT e.currentContext: while
+	// an FCU is in progress currentContext is that block's half-written SD,
+	// actively mutated by the executing pipeline (the coinbase nonce is
+	// already bumped mid-block). A consumer that grabbed currentContext would
+	// see a not-yet-final block — e.g. GetTransactionCount and txpool
+	// validateTx in the same SubmitTransfer disagreeing by one nonce. The
+	// published leaf only advances at block completion, so it is stable.
 	var context *execctx.SharedDomains
-	if c.execModule != nil {
-		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
-		c.execModule.lock.RUnlock()
-	}
-	// Fall back to the published SD from Events during background commits
-	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
+	if c.publishedSD != nil {
 		context = c.publishedSD()
 	}
 
