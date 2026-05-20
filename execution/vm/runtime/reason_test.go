@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -69,11 +70,11 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	db := temporaltest.NewTestDB(t, dirs)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	t.Cleanup(func() { tx.Rollback() })
+	t.Cleanup(tx.Rollback)
 
 	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
-	t.Cleanup(func() { sd.Close() })
+	t.Cleanup(sd.Close)
 
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	ibs.SetHooks(tracer)
@@ -271,4 +272,73 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 		"runtime.Execute should emit at least one code change for setup")
 	require.Equal(t, tracing.CodeChangeUnspecified, codeEvents[0].Reason,
 		"setup SetCode must use CodeChangeUnspecified, not a deployment reason")
+}
+
+// TestReasonRoundTripThroughIBS verifies that every NonceChangeReason and
+// CodeChangeReason value used by the call sites outside this package
+// (TxnExecutor EoA-call / EIP-7702 paths, account-abstraction exec) plumbs
+// unchanged through IntraBlockState.SetNonce / SetCode into the V2 tracer
+// hook.
+//
+// This is a plumbing guard: the V2 hook layer must not coerce, drop, or
+// re-tag the reason argument. Full end-to-end coverage of the call sites
+// themselves lives in the upstream TxnExecutor tests (which exercise the
+// txn_executor.go and aa/aa_exec.go reason emit sites directly).
+func TestReasonRoundTripThroughIBS(t *testing.T) {
+	t.Run("nonce reasons", func(t *testing.T) {
+		nonceReasons := []tracing.NonceChangeReason{
+			tracing.NonceChangeEoACall,
+			tracing.NonceChangeAuthorization,
+			tracing.NonceChangeContractCreator,
+			tracing.NonceChangeNewContract,
+			tracing.NonceChangeGenesis,
+			tracing.NonceChangeUnspecified,
+		}
+		for _, reason := range nonceReasons {
+			t.Run(reason.String(), func(t *testing.T) {
+				var got []tracing.NonceChangeReason
+				tracer := &tracing.Hooks{
+					OnNonceChangeV2: func(_ accounts.Address, _, _ uint64, r tracing.NonceChangeReason) {
+						got = append(got, r)
+					},
+				}
+				cfg := newTestIBS(t, tracer)
+				addr := accounts.InternAddress(common.HexToAddress("0x01"))
+
+				require.NoError(t, cfg.State.SetNonce(addr, 1, reason))
+
+				require.Len(t, got, 1, "exactly one OnNonceChangeV2 event")
+				require.Equal(t, reason, got[0],
+					"IBS.SetNonce must forward reason unchanged to OnNonceChangeV2")
+			})
+		}
+	})
+
+	t.Run("code reasons", func(t *testing.T) {
+		codeReasons := []tracing.CodeChangeReason{
+			tracing.CodeChangeAuthorization,
+			tracing.CodeChangeAuthorizationClear,
+			tracing.CodeChangeContractCreation,
+			tracing.CodeChangeGenesis,
+			tracing.CodeChangeUnspecified,
+		}
+		for _, reason := range codeReasons {
+			t.Run(reason.String(), func(t *testing.T) {
+				var got []tracing.CodeChangeReason
+				tracer := &tracing.Hooks{
+					OnCodeChangeV2: func(_ accounts.Address, _ accounts.CodeHash, _ []byte, _ accounts.CodeHash, _ []byte, r tracing.CodeChangeReason) {
+						got = append(got, r)
+					},
+				}
+				cfg := newTestIBS(t, tracer)
+				addr := accounts.InternAddress(common.HexToAddress("0x02"))
+
+				require.NoError(t, cfg.State.SetCode(addr, []byte{byte(vm.STOP)}, reason))
+
+				require.Len(t, got, 1, "exactly one OnCodeChangeV2 event")
+				require.Equal(t, reason, got[0],
+					"IBS.SetCode must forward reason unchanged to OnCodeChangeV2")
+			})
+		}
+	})
 }

@@ -237,6 +237,11 @@ func (t *muxTracer) OnSystemCallStartV2(vm *tracing.VMContext) {
 	}
 }
 
+// OnSystemCallEnd fans out to children. No leaf tracer in-tree wires this
+// today — they let the next OnTxStart/OnSystemCallStartV2 overwrite their
+// env reference. Kept symmetric with OnSystemCallStartV2 for parity with
+// geth and to support a future WrapWithJournal follow-up that emits
+// revert-style events on system-call rollback.
 func (t *muxTracer) OnSystemCallEnd() {
 	for _, t := range t.tracers {
 		if t.Hooks == nil {

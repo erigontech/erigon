@@ -344,7 +344,9 @@ const (
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	NonceChangeRevert NonceChangeReason = 6
 
-	// NonceChangeSelfdestruct is emitted when the nonce is reset to zero due to a self-destruct
+	// NonceChangeSelfdestruct is emitted when the nonce is reset to zero due to a self-destruct.
+	// Spelling (lowercase "d") matches geth; CodeChangeSelfDestruct uses capital "D" — same
+	// inconsistency carried for parity.
 	NonceChangeSelfdestruct NonceChangeReason = 7
 )
 
