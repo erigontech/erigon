@@ -69,64 +69,74 @@ const ChainTomlV2BaseName = "chain.v2"
 // (V2 manifest, UCAN attestation) is one logical generation.
 const ChainUCANBaseName = "chain.ucan"
 
-// chainTomlV2NameRE matches chain.v2.<seq>.toml — the only filename
-// shape RollingV2Publisher emits and recognises.
-var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.(\d+)\.toml$`)
+// chainTomlV2NameRE matches chain.v2.<enr-fp>.<seq>.toml — the only
+// filename shape RollingV2Publisher emits and recognises. <enr-fp> is
+// 16 lowercase hex chars (see ENRFingerprint).
+var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.(\d+)\.toml$`)
 
-// chainUCANNameRE matches chain.ucan.<seq>.bin — the UCAN sidecar
-// shape paired with each V2 generation.
-var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.(\d+)\.bin$`)
+// chainUCANNameRE matches chain.ucan.<enr-fp>.<seq>.bin — the UCAN
+// sidecar shape paired with each V2 generation.
+var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.([0-9a-f]{16})\.(\d+)\.bin$`)
 
-// ChainTomlV2FileNameForSeq formats a generational filename for the
-// given sequence number.
-func ChainTomlV2FileNameForSeq(seq uint64) string {
-	return fmt.Sprintf("%s.%d.toml", ChainTomlV2BaseName, seq)
+// ENRFingerprint formats the 16-hex-char node fingerprint used in
+// per-node advertisement filenames — the first 8 bytes of the node's
+// discv5 ID. The node ID is keccak(pubkey), stable across ENR-record
+// updates, so the fingerprint identifies the node, not a record
+// version.
+func ENRFingerprint(nodeID [32]byte) string {
+	return hex.EncodeToString(nodeID[:8])
 }
 
-// ChainUCANFileNameForSeq formats the UCAN sidecar filename paired
-// with the V2 manifest at the same seq.
-func ChainUCANFileNameForSeq(seq uint64) string {
-	return fmt.Sprintf("%s.%d.bin", ChainUCANBaseName, seq)
+// ChainTomlV2FileName formats the per-node advertisement filename for
+// the given ENR fingerprint and generation sequence:
+// chain.v2.<enr-fp>.<seq>.toml.
+func ChainTomlV2FileName(enrFP string, seq uint64) string {
+	return fmt.Sprintf("%s.%s.%d.toml", ChainTomlV2BaseName, enrFP, seq)
 }
 
-// ChainV2SigFileNameForSeq formats the signature sidecar filename
-// paired with chain.v2.<seq>.toml. The signature is over the bytes
-// of the .toml file. Receivers fetch both files, verify the
-// signature against the peer's ENR public key, then process the
-// manifest. Per
-// docs/plans/20260515-three-layer-snapshot-distribution.md the
-// signature is the MITM-publisher defence — any redistributor that
-// modifies the .toml content invalidates the .sig.
-func ChainV2SigFileNameForSeq(seq uint64) string {
-	return fmt.Sprintf("%s.%d.sig", ChainTomlV2BaseName, seq)
+// ChainUCANFileName formats the UCAN sidecar filename paired with the
+// V2 manifest at the same fingerprint + seq.
+func ChainUCANFileName(enrFP string, seq uint64) string {
+	return fmt.Sprintf("%s.%s.%d.bin", ChainUCANBaseName, enrFP, seq)
 }
 
-// ParseChainTomlV2FileName extracts the generation seq from a filename
-// matching chain.v2.<seq>.toml. ok=false for any other shape.
-func ParseChainTomlV2FileName(name string) (seq uint64, ok bool) {
+// ChainV2SigFileName formats the signature sidecar filename paired with
+// chain.v2.<enr-fp>.<seq>.toml. The signature is over the .toml bytes;
+// per docs/plans/20260515-three-layer-snapshot-distribution.md it is
+// the MITM-publisher defence — any redistributor that modifies the
+// .toml content invalidates the .sig.
+func ChainV2SigFileName(enrFP string, seq uint64) string {
+	return fmt.Sprintf("%s.%s.%d.sig", ChainTomlV2BaseName, enrFP, seq)
+}
+
+// ParseChainTomlV2FileName extracts the ENR fingerprint and generation
+// seq from a filename matching chain.v2.<enr-fp>.<seq>.toml. ok=false
+// for any other shape.
+func ParseChainTomlV2FileName(name string) (enrFP string, seq uint64, ok bool) {
 	m := chainTomlV2NameRE.FindStringSubmatch(name)
 	if m == nil {
-		return 0, false
+		return "", 0, false
 	}
-	n, err := strconv.ParseUint(m[1], 10, 64)
+	n, err := strconv.ParseUint(m[2], 10, 64)
 	if err != nil {
-		return 0, false
+		return "", 0, false
 	}
-	return n, true
+	return m[1], n, true
 }
 
-// ParseChainUCANFileName extracts the generation seq from a filename
-// matching chain.ucan.<seq>.bin. ok=false for any other shape.
-func ParseChainUCANFileName(name string) (seq uint64, ok bool) {
+// ParseChainUCANFileName extracts the ENR fingerprint and generation
+// seq from a filename matching chain.ucan.<enr-fp>.<seq>.bin. ok=false
+// for any other shape.
+func ParseChainUCANFileName(name string) (enrFP string, seq uint64, ok bool) {
 	m := chainUCANNameRE.FindStringSubmatch(name)
 	if m == nil {
-		return 0, false
+		return "", 0, false
 	}
-	n, err := strconv.ParseUint(m[1], 10, 64)
+	n, err := strconv.ParseUint(m[2], 10, 64)
 	if err != nil {
-		return 0, false
+		return "", 0, false
 	}
-	return n, true
+	return m[1], n, true
 }
 
 // generationEntry caches the seq and the set of snapshot names a
@@ -154,6 +164,13 @@ type RollingV2Publisher struct {
 	mu               sync.Mutex
 	history          []generationEntry // chronological, oldest first
 	delegationSource DelegationSource
+
+	// enrFP is an explicit ENR-fingerprint override. When empty,
+	// resolveENRFP falls back to downloader.SelfENRFingerprint().
+	// Production leaves this empty (the Downloader carries the
+	// fingerprint); tests / the harness / the cold-start helper set it
+	// directly via SetENRFingerprint.
+	enrFP string
 
 	// selfCheck is invoked on every Publish() after the manifest has
 	// been generated but before any file is written. It receives the
@@ -256,6 +273,29 @@ func (r *RollingV2Publisher) SetSigner(fn ManifestSignerFn) {
 	r.signer = fn
 }
 
+// SetENRFingerprint sets an explicit ENR fingerprint, overriding the
+// downloader-carried one. Used by the cold-start helper, the harness,
+// and tests — production leaves it unset (the Downloader carries it).
+func (r *RollingV2Publisher) SetENRFingerprint(fp string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.enrFP = fp
+}
+
+// resolveENRFP returns the ENR fingerprint for filename construction:
+// the explicit override if set, else the downloader's. Caller must
+// hold r.mu. Empty result means the fingerprint is not yet known —
+// Publish treats that as a wiring error.
+func (r *RollingV2Publisher) resolveENRFP() string {
+	if r.enrFP != "" {
+		return r.enrFP
+	}
+	if r.downloader != nil {
+		return r.downloader.SelfENRFingerprint()
+	}
+	return ""
+}
+
 // NewRollingV2Publisher constructs a publisher for snapDir. Discovers
 // existing chain.v2.<seq>.toml files, parses each to recover its name
 // set, and seeds history (sorted oldest first). A generation whose
@@ -277,7 +317,7 @@ func NewRollingV2Publisher(snapDir string, torrentFS *AtomicTorrentFS, dl *Downl
 		if e.IsDir() {
 			continue
 		}
-		seq, ok := ParseChainTomlV2FileName(e.Name())
+		_, seq, ok := ParseChainTomlV2FileName(e.Name())
 		if !ok {
 			continue
 		}
@@ -378,11 +418,16 @@ func (r *RollingV2Publisher) Publish(
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	enrFP := r.resolveENRFP()
+	if enrFP == "" {
+		return metainfo.Hash{}, fmt.Errorf("RollingV2Publisher.Publish: ENR fingerprint not set (P2P not up, or SetENRFingerprint not called)")
+	}
+
 	var nextSeq uint64
 	if n := len(r.history); n > 0 {
 		nextSeq = r.history[n-1].seq + 1
 	}
-	name := ChainTomlV2FileNameForSeq(nextSeq)
+	name := ChainTomlV2FileName(enrFP, nextSeq)
 	path := filepath.Join(r.snapDir, name)
 
 	// Write the UCAN sidecar first if a delegation source is wired.
@@ -395,7 +440,7 @@ func (r *RollingV2Publisher) Publish(
 			return metainfo.Hash{}, fmt.Errorf("delegation source: %w", err)
 		}
 		if len(ucanBytes) > 0 {
-			ucanName := ChainUCANFileNameForSeq(nextSeq)
+			ucanName := ChainUCANFileName(enrFP, nextSeq)
 			ucanPath := filepath.Join(r.snapDir, ucanName)
 			if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
 				return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
@@ -466,7 +511,7 @@ func (r *RollingV2Publisher) Publish(
 			_ = dir.RemoveFile(path)
 			return metainfo.Hash{}, fmt.Errorf("publisher signing %s: %w", name, err)
 		}
-		sigName := ChainV2SigFileNameForSeq(nextSeq)
+		sigName := ChainV2SigFileName(enrFP, nextSeq)
 		sigPath := filepath.Join(r.snapDir, sigName)
 		if err := saveChainTomlFile(sigPath, sigBytes); err != nil {
 			_ = dir.RemoveFile(path)
@@ -513,7 +558,7 @@ func (r *RollingV2Publisher) Publish(
 
 	canonical := manifestFileNames(manifest)
 	r.history = append(r.history, generationEntry{seq: nextSeq, names: canonical})
-	r.evictInvalidLocked(canonical)
+	r.evictInvalidLocked(enrFP, canonical)
 
 	return spec.InfoHash, nil
 }
@@ -528,7 +573,7 @@ func (r *RollingV2Publisher) Publish(
 // is expected to delete those files from disk; this step ensures the
 // torrent client stops advertising them even if the merger didn't drop
 // the torrent registration.
-func (r *RollingV2Publisher) evictInvalidLocked(canonical map[string]struct{}) {
+func (r *RollingV2Publisher) evictInvalidLocked(enrFP string, canonical map[string]struct{}) {
 	if len(r.history) <= 1 {
 		return
 	}
@@ -566,7 +611,7 @@ func (r *RollingV2Publisher) evictInvalidLocked(canonical map[string]struct{}) {
 
 	orphanNames := make(map[string]struct{})
 	for _, gen := range evicted {
-		r.evictGenerationLocked(gen.seq)
+		r.evictGenerationLocked(enrFP, gen.seq)
 		for name := range gen.names {
 			if _, kept := stillReferenced[name]; kept {
 				continue
@@ -602,10 +647,10 @@ func isSubsetOf(a, b map[string]struct{}) bool {
 // .torrent sidecars) are removed here. Unseeding orphan snapshot
 // files is done by evictInvalidLocked once the full set of evictions
 // for this Publish is known.
-func (r *RollingV2Publisher) evictGenerationLocked(seq uint64) {
-	tomlName := ChainTomlV2FileNameForSeq(seq)
-	ucanName := ChainUCANFileNameForSeq(seq)
-	sigName := ChainV2SigFileNameForSeq(seq)
+func (r *RollingV2Publisher) evictGenerationLocked(enrFP string, seq uint64) {
+	tomlName := ChainTomlV2FileName(enrFP, seq)
+	ucanName := ChainUCANFileName(enrFP, seq)
+	sigName := ChainV2SigFileName(enrFP, seq)
 	if r.downloader != nil {
 		r.downloader.DropTorrentByName(tomlName)
 		r.downloader.DropTorrentByName(ucanName)
@@ -645,8 +690,8 @@ func (r *RollingV2Publisher) Cleanup() error {
 		}
 		var seq uint64
 		var ok bool
-		if seq, ok = ParseChainTomlV2FileName(e.Name()); !ok {
-			seq, ok = ParseChainUCANFileName(e.Name())
+		if _, seq, ok = ParseChainTomlV2FileName(e.Name()); !ok {
+			_, seq, ok = ParseChainUCANFileName(e.Name())
 		}
 		if !ok {
 			continue

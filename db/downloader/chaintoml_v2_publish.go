@@ -69,6 +69,8 @@ func ComputeENRFields(manifest *ChainTomlV2) (domainSteps, mergeDepth uint64) {
 // authoritativeBlocks passes through to the ENR ChainToml entry.
 // enrUpdater may be nil for cold-start paths where P2P isn't up yet;
 // the manifest still gets written and the .torrent still gets built.
+// enrFP is the node's ENR fingerprint (see ENRFingerprint) — required
+// for the per-node advertisement filename chain.v2.<enr-fp>.<seq>.toml.
 //
 // Returns the V2 infohash for logs / verification.
 func PublishChainTomlV2(
@@ -76,6 +78,7 @@ func PublishChainTomlV2(
 	torrentFS *AtomicTorrentFS,
 	inv *snapshotinv.Inventory,
 	authoritativeBlocks uint64,
+	enrFP string,
 	enrUpdater func(enr.ChainToml),
 ) (metainfo.Hash, error) {
 	if inv == nil {
@@ -89,5 +92,6 @@ func PublishChainTomlV2(
 	if err != nil {
 		return metainfo.Hash{}, err
 	}
+	pub.SetENRFingerprint(enrFP)
 	return pub.Publish(context.Background(), inv, authoritativeBlocks, enrUpdater)
 }

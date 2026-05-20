@@ -84,6 +84,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -464,9 +465,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			return backend.components.Downloader.Downloader.PublishLocalChainToml()
 		},
-		Inventory:            inv,
-		Aggregator:           agg,
-		IndexWorkers:         estimate.IndexSnapshot.Workers(),
+		Inventory:    inv,
+		Aggregator:   agg,
+		IndexWorkers: estimate.IndexSnapshot.Workers(),
+		// PostIndexedSeed: invoked by the orchestrator after every
+		// phase-1 file reaches LifecycleIndexed AND snapshots.OpenFolder
+		// + aggregator.OpenFolder have run, but BEFORE
+		// InitialStateReady fires. Populates kv.HeaderTD + canonical
+		// hash pointers from frozen headers via FillDBFromSnapshots.
+		// Without this, Caplin's BlockCollector.Flush errors with
+		// "parent's total difficulty not found" for the snapshot tip
+		// because no other code path seeds TD for blocks in the
+		// snapshot range. See
+		// docs/plans/20260518-storage-owns-post-download-pipeline.md.
+		PostIndexedSeed: func(seedCtx context.Context) error {
+			return temporalDb.Update(seedCtx, func(tx kv.RwTx) error {
+				return rawdbreset.FillDBFromSnapshots("storage.postIndexed", seedCtx, tx, dirs, blockReader, logger)
+			})
+		},
 		SegmentsBuildLimiter: segmentsBuildLimiter,
 		Logger:               logger,
 	}); err != nil {
@@ -737,6 +753,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					if selfIP := p2p.LocalNode().Node().IP(); selfIP != nil {
 						dl.SetSelfIP(selfIP)
 					}
+					// The ENR fingerprint (node ID) is constant for the
+					// node's lifetime; the rolling publisher uses it to
+					// name per-node advertisements chain.v2.<enr-fp>.*.
+					dl.SetSelfENRFingerprint(downloader.ENRFingerprint([32]byte(p2p.LocalNode().Node().ID())))
 				}
 			}
 			if !validPort {
@@ -760,6 +780,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if selfIP := p2pSrv.LocalNode().Node().IP(); selfIP != nil {
 					dl.SetSelfIP(selfIP)
 				}
+				dl.SetSelfENRFingerprint(downloader.ENRFingerprint([32]byte(p2pSrv.LocalNode().Node().ID())))
 				dv5 := p2pSrv.DiscV5()
 				// Add directly connected devp2p peers FIRST — resolved peers take
 				// priority over discv5 routing table entries which may have stale ENRs.
@@ -1270,6 +1291,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
+	// V2 mode: wire the orchestrator's InitialStateReady so
+	// ProcessFrozenBlocks waits for storage's postIndexed (which holds
+	// its own MDBX RW tx during FillDBFromSnapshots) before opening
+	// the framework's RW tx. Without this, the two writers deadlock.
+	if backend.components.Storage != nil && backend.components.Storage.InitialStateReady != nil {
+		pipelineExecutor.SetInitialStateReady(backend.components.Storage.InitialStateReady)
+	}
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, dispatcher, backend.sentryProvider.Client.SetStatus, statusDataProvider, backend.sentryProvider.ExecutionP2PPublisher)
 

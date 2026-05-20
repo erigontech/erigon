@@ -125,10 +125,10 @@ func (k peerSidecarKind) label() string {
 func (k peerSidecarKind) parseName(name string) bool {
 	switch k {
 	case sidecarV2Manifest:
-		_, ok := dl.ParseChainTomlV2FileName(name)
+		_, _, ok := dl.ParseChainTomlV2FileName(name)
 		return ok
 	case sidecarUCAN:
-		_, ok := dl.ParseChainUCANFileName(name)
+		_, _, ok := dl.ParseChainUCANFileName(name)
 		return ok
 	}
 	return false
@@ -289,6 +289,9 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 // onDownloadRequested is the materialised handler. Must match the exact
 // signature of flow.DownloadRequested consumers for the bus to route to it.
 func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
+	if p.logger != nil {
+		p.logger.Debug("[downloader-bus] onDownloadRequested", "file", req.FileName)
+	}
 	protoReq := &downloaderproto.DownloadRequest{
 		Items: []*downloaderproto.DownloadItem{{
 			Path:        req.FileName,
@@ -298,6 +301,9 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 	}
 
 	if err := p.Client.Download(p.busCtx, protoReq); err != nil {
+		if p.logger != nil {
+			p.logger.Warn("[downloader-bus] Client.Download failed", "file", req.FileName, "err", err)
+		}
 		p.bus.Publish(flow.DownloadFailed{
 			FileName: req.FileName,
 			Reason:   err.Error(),
@@ -309,6 +315,9 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 	var size int64
 	if fi, err := os.Stat(localPath); err == nil {
 		size = fi.Size()
+	}
+	if p.logger != nil {
+		p.logger.Info("[downloader-bus] publishing DownloadComplete", "file", req.FileName, "size", size)
 	}
 	p.bus.Publish(flow.DownloadComplete{
 		FileName:  req.FileName,

@@ -31,6 +31,10 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
+// testENRFP is the deterministic 16-hex ENR fingerprint used by every
+// publisher constructed in this file.
+const testENRFP = "a1b2c3d4e5f60718"
+
 // rollingTestInventory builds a tiny canonical inventory so the test
 // runs in milliseconds. Two state files at canonical boundaries; their
 // content is irrelevant for the publisher mechanics — what matters is
@@ -66,7 +70,7 @@ func listV2Generations(t *testing.T, snapDir string) []uint64 {
 	require.NoError(t, err)
 	var seqs []uint64
 	for _, e := range entries {
-		if seq, ok := ParseChainTomlV2FileName(e.Name()); ok {
+		if _, seq, ok := ParseChainTomlV2FileName(e.Name()); ok {
 			seqs = append(seqs, seq)
 		}
 	}
@@ -82,6 +86,7 @@ func TestRollingV2Publisher_GenerationsAdvance(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 	require.Empty(t, pub.History())
 
 	inv := rollingTestInventory(t, 0x10)
@@ -109,6 +114,7 @@ func TestRollingV2Publisher_KeepsSubsetValidGenerations(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	inv := rollingTestInventory(t, 0x20)
 	for i := 0; i < 7; i++ {
@@ -129,6 +135,7 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	// gen 0,1: inv lists {accounts.0-1024, storage.0-1024}.
 	inv1 := rollingTestInventory(t, 0x21)
@@ -158,7 +165,7 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	require.Equal(t, []uint64{2}, pub.History())
 	require.Equal(t, []uint64{2}, listV2Generations(t, snapDir))
 	for _, oldSeq := range []uint64{0, 1} {
-		oldName := ChainTomlV2FileNameForSeq(oldSeq)
+		oldName := ChainTomlV2FileName(testENRFP, oldSeq)
 		_, err := os.Stat(filepath.Join(snapDir, oldName))
 		require.True(t, os.IsNotExist(err), "%s should have been evicted", oldName)
 		_, err = os.Stat(filepath.Join(snapDir, oldName+".torrent"))
@@ -176,6 +183,7 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 	// Publish a few generations, then drop the publisher.
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	first.SetENRFingerprint(testENRFP)
 	for i := 0; i < 3; i++ {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
 		require.NoError(t, err)
@@ -185,6 +193,7 @@ func TestRollingV2Publisher_RestartResumesSeq(t *testing.T) {
 	// New publisher discovers existing files, resumes from seq 3.
 	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	second.SetENRFingerprint(testENRFP)
 	require.Equal(t, []uint64{0, 1, 2}, second.History())
 
 	_, err = second.Publish(context.Background(), inv, 0, nil)
@@ -203,6 +212,7 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	first.SetENRFingerprint(testENRFP)
 	for i := 0; i < 3; i++ {
 		_, err := first.Publish(context.Background(), inv, 0, nil)
 		require.NoError(t, err)
@@ -213,6 +223,7 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	// name-sets so the next Publish can evaluate validity.
 	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	second.SetENRFingerprint(testENRFP)
 	require.Equal(t, []uint64{0, 1, 2}, second.History())
 
 	// Publish with a retiring inventory — every prior gen must evict.
@@ -239,6 +250,7 @@ func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	inv := rollingTestInventory(t, 0x50)
 
@@ -251,7 +263,7 @@ func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 
 	// Plant orphan files on disk (no .torrent sidecar, simulating a
 	// crash partway through Publish).
-	orphanName := ChainTomlV2FileNameForSeq(99)
+	orphanName := ChainTomlV2FileName(testENRFP, 99)
 	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanName), []byte("stub"), 0o644))
 
 	// Cleanup removes the orphan, leaves history intact.
@@ -267,6 +279,7 @@ func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	inv := rollingTestInventory(t, 0x60)
 
@@ -292,27 +305,35 @@ func TestRollingV2Publisher_ENRUpdaterFires(t *testing.T) {
 // behaviour. Lock the wire format down so a typo elsewhere can't widen it.
 func TestParseChainTomlV2FileName(t *testing.T) {
 	cases := []struct {
-		name    string
-		wantOK  bool
-		wantSeq uint64
+		name      string
+		wantOK    bool
+		wantENRFP string
+		wantSeq   uint64
 	}{
-		{"chain.v2.0.toml", true, 0},
-		{"chain.v2.42.toml", true, 42},
-		{"chain.v2.18446744073709551614.toml", true, 18446744073709551614},
-		// Reject everything else — no leading dot, no v1, no missing seq, etc.
-		{"chain.v2.toml", false, 0},
-		{"chain.v2.0", false, 0},
-		{"chain.v2.0.tml", false, 0},
-		{"chain.v3.0.toml", false, 0},
-		{"chain.v2.-1.toml", false, 0},
-		{"chain.v2.0.toml.bak", false, 0},
-		{"prefix.chain.v2.0.toml", false, 0},
-		{"chain.v2.0.toml.torrent", false, 0},
+		{"chain.v2.a1b2c3d4e5f60718.0.toml", true, "a1b2c3d4e5f60718", 0},
+		{"chain.v2.a1b2c3d4e5f60718.42.toml", true, "a1b2c3d4e5f60718", 42},
+		{"chain.v2.0123456789abcdef.18446744073709551614.toml", true, "0123456789abcdef", 18446744073709551614},
+		// Reject everything else — no fingerprint, wrong-length fingerprint,
+		// no leading dot, no v1, no missing seq, etc.
+		{"chain.v2.0.toml", false, "", 0},
+		{"chain.v2.42.toml", false, "", 0},
+		{"chain.v2.toml", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f60718.0", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f60718.0.tml", false, "", 0},
+		{"chain.v3.a1b2c3d4e5f60718.0.toml", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f60718.-1.toml", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f6071.0.toml", false, "", 0},   // 15-hex fingerprint
+		{"chain.v2.a1b2c3d4e5f607189.0.toml", false, "", 0}, // 17-hex fingerprint
+		{"chain.v2.A1B2C3D4E5F60718.0.toml", false, "", 0},  // uppercase rejected
+		{"chain.v2.a1b2c3d4e5f60718.0.toml.bak", false, "", 0},
+		{"prefix.chain.v2.a1b2c3d4e5f60718.0.toml", false, "", 0},
+		{"chain.v2.a1b2c3d4e5f60718.0.toml.torrent", false, "", 0},
 	}
 	for _, c := range cases {
-		seq, ok := ParseChainTomlV2FileName(c.name)
+		enrFP, seq, ok := ParseChainTomlV2FileName(c.name)
 		require.Equal(t, c.wantOK, ok, "ok mismatch for %q", c.name)
 		if c.wantOK {
+			require.Equal(t, c.wantENRFP, enrFP, "enrFP mismatch for %q", c.name)
 			require.Equal(t, c.wantSeq, seq, "seq mismatch for %q", c.name)
 		}
 	}
@@ -361,11 +382,12 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 
 	pub, err := NewRollingV2Publisher(snapDir, torrentFS, nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 	hash, err := pub.Publish(context.Background(), inv, 0, nil)
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash)
 
-	gen0 := ChainTomlV2FileNameForSeq(0)
+	gen0 := ChainTomlV2FileName(testENRFP, 0)
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	m, err := ParseV2(tomlBytes)
@@ -388,6 +410,7 @@ func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	// selfCheck is nil — Publish proceeds normally.
 	hash, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
@@ -395,7 +418,7 @@ func TestRollingV2Publisher_SelfCheck_NilDefault(t *testing.T) {
 	require.NotEqual(t, metainfo.Hash{}, hash)
 
 	// File was written.
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 }
 
 // TestRollingV2Publisher_SelfCheck_PassPropagates pins that when the
@@ -406,6 +429,7 @@ func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	called := false
 	pub.SetSelfCheck(func(m *ChainTomlV2) error {
@@ -418,7 +442,7 @@ func TestRollingV2Publisher_SelfCheck_PassPropagates(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, metainfo.Hash{}, hash)
 	require.True(t, called, "self-check callback was invoked")
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 }
 
 // TestRollingV2Publisher_SelfCheck_FailLoud is the core invariant: a
@@ -433,6 +457,7 @@ func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	sentinel := errors.New("retire bug: hash mismatch on v1.0-headers.seg")
 	pub.SetSelfCheck(func(m *ChainTomlV2) error {
@@ -444,7 +469,7 @@ func TestRollingV2Publisher_SelfCheck_FailLoud(t *testing.T) {
 		"self-check error propagates unchanged so callers can discriminate via errors.Is")
 
 	// No file written — the failed generation must not appear on disk.
-	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)),
+	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)),
 		"chain.v2.0.toml must NOT exist after self-check failure — failed generations don't pollute disk")
 	require.Empty(t, pub.History(),
 		"history not advanced — next Publish() retries with seq=0, not seq=1")
@@ -459,6 +484,7 @@ func TestRollingV2Publisher_SelfCheck_RetryAfterFailure(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	fail := errors.New("first attempt fails")
 	pub.SetSelfCheck(func(m *ChainTomlV2) error { return fail })
@@ -533,11 +559,12 @@ func TestRollingV2Publisher_Signer_NilDefault(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
 	require.NoError(t, err)
-	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(0)),
+	require.FileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)),
 		"no signer configured → no .sig sidecar written")
 }
 
@@ -549,6 +576,7 @@ func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	var signedBytes []byte
 	pub.SetSigner(func(data []byte) ([]byte, error) {
@@ -564,7 +592,7 @@ func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x31), 0, nil)
 	require.NoError(t, err)
 
-	sigPath := filepath.Join(snapDir, ChainV2SigFileNameForSeq(0))
+	sigPath := filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0))
 	require.FileExists(t, sigPath, ".sig sidecar must be written")
 
 	// Verify .sig contains exactly what the signer returned.
@@ -575,7 +603,7 @@ func TestRollingV2Publisher_Signer_WritesSidecar(t *testing.T) {
 	// Verify the signer was called with the same bytes the .toml file
 	// on disk contains — this is the MITM-defence invariant: signature
 	// is over the EXACT bytes any receiver will see.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	require.Equal(t, tomlBytes, signedBytes,
 		"signer must receive the same bytes that get persisted — consumer verifies signature over file bytes")
@@ -590,6 +618,7 @@ func TestRollingV2Publisher_Signer_FailureRollsBack(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	sentinel := errors.New("signing key unavailable")
 	pub.SetSigner(func(data []byte) ([]byte, error) {
@@ -600,9 +629,9 @@ func TestRollingV2Publisher_Signer_FailureRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 
 	// .toml that was just written must be removed (don't seed unsigned).
-	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)),
+	require.NoFileExists(t, filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)),
 		"signer failure rolls back the .toml — must not leave unsigned content on disk")
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(0)))
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)))
 	require.Empty(t, pub.History(),
 		"signer failure does not advance history")
 }
@@ -615,6 +644,7 @@ func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	pub.SetSigner(func(data []byte) ([]byte, error) {
 		sig := make([]byte, 64)
@@ -639,7 +669,7 @@ func TestRollingV2Publisher_Signer_EvictionRemovesSig(t *testing.T) {
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
 
-	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(0)),
+	require.NoFileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 0)),
 		"evicted generation's .sig is removed alongside its .toml")
-	require.FileExists(t, filepath.Join(snapDir, ChainV2SigFileNameForSeq(1)))
+	require.FileExists(t, filepath.Join(snapDir, ChainV2SigFileName(testENRFP, 1)))
 }

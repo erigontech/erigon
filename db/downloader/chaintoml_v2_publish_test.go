@@ -97,12 +97,12 @@ func TestPublishChainTomlV2Roundtrip(t *testing.T) {
 		enrCalls++
 	}
 
-	hash, err := PublishChainTomlV2(snapDir, torrentFS, inv, 12345, enrUpdater)
+	hash, err := PublishChainTomlV2(snapDir, torrentFS, inv, 12345, testENRFP, enrUpdater)
 	require.NoError(t, err)
 	require.NotEqual(t, [20]byte{}, hash, "infohash must be non-zero after publish")
 
 	// The file was written under the gen-0 name.
-	gen0 := ChainTomlV2FileNameForSeq(0)
+	gen0 := ChainTomlV2FileName(testENRFP, 0)
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	require.NotEmpty(t, tomlBytes)
@@ -128,11 +128,11 @@ func TestPublishChainTomlV2NilEnrUpdaterSkipped(t *testing.T) {
 	torrentFS := NewAtomicTorrentFS(snapDir)
 	inv := seedInventory(t)
 
-	_, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, nil)
+	_, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, testENRFP, nil)
 	require.NoError(t, err, "nil enrUpdater must be a tolerated no-op")
 
 	// File was still written under the gen-0 name.
-	gen0 := ChainTomlV2FileNameForSeq(0)
+	gen0 := ChainTomlV2FileName(testENRFP, 0)
 	exists, err := dirExists(filepath.Join(snapDir, gen0))
 	require.NoError(t, err)
 	require.True(t, exists, "%s must be written even when ENR updater is nil", gen0)
@@ -143,7 +143,7 @@ func TestPublishChainTomlV2Regenerates(t *testing.T) {
 	torrentFS := NewAtomicTorrentFS(snapDir)
 	inv := seedInventory(t)
 
-	hash1, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, nil)
+	hash1, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, testENRFP, nil)
 	require.NoError(t, err)
 
 	// Add another canonical file; the manifest and its hash must change.
@@ -157,7 +157,7 @@ func TestPublishChainTomlV2Regenerates(t *testing.T) {
 		Trust:       snapshotinv.TrustVerified,
 	})
 
-	hash2, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, nil)
+	hash2, err := PublishChainTomlV2(snapDir, torrentFS, inv, 0, testENRFP, nil)
 	require.NoError(t, err)
 	require.NotEqual(t, hash1, hash2, "infohash must change when inventory changes")
 }
@@ -166,10 +166,10 @@ func TestPublishChainTomlV2RejectsNil(t *testing.T) {
 	snapDir := t.TempDir()
 	torrentFS := NewAtomicTorrentFS(snapDir)
 
-	_, err := PublishChainTomlV2(snapDir, torrentFS, nil, 0, nil)
+	_, err := PublishChainTomlV2(snapDir, torrentFS, nil, 0, testENRFP, nil)
 	require.Error(t, err)
 
-	_, err = PublishChainTomlV2(snapDir, nil, seedInventory(t), 0, nil)
+	_, err = PublishChainTomlV2(snapDir, nil, seedInventory(t), 0, testENRFP, nil)
 	require.Error(t, err)
 }
 

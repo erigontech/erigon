@@ -211,6 +211,15 @@ type Downloader struct {
 	// fetch can add a loopback dial candidate. nil until set / when P2P
 	// hasn't resolved an external IP yet. Guarded by lock.
 	selfIP net.IP
+
+	// selfENRFP is this node's ENR fingerprint — 16 lowercase hex chars,
+	// the first 8 bytes of the discv5 node ID. Stable across ENR-record
+	// updates (the node ID is keccak(pubkey), not the mutable record),
+	// so it identifies the node, not a record version. RollingV2Publisher
+	// uses it in the per-node advertisement filename
+	// (chain.v2.<enr-fp>.<seq>.toml). Empty until production wiring calls
+	// SetSelfENRFingerprint once P2P is up. Guarded by lock.
+	selfENRFP string
 }
 
 type AggStats struct {
@@ -541,6 +550,24 @@ func (d *Downloader) SetSelfIP(ip net.IP) {
 	}
 }
 
+// SetSelfENRFingerprint records this node's ENR fingerprint — 16
+// lowercase hex chars (the first 8 bytes of the discv5 node ID).
+// Production wiring calls this once P2P is up; RollingV2Publisher reads
+// it to name per-node advertisements chain.v2.<enr-fp>.<seq>.toml.
+func (d *Downloader) SetSelfENRFingerprint(fp string) {
+	d.lock.Lock()
+	d.selfENRFP = fp
+	d.lock.Unlock()
+}
+
+// SelfENRFingerprint returns this node's ENR fingerprint, or "" if not
+// yet set (P2P not up).
+func (d *Downloader) SelfENRFingerprint() string {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	return d.selfENRFP
+}
+
 // SelfIP returns this node's externally-advertised IP, or nil if not
 // yet known. The peer-sidecar fetch uses it to spot same-host peers.
 func (d *Downloader) SelfIP() net.IP {
@@ -765,7 +792,7 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	// and it silently starves every V2 consumer. Surface it loudly
 	// rather than letting consumers infer it from a 12-byte fetch.
 	if seq, ok := pub.LatestSeq(); ok && d.localInventoryFileCount(inv) > 0 {
-		p := filepath.Join(d.snapDir(), ChainTomlV2FileNameForSeq(seq))
+		p := filepath.Join(d.snapDir(), ChainTomlV2FileName(d.SelfENRFingerprint(), seq))
 		if fi, statErr := os.Stat(p); statErr == nil && fi.Size() < 32 {
 			d.logger.Warn("[chaintoml] published an effectively empty v2 manifest while the inventory has local files — torrent hashes missing?",
 				"file", filepath.Base(p), "bytes", fi.Size())

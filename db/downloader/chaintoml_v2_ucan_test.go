@@ -38,7 +38,7 @@ func listUCANGenerations(t *testing.T, snapDir string) []uint64 {
 	require.NoError(t, err)
 	var seqs []uint64
 	for _, e := range entries {
-		if seq, ok := ParseChainUCANFileName(e.Name()); ok {
+		if _, seq, ok := ParseChainUCANFileName(e.Name()); ok {
 			seqs = append(seqs, seq)
 		}
 	}
@@ -53,6 +53,7 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
 	require.NoError(t, err)
@@ -62,7 +63,7 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 		"no delegation source → no UCAN sidecar")
 
 	// The on-disk V2 manifest must carry an empty UCANHash field.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
@@ -77,6 +78,7 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	// Distinctive bytes so the UCAN torrent has a stable, comparable
 	// infohash. Real UCANs are CBOR; we just need bytes-on-disk for
@@ -91,23 +93,23 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	require.Equal(t, []uint64{0}, listUCANGenerations(t, snapDir))
 
 	// UCAN file content matches what the source returned.
-	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileNameForSeq(0)))
+	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 0)))
 	require.NoError(t, err)
 	require.Equal(t, ucanBytes, gotUCAN)
 
 	// UCAN .torrent exists alongside.
-	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileNameForSeq(0)+".torrent"))
+	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 0)+".torrent"))
 	require.NoError(t, err)
 
 	// V2 manifest's UCANHash matches the UCAN torrent's infohash.
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
 	require.NotEmpty(t, manifest.UCANHash)
 
 	tf := NewAtomicTorrentFS(snapDir)
-	ucanSpec, err := tf.LoadByName(ChainUCANFileNameForSeq(0) + ".torrent")
+	ucanSpec, err := tf.LoadByName(ChainUCANFileName(testENRFP, 0) + ".torrent")
 	require.NoError(t, err)
 	require.Equal(t, hex.EncodeToString(ucanSpec.InfoHash[:]), manifest.UCANHash,
 		"V2.UCANHash must equal hex(UCAN torrent infohash)")
@@ -120,6 +122,7 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	calls := 0
 	pub.SetDelegationSource(func() ([]byte, error) {
@@ -135,7 +138,7 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 
 	// Each generation's UCAN bytes match the rotation.
 	for i := 0; i < 3; i++ {
-		got, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileNameForSeq(uint64(i))))
+		got, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, uint64(i))))
 		require.NoError(t, err, "read gen %d UCAN", i)
 		require.Equal(t, []byte(fmt.Sprintf("ucan-gen-%d", i+1)), got,
 			"gen %d UCAN content reflects the rotation", i)
@@ -149,6 +152,7 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	pub.SetDelegationSource(func() ([]byte, error) {
 		return []byte("u"), nil
@@ -178,7 +182,7 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	require.Equal(t, []uint64{1}, listUCANGenerations(t, snapDir))
 
 	// Evicted UCAN + .torrent metafiles are gone too.
-	ucanName := ChainUCANFileNameForSeq(0)
+	ucanName := ChainUCANFileName(testENRFP, 0)
 	_, err = os.Stat(filepath.Join(snapDir, ucanName))
 	require.True(t, os.IsNotExist(err), "evicted UCAN %s must be gone", ucanName)
 	_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
@@ -192,6 +196,7 @@ func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	pub.SetDelegationSource(func() ([]byte, error) { return []byte("u"), nil })
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
@@ -199,17 +204,17 @@ func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 
 	// Drop a stray orphan pair from a hypothetical crash.
 	require.NoError(t, os.WriteFile(
-		filepath.Join(snapDir, ChainUCANFileNameForSeq(99)),
+		filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)),
 		[]byte("orphan"), 0o644))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(snapDir, ChainUCANFileNameForSeq(99)+".torrent"),
+		filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)+".torrent"),
 		[]byte{}, 0o644))
 
 	require.NoError(t, pub.Cleanup())
 
 	require.Equal(t, []uint64{0}, listUCANGenerations(t, snapDir),
 		"Cleanup must drop orphan UCAN seqs not in history")
-	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileNameForSeq(99)+".torrent"))
+	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, 99)+".torrent"))
 	require.True(t, os.IsNotExist(err), "orphan UCAN .torrent must be cleaned up")
 }
 
@@ -220,6 +225,7 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	pub.SetDelegationSource(func() ([]byte, error) { return nil, nil })
 
@@ -229,7 +235,7 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	require.Equal(t, []uint64{0}, listV2Generations(t, snapDir))
 	require.Empty(t, listUCANGenerations(t, snapDir))
 
-	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileNameForSeq(0)))
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, 0)))
 	require.NoError(t, err)
 	manifest, err := ParseV2(tomlBytes)
 	require.NoError(t, err)
@@ -243,6 +249,7 @@ func TestRollingV2Publisher_DelegationErrorAbortsPublish(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
 
 	pub.SetDelegationSource(func() ([]byte, error) {
 		return nil, fmt.Errorf("operator key unavailable")

@@ -58,6 +58,13 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
+// harnessENRFP is the deterministic 16-hex ENR fingerprint stamped on
+// every harness node's RollingV2Publisher. Production resolves this from
+// the node's discv5 ID; the harness skips discv5, so a fixed value keeps
+// chain.v2.<fp>.<seq>.toml filenames stable and discoverable across the
+// manual + auto publish paths.
+const harnessENRFP = "a1b2c3d4e5f60718"
+
 // P2PNode wires a real anacrolix/torrent client through the production
 // downloader.Provider, manifest_exchange, flow.Orchestrator, plus a real
 // sentry.Provider running the eth/68 protocol on a live DevP2P listener.
@@ -294,6 +301,7 @@ func (n *P2PNode) PublishV2Manifest() [20]byte {
 		torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
 		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, torrentFS, n.dCore)
 		require.NoError(n.T, err)
+		pub.SetENRFingerprint(harnessENRFP)
 		n.v2Publisher = pub
 	}
 	hash, err := n.v2Publisher.Publish(n.ctx, n.Inventory, 0, nil)

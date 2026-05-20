@@ -113,9 +113,10 @@ func makePeerNode(t *testing.T, ct *enr.ChainToml) *enode.Node {
 func seedPeerManifest(t *testing.T, seedDir string, inv *snapshot.Inventory) (string, [20]byte) {
 	t.Helper()
 	torrentFS := downloader.NewAtomicTorrentFS(seedDir)
-	hash, err := downloader.PublishChainTomlV2(seedDir, torrentFS, inv, 0, nil)
+	const enrFP = "a1b2c3d4e5f60718"
+	hash, err := downloader.PublishChainTomlV2(seedDir, torrentFS, inv, 0, enrFP, nil)
 	require.NoError(t, err)
-	return filepath.Join(seedDir, downloader.ChainTomlV2FileNameForSeq(0)), [20]byte(hash)
+	return filepath.Join(seedDir, downloader.ChainTomlV2FileName(enrFP, 0)), [20]byte(hash)
 }
 
 func makeInventory(t *testing.T) *snapshot.Inventory {
