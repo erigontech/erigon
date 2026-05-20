@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	dirutil "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -103,7 +104,7 @@ func TestSweep_RemovesEntryWhenFileGoneFromDisk(t *testing.T) {
 	require.True(t, ok, "file must be discovered while on disk")
 
 	// Merger retires the file: gone from disk.
-	require.NoError(t, os.Remove(path))
+	require.NoError(t, dirutil.RemoveFile(path))
 	d.Sweep(context.Background(), nil)
 
 	_, ok = inv.LifecycleState("a.seg")

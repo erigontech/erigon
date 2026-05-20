@@ -630,46 +630,23 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		return toRequest[i].Name > toRequest[j].Name
 	})
 
-	// Phase routing.
-	//   - State-domain files: phase 1. Publish now, count toward
-	//     statePending so InitialStateReady gates on them.
-	//   - ALL block files (headers + bodies + transactions): also
-	//     phase 1. InitialStateReady is the gate for stages 2-6
-	//     (exec etc.); they call rawdbreset.FillDBFromSnapshots which
-	//     uses blockReader.FrozenBlocks() — itself computed under
-	//     alignMin=true as min(headers, bodies, transactions). If any
-	//     type is missing, FrozenBlocks() collapses to 0 and the seed
-	//     is a no-op (observed 2026-05-18: kv.HeaderTD never
-	//     populated, Caplin's BlockCollector.Flush failed for 9.5h
-	//     with "parent's total difficulty not found"). Caplin doesn't
-	//     need bodies/tx and has its own earlier signal
-	//     BlockHeadersReady — it starts as soon as headers are open
-	//     and downloads its own block stream regardless of bodies/tx
-	//     phase-1 progress.
-	//   - Caplin .seg files: phase 2. EL doesn't need them; queue
-	//     until InitialStateReady fires, then drain.
-	isState := domain != ""
-	var phase1, phase2 []*snapshot.FileEntry
-	if isState {
-		phase1 = toRequest
-	} else {
-		// Block files (Domain == ""): all of headers/bodies/tx go to
-		// phase 1. requestSimpleGaps handles caplin separately with
-		// phase1=false; nothing else reaches this branch.
-		phase1 = toRequest
-	}
+	// State-domain files and ALL block files (headers + bodies +
+	// transactions) are phase 1: InitialStateReady gates on them.
+	// Stages 2-6 call rawdbreset.FillDBFromSnapshots, which uses
+	// blockReader.FrozenBlocks() computed under alignMin=true as
+	// min(headers, bodies, transactions) — if any block type is
+	// missing it collapses to 0 and the seed is a no-op (observed
+	// 2026-05-18: kv.HeaderTD unpopulated, Caplin's BlockCollector
+	// failed for 9.5h on a missing parent TD). The only phase-2
+	// artefact, Caplin .seg, is routed by requestSimpleGaps
+	// (phase1=false) and never reaches this function.
+	phase1 := toRequest
 
 	o.peerMu.Lock()
 	if len(phase1) > 0 {
 		o.statePending += len(phase1)
-		if isState {
+		if domain != "" {
 			o.stateDomainsSeen[domain] = struct{}{}
-		}
-	}
-	holdForPhase2 := !o.stateReadyFired
-	if holdForPhase2 {
-		for _, entry := range phase2 {
-			o.blocksQueued = append(o.blocksQueued, queuedBlock{entry: entry, peerID: peerID})
 		}
 	}
 	o.peerMu.Unlock()
@@ -682,16 +659,6 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			Domain:    domain,
 			Range:     entry.Range(),
 		})
-	}
-	if !holdForPhase2 {
-		for _, entry := range phase2 {
-			o.bus.Publish(DownloadRequested{
-				FileName:  entry.Name,
-				InfoHash:  entry.TorrentHash,
-				FromPeers: []string{peerID},
-				Range:     entry.Range(),
-			})
-		}
 	}
 }
 
