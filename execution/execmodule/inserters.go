@@ -23,12 +23,34 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// flushBlockOverlayToDB commits the in-memory block overlay to the DB so
+// per-batch memory stays bounded. After the commit the overlay is closed;
+// the next InsertBlocks call opens a fresh RoTx that sees the committed TDs.
+func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains, overlay interface {
+	Flush(context.Context, kv.RwTx) error
+}) (ExecutionStatus, error) {
+	rwTx, err := e.db.BeginTemporalRw(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: begin rw for overlay flush: %w", err)
+	}
+	defer rwTx.Rollback()
+	if err := overlay.Flush(ctx, rwTx); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: flush overlay: %w", err)
+	}
+	if err := rwTx.Commit(); err != nil {
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
+	}
+	sd.CloseBlockOverlay()
+	return ExecutionStatusSuccess, nil
+}
 
 func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error) {
 	if !e.semaphore.TryAcquire(1) {
@@ -125,8 +147,14 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Writes stay in the block overlay on currentContext — no flush or commit here.
-	// ValidateChain reads from the overlay; UpdateForkChoice flushes everything
-	// in a single commit at the end.
+	// Flush block overlay to DB so in-memory usage stays bounded to one batch.
+	// After the commit, the next InsertBlocks call opens a fresh RoTx that sees
+	// the committed TDs, so parent TD lookups in subsequent batches still work.
+	// UpdateForkChoice detects hasOverlay=false and reads block data from DB.
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		if status, err2 := e.flushBlockOverlayToDB(ctx, sd, overlay); err2 != nil {
+			return status, err2
+		}
+	}
 	return ExecutionStatusSuccess, nil
 }
