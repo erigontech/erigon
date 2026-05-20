@@ -19,10 +19,14 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -316,5 +320,248 @@ func TestXform_BuildValueTransformer_PassThrough(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, vt,
 			"buildValueTransformer(detected=%v, target=%v) with matching axes must return nil", sq, sq)
+	}
+}
+
+// fakeVisibleFile is a minimal kv.VisibleFile implementation for preflightResume
+// tests. preflightResume only consults StartRootNum/EndRootNum (divided by
+// stepSize) to derive each input file's step range; Fullpath is unused on the
+// happy path but is present so the type satisfies the interface.
+type fakeVisibleFile struct {
+	path  string
+	start uint64
+	end   uint64
+}
+
+func (f fakeVisibleFile) Fullpath() string     { return f.path }
+func (f fakeVisibleFile) StartRootNum() uint64 { return f.start }
+func (f fakeVisibleFile) EndRootNum() uint64   { return f.end }
+
+// preflightTestStepSize matches the unit step used in these tests: each input
+// "file" spans one step, so StartRootNum=N maps to step range [N, N+1).
+const preflightTestStepSize uint64 = 1
+
+// preflightTestAccessors is the full accessor set used by these tests
+// (commitment domain configs with btree + hashmap + existence filter all
+// enabled).
+var preflightTestAccessors = []string{".bt", ".kvi", ".kvei"}
+
+// fakeInputFiles builds n contiguous one-step input files starting from step
+// `firstStep`. Their Fullpath strings are not consulted by preflightResume but
+// are made unique for easier debugging.
+func fakeInputFiles(firstStep uint64, n int) VisibleFiles {
+	out := make(VisibleFiles, n)
+	for i := 0; i < n; i++ {
+		s := firstStep + uint64(i)
+		out[i] = fakeVisibleFile{
+			path:  fmt.Sprintf("/fake/v1-commitment.%d-%d.kv", s, s+1),
+			start: s,
+			end:   s + 1,
+		}
+	}
+	return out
+}
+
+// writeCompleteShard creates an empty .kv and an empty file for every required
+// accessor (extensions in `accessors`) for step range [from, to) inside dir.
+// All files are zero-byte; preflightResume's completeness check is presence-
+// based (see Findings in the implementation plan), so size does not matter.
+func writeCompleteShard(t *testing.T, dir string, from, to uint64, accessors []string) {
+	t.Helper()
+	base := fmt.Sprintf("v1-commitment.%d-%d", from, to)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, base+".kv"), nil, 0o644))
+	for _, ext := range accessors {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, base+ext), nil, 0o644))
+	}
+}
+
+func TestPreflightResume_continueFalse_wipes(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+	// Pre-populate with junk: a complete shard, an orphan, a subdir.
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	require.NoError(t, os.WriteFile(filepath.Join(rebuildDir, "stray.txt"), []byte("noise"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(rebuildDir, "subdir"), 0o755))
+
+	files := fakeInputFiles(0, 3)
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, false, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files, out, "continueMode=false must return input files unchanged")
+	// dir.RemoveAll deletes the rebuildDir itself; the caller (ConvertCommitmentFiles)
+	// re-creates it with MkdirAll afterwards.
+	_, statErr := os.Stat(rebuildDir)
+	require.True(t, os.IsNotExist(statErr), "continueMode=false must wipe rebuildDir, got stat err: %v", statErr)
+}
+
+func TestPreflightResume_empty(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	files := fakeInputFiles(0, 4)
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files, out, "empty rebuildDir + continueMode=true must return full input slice")
+
+	// rebuildDir was not pre-populated, so the missing-dir branch is exercised
+	// when the dir literally does not exist either.
+	missingDir := filepath.Join(tmp, "does", "not", "exist")
+	out2, err := preflightResume(files, missingDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files, out2, "missing rebuildDir + continueMode=true must return full input slice")
+}
+
+func TestPreflightResume_partial(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// 4 inputs spanning steps 0..4. Pre-populate complete shards for the first
+	// two (the contiguous prefix); the remaining two must be returned.
+	files := fakeInputFiles(0, 4)
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	writeCompleteShard(t, rebuildDir, 1, 2, preflightTestAccessors)
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files[2:], out, "expected suffix containing only the unconverted inputs")
+}
+
+func TestPreflightResume_allDone(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	files := fakeInputFiles(0, 3)
+	for _, f := range files {
+		writeCompleteShard(t, rebuildDir, f.StartRootNum(), f.EndRootNum(), preflightTestAccessors)
+	}
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Empty(t, out, "every input matched a complete shard → empty suffix")
+}
+
+func TestPreflightResume_incomplete(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Single input file, partial shard: .kv + .bt present, .kvi missing.
+	files := fakeInputFiles(0, 1)
+	base := "v1-commitment.0-1"
+	kvPath := filepath.Join(rebuildDir, base+".kv")
+	btPath := filepath.Join(rebuildDir, base+".bt")
+	require.NoError(t, os.WriteFile(kvPath, nil, 0o644))
+	require.NoError(t, os.WriteFile(btPath, nil, 0o644))
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files, out, "incomplete shard must not be treated as done; file is returned for re-conversion")
+
+	// Partial siblings are removed so the next run starts from a clean slate.
+	_, statErr := os.Stat(kvPath)
+	require.True(t, os.IsNotExist(statErr), "incomplete .kv should be removed, got: %v", statErr)
+	_, statErr = os.Stat(btPath)
+	require.True(t, os.IsNotExist(statErr), "incomplete .bt sibling should be removed, got: %v", statErr)
+}
+
+func TestPreflightResume_gap(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Inputs 0..3. Complete shards for [0,1) and [2,3) — missing [1,2) in the
+	// middle. preflightResume must return a hard error naming the gap.
+	files := fakeInputFiles(0, 3)
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	writeCompleteShard(t, rebuildDir, 2, 3, preflightTestAccessors)
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.Error(t, err)
+	require.Nil(t, out)
+	require.Contains(t, err.Error(), "non-contiguous shards")
+	require.Contains(t, err.Error(), "1-2", "error must name the missing range")
+}
+
+func TestPreflightResume_orphan(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// One complete shard + assorted orphans (no -commitment. step-range marker).
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	orphan1 := filepath.Join(rebuildDir, "stray.txt")
+	orphan2 := filepath.Join(rebuildDir, "v1-domain.0-1.kv") // not -commitment.
+	orphan3 := filepath.Join(rebuildDir, "README")
+	require.NoError(t, os.WriteFile(orphan1, []byte("noise"), 0o644))
+	require.NoError(t, os.WriteFile(orphan2, nil, 0o644))
+	require.NoError(t, os.WriteFile(orphan3, nil, 0o644))
+
+	files := fakeInputFiles(0, 2)
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.NoError(t, err)
+	require.Equal(t, files[1:], out, "first input is done, second remains")
+
+	for _, p := range []string{orphan1, orphan2, orphan3} {
+		_, statErr := os.Stat(p)
+		require.True(t, os.IsNotExist(statErr), "orphan %s should be removed, got: %v", p, statErr)
+	}
+	// The complete shard's files survive.
+	_, statErr := os.Stat(filepath.Join(rebuildDir, "v1-commitment.0-1.kv"))
+	require.NoError(t, statErr, "complete shard .kv must remain")
+}
+
+func TestPreflightResume_phantomShard(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Inputs cover steps 0..2. rebuildDir has a complete shard for steps
+	// 99-100 that does NOT correspond to any input file — operator's input
+	// set has drifted since the original run.
+	files := fakeInputFiles(0, 2)
+	writeCompleteShard(t, rebuildDir, 99, 100, preflightTestAccessors)
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.Error(t, err)
+	require.Nil(t, out)
+	require.Contains(t, err.Error(), "does not match any current input file")
+	require.Contains(t, err.Error(), "99-100", "error must name the phantom range")
+}
+
+// TestPreflightResume_validationErrorPreservesDisk locks in the invariant
+// that contiguity / phantom-shard validation failures return WITHOUT mutating
+// rebuildDir, so the operator can investigate the pre-resume state.
+func TestPreflightResume_validationErrorPreservesDisk(t *testing.T) {
+	tmp := t.TempDir()
+	rebuildDir := filepath.Join(tmp, "snap", "rebuild", "domain")
+	require.NoError(t, os.MkdirAll(rebuildDir, 0o755))
+
+	// Set up a gap-triggering state alongside orphans and an incomplete
+	// shard. preflightResume must reject the resume AND leave every file
+	// in place.
+	files := fakeInputFiles(0, 3)
+	writeCompleteShard(t, rebuildDir, 0, 1, preflightTestAccessors)
+	writeCompleteShard(t, rebuildDir, 2, 3, preflightTestAccessors) // gap at 1-2
+	orphan := filepath.Join(rebuildDir, "stray.txt")
+	require.NoError(t, os.WriteFile(orphan, []byte("noise"), 0o644))
+	incompleteKV := filepath.Join(rebuildDir, "v1-commitment.4-5.kv")
+	require.NoError(t, os.WriteFile(incompleteKV, nil, 0o644))
+
+	out, err := preflightResume(files, rebuildDir, preflightTestAccessors, preflightTestStepSize, true, log.New())
+	require.Error(t, err)
+	require.Nil(t, out)
+
+	// Everything pre-existing must still be on disk.
+	for _, p := range []string{
+		filepath.Join(rebuildDir, "v1-commitment.0-1.kv"),
+		filepath.Join(rebuildDir, "v1-commitment.2-3.kv"),
+		orphan,
+		incompleteKV,
+	} {
+		_, statErr := os.Stat(p)
+		require.NoError(t, statErr, "file %s must survive validation-error return", p)
 	}
 }

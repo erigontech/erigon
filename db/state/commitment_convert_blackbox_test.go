@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -732,6 +733,202 @@ func TestConvertCommitmentFiles_LeftoverRebuild(t *testing.T) {
 	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
 	_, err = os.Stat(backupDir)
 	require.NoError(t, err, "backup dir must exist after successful run")
+}
+
+// listVisibleCommitmentKVs returns the basenames of every visible commitment
+// .kv file in the aggregator's view, in the order at.Files presents them.
+// Used by the resume integration test to know how many input shards Phase 1
+// will touch up-front.
+func listVisibleCommitmentKVs(t *testing.T, db kv.TemporalRwDB) []kv.VisibleFile {
+	t.Helper()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := state.AggTx(tx)
+	all := at.Files(kv.CommitmentDomain)
+	out := make([]kv.VisibleFile, 0, len(all))
+	for _, f := range all {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// TestConvertCommitmentFiles_ContinueResumes drives the resume flow end-to-end.
+// A reference fixture runs the orchestrator uninterrupted; a parallel fixture
+// (same deterministic seed → byte-identical inputs) cancels mid-Phase-1 after
+// the first .kv lands in rebuildDir, then re-runs with Continue=true. The
+// resumed snapshots/domain/ must match the reference byte-for-byte and the
+// commitment root must be unchanged from the pre-conversion value.
+//
+// Cancellation is driven by the convertPhase1AfterFileHook test hook rather
+// than by counting log lines (which is fragile across line-number /
+// timestamp changes — see the plan's "Decision now" note in Task 5).
+func TestConvertCommitmentFiles_ContinueResumes(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	cfg := &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true}
+
+	// Pure key-axis conversion (V1→V2). The squeeze axis stays off so the
+	// sub-threshold short-circuit at convertCommitmentFile cannot silently
+	// downgrade individual files to errSkip — every visible .kv must drive a
+	// real Phase 1 conversion, otherwise the hook-count assertion below would
+	// fire spuriously.
+	opts := state.ConvertOpts{TargetSqueeze: false, TargetNibblesV2: true}
+
+	// Reference fixture: deterministic seed (newRnd(0) in the fixture builder)
+	// → identical input bytes to the resume fixture. A full uninterrupted run
+	// produces the snapshots/domain/ contents we compare against.
+	refDB, refAgg := testDbAggregatorWithFiles(t, cfg)
+	runOrchestrator(t, refDB, opts)
+	referenceSnap := snapshotCommitmentFiles(t, refAgg.Dirs().SnapDomain)
+	require.NotEmpty(t, referenceSnap, "reference run must produce commitment files in snapDomain")
+	referenceRoot := computeCommitmentRoot(t, refDB)
+
+	// Resume fixture: same config, same seed.
+	db, agg := testDbAggregatorWithFiles(t, cfg)
+	snapDir := agg.Dirs().SnapDomain
+	rebuildDir := filepath.Join(agg.Dirs().Snap, "rebuild", "domain")
+	backupDir := filepath.Join(agg.Dirs().Snap, "backup", "domains")
+
+	// Snapshot the pre-conversion state so we can assert Phase 1 cancellation
+	// left snapDomain untouched (Phases 2-5 never ran in the first attempt).
+	originalSnap := snapshotCommitmentFiles(t, snapDir)
+	require.NotEmpty(t, originalSnap)
+	rootBefore := computeCommitmentRoot(t, db)
+	require.Equal(t, referenceRoot, rootBefore,
+		"determinism precondition: identical seed must produce identical pre-conversion root")
+
+	inputFiles := listVisibleCommitmentKVs(t, db)
+	require.GreaterOrEqual(t, len(inputFiles), 2,
+		"resume test needs >= 2 commitment .kv files to exercise the suffix path")
+	firstFileStepFrom := inputFiles[0].StartRootNum() / agg.StepSize()
+	firstFileStepTo := inputFiles[0].EndRootNum() / agg.StepSize()
+	inputCount := len(inputFiles)
+
+	// First run: cancel after file 0 completes. The hook fires AFTER the file's
+	// .kv (and accessor siblings, all tmp-then-rename) land in rebuildDir, so
+	// the partial state captured here is one complete shard.
+	t.Cleanup(func() { state.SetConvertPhase1AfterFileHookForTest(nil) })
+	ctx1, cancel1 := context.WithCancel(t.Context())
+	firstRunCount := 0
+	state.SetConvertPhase1AfterFileHookForTest(func(idx int) {
+		firstRunCount++
+		if idx == 0 {
+			cancel1()
+		}
+	})
+
+	tx1, err := db.BeginTemporalRw(ctx1)
+	require.NoError(t, err)
+	t.Cleanup(tx1.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
+	convErr := state.ConvertCommitmentFiles(ctx1, state.AggTx(tx1), opts, log.New())
+	tx1.Rollback()
+	cancel1()
+	require.Error(t, convErr, "first run must abort once the hook cancels ctx")
+	require.ErrorIs(t, convErr, context.Canceled)
+	require.Equal(t, 1, firstRunCount,
+		"hook must fire exactly once before cancel is observed at the next iteration's ctx.Err() check")
+
+	// File 0's complete shard must be present in rebuildDir.
+	kvPattern := filepath.Join(rebuildDir, fmt.Sprintf("*-commitment.%d-%d.kv", firstFileStepFrom, firstFileStepTo))
+	kvMatches, err := filepath.Glob(kvPattern)
+	require.NoError(t, err)
+	require.Len(t, kvMatches, 1, "rebuildDir must contain file 0's .kv after the cancel: %s", kvPattern)
+	kviPattern := filepath.Join(rebuildDir, fmt.Sprintf("*-commitment.%d-%d.kvi", firstFileStepFrom, firstFileStepTo))
+	kviMatches, err := filepath.Glob(kviPattern)
+	require.NoError(t, err)
+	require.Len(t, kviMatches, 1, "rebuildDir must contain file 0's .kvi sibling after the cancel")
+
+	// No other shards should be present — the ctx.Err() check at the top of
+	// Phase 1's next iteration returns before convertCommitmentFile is invoked
+	// again, so no other rebuildDir output races to land.
+	allKVMatches, err := filepath.Glob(filepath.Join(rebuildDir, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.Len(t, allKVMatches, 1, "exactly one .kv shard expected in rebuildDir after cancel")
+
+	// snapDomain must be byte-identical to the pre-conversion snapshot — Phase
+	// 3 backup and Phase 4 promote never ran.
+	postCancelSnap := snapshotCommitmentFiles(t, snapDir)
+	require.Equal(t, len(originalSnap), len(postCancelSnap),
+		"snapDomain file count must be unchanged after Phase 1 cancel")
+	for name, want := range originalSnap {
+		got, ok := postCancelSnap[name]
+		require.Truef(t, ok, "snapDomain file %s disappeared during Phase 1 cancel", name)
+		require.Truef(t, bytes.Equal(want, got), "snapDomain file %s mutated during Phase 1 cancel", name)
+	}
+	_, statErr := os.Stat(backupDir)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"backup dir must not exist after Phase 1 cancel (Phase 3 did not run): %v", statErr)
+
+	// Second run: Continue=true, fresh ctx, hook installed only to count calls
+	// — no cancellation this time.
+	secondRunCount := 0
+	state.SetConvertPhase1AfterFileHookForTest(func(idx int) {
+		secondRunCount++
+	})
+
+	tx2, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx2.Rollback) //nolint:gocritic // explicit Rollback below; this is the panic safety net
+	resumeOpts := opts
+	resumeOpts.Continue = true
+	convErr = state.ConvertCommitmentFiles(t.Context(), state.AggTx(tx2), resumeOpts, log.New())
+	tx2.Rollback() // safe: Phase 5 ReloadFiles already invalidated at internally
+	require.NoError(t, convErr, "resume run must complete successfully")
+	state.SetConvertPhase1AfterFileHookForTest(nil)
+
+	// File 0 was already done from run 1 — Phase 1 only iterates over the
+	// pendingFiles suffix, so the hook fires exactly (inputCount - 1) times.
+	require.Equal(t, inputCount-1, secondRunCount,
+		"resume must process N-1 files (file 0 was carried over from the cancelled run)")
+
+	// Phase 4 invariant: rebuildDir is gone.
+	_, statErr = os.Stat(rebuildDir)
+	require.Truef(t, errors.Is(statErr, os.ErrNotExist),
+		"rebuildDir must be removed after successful resume: %v", statErr)
+
+	// Phase 3 invariant: every original is backed up.
+	_, statErr = os.Stat(backupDir)
+	require.NoError(t, statErr, "backup dir must exist after successful resume")
+	backupSnap := snapshotCommitmentFiles(t, backupDir)
+	require.NotEmpty(t, backupSnap)
+	for name, content := range backupSnap {
+		orig, ok := originalSnap[name]
+		require.Truef(t, ok, "backup contains %s with no matching pre-conversion original", name)
+		require.Truef(t, bytes.Equal(orig, content), "backup content mismatch for %s", name)
+	}
+
+	// snapDomain matches the reference run. The on-disk basename set must be
+	// identical; for each .kv file the bytes must match. Accessor siblings
+	// (.kvi / .bt / .kvei) are not byte-compared because recsplit uses a
+	// per-datadir random salt (see salt-state.txt), so independent fixtures
+	// produce different accessor bytes for the same input — accessor existence
+	// is asserted via the basename match.
+	resumedSnap := snapshotCommitmentFiles(t, snapDir)
+	require.Equal(t, len(referenceSnap), len(resumedSnap),
+		"resumed snapDomain file count must match reference")
+	for name := range referenceSnap {
+		_, ok := resumedSnap[name]
+		require.Truef(t, ok, "resumed run missing file %s present in reference", name)
+	}
+	for name, refContent := range referenceSnap {
+		if !strings.HasSuffix(name, ".kv") {
+			continue
+		}
+		got := resumedSnap[name]
+		require.Truef(t, bytes.Equal(refContent, got),
+			"resumed .kv %s differs from reference (ref %d bytes, resumed %d bytes)",
+			name, len(refContent), len(got))
+	}
+
+	// Commitment root unchanged across the conversion — semantic correctness
+	// check independent of file-byte equality.
+	rootAfter := computeCommitmentRoot(t, db)
+	require.Equal(t, rootBefore, rootAfter,
+		"commitment root must survive the cancel/resume cycle")
 }
 
 // TestRestoreCommitmentFiles_HappyPath seeds the backup dir with original

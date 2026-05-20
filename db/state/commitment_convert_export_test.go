@@ -26,3 +26,10 @@ var (
 	ConvertCommitmentFileForTest = convertCommitmentFile
 	ErrSkipForTest               = errSkip
 )
+
+// SetConvertPhase1AfterFileHookForTest installs (or clears, via nil) the
+// after-file hook called by convertPhase1 once per loop iteration. Used by the
+// resume integration test to cancel mid-Phase-1 deterministically.
+func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
+	convertPhase1AfterFileHook = fn
+}

@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,12 @@ var commitmentStepRangeRe = regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.`)
 type ConvertOpts struct {
 	TargetSqueeze   bool
 	TargetNibblesV2 bool
+	// Continue resumes a prior interrupted conversion: input files whose
+	// converted shard already exists in <datadir>/snap/rebuild/domain/ with
+	// every required accessor sibling are skipped. Operator is responsible
+	// for passing the same TargetSqueeze / TargetNibblesV2 values used in
+	// the original run; a mismatch produces mixed-encoding output silently.
+	Continue bool
 }
 
 // fileState describes the detected current encoding of a commitment .kv file.
@@ -628,9 +635,14 @@ func signedByteSizeHR(n int64) string {
 // aggregator if it needs to keep working.
 //
 // Pre-flight refuses to run if snapshots/backup/domains/ is non-empty (a
-// prior conversion's backup is still in place) and wipes a leftover
-// snapshots/rebuild/domain/ from a prior crashed run.
+// prior conversion's backup is still in place). By default it wipes a
+// leftover snapshots/rebuild/domain/ from a prior crashed run; with
+// opts.Continue set, complete shards from a prior interrupted run are
+// preserved and skipped in Phase 1 (see preflightResume).
 func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts ConvertOpts, logger log.Logger) error {
+	if opts.Continue {
+		logger.Warn("[commitment_convert] --continue: assumes prior interrupted run used the SAME --squeeze and --nibbles.v2 values. Mismatch will produce mixed-encoding output silently.")
+	}
 	// at.Files mixes domain .kv with history .v / .ef when commitment history is
 	// enabled. The converter only handles .kv files; filter the rest out.
 	allFiles := at.Files(kv.CommitmentDomain)
@@ -652,7 +664,18 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	if err := preflightBackupDir(backupDir); err != nil {
 		return err
 	}
-	if err := preflightRebuildDir(rebuildDir, logger); err != nil {
+
+	// requiredAccessors mirrors the set Phase 2 verifies post-conversion;
+	// preflightResume reuses it to classify shards from prior interrupted runs.
+	requiredAccessors := requiredAccessorsForCommitment(at.d[kv.CommitmentDomain].d)
+	// pendingFiles is the suffix of `files` that still needs Phase 1 work.
+	// `files` itself stays as the full original input list — Phases 2-3 walk
+	// it to identify and back up originals for shards completed in prior
+	// runs that already exist in rebuildDir. When Continue=false,
+	// preflightResume wipes rebuildDir and returns files unchanged, so
+	// pendingFiles == files and behavior is byte-identical to before.
+	pendingFiles, err := preflightResume(files, rebuildDir, requiredAccessors, at.StepSize(), opts.Continue, logger)
+	if err != nil {
 		return err
 	}
 
@@ -660,27 +683,34 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return fmt.Errorf("[commitment_convert] mkdir rebuild dir %s: %w", rebuildDir, err)
 	}
 
-	// Pre-pass: sum total key count across every input file so phase 1 can
-	// render a keys-overall percentage. KeyCountInFiles is cheap (no I/O —
-	// just sums cached decompressor.Count() values), so this loop costs O(files).
+	priorCompleteCount := len(files) - len(pendingFiles)
+	if opts.Continue && len(pendingFiles) == 0 && priorCompleteCount > 0 {
+		logger.Info("[commitment_convert] all input files already converted in rebuild dir; proceeding to Phase 2")
+	}
+
+	// Pre-pass: sum total key count across files Phase 1 will actually
+	// touch so the keys-overall percentage reflects work-remaining. When
+	// Continue=false, pendingFiles == files, so the sum is byte-identical
+	// to today's. KeyCountInFiles is cheap (no I/O — just sums cached
+	// decompressor.Count() values), so this loop costs O(pendingFiles).
 	var grandTotalKeys uint64
-	for _, f := range files {
+	for _, f := range pendingFiles {
 		grandTotalKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())
 	}
 
 	// Phase 1: convert all.
 	phaseStart := time.Now()
-	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, files, rebuildDir, opts, grandTotalKeys, logger)
+	processedFiles, skippedFiles, totalSizeDelta, processedKeys, err := convertPhase1(ctx, at, pendingFiles, rebuildDir, opts, grandTotalKeys, logger)
 	if err != nil {
 		return err
 	}
 	logger.Info(fmt.Sprintf(
 		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s",
-		processedFiles, skippedFiles, len(files),
+		processedFiles, skippedFiles, len(pendingFiles),
 		common.PrettyCounter(processedKeys),
 		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta)))
 
-	if processedFiles == 0 {
+	if processedFiles == 0 && priorCompleteCount == 0 {
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 			logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
 		}
@@ -690,14 +720,17 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 
 	// Phase 2: pre-swap check — identify converted files and verify every
-	// expected accessor sibling landed in rebuildDir.
+	// expected accessor sibling landed in rebuildDir. Walks the full input
+	// list so prior-run shards (those filtered out of pendingFiles) are
+	// included in convertedFiles and reach Phase 3's backup step.
 	convertedFiles, err := convertPhase2(at, files, rebuildDir)
 	if err != nil {
 		return err
 	}
-	if len(convertedFiles) != processedFiles {
-		return fmt.Errorf("[commitment_convert] phase 2 mismatch: %d converted, %d found in rebuild dir",
-			processedFiles, len(convertedFiles))
+	expectedConverted := processedFiles + priorCompleteCount
+	if len(convertedFiles) != expectedConverted {
+		return fmt.Errorf("[commitment_convert] phase 2 mismatch: %d converted this run + %d from prior runs = %d expected, %d found in rebuild dir",
+			processedFiles, priorCompleteCount, expectedConverted, len(convertedFiles))
 	}
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 2 pre-swap check: %d files ok", len(convertedFiles)))
 
@@ -726,9 +759,14 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		return fmt.Errorf("[commitment_convert] phase 5 ReloadFiles: %w", reloadErr)
 	}
 
+	doneSummary := fmt.Sprintf("%d files", expectedConverted)
+	if priorCompleteCount > 0 {
+		doneSummary = fmt.Sprintf("%d files (%d this run + %d from prior runs)",
+			expectedConverted, processedFiles, priorCompleteCount)
+	}
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] DONE. converted %d files. Originals preserved at:\n    %s\nTo restore originals: re-run with --restore",
-		processedFiles, backupDir))
+		"[commitment_convert] DONE. converted %s. Originals preserved at:\n    %s\nTo restore originals: re-run with --restore",
+		doneSummary, backupDir))
 	return nil
 }
 
@@ -1012,26 +1050,237 @@ func preflightBackupDir(backupDir string) error {
 	return nil
 }
 
-// preflightRebuildDir wipes a leftover rebuild dir from a prior crashed run.
-// A crashed Phase 1 leaves partial outputs in rebuildDir; deleting them is
-// safe because snapshots/domain/ was never touched.
-func preflightRebuildDir(rebuildDir string, logger log.Logger) error {
+// requiredAccessorsForCommitment returns the accessor file extensions that
+// must accompany every commitment .kv file under the supplied domain config.
+// Extensions include the leading dot (".bt", ".kvi", ".kvei"). The .kv data
+// file itself is always required and is not in this list.
+//
+// Extracted from convertPhase2 so preflightResume can apply the same
+// completeness check before phase 1 starts.
+func requiredAccessorsForCommitment(d *Domain) []string {
+	var out []string
+	if d.Accessors.Has(statecfg.AccessorBTree) {
+		out = append(out, ".bt")
+	}
+	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		out = append(out, ".kvi")
+	}
+	if d.Accessors.Has(statecfg.AccessorExistence) {
+		out = append(out, ".kvei")
+	}
+	return out
+}
+
+// preflightResume prepares rebuildDir for ConvertCommitmentFiles' phase 1.
+//
+// When continueMode is false, it wipes any leftover rebuildDir from a prior
+// crashed run (safe — snapshots/domain/ was never touched) and returns files
+// unchanged.
+//
+// When continueMode is true, it scans rebuildDir for shards left behind by a
+// prior interrupted run. A shard for step range (from, to) is "complete" iff
+// rebuildDir contains a file whose basename ends with `-commitment.<from>-<to>.kv`
+// AND, for every acc in requiredAccessors, a file whose basename ends with
+// `-commitment.<from>-<to><acc>`. Incomplete shards (.kv present but at
+// least one accessor missing) and orphan files (anything not matching the
+// commitment step-range pattern) are removed from rebuildDir.
+//
+// The complete shards must form a contiguous prefix of `files` (input
+// ordering). A gap — a complete shard for a range that comes after an
+// incomplete or missing range in `files` — is a hard error: the operator's
+// input set has drifted and resume is unsafe.
+//
+// Returned VisibleFiles is the suffix of `files` that still needs
+// conversion. Empty rebuildDir + continueMode=true is a benign no-op:
+// returns `files` unchanged and logs "no prior progress, starting fresh".
+//
+// File-level write atomicity (tmp-then-rename, see Findings in
+// docs/plans/completed/20260519-convert-continue-flag.md) makes existence
+// sufficient for the per-file completeness check — no size check needed.
+func preflightResume(
+	files VisibleFiles,
+	rebuildDir string,
+	requiredAccessors []string,
+	stepSize uint64,
+	continueMode bool,
+	logger log.Logger,
+) (VisibleFiles, error) {
+	if !continueMode {
+		entries, err := os.ReadDir(rebuildDir)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("[commitment_convert] pre-flight: check rebuild dir %s: %w", rebuildDir, err)
+		}
+		if len(entries) > 0 {
+			logger.Info("[commitment_convert] pre-flight: wiping leftover rebuild dir",
+				"path", rebuildDir, "entries", len(entries))
+		}
+		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
+			return nil, fmt.Errorf("[commitment_convert] pre-flight: wipe rebuild dir %s: %w", rebuildDir, rmErr)
+		}
+		return files, nil
+	}
+
 	entries, err := os.ReadDir(rebuildDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+			return files, nil
 		}
-		return fmt.Errorf("[commitment_convert] pre-flight: check rebuild dir %s: %w", rebuildDir, err)
+		return nil, fmt.Errorf("[commitment_convert] --continue: read rebuild dir %s: %w", rebuildDir, err)
 	}
-	if len(entries) > 0 {
-		logger.Info("[commitment_convert] pre-flight: wiping leftover rebuild dir",
-			"path", rebuildDir, "entries", len(entries))
+	if len(entries) == 0 {
+		logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+		return files, nil
 	}
-	if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
-		return fmt.Errorf("[commitment_convert] pre-flight: wipe rebuild dir %s: %w", rebuildDir, rmErr)
+
+	type stepRange struct{ from, to uint64 }
+	groups := make(map[stepRange][]string)
+	var orphans []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() {
+			orphans = append(orphans, name)
+			continue
+		}
+		m := commitmentStepRangeRe.FindStringSubmatch(name)
+		if m == nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		from, perr := strconv.ParseUint(m[1], 10, 64)
+		if perr != nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		to, perr := strconv.ParseUint(m[2], 10, 64)
+		if perr != nil {
+			orphans = append(orphans, name)
+			continue
+		}
+		r := stepRange{from, to}
+		groups[r] = append(groups[r], name)
 	}
-	return nil
+
+	done := make(map[stepRange]struct{})
+	var incompleteRanges []stepRange
+	for r, names := range groups {
+		var hasKV bool
+		accFound := make(map[string]bool, len(requiredAccessors))
+		kvSuffix := fmt.Sprintf("-commitment.%d-%d.kv", r.from, r.to)
+		for _, n := range names {
+			if strings.HasSuffix(n, kvSuffix) {
+				hasKV = true
+				continue
+			}
+			for _, ext := range requiredAccessors {
+				if strings.HasSuffix(n, fmt.Sprintf("-commitment.%d-%d%s", r.from, r.to, ext)) {
+					accFound[ext] = true
+					break
+				}
+			}
+		}
+		complete := hasKV
+		for _, ext := range requiredAccessors {
+			if !accFound[ext] {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			done[r] = struct{}{}
+		} else {
+			incompleteRanges = append(incompleteRanges, r)
+		}
+	}
+
+	// Validate the contiguity invariant BEFORE mutating rebuildDir, so an
+	// error return leaves the directory exactly as the operator left it.
+	prefixLen := -1
+	var firstMissingRange stepRange
+	seenInInput := make(map[stepRange]bool, len(done))
+	for i, f := range files {
+		fr := stepRange{
+			from: f.StartRootNum() / stepSize,
+			to:   f.EndRootNum() / stepSize,
+		}
+		if _, ok := done[fr]; ok {
+			seenInInput[fr] = true
+			if prefixLen != -1 {
+				return nil, fmt.Errorf(
+					"[commitment_convert] --continue: non-contiguous shards: "+
+						"rebuildDir has complete shard at steps %d-%d but is missing %d-%d before it",
+					fr.from, fr.to,
+					firstMissingRange.from, firstMissingRange.to)
+			}
+		} else if prefixLen == -1 {
+			prefixLen = i
+			firstMissingRange = fr
+		}
+	}
+	if prefixLen == -1 {
+		prefixLen = len(files)
+	}
+	for r := range done {
+		if !seenInInput[r] {
+			return nil, fmt.Errorf(
+				"[commitment_convert] --continue: rebuildDir contains complete shard for steps %d-%d "+
+					"that does not match any current input file; verify the input file set matches the original run",
+				r.from, r.to)
+		}
+	}
+
+	// Validation passed; now safe to mutate disk.
+	for _, name := range orphans {
+		p := filepath.Join(rebuildDir, name)
+		if rmErr := dir.RemoveAll(p); rmErr != nil {
+			return nil, fmt.Errorf("[commitment_convert] --continue: remove orphan %s: %w", p, rmErr)
+		}
+	}
+	for _, r := range incompleteRanges {
+		for _, name := range groups[r] {
+			p := filepath.Join(rebuildDir, name)
+			if rmErr := dir.RemoveFile(p); rmErr != nil {
+				return nil, fmt.Errorf("[commitment_convert] --continue: remove incomplete shard %s: %w", p, rmErr)
+			}
+		}
+	}
+
+	if prefixLen == 0 {
+		logger.Info("[commitment_convert] --continue: no prior progress, starting fresh")
+		return files, nil
+	}
+
+	firstFile := files[0]
+	lastCompleteFile := files[prefixLen-1]
+	if prefixLen == len(files) {
+		logger.Info(fmt.Sprintf(
+			"[commitment_convert] --continue: all %d input files already converted in rebuild dir (steps %d-%d); proceeding to Phase 2",
+			prefixLen,
+			firstFile.StartRootNum()/stepSize,
+			lastCompleteFile.EndRootNum()/stepSize,
+		))
+		return files[prefixLen:], nil
+	}
+	lastInputFile := files[len(files)-1]
+	logger.Info(fmt.Sprintf(
+		"[commitment_convert] --continue: resuming. complete shards in rebuild dir: %d (steps %d-%d), remaining: %d input files (steps %d-%d)",
+		prefixLen,
+		firstFile.StartRootNum()/stepSize,
+		lastCompleteFile.EndRootNum()/stepSize,
+		len(files)-prefixLen,
+		lastCompleteFile.EndRootNum()/stepSize,
+		lastInputFile.EndRootNum()/stepSize,
+	))
+
+	return files[prefixLen:], nil
 }
+
+// convertPhase1AfterFileHook is a test-only hook fired after each input file
+// completes a Phase 1 iteration (successful conversion or errSkip). nil in
+// production. Set via SetConvertPhase1AfterFileHookForTest in tests so the
+// resume integration test can cancel mid-Phase-1 deterministically without
+// racing against log-line counting.
+var convertPhase1AfterFileHook func(idx int)
 
 // convertPhase1 runs convertCommitmentFile against every visible commitment
 // file in sequence, writing outputs into rebuildDir. errSkip is caught
@@ -1064,6 +1313,9 @@ func convertPhase1(
 			logger.Info(fmt.Sprintf("[commitment_convert] phase 1 skip %s (already in target state) %s",
 				filepath.Base(f.Fullpath()),
 				buildPhase1Prefix(i+1, N, processedKeys, grandTotalKeys)))
+			if convertPhase1AfterFileHook != nil {
+				convertPhase1AfterFileHook(i)
+			}
 			continue
 		}
 		if convErr != nil {
@@ -1074,6 +1326,9 @@ func convertPhase1(
 		processedKeys += ki
 		processedFiles++
 		totalSizeDelta += delta
+		if convertPhase1AfterFileHook != nil {
+			convertPhase1AfterFileHook(i)
+		}
 	}
 	return processedFiles, skippedFiles, totalSizeDelta, processedKeys, nil
 }
