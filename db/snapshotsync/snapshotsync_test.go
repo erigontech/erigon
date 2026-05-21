@@ -122,6 +122,56 @@ func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 	}
 }
 
+// TestDownloadFilteringApplies covers the predicate that gates the slow
+// getMinimumBlocksToDownload + buildBlackListForPruning call. Of particular
+// interest is the {DefaultBlocksPruneMode, DefaultBlocksPruneMode} hybrid
+// produced by `--prune.mode=archive --prune.distance.blocks=18446744073709551615`:
+// neither field's Enabled() is true, but the operator opted into
+// chain-history-expiry, so filtering must apply when MergeHeight is set.
+func TestDownloadFilteringApplies(t *testing.T) {
+	mergeHeight := uint64(15_537_394)
+	ccMainnet := &chain.Config{MergeHeight: &mergeHeight}
+	ccNoMerge := &chain.Config{}
+
+	cases := []struct {
+		name string
+		mode prune.Mode
+		cc   *chain.Config
+		want bool
+	}{
+		{"archive on mainnet", prune.ArchiveMode, ccMainnet, false},
+		{"archive on pre-merge chain", prune.ArchiveMode, ccNoMerge, false},
+		{"full", prune.FullMode, ccMainnet, true},
+		{"minimal", prune.MinimalMode, ccMainnet, true},
+		{"blocks", prune.BlocksMode, ccMainnet, true},
+		{
+			name: "archive+blocks-override chain-history-expiry (mainnet)",
+			mode: prune.Mode{Initialised: true, History: prune.DefaultBlocksPruneMode, Blocks: prune.DefaultBlocksPruneMode},
+			cc:   ccMainnet,
+			want: true, // pre-merge tx must still be filtered
+		},
+		{
+			name: "archive+blocks-override chain-history-expiry (no MergeHeight)",
+			mode: prune.Mode{Initialised: true, History: prune.DefaultBlocksPruneMode, Blocks: prune.DefaultBlocksPruneMode},
+			cc:   ccNoMerge,
+			want: false, // no MergeHeight → nothing to filter
+		},
+		{
+			name: "legacy full {DefaultBlocks, Distance}",
+			mode: prune.Mode{Initialised: true, History: prune.Distance(100_000), Blocks: prune.DefaultBlocksPruneMode},
+			cc:   ccMainnet,
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := downloadFilteringApplies(tc.mode, tc.cc); got != tc.want {
+				t.Errorf("downloadFilteringApplies(%s) = %v, want %v", tc.mode.String(), got, tc.want)
+			}
+		})
+	}
+}
+
 // TestBlackListForPruning_ChainHistoryExpiry covers the case absorbed from
 // the former isTransactionsSegmentExpired: when Blocks=DefaultBlocksPruneMode
 // and the chain has a MergeHeight, pre-merge transaction segments must be

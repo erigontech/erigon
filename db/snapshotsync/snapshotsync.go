@@ -274,6 +274,25 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
+// downloadFilteringApplies reports whether buildBlackListForPruning would
+// produce any blacklist entries for pruneMode + chain. Mirrors the function's
+// own early-return predicate so the (slow) getMinimumBlocksToDownload call
+// is skipped for modes where no filtering happens. Notably, an
+// operator-supplied hybrid like
+//
+//	--prune.mode=archive --prune.distance.blocks=18446744073709551615
+//
+// produces {Blocks: DefaultBlocksPruneMode, History: DefaultBlocksPruneMode}
+// — neither field's Enabled() is true, but the operator opted into
+// chain-history-expiry for blocks. The DefaultBlocksPruneMode + MergeHeight
+// branch covers that.
+func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
+	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() {
+		return true
+	}
+	return pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc != nil && cc.MergeHeight != nil
+}
+
 // blocksRetentionCutoff returns the block height below which block-data
 // segments (transactions and receipt-related state) are considered expired
 // under pruneMode:
@@ -418,7 +437,7 @@ func SyncSnapshots(
 
 		blockPrune, historyPrune := computeBlocksToPrune(blockReader, prune)
 		blackListForPruning := make(map[string]struct{})
-		wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
+		wantToPrune := downloadFilteringApplies(prune, cc)
 		if !headerchain && wantToPrune {
 			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 			if err != nil {
