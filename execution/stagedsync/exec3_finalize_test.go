@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -201,7 +200,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	newRecipientBal := new(uint256.Int).Add(recipientBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	// TxIn: reads from execution. No coinbase reads (coinbase not touched
 	// during calcFees=false execution).
@@ -214,9 +213,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	// CollectorWrites: LightCollector output from MakeWriteSet.

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -45,7 +46,7 @@ type StateV3 struct {
 	logger                     log.Logger
 	persistReceiptsCacheV2     bool
 	txNum                      uint64
-	trace                      bool
+	trace                      atomic.Bool
 	skipStepBoundaryCommitment bool
 }
 
@@ -59,7 +60,7 @@ func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, log
 }
 
 func (rs *StateV3) SetTrace(trace bool) {
-	rs.trace = trace
+	rs.trace.Store(trace)
 }
 
 func (rs *StateV3) Domains() *execctx.SharedDomains {
@@ -145,7 +146,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			address := addr.Value()
 
 			if d.selfDestruct {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
 				}
 				if blockCache != nil {
@@ -161,7 +162,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
 					}
 					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
-						if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
 						continue
@@ -175,7 +176,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 					// Pure delete: no account fields means DeleteAccount was called.
 					if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
-						if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+						if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
 						}
 						if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
@@ -228,7 +229,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				} else if d.code != nil {
 					acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(d.code))
 				}
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
 				}
 				enc := accounts.SerialiseV3(&acc)
@@ -245,7 +246,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.code != nil {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+				if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 					code := d.code
 					if len(code) > 40 {
 						code = code[:40]
@@ -269,7 +270,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				composite := append(address[:], key[:]...)
 				v := item.value.Bytes()
 				if len(v) == 0 {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
 					}
 					if blockCache != nil {
@@ -283,7 +284,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						}
 					}
 				} else {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+					if dbg.TraceApply && (rs.trace.Load() || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
 					}
 					if blockCache != nil {
@@ -1249,6 +1250,19 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 	return nil, false
 }
 
+// GetCurrentCode returns the latest code (including intra-block writes).
+// Returns (nil, false) if no intra-block code write has occurred — callers
+// should fall back to the underlying domain reader for the committed value.
+func (c *BlockStateCache) GetCurrentCode(addr accounts.Address) ([]byte, bool) {
+	c.mu.RLock()
+	if code, ok := c.currentCode[addr]; ok {
+		c.mu.RUnlock()
+		return code, true
+	}
+	c.mu.RUnlock()
+	return nil, false
+}
+
 // Flush replays writeLog against SharedDomains in write order. Each
 // entry is stamped with the txNum at which the write was originally
 // made, so the AccountsDomain / StorageDomain / CodeDomain history is
@@ -1376,6 +1390,24 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return &result, nil
 	}
 	return nil, nil
+}
+
+func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if r.blockCache != nil && r.readCurrent {
+		if code, ok := r.blockCache.GetCurrentCode(address); ok {
+			return code, nil
+		}
+	}
+	return r.ReaderV3.ReadAccountCode(address)
+}
+
+func (r *CachedReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	if r.blockCache != nil && r.readCurrent {
+		if code, ok := r.blockCache.GetCurrentCode(address); ok {
+			return len(code), nil
+		}
+	}
+	return r.ReaderV3.ReadAccountCodeSize(address)
 }
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {

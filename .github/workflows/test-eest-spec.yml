@@ -56,7 +56,7 @@ jobs:
           build-cache-extra-key: eest-spec-${{ matrix.shard }}
 
       - name: Cache EEST tarballs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Only cache the .tar.gz files; extracted dirs are recreated by
           # tools/test-fixtures.sh on each run from the cached tarballs.
