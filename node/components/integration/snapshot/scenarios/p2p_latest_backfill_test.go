@@ -20,15 +20,14 @@
 // snapshot-flow-merge-gate.md. A multi-step archive on a single
 // seeder, fresh leecher, exercises:
 //
-//   - Phase 0 — latest-state download. Per-domain DownloadRequested
-//     events fire in latest-step-first order (the orchestrator's
-//     ToStep-descending sort).
-//   - Phase 0 → Phase 2 — InitialStateReady fires once after all
-//     state files complete; only THEN do block DownloadRequested
-//     events drain.
-//   - Phase 1 — backfill. Older step ranges populate after the
-//     latest range; every file at every range eventually promotes
-//     to TrustVerified.
+//   - Latest-first ordering — per-domain DownloadRequested events fire
+//     in latest-step-first order (the orchestrator's ToStep-descending
+//     sort).
+//   - Phase 1 — state files and all block files (headers + bodies)
+//     request before InitialStateReady, which fires once they have all
+//     completed (the FrozenBlocks=min gate; only caplin is phase 2).
+//   - Backfill — older step ranges populate after the latest range;
+//     every file at every range eventually promotes to TrustVerified.
 //
 // What this scenario does NOT yet assert: cross-file consistency
 // (commitment chain across .kv generations, history/kv alignment).
@@ -156,8 +155,8 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 		reqMu           sync.Mutex
 
 		stateBeforeReady          atomic.Int32
-		headerBeforeReady         atomic.Int32 // *-headers.seg before ready — phase 1 under piece A
-		nonHeaderBlockBeforeReady atomic.Int32 // bodies/transactions before ready — phase 2 violation if > 0
+		headerBeforeReady         atomic.Int32 // *-headers.seg before ready — phase 1
+		nonHeaderBlockBeforeReady atomic.Int32 // bodies/transactions before ready — also phase 1 (FrozenBlocks=min gate)
 	)
 	require.NoError(t, leecher.Bus.Subscribe(func(flow.InitialStateReady) {
 		stateReadyCount.Add(1)
@@ -181,10 +180,10 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 		} else {
 			blockReqs = append(blockReqs, rec)
 			if stateReadyCount.Load() == 0 {
-				// Header files are phase 1 under piece A (they carry
-				// header.stateRoot, the consensus anchor every state
-				// validator cross-references). Bodies / transactions
-				// stay phase 2 and a count > 0 here is a regression.
+				// All block files are phase 1: InitialStateReady gates
+				// on headers, bodies and transactions alike (the
+				// FrozenBlocks=min gate). The split is kept only so the
+				// assertions can pin each kind individually.
 				if strings.HasSuffix(e.FileName, "-headers.seg") {
 					headerBeforeReady.Add(1)
 				} else {
@@ -209,22 +208,20 @@ func TestP2P_LatestDownloadBackfill(t *testing.T) {
 	require.Equal(t, int32(1), stateReadyCount.Load(),
 		"InitialStateReady must fire exactly once across the run")
 
-	// 2. Phase ordering.
-	//    - Non-header block files (bodies / transactions) MUST NOT
-	//      request before InitialStateReady — phase 2.
-	//    - Header files MAY request before InitialStateReady — phase 1
-	//      under piece A (they carry header.stateRoot, the consensus
-	//      anchor every cryptographic state validator cross-references).
-	//      Not asserted positive here because the archive may not include
-	//      any header files; the negative assertion above is the
-	//      regression sentinel either way.
-	//    - At least one state DownloadRequested must precede
-	//      InitialStateReady (else the gate never has anything to wait on).
-	require.Zero(t, nonHeaderBlockBeforeReady.Load(),
-		"no non-header block (bodies/transactions) may fire DownloadRequested before InitialStateReady — phase 2 violation")
+	// 2. Phase ordering (orchestrator.requestGapsFor). State files AND
+	//    all block files — headers + bodies + transactions — are
+	//    phase 1: InitialStateReady gates on every one of them. The
+	//    postIndexed callback runs FillDBFromSnapshots before ready
+	//    fires, and FrozenBlocks() is min(headers, bodies, transactions)
+	//    under alignMin — so bodies must already be downloaded by then,
+	//    hence requested before InitialStateReady, same as headers and
+	//    state. Only caplin is phase 2 (none in this archive).
+	require.Greater(t, nonHeaderBlockBeforeReady.Load(), int32(0),
+		"bodies are phase 1 — they must request before InitialStateReady (the FrozenBlocks=min gate)")
+	require.Greater(t, headerBeforeReady.Load(), int32(0),
+		"headers are phase 1 — at least one must request before InitialStateReady")
 	require.Greater(t, stateBeforeReady.Load(), int32(0),
 		"at least one state DownloadRequested must precede InitialStateReady")
-	_ = headerBeforeReady.Load() // informational; not asserted (archive may have no headers)
 
 	// 3. Latest-first ordering PER DOMAIN. The orchestrator's
 	//    requestGapsFor sorts each domain's batch by ToStep descending,

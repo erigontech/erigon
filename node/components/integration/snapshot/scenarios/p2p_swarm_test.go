@@ -171,24 +171,24 @@ func TestP2P_Swarm_CompleteArchive(t *testing.T) {
 
 	// Observers for the phased-ordering check.
 	//
-	// Phase 1 (must dispatch BEFORE InitialStateReady):
+	// Phase 1 (dispatch BEFORE InitialStateReady — it gates on them):
 	//   - state-domain files (e.Domain != "")
-	//   - block-header files (*-headers.seg) — they carry header.stateRoot,
-	//     the consensus anchor every cryptographic state validator
-	//     cross-references; InitialStateReady's contract is "state is
-	//     validated against consensus", so headers are part of it.
+	//   - ALL block files (headers + bodies + transactions). The
+	//     postIndexed callback runs FillDBFromSnapshots before ready
+	//     fires, and FrozenBlocks() = min(headers, bodies, transactions)
+	//     under alignMin — so every block type must already be
+	//     downloaded by then. See orchestrator.requestGapsFor.
 	//   - meta + salt (not exercised in this archive)
 	//
-	// Phase 2 (must NOT dispatch until InitialStateReady):
-	//   - non-header block files (bodies, transactions)
-	//   - caplin
+	// Phase 2 (dispatch only after InitialStateReady):
+	//   - caplin (not exercised in this archive)
 	var (
 		manifestCount             atomic.Int32
 		promotedCount             atomic.Int32
 		stateReadyCount           atomic.Int32
 		stateReqBeforeReady       atomic.Int32
-		headerReqBeforeReady      atomic.Int32 // *-headers.seg before ready — expected > 0 under piece A
-		nonHeaderBlockBeforeReady atomic.Int32 // bodies / transactions before ready — REGRESSION if > 0
+		headerReqBeforeReady      atomic.Int32 // *-headers.seg before ready — phase 1, expected > 0
+		nonHeaderBlockBeforeReady atomic.Int32 // bodies / transactions before ready — phase 1, expected > 0
 		stateReqAfterReady        atomic.Int32
 		blockReqAfterReady        atomic.Int32
 	)
@@ -235,26 +235,21 @@ func TestP2P_Swarm_CompleteArchive(t *testing.T) {
 	require.Equal(t, int32(1), stateReadyCount.Load(),
 		"InitialStateReady must fire exactly once")
 
-	// Phased-ordering check.
-	//   - Non-header block files (bodies / transactions / caplin) must
-	//     NOT dispatch before InitialStateReady — they're phase 2.
-	//   - At least one state DownloadRequested must fire in phase 1
-	//     (else the gate never has anything to wait for).
-	//   - At least one block DownloadRequested must fire after
-	//     InitialStateReady (the phase-2 drain happened).
-	//   - Header files (phase 1 under piece A) MAY dispatch before
-	//     state-ready; expected count = one per range in the archive
-	//     (3 here). Asserted positive to lock in the piece-A contract:
-	//     if this drops to zero a regression has reverted headers to
-	//     phase 2.
-	require.Zero(t, nonHeaderBlockBeforeReady.Load(),
-		"no non-header block (bodies/transactions/caplin) may fire DownloadRequested before InitialStateReady — phase 2 violation")
+	// Phased-ordering check (orchestrator.requestGapsFor). State files
+	// and all block files (headers + bodies + transactions) are
+	// phase 1 — InitialStateReady gates on every one of them, because
+	// FillDBFromSnapshots runs before ready fires and needs
+	// FrozenBlocks() = min(headers, bodies, transactions) > 0. Only
+	// caplin is phase 2, and this archive carries none — so nothing
+	// dispatches after InitialStateReady.
+	require.Greater(t, nonHeaderBlockBeforeReady.Load(), int32(0),
+		"bodies/transactions are phase 1 — they must dispatch before InitialStateReady (the FrozenBlocks=min gate)")
 	require.Greater(t, stateReqBeforeReady.Load(), int32(0),
 		"at least one state DownloadRequested before InitialStateReady")
 	require.Greater(t, headerReqBeforeReady.Load(), int32(0),
-		"at least one header DownloadRequested must fire before InitialStateReady — pins the piece-A contract (headers are phase 1, carry header.stateRoot)")
-	require.Greater(t, blockReqAfterReady.Load(), int32(0),
-		"at least one block DownloadRequested after InitialStateReady")
+		"at least one header DownloadRequested before InitialStateReady")
+	require.Zero(t, blockReqAfterReady.Load(),
+		"all block files are phase 1 and this archive has no caplin — nothing dispatches after InitialStateReady")
 
 	// Every seeder's manifest was observed.
 	require.GreaterOrEqual(t, manifestCount.Load(), int32(numSeeders),
