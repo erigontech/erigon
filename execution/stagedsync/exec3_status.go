@@ -15,6 +15,7 @@ type ExecutionStat struct {
 type execStatusList struct {
 	pending    []int
 	inProgress []int
+	deferred   []int // txs whose retry waits on a directed-delay predicate
 	complete   []int
 	dependency map[int]map[int]bool
 	blocker    map[int]map[int]bool
@@ -69,6 +70,47 @@ func (m execStatusList) maxComplete() int {
 
 func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
+}
+
+// pushDeferred parks a tx that hit ErrDependency with no effective blocker
+// (or was invalidated mid-flight). Immediate re-dispatch re-enters the
+// race; drainDeferredIfReady gates retry on a directed-delay predicate.
+func (m *execStatusList) pushDeferred(tx int) {
+	m.deferred = insertInList(m.deferred, tx)
+}
+
+// drainDeferred unconditionally moves deferred → pending. Forward-progress
+// safety net when no workers are in flight.
+func (m *execStatusList) drainDeferred() {
+	for _, tx := range m.deferred {
+		m.pending = insertInList(m.pending, tx)
+	}
+	m.deferred = m.deferred[:0]
+}
+
+func (m *execStatusList) drainDeferredIfReady(ready func(tx int) bool) {
+	if len(m.deferred) == 0 {
+		return
+	}
+	kept := m.deferred[:0]
+	for _, tx := range m.deferred {
+		if ready(tx) {
+			m.pending = insertInList(m.pending, tx)
+		} else {
+			kept = append(kept, tx)
+		}
+	}
+	m.deferred = kept
+}
+
+func (m *execStatusList) inProgressCount() int { return len(m.inProgress) }
+
+// minInProgress returns the lowest in-progress tx index, or -1 if empty.
+func (m *execStatusList) minInProgress() int {
+	if len(m.inProgress) == 0 {
+		return -1
+	}
+	return m.inProgress[0]
 }
 
 func removeFromList(l []int, v int, expect bool) []int {

@@ -1206,7 +1206,7 @@ func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64) error {
+func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64, reason tracing.NonceChangeReason) error {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetNonce %x, %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, nonce)
 	}
@@ -1215,8 +1215,7 @@ func (sdb *IntraBlockState) SetNonce(addr accounts.Address, nonce uint64) error 
 	if err != nil {
 		return err
 	}
-
-	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, accounts.NilKey))
+	stateObject.SetNonce(nonce, !sdb.hasWrite(addr, NoncePath, accounts.NilKey), reason)
 	versionWritten(sdb, addr, NoncePath, accounts.NilKey, stateObject.Nonce())
 	return nil
 }
@@ -1237,7 +1236,7 @@ func printCode(c []byte) (int, string) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
+func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		lenc, cs := printCode(code)
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, lenc, cs)
@@ -1255,7 +1254,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	// original.CodeHash). This is the correct base for the
 	// revert-to-original optimisation.
 	baseCodeHash := stateObject.data.CodeHash
-	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
+	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey), reason)
 	if err != nil {
 		return err
 	}
@@ -2429,41 +2428,6 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	}
 }
 
-// SnapshotVersionedReadKeys returns the current set of read keys for addr.
-// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
-// preserving pre-existing legitimate reads.
-func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
-	if sdb.versionedReads == nil {
-		return nil
-	}
-	reads := sdb.versionedReads[addr]
-	if len(reads) == 0 {
-		return nil
-	}
-	snapshot := make(map[AccountKey]struct{}, len(reads))
-	for k := range reads {
-		snapshot[k] = struct{}{}
-	}
-	return snapshot
-}
-
-// MarkNewReadsInternal marks as internal only the reads for addr that were
-// added after the given snapshot. Use this when gas-calculation-only reads
-// were recorded on top of earlier legitimate reads — the legitimate ones
-// must remain non-internal so they appear in the block access list.
-func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
-	if sdb.versionedReads == nil {
-		return
-	}
-	for key, vr := range sdb.versionedReads[addr] {
-		if _, existed := before[key]; existed {
-			continue
-		}
-		vr.internal = true
-		sdb.versionedReads[addr][key] = vr
-	}
-}
-
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
@@ -2679,12 +2643,12 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				}
 			case BalancePath:
 				balance := val.(uint256.Int)
-				if err := sdb.SetBalance(addr, balance, writes[i].Reason); err != nil {
+				if err := sdb.SetBalance(addr, balance, writes[i].BalanceChangeReason); err != nil {
 					return err
 				}
 			case NoncePath:
 				nonce := val.(uint64)
-				if err := sdb.SetNonce(addr, nonce); err != nil {
+				if err := sdb.SetNonce(addr, nonce, writes[i].NonceChangeReason); err != nil {
 					return err
 				}
 			case IncarnationPath:

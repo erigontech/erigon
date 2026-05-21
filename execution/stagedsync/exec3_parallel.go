@@ -1784,11 +1784,11 @@ func (result *execResult) finalizeTx(
 	copy(allWrites, result.TxOut)
 	if coinbaseChanged {
 		allWrites = append(allWrites, &state.VersionedWrite{
-			Address: result.Coinbase,
-			Path:    state.BalancePath,
-			Val:     newCoinbaseBalance,
-			Version: task.Version(),
-			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+			Address:             result.Coinbase,
+			Path:                state.BalancePath,
+			Val:                 newCoinbaseBalance,
+			Version:             task.Version(),
+			BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 		})
 	}
 	if hasBurnt {
@@ -1798,11 +1798,11 @@ func (result *execResult) finalizeTx(
 		}
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceDecreaseGasBuy,
+				Address:             burntAddr,
+				Path:                state.BalancePath,
+				Val:                 newBurntBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
 			})
 		}
 	}
@@ -2099,11 +2099,11 @@ func (result *execResult) finalizeTxSimple(
 			})
 		} else {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: result.Coinbase,
-				Path:    state.BalancePath,
-				Val:     newCoinbaseBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+				Address:             result.Coinbase,
+				Path:                state.BalancePath,
+				Val:                 newCoinbaseBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 			})
 		}
 	}
@@ -2114,11 +2114,11 @@ func (result *execResult) finalizeTxSimple(
 		}
 		if newBurntBalance != oldBurntBalance {
 			allWrites = append(allWrites, &state.VersionedWrite{
-				Address: burntAddr,
-				Path:    state.BalancePath,
-				Val:     newBurntBalance,
-				Version: task.Version(),
-				Reason:  tracing.BalanceDecreaseGasBuy,
+				Address:             burntAddr,
+				Path:                state.BalancePath,
+				Val:                 newBurntBalance,
+				Version:             task.Version(),
+				BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
 			})
 		}
 	}
@@ -2449,6 +2449,21 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
+// tooManyRetries returns an invalid-block result when tx has exceeded its
+// retry budget, otherwise nil. origin may be nil (validator-invalid path)
+// or carry the worker's underlying error.
+func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin error) *blockResult {
+	if be.txIncarnations[tx] <= len(be.tasks) {
+		return nil
+	}
+	if origin != nil {
+		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many %s retries: %d, expected: %d",
+			rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), origin, label, be.txIncarnations[tx], len(be.tasks)))
+	}
+	return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many %s retries: %d, expected: %d",
+		rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2530,7 +2545,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execTasks.clearInProgress(tx)
 
 			if !addedDependencies {
-				be.execTasks.pushPending(tx)
+				// addDependency couldn't register a real wait (named blocker
+				// already complete). Defer — scheduleExecution's predicate
+				// gates retry on predecessor-validated + no-lower-IP.
+				be.execTasks.pushDeferred(tx)
 			}
 			be.txIncarnations[tx]++
 			be.cntAbort++
@@ -2664,8 +2682,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txTask := be.tasks[tx].Task
 
 				if txn := txTask.Tx(); txn != nil {
-					if err := protocol.CheckBlockGasInclusion(be.gasPool, txResult.ExecutionResult.BlockRegularGasUsed, txResult.ExecutionResult.BlockStateGasUsed); err != nil {
-						return nil, fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)
+					regularContribution, stateContribution, err := protocol.InclusionContributions(txn, txTask.Rules())
+					if err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w, block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
+					}
+					if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 					}
 				}
 
@@ -2762,9 +2784,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 							}
 							if i, found := balIdx[w.Address]; found {
 								txResult.CollectorWrites[i].Val = bal
-								txResult.CollectorWrites[i].Reason = w.Reason
+								txResult.CollectorWrites[i].BalanceChangeReason = w.BalanceChangeReason
 							} else {
-								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, Reason: w.Reason})
+								txResult.CollectorWrites = append(txResult.CollectorWrites, &state.VersionedWrite{Address: w.Address, Path: state.BalancePath, Val: bal, BalanceChangeReason: w.BalanceChangeReason})
 								balIdx[w.Address] = len(txResult.CollectorWrites) - 1
 							}
 						}
@@ -2820,9 +2842,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.validateTasks.pushPendingSet(be.execTasks.getRevalidationRange(tx + 1))
 			be.validateTasks.clearInProgress(tx) // clear in progress - pending will be added again once new incarnation executes
 			be.execTasks.clearComplete(tx)
-			be.execTasks.pushPending(tx)
+			// Defer: validator-invalid may be race-induced (worker raced an
+			// exec-loop flush). Drain predicate in scheduleExecution waits.
+			be.execTasks.pushDeferred(tx)
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
+			if r := be.tooManyRetries(tx, txVersion.TxIndex, "validator-invalid", nil); r != nil {
+				return r, nil
+			}
 		}
 	}
 
@@ -3084,10 +3111,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+	// Drain deferred tx N when its predecessor is validated AND no worker
+	// at index < N is in flight. Lower-indexed workers' flushes land at
+	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
+	// ones don't. Non-deferred txs keep dispatching via pending.
+	be.execTasks.drainDeferredIfReady(func(tx int) bool {
+		if be.validateTasks.maxComplete() < tx-1 {
+			return false
+		}
+		minIP := be.execTasks.minInProgress()
+		return minIP < 0 || minIP >= tx
+	})
+
 	toExecute := make(sort.IntSlice, 0, 2)
 
 	for be.execTasks.minPending() >= 0 {
 		toExecute = append(toExecute, be.execTasks.takeNextPending())
+	}
+
+	// Forward-progress safety net: pending empty + no workers in flight
+	// means nothing will drive a subsequent maxComplete advance. Force-
+	// drain so the exec loop doesn't block on rws.ResultCh forever.
+	if len(toExecute) == 0 && be.execTasks.inProgressCount() == 0 {
+		be.execTasks.drainDeferred()
+		for be.execTasks.minPending() >= 0 {
+			toExecute = append(toExecute, be.execTasks.takeNextPending())
+		}
 	}
 
 	maxValidated := be.validateTasks.maxComplete()

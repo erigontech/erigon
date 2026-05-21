@@ -211,12 +211,13 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 	t.logValue = t.log.setupObject()
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
-			OnOpcode:  t.OnOpcode,
-			OnFault:   t.OnFault,
+			OnTxStart:           t.OnTxStart,
+			OnSystemCallStartV2: t.OnSystemCallStartV2,
+			OnTxEnd:             t.OnTxEnd,
+			OnEnter:             t.OnEnter,
+			OnExit:              t.OnExit,
+			OnOpcode:            t.OnOpcode,
+			OnFault:             t.OnFault,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -226,6 +227,14 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 // OnTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
 func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	t.onExecutionStart(env, tx.GetGasLimit())
+}
+
+func (t *jsTracer) OnSystemCallStartV2(env *tracing.VMContext) {
+	t.onExecutionStart(env, 0)
+}
+
+func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 	t.env = env
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
@@ -237,7 +246,7 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 	t.ctx["block"] = t.vm.ToValue(t.env.BlockNumber)
-	t.ctx["gas"] = t.vm.ToValue(tx.GetGasLimit())
+	t.ctx["gas"] = t.vm.ToValue(gasLimit)
 	gasPriceBig, err := t.toBig(t.vm, env.GasPrice.String())
 	if err != nil {
 		t.err = err

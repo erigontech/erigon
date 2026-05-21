@@ -48,11 +48,10 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 		return
 	}
 
-	// Pre-compute state and PTC per unique blockRoot to avoid redundant GetState + GetPTC
-	// calls for every attesting validator (PtcSize can be 512).
+	// Pre-compute PTC per unique blockRoot to avoid redundant state lookups
+	// for every attesting validator (PtcSize can be 512).
 	type cachedPTC struct {
-		state *state.CachingBeaconState
-		ptc   []uint64
+		ptc []uint64
 	}
 	ptcCache := make(map[common.Hash]*cachedPTC)
 
@@ -70,50 +69,36 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 			if err != nil || blockState == nil {
 				continue
 			}
-			ptc, err := blockState.GetPTC(data.Slot)
-			if err != nil {
-				continue
-			}
 			if data.Slot != blockState.Slot() {
 				continue
 			}
-			cached = &cachedPTC{state: blockState, ptc: ptc}
+			ptc, err := blockState.GetPTCFromWindow(data.Slot)
+			if err != nil {
+				continue
+			}
+			cached = &cachedPTC{ptc: ptc}
 			ptcCache[blockRoot] = cached
 		}
 
-		indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
-		if err != nil {
+		if payloadAttestation.AggregationBits == nil {
 			continue
 		}
 
-		attestingIndices := indexedPayloadAttestation.AttestingIndices
-		for j := 0; j < attestingIndices.Length(); j++ {
-			idx := attestingIndices.Get(j)
-			f.applyPayloadAttestationVote(idx, data, blockRoot, cached.ptc)
+		for j := range cached.ptc {
+			if payloadAttestation.AggregationBits.GetBitAt(j) {
+				f.applyPayloadAttestationVote(j, data, blockRoot)
+			}
 		}
 	}
 }
 
-// applyPayloadAttestationVote updates PTC vote tracking for a single validator.
-// Used by notifyPtcMessages with pre-computed PTC to avoid redundant GetState/GetPTC calls.
+// applyPayloadAttestationVote updates PTC vote tracking for a single PTC position.
+// ptcIndex is the position in the PTC (the aggregation bit index).
 func (f *ForkChoiceStore) applyPayloadAttestationVote(
-	validatorIndex uint64,
+	ptcIndex int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
-	ptc []uint64,
 ) {
-	// Find the validator's position in the PTC
-	ptcIndex := -1
-	for i, idx := range ptc {
-		if idx == validatorIndex {
-			ptcIndex = i
-			break
-		}
-	}
-	if ptcIndex == -1 {
-		return
-	}
-
 	// Atomically update PTC vote arrays under mutex to prevent concurrent
 	// Load→modify→Store from losing votes. See also OnPayloadAttestationMessage.
 	f.ptcVoteMu.Lock()

@@ -2,7 +2,9 @@ package p2p
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"net"
+	"path/filepath"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -11,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	elp2p "github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -48,6 +51,8 @@ type P2PConfig struct {
 
 	MaxPeerCount       uint64
 	SubscribeAllTopics bool // When true, advertise all attnets/syncnets in ENR
+
+	DataDir string // persistent storage dir; used to save the node key so ENR is stable across restarts
 }
 
 type p2pManager struct {
@@ -59,6 +64,14 @@ type p2pManager struct {
 	ethClock eth_clock.EthereumClock
 
 	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
+}
+
+func loadOrGenerateKey(dataDir string) (*ecdsa.PrivateKey, error) {
+	if dataDir == "" {
+		return crypto.GenerateKey()
+	}
+	var cfg elp2p.NodeKeyConfig
+	return cfg.LoadOrGenerateAndSave(filepath.Join(dataDir, "caplin-nodekey"))
 }
 
 func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethClock eth_clock.EthereumClock) (P2PManager, error) {
@@ -83,7 +96,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		enodes[i] = newNode
 	}
 
-	privateKey, err := crypto.GenerateKey()
+	privateKey, err := loadOrGenerateKey(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
