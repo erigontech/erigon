@@ -80,12 +80,14 @@ func TestP2P_OnePeerOffline_SurvivorCompletes(t *testing.T) {
 	require.Equal(t, fixtureHashA, fixtureHashB,
 		"identical content must produce identical torrent hashes")
 
-	// Each seeder publishes its own V2 manifest. The generation id in
-	// the manifest filename is random per publish, so two nodes with
-	// identical inventory get distinct manifest infohashes (the infohash
-	// covers the filename) — each advertises its own in its ENR.
+	// Two nodes with identical inventory produce a byte-identical V2
+	// manifest; the generation id in the filename is the manifest's own
+	// content hash, so the filenames — and the torrent infohashes that
+	// cover them — match.
 	v2HashA := seederA.PublishV2Manifest()
 	v2HashB := seederB.PublishV2Manifest()
+	require.Equal(t, v2HashA, v2HashB,
+		"identical inventory must produce identical V2 manifest hashes")
 
 	// Both seeders advertise the same V2 chain-toml entry + their own
 	// BT port. Leecher will reach A's and B's BT addresses separately
@@ -122,10 +124,11 @@ func TestP2P_OnePeerOffline_SurvivorCompletes(t *testing.T) {
 	leecher.AddDevP2PPeer(seederA.DevP2PSelf())
 	leecher.AddDevP2PPeer(seederB.DevP2PSelf())
 
-	// Wait until both manifests have been fetched. The two peers
-	// advertise distinct V2 infohashes (random per-publish generation
-	// id), so each manifest is fetched independently and both
-	// PeerManifestReceived events fire, each tagged with its own peerID.
+	// Wait until both manifests have been fetched. Two peers advertise
+	// the same V2 infohash (the manifest is content-addressed); the
+	// FetchPeerManifestV2 dedupe by hash means the second call reuses
+	// the first's bytes and both PeerManifestReceived events still
+	// fire, each tagged with its own peerID.
 	waitForP2P(t, func() bool { return manifestCount.Load() >= 2 },
 		30*time.Second, "both PeerManifestReceived events to fire")
 

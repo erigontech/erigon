@@ -87,11 +87,11 @@ func TestRollingV2Publisher_GenerationsAdvance(t *testing.T) {
 	pub.SetENRFingerprint(testENRFP)
 	require.Empty(t, pub.History())
 
-	inv := rollingTestInventory(t, 0x10)
-
 	hashes := make([]metainfo.Hash, 5)
 	for i := range hashes {
-		h, err := pub.Publish(context.Background(), inv, 0, nil)
+		// Distinct inventory per publish: the generation ID is the
+		// content hash, so identical inventory is one generation.
+		h, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x10+byte(i)), 0, nil)
 		require.NoError(t, err, "publish %d", i)
 		require.NotEqual(t, metainfo.Hash{}, h, "publish %d: zero hash", i)
 		hashes[i] = h
@@ -114,13 +114,14 @@ func TestRollingV2Publisher_KeepsSubsetValidGenerations(t *testing.T) {
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	inv := rollingTestInventory(t, 0x20)
+	// Seven generations with distinct content but the same file-name
+	// set — every prior generation stays a subset of the latest.
 	for i := 0; i < 7; i++ {
-		_, err := pub.Publish(context.Background(), inv, 0, nil)
+		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x20+byte(i)), 0, nil)
 		require.NoError(t, err, "publish %d", i)
 	}
 
-	// All 7 generations are subset-valid (same inv) — none evicted.
+	// All 7 generations are subset-valid — none evicted.
 	require.Len(t, pub.History(), 7)
 	require.ElementsMatch(t, pub.History(), listV2Generations(t, snapDir))
 }
@@ -135,10 +136,10 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	// gen 0,1: inv lists {accounts.0-1024, storage.0-1024}.
-	inv1 := rollingTestInventory(t, 0x21)
+	// gen 0,1: distinct content, both listing {accounts.0-1024,
+	// storage.0-1024}.
 	for i := 0; i < 2; i++ {
-		_, err := pub.Publish(context.Background(), inv1, 0, nil)
+		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}
 	oldGenIDs := append([]string(nil), pub.History()...)
@@ -179,14 +180,13 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 // adds a new generation alongside.
 func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 	snapDir := t.TempDir()
-	inv := rollingTestInventory(t, 0x30)
 
-	// Publish a few generations, then drop the publisher.
+	// Publish a few distinct generations, then drop the publisher.
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
 	for i := 0; i < 3; i++ {
-		_, err := first.Publish(context.Background(), inv, 0, nil)
+		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x30+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}
 	firstGenIDs := first.History()
@@ -198,7 +198,7 @@ func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 	second.SetENRFingerprint(testENRFP)
 	require.ElementsMatch(t, firstGenIDs, second.History())
 
-	_, err = second.Publish(context.Background(), inv, 0, nil)
+	_, err = second.Publish(context.Background(), rollingTestInventory(t, 0x33), 0, nil)
 	require.NoError(t, err)
 	require.Len(t, second.History(), 4)
 	require.ElementsMatch(t, second.History(), listV2Generations(t, snapDir))
@@ -210,13 +210,12 @@ func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 // is enforceable on the first post-restart Publish.
 func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	snapDir := t.TempDir()
-	inv := rollingTestInventory(t, 0x40)
 
 	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
 	for i := 0; i < 3; i++ {
-		_, err := first.Publish(context.Background(), inv, 0, nil)
+		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x40+byte(i)), 0, nil)
 		require.NoError(t, err)
 	}
 	require.Len(t, first.History(), 3)
@@ -254,12 +253,10 @@ func TestRollingV2Publisher_CleanupOrphans(t *testing.T) {
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	inv := rollingTestInventory(t, 0x50)
-
-	// Publish two generations normally.
-	_, err = pub.Publish(context.Background(), inv, 0, nil)
+	// Publish two distinct generations normally.
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x50), 0, nil)
 	require.NoError(t, err)
-	_, err = pub.Publish(context.Background(), inv, 0, nil)
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x51), 0, nil)
 	require.NoError(t, err)
 	require.Len(t, pub.History(), 2)
 

@@ -43,7 +43,7 @@ package downloader
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -69,17 +69,18 @@ const ChainTomlV2BaseName = "chain.v2"
 // (V2 manifest, UCAN attestation) is one logical generation.
 const ChainUCANBaseName = "chain.ucan"
 
-// GenIDLen is the byte length of a generation ID — an opaque random
-// token, NOT a counter. Each Publish mints a fresh one; it replaces a
-// monotonic <seq> precisely so a passive discv5 scraper cannot read a
-// publisher's republish rate or uptime from its ENR. 8 bytes renders
-// as 16 lowercase hex chars in filenames.
+// GenIDLen is the byte length of a generation ID. The ID is derived
+// from the artefact's own content (see genIDFromContent), NOT a
+// counter — replacing a monotonic <seq> so a passive discv5 scraper
+// cannot read a publisher's republish rate from its ENR, while still
+// giving two publishers of byte-identical content the same ID. 8 bytes
+// renders as 16 lowercase hex chars in filenames.
 const GenIDLen = 8
 
 // chainTomlV2NameRE matches chain.v2.<enr-fp>.<genID>.toml — the only
 // filename shape RollingV2Publisher emits and recognises. Both
 // <enr-fp> and <genID> are 16 lowercase hex chars (see ENRFingerprint,
-// newGenID).
+// genIDFromContent).
 var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.([0-9a-f]{16})\.toml$`)
 
 // chainUCANNameRE matches chain.ucan.<enr-fp>.<genID>.bin — the UCAN
@@ -95,16 +96,15 @@ func ENRFingerprint(nodeID [32]byte) string {
 	return hex.EncodeToString(nodeID[:8])
 }
 
-// newGenID mints a fresh opaque generation ID — GenIDLen random bytes
-// rendered as lowercase hex. Not a counter: successive generations
-// from one publisher carry uncorrelated IDs so a passive ENR scraper
-// learns nothing about republish cadence.
-func newGenID() (string, error) {
-	var b [GenIDLen]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("generate generation ID: %w", err)
-	}
-	return hex.EncodeToString(b[:]), nil
+// genIDFromContent derives a generation ID deterministically from an
+// artefact's own bytes — the first GenIDLen bytes of their SHA-256,
+// lowercase hex. Two publishers of byte-identical content get the same
+// ID, hence the same filename and the same torrent info-hash, so an
+// honest swarm converges on one artefact per distinct manifest; any
+// content change yields a fresh ID.
+func genIDFromContent(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:GenIDLen])
 }
 
 // ChainTomlV2FileName formats the per-node advertisement filename for
@@ -443,44 +443,6 @@ func (r *RollingV2Publisher) Publish(
 		return metainfo.Hash{}, fmt.Errorf("RollingV2Publisher.Publish: ENR fingerprint not set (P2P not up, or SetENRFingerprint not called)")
 	}
 
-	genID, err := newGenID()
-	if err != nil {
-		return metainfo.Hash{}, err
-	}
-	name := ChainTomlV2FileName(enrFP, genID)
-	path := filepath.Join(r.snapDir, name)
-
-	// Write the UCAN sidecar first if a delegation source is wired.
-	// Its infohash is embedded in the V2 manifest, so the V2 must be
-	// generated AFTER the UCAN torrent exists.
-	var ucanHashHex string
-	if r.delegationSource != nil {
-		ucanBytes, err := r.delegationSource()
-		if err != nil {
-			return metainfo.Hash{}, fmt.Errorf("delegation source: %w", err)
-		}
-		if len(ucanBytes) > 0 {
-			ucanName := ChainUCANFileName(enrFP, genID)
-			ucanPath := filepath.Join(r.snapDir, ucanName)
-			if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
-				return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
-			}
-			if _, err := BuildTorrentIfNeed(ctx, ucanName, r.snapDir, r.torrentFS); err != nil {
-				return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", ucanName, err)
-			}
-			ucanSpec, err := r.torrentFS.LoadByName(ucanName + ".torrent")
-			if err != nil {
-				return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", ucanName, err)
-			}
-			if r.downloader != nil {
-				if err := r.downloader.AddNewSeedableFile(ctx, ucanName); err != nil {
-					return metainfo.Hash{}, fmt.Errorf("seed %s: %w", ucanName, err)
-				}
-			}
-			ucanHashHex = hex.EncodeToString(ucanSpec.InfoHash[:])
-		}
-	}
-
 	// The storage component doesn't yet feed torrent hashes back into
 	// the inventory after Seed (no downloader→storage callback wired),
 	// so a publisher whose files are all on disk still has inventory
@@ -491,7 +453,6 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
-	manifest.AuthorityUCANHash = ucanHashHex
 
 	// Producer self-check: fail loud if this manifest disagrees with
 	// canonical for any known-canonical name. The check happens BEFORE
@@ -508,9 +469,65 @@ func (r *RollingV2Publisher) Publish(
 		}
 	}
 
-	tomlBytes, err := MarshalV2(manifest)
+	// The generation ID is derived from this generation's content — the
+	// inventory-derived manifest bytes plus the Authority UCAN bytes.
+	// Two publishers of byte-identical inventory and UCAN get the same
+	// genID (hence the same filenames and manifest torrent info-hash),
+	// so an honest swarm converges on one artefact per generation; any
+	// inventory or UCAN change yields a fresh one. It is derived from
+	// the manifest BEFORE its AuthorityUCANHash is stamped, breaking the
+	// circular dependency — AuthorityUCANHash names the UCAN torrent,
+	// which is itself named by this genID.
+	coreBytes, err := MarshalV2(manifest)
 	if err != nil {
-		return metainfo.Hash{}, fmt.Errorf("marshal %s: %w", name, err)
+		return metainfo.Hash{}, fmt.Errorf("marshal chain.v2 manifest: %w", err)
+	}
+	var ucanBytes []byte
+	if r.delegationSource != nil {
+		ucanBytes, err = r.delegationSource()
+		if err != nil {
+			return metainfo.Hash{}, fmt.Errorf("delegation source: %w", err)
+		}
+	}
+	genID := genIDFromContent(append(append([]byte(nil), coreBytes...), ucanBytes...))
+	name := ChainTomlV2FileName(enrFP, genID)
+	path := filepath.Join(r.snapDir, name)
+
+	// Write the Authority UCAN sidecar first when one is configured: its
+	// torrent info-hash is stamped into the manifest's AuthorityUCANHash,
+	// so the final manifest bytes can only be produced once the UCAN
+	// torrent exists. The sidecar shares the manifest's genID — they are
+	// one logical generation on disk, registered/evicted/cleaned up
+	// together.
+	var ucanHashHex string
+	if len(ucanBytes) > 0 {
+		ucanName := ChainUCANFileName(enrFP, genID)
+		ucanPath := filepath.Join(r.snapDir, ucanName)
+		if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
+			return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
+		}
+		if _, err := BuildTorrentIfNeed(ctx, ucanName, r.snapDir, r.torrentFS); err != nil {
+			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", ucanName, err)
+		}
+		ucanSpec, err := r.torrentFS.LoadByName(ucanName + ".torrent")
+		if err != nil {
+			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", ucanName, err)
+		}
+		if r.downloader != nil {
+			if err := r.downloader.AddNewSeedableFile(ctx, ucanName); err != nil {
+				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", ucanName, err)
+			}
+		}
+		ucanHashHex = hex.EncodeToString(ucanSpec.InfoHash[:])
+	}
+
+	tomlBytes := coreBytes
+	if ucanHashHex != "" {
+		manifest.AuthorityUCANHash = ucanHashHex
+		tomlBytes, err = MarshalV2(manifest)
+		if err != nil {
+			return metainfo.Hash{}, fmt.Errorf("marshal chain.v2 manifest: %w", err)
+		}
 	}
 	if err := saveChainTomlFile(path, tomlBytes); err != nil {
 		return metainfo.Hash{}, fmt.Errorf("save %s: %w", name, err)
@@ -590,7 +607,11 @@ func (r *RollingV2Publisher) Publish(
 	}
 
 	canonical := manifestFileNames(manifest)
-	r.history = append(r.history, generationEntry{genID: genID, names: canonical})
+	// A no-op republish (unchanged inventory) produces the same content
+	// genID; don't record a duplicate generation.
+	if n := len(r.history); n == 0 || r.history[n-1].genID != genID {
+		r.history = append(r.history, generationEntry{genID: genID, names: canonical})
+	}
 	r.evictInvalidLocked(enrFP, canonical)
 
 	return spec.InfoHash, nil
