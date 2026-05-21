@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -82,7 +81,6 @@ type memStore struct {
 	mu        sync.RWMutex
 	tables    map[string]*memTable
 	sequences map[string]uint64
-	byteSize  atomic.Uint64
 }
 
 func newMemStore() *memStore {
@@ -207,7 +205,6 @@ func (s *memStore) Put(table string, k, v []byte) error {
 	defer s.mu.Unlock()
 	t := s.getOrCreateTable(table)
 	t.tree.Set(memEntry{k: common.Copy(k), v: common.Copy(v)})
-	s.byteSize.Add(uint64(len(k) + len(v)))
 	// Keep sequences map in sync when writing to the Sequence table.
 	if table == kv.Sequence && len(v) >= 8 {
 		s.sequences[string(k)] = binary.BigEndian.Uint64(v)
@@ -368,8 +365,6 @@ func (s *memStore) RangeDupSort(table string, key []byte, fromPrefix, toPrefix [
 	}
 	return s.collectRangeDupSort(t, key, fromPrefix, toPrefix, bool(asc), int64(limit)), nil
 }
-
-func (s *memStore) Size() uint64 { return s.byteSize.Load() }
 
 func (s *memStore) BucketSize(table string) (uint64, error) {
 	s.mu.RLock()

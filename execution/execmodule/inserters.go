@@ -30,14 +30,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-const blockOverlayFlushThreshold = 512 * 1024 * 1024 // 512 MiB
-
-// flushBlockOverlayToDB flushes the block overlay to DB when it exceeds the
-// size threshold, bounding memory during historical backfill while preserving
-// the in-memory overlay for chain-tip (single-block) inserts.
+// flushBlockOverlayToDB flushes the block overlay to DB, bounding memory
+// during bulk inserts. Not called for single-block chain-tip inserts.
 func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
 	overlay := sd.BlockOverlay()
-	if overlay == nil || overlay.Size() < blockOverlayFlushThreshold {
+	if overlay == nil {
 		return nil
 	}
 	rwTx, err := e.db.BeginTemporalRw(ctx)
@@ -150,8 +147,10 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
-		return 0, err
+	if len(blocks) > 16 {
+		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
+			return 0, err
+		}
 	}
 	return ExecutionStatusSuccess, nil
 }
