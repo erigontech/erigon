@@ -2265,6 +2265,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if info.IsDir() {
 			return nil
 		}
+		if filepath.Ext(info.Name()) == ".tmp" {
+			return nil
+		}
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
@@ -2368,6 +2371,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(info.Name()) == ".tmp" {
 			return nil
 		}
 
