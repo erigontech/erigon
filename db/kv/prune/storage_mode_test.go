@@ -163,13 +163,25 @@ func TestIsRetentionWindowChange(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "history widened, blocks sentinel→finite (full mode upgrade)",
+			name:      "blocks DefaultBlocksPruneMode→finite (full mode EIP-8252 upgrade)",
 			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode},
+			requested: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
+			want:      true,
+		},
+		{
+			name:      "blocks finite→DefaultBlocksPruneMode (reverse direction, rejected)",
+			persisted: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
+			requested: Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode},
+			want:      false,
+		},
+		{
+			name:      "blocks KeepAllBlocksPruneMode→finite (archive/blocks → finite, rejected)",
+			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode},
 			requested: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
 			want:      false,
 		},
 		{
-			name:      "blocks finite→sentinel (archive switch)",
+			name:      "blocks finite→KeepAllBlocksPruneMode (archive switch, rejected)",
 			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: Distance(100_000)},
 			requested: Mode{Initialised: true, History: Distance(math.MaxUint64), Blocks: KeepAllBlocksPruneMode},
 			want:      false,
@@ -230,23 +242,38 @@ func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
 	assert.Equal(t, BlocksMode, persisted, "shim must rewrite the persisted value")
 }
 
-func TestEnsureNotChanged_FullSentinelRejected(t *testing.T) {
+func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 	// Pre-rescope full mode: {DefaultBlocksPruneMode (sentinel), Distance(100_000)}.
-	// New FullMode has Blocks=Distance(262_144). Sentinel→finite on Blocks is a
-	// mode-shape change, not a retention-window change, so the shim must NOT
-	// accept it — the operator must opt in explicitly.
+	// New FullMode has Blocks=Distance(262_144). The shim treats this specific
+	// one-way DefaultBlocksPruneMode→finite transition on Blocks as a
+	// retention-window change so existing full nodes upgrade without operator
+	// intervention. (Frozen .seg files won't actually be deleted until #21306
+	// lands; the config-level transition is still recorded.)
 	_, tx := memdb.NewTestTx(t)
 	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
 	initStoredMode(t, tx, legacyFull)
 
 	got, err := EnsureNotChanged(tx, FullMode)
-	require.Error(t, err)
-	assert.Equal(t, legacyFull, got, "on rejection the persisted mode is returned")
+	require.NoError(t, err)
+	assert.Equal(t, FullMode, got)
 
-	// And the DB must not have been rewritten.
 	persisted, err := Get(tx)
 	require.NoError(t, err)
-	assert.Equal(t, legacyFull, persisted)
+	assert.Equal(t, FullMode, persisted, "shim must rewrite the persisted value")
+}
+
+func TestEnsureNotChanged_BlocksFiniteToDefaultRejected(t *testing.T) {
+	// Reverse direction: starting from a finite Blocks distance, the operator
+	// can't silently flip back to DefaultBlocksPruneMode (chain history-expiry
+	// policy). That'd be a mode-shape change.
+	_, tx := memdb.NewTestTx(t)
+	persisted := Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)}
+	initStoredMode(t, tx, persisted)
+
+	requested := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	got, err := EnsureNotChanged(tx, requested)
+	require.Error(t, err)
+	assert.Equal(t, persisted, got)
 }
 
 func TestEnsureNotChanged_ArchiveUnchanged(t *testing.T) {

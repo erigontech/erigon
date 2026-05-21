@@ -201,13 +201,14 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		// to 262_144, or any operator-initiated --prune.distance change) are
 		// safe in both directions: widening cannot bring back already-pruned
 		// state but is operationally fine going forward, and narrowing just
-		// causes the next prune pass to delete more. Accept such changes,
-		// rewrite the persisted value so we don't warn on every restart, and
-		// log the transition. Mode-shape changes that toggle between a finite
-		// Distance and a sentinel (KeepAllBlocksPruneMode / DefaultBlocksPruneMode)
-		// continue to be rejected — those are likely typos with destructive
-		// consequences (e.g., archive → minimal silently pruning the bulk of
-		// the datadir).
+		// causes the next prune pass to delete more. The shim also accepts the
+		// one-way DefaultBlocksPruneMode → finite transition on Blocks so that
+		// existing full-mode datadirs can adopt the EIP-8252 default without
+		// operator intervention. Accept such changes, rewrite the persisted
+		// value so we don't warn on every restart, and log the transition.
+		// Other mode-shape toggles (anything involving KeepAllBlocksPruneMode,
+		// or finite → DefaultBlocksPruneMode) remain rejected — those are
+		// likely typos with destructive consequences.
 		if isRetentionWindowChange(pm, pruneMode) {
 			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
 				"previous", pm.String(), "current", pruneMode.String())
@@ -225,9 +226,14 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 }
 
 // isRetentionWindowChange reports whether persisted and requested differ only
-// in the size of their finite block-retention windows. A field with a sentinel
-// value (KeepAllBlocksPruneMode or DefaultBlocksPruneMode) on either side is
-// treated as a mode-shape change, not a window change, and returns false.
+// in the size of their block-retention windows. Finite Distance values on
+// either side are a window change in any direction. The one-way transition
+// DefaultBlocksPruneMode → Distance(N) on Blocks is also treated as a window
+// change so that existing full-mode datadirs (persisted Blocks=DefaultBlocksPruneMode
+// from before the EIP-8252 default bump) can upgrade to the new FullMode.Blocks=
+// Distance(DefaultPruneDistance) without operator intervention. The reverse
+// direction (finite → DefaultBlocksPruneMode) and KeepAllBlocksPruneMode on
+// either side remain mode-shape changes and stay rejected.
 func isRetentionWindowChange(persisted, requested Mode) bool {
 	if persisted.History == requested.History && persisted.Blocks == requested.Blocks {
 		return false
@@ -235,7 +241,8 @@ func isRetentionWindowChange(persisted, requested Mode) bool {
 	historyOK := persisted.History == requested.History ||
 		(isFiniteDistance(persisted.History) && isFiniteDistance(requested.History))
 	blocksOK := persisted.Blocks == requested.Blocks ||
-		(isFiniteDistance(persisted.Blocks) && isFiniteDistance(requested.Blocks))
+		(isFiniteDistance(persisted.Blocks) && isFiniteDistance(requested.Blocks)) ||
+		(persisted.Blocks == DefaultBlocksPruneMode && isFiniteDistance(requested.Blocks))
 	return historyOK && blocksOK
 }
 
