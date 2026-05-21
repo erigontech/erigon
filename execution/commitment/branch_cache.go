@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,18 @@ import (
 
 	"github.com/erigontech/erigon/common/maphash"
 )
+
+// KeyCommitmentState is the commitment-domain key under which the trie
+// checkpoint (txNum / blockNum / encoded root state) is stored. It is NOT a
+// trie branch: it changes every block, so it must never enter the
+// BranchCache — serving a stale checkpoint restores the trie to the wrong
+// state and corrupts the computed root. BranchCache.Put/Get/PinEntry reject
+// it by construction so no caller can pollute the cache with it.
+var KeyCommitmentState = []byte("state")
+
+func isCommitmentStateKey(prefix []byte) bool {
+	return bytes.Equal(prefix, KeyCommitmentState)
+}
 
 // BranchCache stores commitment-trie branch data:
 //
@@ -360,6 +373,9 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 // contracts under PIN_CONTRACT_TRUNKS. Data is copied; safe to mutate
 // the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin string) {
+	if isCommitmentStateKey(prefix) {
+		return
+	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	c.pinned.Set(prefix, &branchCacheEntry{
@@ -417,6 +433,9 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 // bytes (with the leading 2-byte touch-map prefix) plus the on-disk file
 // step the bytes came from (0 if not tracked).
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
+	if isCommitmentStateKey(prefix) {
+		return nil, 0, false
+	}
 	entry, ok := c.lookup(prefix)
 	if !ok {
 		return nil, 0, false
@@ -437,6 +456,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 // caller MUST NOT modify the cells in place. Read-only consumption is
 // safe across concurrent calls.
 func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell, ok bool) {
+	if isCommitmentStateKey(prefix) {
+		return 0, nil, false
+	}
 	entry, found := c.lookup(prefix)
 	if !found {
 		return 0, nil, false
@@ -468,6 +490,9 @@ func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell,
 // from (0 if not tracked); origin is a short label of the write site
 // captured for divergence-detection diagnostics.
 func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string) {
+	if isCommitmentStateKey(prefix) {
+		return
+	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	c.store(prefix, &branchCacheEntry{
