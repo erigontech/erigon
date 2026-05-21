@@ -206,9 +206,9 @@ func TestFlushAppendPath(t *testing.T) {
 	require.Equal(t, "value3", string(v))
 }
 
-// TestFlushEmptyDestination exercises the empty-destination case (canAppend
-// holds without comparison) for both plain and dupsort tables.
-func TestFlushEmptyDestination(t *testing.T) {
+// TestFlushEmptyDestinationPlain exercises the Append fast-path for a plain
+// table when the destination has no existing keys.
+func TestFlushEmptyDestinationPlain(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
@@ -225,6 +225,32 @@ func TestFlushEmptyDestination(t *testing.T) {
 	v, err = rwTx.GetOne(kv.HeaderNumber, []byte("BBBB"))
 	require.NoError(t, err)
 	require.Equal(t, "v2", string(v))
+}
+
+// TestFlushEmptyDestinationDupsort exercises the AppendDup fast-path for a
+// pure DupSort table when the destination has no existing keys. The batch
+// writes multiple values per key so the dup handling is actually exercised.
+func TestFlushEmptyDestinationDupsort(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k1"), []byte("v1a")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k1"), []byte("v1b")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("k2"), []byte("v2a")))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	var pairs []string
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		pairs = append(pairs, string(k)+"="+string(v))
+	}
+	require.Equal(t, []string{"k1=v1a", "k1=v1b", "k2=v2a"}, pairs)
 }
 
 func TestForEach(t *testing.T) {
