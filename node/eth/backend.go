@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -491,6 +492,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
+	// canonicalView + canonicalGenesis are assigned below in the
+	// manifest_exchange block when a genesis is pinned. The producer
+	// self-check closure and the adoption trigger (set just below)
+	// close over them and read them at publish time, long after
+	// assignment, so the forward reference is safe.
+	var canonicalView *snapshotsync.CanonicalView
+	var canonicalGenesis snapcfg.PreverifiedItems
+
 	// Hand the storage component's inventory to the downloader so
 	// PublishLocalChainToml emits V2 sidecars alongside V1. Required
 	// for consumer-side manifest_exchange to fetch a usable manifest.
@@ -510,28 +519,71 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// db/snapshotsync imports db/downloader and the reverse
 		// would be a cycle.
 		chainName := config.Genesis.Config.ChainName
-		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
-			cfg, known := snapcfg.KnownCfg(chainName)
-			if !known || cfg == nil {
-				return nil // no canonical loaded → defensive no-op
+
+		// Phase 7c minority-detection trigger. The producer self-check
+		// runs on every RollingV2Publisher.Publish; when it finds this
+		// node advertising a non-canonical hash for a quorum-promoted
+		// file it hands the verdict to triggerAdoption, which runs
+		// staged adoption out of band (a network fetch + validation +
+		// cutover must not block the publish path). adoptionRunning is
+		// a single-flight guard — only one adoption in flight; a failed
+		// run resets it so the next publish retries.
+		adoptionPolicy, apErr := snapshotsync.ParseAdoptionPolicy(config.Snapshot.AdoptionPolicy)
+		if apErr != nil {
+			return nil, fmt.Errorf("invalid --snapshot.adoption-policy: %w", apErr)
+		}
+		var adoptionRunning atomic.Bool
+		triggerAdoption := func(verdict *snapshotsync.MinorityVerdict) {
+			if !adoptionRunning.CompareAndSwap(false, true) {
+				return // an adoption is already in flight
 			}
-			// Phase 7a: CheckOwnAdvertisement splits a hash mismatch
-			// into a fatal genesis divergence and a non-fatal minority
-			// verdict. Wiring the minority path to the live canonical
-			// view + staged adoption is Phase 7b; until then the
-			// static preverified set is treated as genesis, so every
-			// mismatch is a divergence — behaviour is unchanged.
+			version := 0
+			if canonicalView != nil {
+				version = canonicalView.Version()
+			}
+			go func() {
+				defer adoptionRunning.Store(false)
+				res, err := backend.components.Storage.RunStagedAdoption(backend.sentryCtx, storagecomp.AdoptionRequest{
+					Verdict:          verdict,
+					Policy:           adoptionPolicy,
+					CanonicalVersion: fmt.Sprint(version),
+					PruneMode:        config.Prune,
+					Downloader:       backend.components.Downloader,
+				})
+				if err != nil {
+					logger.Error("staged adoption failed", "err", err)
+					return
+				}
+				logger.Info("staged adoption", "outcome", res.Outcome, "reason", res.Reason)
+			}()
+		}
+
+		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
+			// Check against the live canonical quorum view when a
+			// genesis is pinned; otherwise fall back to the static
+			// embedded preverified set treated as genesis (legacy
+			// mode — every mismatch is a fatal divergence).
+			genesis := canonicalGenesis
+			var canonicals []snapcfg.PreverifiedItems
+			if canonicalView != nil {
+				canonicals = []snapcfg.PreverifiedItems{canonicalView.Canonical()}
+			} else {
+				cfg, known := snapcfg.KnownCfg(chainName)
+				if !known || cfg == nil {
+					return nil // no canonical loaded → defensive no-op
+				}
+				genesis = cfg.Preverified.Items
+				canonicals = []snapcfg.PreverifiedItems{cfg.Preverified.Items}
+			}
 			verdict, err := snapshotsync.CheckOwnAdvertisement(
-				downloader.ChainTomlV2ToItems(m),
-				cfg.Preverified.Items,
-				[]snapcfg.PreverifiedItems{cfg.Preverified.Items},
-			)
+				downloader.ChainTomlV2ToItems(m), genesis, canonicals)
 			if err != nil {
 				return err
 			}
 			if verdict != nil {
-				logger.Warn("publisher self-check: minority entries detected — staged adoption pending (Phase 7b)",
-					"count", len(verdict.Adopt))
+				logger.Warn("publisher self-check: minority entries detected — triggering staged adoption",
+					"count", len(verdict.Adopt), "policy", adoptionPolicy)
+				triggerAdoption(verdict)
 			}
 			return nil
 		})
@@ -656,8 +708,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			if gerr != nil {
 				return nil, fmt.Errorf("loading pinned canonical genesis: %w", gerr)
 			}
-			var canonicalView *snapshotsync.CanonicalView
 			if genesisPinned {
+				canonicalGenesis = genesisItems
 				qc := snapcfg.QuorumConfigFor(mxChainName)
 				if config.Snapshot.QuorumFloor > 0 {
 					qc.QFloor = config.Snapshot.QuorumFloor
