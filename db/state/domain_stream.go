@@ -221,31 +221,43 @@ func (hi *DomainLatestIterFile) init(domainRoTx *DomainRoTx) error {
 
 func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 	if domainRoTx.d.LargeValues {
-		valsCursor, err := hi.roTx.Cursor(domainRoTx.d.ValuesTable) //nolint:gocritic
+		keysCursor, err := hi.roTx.CursorDupSort(domainRoTx.d.KeysTable) //nolint:gocritic
 		if err != nil {
 			return err
 		}
 		var pushed bool
 		defer func() {
 			if !pushed {
-				valsCursor.Close()
+				keysCursor.Close()
 			}
 		}()
-		key, value, err := valsCursor.Seek(hi.from)
+		key, dup, err := keysCursor.Seek(hi.from)
 		if err != nil {
 			return err
 		}
-		for key != nil && len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
-			k := key[:len(key)-8]
-			stepBytes := key[len(key)-8:]
-			step := ^binary.BigEndian.Uint64(stepBytes)
+		for key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
+			if len(dup) != dupRecordLen {
+				key, dup, err = keysCursor.NextNoDup()
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			step := ^binary.BigEndian.Uint64(dup[:8])
 			endTxNum := step * domainRoTx.d.stepSize
 			if endTxNum >= hi.filesEndTxNum {
-				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(value), cNonDup: valsCursor, endTxNum: endTxNum, reverse: true})
+				var v []byte
+				if binary.BigEndian.Uint64(dup[8:]) != deletionSeqID {
+					v, err = hi.roTx.GetOne(domainRoTx.d.ValuesTable, dup[8:])
+					if err != nil {
+						return err
+					}
+				}
+				heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(key), val: common.Copy(v), cDup: keysCursor, endTxNum: endTxNum, reverse: true})
 				pushed = true
 				break
 			}
-			key, value, err = valsCursor.Next()
+			key, dup, err = keysCursor.NextNoDup()
 			if err != nil {
 				return err
 			}
@@ -292,32 +304,27 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		}
 	}()
 	for {
-		initial, _, err := ci1.cNonDup.Current()
+		k, dup, err := ci1.cDup.NextNoDup()
 		if err != nil {
 			return err
 		}
-		if initial == nil || len(initial) <= 8 {
+		if len(k) == 0 || !(hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 			break
 		}
-		baseKey := initial[:len(initial)-8]
-		var k, v []byte
-		for {
-			k, v, err = ci1.cNonDup.Next()
-			if err != nil {
-				return err
-			}
-			if k == nil || len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
-				break
-			}
+		if len(dup) != dupRecordLen {
+			continue
 		}
-		if k == nil || len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
-			break
-		}
-		stepBytes := k[len(k)-8:]
-		step := ^binary.BigEndian.Uint64(stepBytes)
+		step := ^binary.BigEndian.Uint64(dup[:8])
 		endTxNum := step * hi.aggStep
 		if endTxNum >= hi.filesEndTxNum {
-			ci1.key = common.Copy(k[:len(k)-8])
+			var v []byte
+			if binary.BigEndian.Uint64(dup[8:]) != deletionSeqID {
+				v, err = hi.roTx.GetOne(hi.valsTable, dup[8:])
+				if err != nil {
+					return err
+				}
+			}
+			ci1.key = common.Copy(k)
 			ci1.endTxNum = endTxNum
 			ci1.val = common.Copy(v)
 			heap.Push(hi.h, ci1)

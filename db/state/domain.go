@@ -30,7 +30,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
@@ -60,6 +59,14 @@ var (
 	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
+
+// LargeValues indirect-layout constants.
+const (
+	dupRecordLen = 16 // invStep(8) + seqID(8)
+	// deletionSeqID marks a keys-table dup as a tombstone (no row in valsTable).
+	// IncrementSequence starts at 0 and never wraps in practice, so MaxUint64 is safe.
+	deletionSeqID = math.MaxUint64
+)
 
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
@@ -194,7 +201,11 @@ func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 // maxStepInDBNoHistory - return latest available step in db (at-least 1 value in such step)
 // Does not use history table to find the latest step
 func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
-	firstKey, err := kv.FirstKey(tx, d.ValuesTable)
+	keysTable := d.ValuesTable
+	if d.LargeValues {
+		keysTable = d.KeysTable
+	}
+	firstKey, err := kv.FirstKey(tx, keysTable)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
@@ -202,16 +213,11 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 	if len(firstKey) == 0 {
 		return 0
 	}
-	if d.LargeValues {
-		stepBytes := firstKey[len(firstKey)-8:]
-		return kv.Step(^binary.BigEndian.Uint64(stepBytes))
-	}
-	firstVal, err := tx.GetOne(d.ValuesTable, firstKey)
+	firstVal, err := tx.GetOne(keysTable, firstKey)
 	if err != nil {
 		d.logger.Warn("[agg] Domain.maxStepInDBNoHistory", "firstKey", firstKey, "err", err)
 		return 0
 	}
-
 	stepBytes := firstVal[:8]
 	return kv.Step(^binary.BigEndian.Uint64(stepBytes))
 }
@@ -308,7 +314,13 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 	return dv, hv, hiv
 }
 
-func (d *Domain) Tables() []string { return append(d.History.Tables(), d.ValuesTable) }
+func (d *Domain) Tables() []string {
+	res := append(d.History.Tables(), d.ValuesTable)
+	if d.LargeValues && d.KeysTable != "" {
+		res = append(res, d.KeysTable)
+	}
+	return res
+}
 
 func (d *Domain) Close() {
 	if d == nil {
@@ -357,6 +369,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 	w := &DomainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
+		keysTable: dt.d.KeysTable,
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
@@ -373,6 +386,7 @@ type DomainBufferedWriter struct {
 
 	discard bool
 
+	keysTable string // LargeValues=true only: DupSort table mapping bareKey -> invStep+seqID
 	valsTable string
 	largeVals bool
 
@@ -403,7 +417,79 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if w.largeVals {
-		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+		// On (bareKey, invStep) collision the hot path is real->real: update the vals
+		// row in place and leave the keys dup alone (saves a vals Delete + a keys
+		// PutCurrent per re-flush, common for commitment branches re-written in the
+		// same step). Other transitions still need the full delete/append/replace.
+		keysCursor, err := tx.RwCursorDupSort(w.keysTable)
+		if err != nil {
+			return err
+		}
+		defer keysCursor.Close()
+		// Two cursors on valsTable:
+		//   valsCursorRW  — Put and Delete; can seek anywhere, fine for MDBX_UPSERT/Set.
+		//   valsCursorApp — Append only; never moves backward, so MDBX_APPEND's
+		//                   cursor-position check always sees a position ≤ the new key.
+		//                   Put/Delete on valsCursorRW must not share this cursor or they
+		//                   can leave it at EOF (after deleting the last key), which causes
+		//                   the next MDBX_APPEND to fail with MDBX_EKEYMISMATCH.
+		valsCursorRW, err := tx.RwCursor(w.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursorRW.Close()
+		valsCursorApp, err := tx.RwCursor(w.valsTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursorApp.Close()
+		var seqIDBuf [8]byte
+		var dupBuf [dupRecordLen]byte
+		if err := w.values.Load(tx, w.valsTable, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			bareKey := k[:len(k)-8]
+			invStep := k[len(k)-8:]
+			newIsDeletion := len(v) == 0
+
+			existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+			if err != nil {
+				return err
+			}
+			hasDup := len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep)
+
+			// Hot path: in-place update — keysTable dup unchanged.
+			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
+				copy(seqIDBuf[:], existing[8:])
+				return valsCursorRW.Put(seqIDBuf[:], v)
+			}
+
+			seqID := uint64(deletionSeqID)
+			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+				// real → deletion: remove from vals
+				copy(seqIDBuf[:], existing[8:])
+				if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
+					return err
+				}
+			} else if !newIsDeletion {
+				// new or resurrected: append to vals
+				id, err := tx.IncrementSequence(w.valsTable, 1)
+				if err != nil {
+					return err
+				}
+				seqID = id
+				binary.BigEndian.PutUint64(seqIDBuf[:], seqID)
+				if err := valsCursorApp.Append(seqIDBuf[:], v); err != nil {
+					return err
+				}
+			}
+			// else: del→del or !hasDup+deletion → write tombstone seqID to keysTable only
+
+			copy(dupBuf[:8], invStep)
+			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
+			if hasDup {
+				return keysCursor.PutCurrent(bareKey, dupBuf[:])
+			}
+			return keysCursor.Put(bareKey, dupBuf[:])
+		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
 		w.Close()
@@ -492,7 +578,7 @@ type DomainRoTx struct {
 
 	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
-	valsC      kv.Cursor
+	valsC      kv.CursorDupSort
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
 
 	getFromFileCache *DomainGetFromFileCache
@@ -734,24 +820,35 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	stepVal := ^uint64(step)
 
 	if d.LargeValues {
-		valsCursor, err := roTx.Cursor(d.ValuesTable)
+		keysCursor, err := roTx.CursorDupSort(d.KeysTable)
 		if err != nil {
-			return Collation{}, fmt.Errorf("create %s values cursor: %w", d.FilenameBase, err)
+			return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.FilenameBase, err)
 		}
-		defer valsCursor.Close()
-		for k, v, err := valsCursor.First(); k != nil; k, v, err = valsCursor.Next() {
+		defer keysCursor.Close()
+		var seqKey [8]byte
+		for k, dupVal, err := keysCursor.First(); k != nil; k, dupVal, err = keysCursor.Next() {
 			if err != nil {
 				return coll, err
 			}
-			if binary.BigEndian.Uint64(k[len(k)-8:]) != stepVal {
+			if len(dupVal) != dupRecordLen {
 				continue
 			}
-			bareKey := k[:len(k)-8]
-			if _, err = comp.Write(bareKey); err != nil {
-				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, bareKey, err)
+			if binary.BigEndian.Uint64(dupVal[:8]) != stepVal {
+				continue
+			}
+			var v []byte
+			if binary.BigEndian.Uint64(dupVal[8:]) != deletionSeqID {
+				copy(seqKey[:], dupVal[8:])
+				v, err = roTx.GetOne(d.ValuesTable, seqKey[:])
+				if err != nil {
+					return coll, err
+				}
+			}
+			if _, err = comp.Write(k); err != nil {
+				return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, k, err)
 			}
 			if _, err = comp.Write(v); err != nil {
-				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, bareKey, v, err)
+				return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, k, v, err)
 			}
 		}
 	} else {
@@ -1211,11 +1308,6 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
 
-	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
-	if err != nil {
-		return err
-	}
-	defer valsCursor.Close()
 	// Revert keys using diff entries.
 	// Always: delete current entry at the write step, restore prevValue at unwind target step.
 	//
@@ -1235,26 +1327,72 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if currentFilesEndStep > unwindStep {
 		unwindStep = currentFilesEndStep
 	}
-	unwindStepBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(unwindStep))
+	var unwindStepBytes [8]byte
+	binary.BigEndian.PutUint64(unwindStepBytes[:], ^uint64(unwindStep))
+
+	if dt.d.LargeValues {
+		keysCursor, err := rwTx.RwCursorDupSort(d.KeysTable)
+		if err != nil {
+			return err
+		}
+		defer keysCursor.Close()
+		valsCursor, err := rwTx.RwCursor(d.ValuesTable)
+		if err != nil {
+			return err
+		}
+		defer valsCursor.Close()
+		var seqKey [8]byte
+		var dup [dupRecordLen]byte
+		copy(dup[:8], unwindStepBytes[:])
+		for i := range domainDiffs {
+			keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
+			key := common.ToBytesZeroCopy(keyStr)
+			bareKey := key[:len(key)-8]
+			invStep := key[len(key)-8:]
+			if err := deleteLargeValuesDup(keysCursor, valsCursor, bareKey, invStep); err != nil {
+				return err
+			}
+			if value == nil {
+				continue
+			}
+			// Evict any existing dup already at unwindStep (left by a previous
+			// unwind cycle). Put() on a DupSort cursor appends a NEW dup when the
+			// seqID differs, so without this we'd accumulate duplicate dups at the
+			// same invStep across repeated unwind cycles.
+			if err := deleteLargeValuesDup(keysCursor, valsCursor, bareKey, unwindStepBytes[:]); err != nil {
+				return err
+			}
+			newSeqID := uint64(deletionSeqID)
+			if len(value) > 0 {
+				newSeqID, err = rwTx.IncrementSequence(d.ValuesTable, 1)
+				if err != nil {
+					return err
+				}
+				binary.BigEndian.PutUint64(seqKey[:], newSeqID)
+				if err := valsCursor.Append(seqKey[:], value); err != nil {
+					return err
+				}
+			}
+			binary.BigEndian.PutUint64(dup[8:], newSeqID)
+			if err := keysCursor.Put(bareKey, dup[:]); err != nil {
+				return err
+			}
+		}
+		if _, err := dt.ht.prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+			return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.FilenameBase, txNumUnwindTo, step, err)
+		}
+		return nil
+	}
+
+	valsCursor, err := rwTx.RwCursorDupSort(d.ValuesTable)
+	if err != nil {
+		return err
+	}
+	defer valsCursor.Close()
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := common.ToBytesZeroCopy(keyStr)
-		if dt.d.LargeValues {
-			// Delete the entry at the write step
-			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
-				return err
-			}
-			// nil = different step, skip; []byte{} = absent previously, write empty tombstone
-			if value != nil {
-				fullKey := key[:len(key)-8]
-				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
-					return err
-				}
-			}
-			continue
-		}
 		stepBytes := key[len(key)-8:]
 		fullKey := key[:len(key)-8]
 		// Delete the current entry at the write step
@@ -1273,7 +1411,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 		// nil = different step, skip; []byte{} = absent previously, write empty tombstone
 		if value != nil {
-			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+			if err := valsCursor.Put(fullKey, append(unwindStepBytes[:], value...)); err != nil {
 				return err
 			}
 		}
@@ -1502,7 +1640,7 @@ func (dt *DomainRoTx) closeValsCursor() {
 	}
 }
 
-func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
+func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	if dt.valsC != nil { // run in assert mode only
 		if asserts {
 			if tx.ViewID() != dt.valCViewID {
@@ -1528,7 +1666,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 		dt.valCViewID = tx.ViewID()
 	}
 	if dt.d.LargeValues {
-		dt.valsC, err = tx.Cursor(dt.d.ValuesTable)
+		dt.valsC, err = tx.CursorDupSort(dt.d.KeysTable)
 		return dt.valsC, err
 	}
 	dt.valsC, err = tx.CursorDupSort(dt.d.ValuesTable)
@@ -1548,18 +1686,23 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	var v, foundInvStep []byte
 
 	if dt.d.LargeValues {
-		var fullkey []byte
-		fullkey, v, err = valsC.Seek(key)
+		// SeekBoth at smallest invStep returns the dup with smallest invStep =
+		// highest actual step = latest write.
+		var dupSeek [8]byte
+		dupVal, err := valsC.SeekBothRange(key, dupSeek[:])
 		if err != nil {
-			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
+			return nil, 0, false, fmt.Errorf("valsCursor.SeekBothRange: %w", err)
 		}
-		if len(fullkey) == 0 {
-			return nil, 0, false, nil // This key is not in DB
+		if len(dupVal) != dupRecordLen {
+			return nil, 0, false, nil
 		}
-		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
-			return nil, 0, false, nil // This key is not in DB
+		foundInvStep = dupVal[:8]
+		if binary.BigEndian.Uint64(dupVal[8:]) != deletionSeqID {
+			v, err = roTx.GetOne(dt.d.ValuesTable, dupVal[8:])
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("vals lookup: %w", err)
+			}
 		}
-		foundInvStep = fullkey[len(fullkey)-8:]
 	} else {
 		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
 			defer func() {
@@ -1852,38 +1995,42 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer mxPruneTookDomain.ObserveDuration(time.Now())
-	var valsCursor kv.PseudoDupSortRwCursor
-	var mode prune.StorageMode
-	if dt.d.LargeValues {
-		mode = prune.StepKeyStorageMode
-		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-		defer valsRwCursor.Close()
 
-		switch c := valsRwCursor.(type) {
-		case *mdbx2.MdbxCursor:
-			valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
-		case *mdbx2.MdbxDupSortCursor:
-			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
-		default:
-			valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
+	if dt.d.LargeValues {
+		// LargeValues indirect layout: CommitmentKeys is DupSort(bareKey ->
+		// invStep+seqID). TableScanningPrune uses NextNoDup() for its outer loop,
+		// so it only ever sees the FIRST (newest) dup per bareKey.  If that dup is
+		// beyond the prune range, the entire key is skipped — leaving older-step
+		// dups and their corresponding vals orphaned. Use Next() instead so every
+		// (bareKey, invStep+seqID) pair is examined independently.
+		pruneStat, pruneErr := dt.pruneLargeValues(ctx, rwTx, txFrom, txTo, limit, logEvery, prg)
+		defer func() {
+			pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+			if saveErr := SavePruneValProgress(rwTx, dt.d.ValuesTable, pruneStat); saveErr != nil {
+				dt.d.logger.Error("prune val progress", "name", dt.name, "err", saveErr)
+			}
+		}()
+		if pruneErr != nil {
+			return stat, pruneErr
 		}
-		defer valsCursor.Close()
-	} else {
-		mode = prune.StepValueStorageMode
-		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
-		if err != nil {
-			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
-		}
-		defer valsCursor.Close()
+		mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
+		stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+		stat.MaxStep = kv.Step(pruneStat.MaxTxNum / dt.stepSize)
+		stat.Values = pruneStat.PruneCountValues
+		stat.Progress = pruneStat.ValueProgress
+		return stat, nil
 	}
+
+	valsCursor, err := rwTx.RwCursorDupSort(dt.d.ValuesTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
+	}
+	defer valsCursor.Close()
 
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
+		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, prune.StepValueStorageMode)
 	if err != nil {
 		return stat, err
 	}
@@ -1909,12 +2056,121 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	return stat, err
 }
 
+// deleteLargeValuesDup removes the dup at invStep for bareKey from a LargeValues DupSort
+// keys cursor, deleting the corresponding vals row when the seqID is not the deletion sentinel.
+func deleteLargeValuesDup(keysCursor kv.RwCursorDupSort, valsCursor kv.RwCursor, bareKey, invStep []byte) error {
+	existing, err := keysCursor.SeekBothRange(bareKey, invStep)
+	if err != nil || len(existing) != dupRecordLen || !bytes.Equal(existing[:8], invStep) {
+		return err
+	}
+	if binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
+		var seqKey [8]byte
+		copy(seqKey[:], existing[8:])
+		if err := valsCursor.Delete(seqKey[:]); err != nil {
+			return err
+		}
+	}
+	return keysCursor.DeleteCurrent()
+}
+
+// pruneLargeValues prunes the keysTable+valsTable of a LargeValues domain by
+// scanning every (bareKey, invStep+seqID) dup with Next() instead of NextNoDup().
+// NextNoDup() only sees the first (newest) dup per bareKey; when that dup is beyond
+// the prune range, it would skip the entire key even if older-step dups are in range.
+func (dt *DomainRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, prg *prune.Stat) (stat *prune.Stat, err error) {
+	// KeyProgress=Done: LargeValues domains have no separate keys-only pruning phase.
+	stat = &prune.Stat{MinTxNum: math.MaxUint64, KeyProgress: prune.Done, ValueProgress: prune.Done}
+
+	keysC, err := rwTx.RwCursorDupSort(dt.d.KeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", dt.name.String(), err)
+	}
+	defer keysC.Close()
+
+	var bareKey, dupVal []byte
+	if prg.ValueProgress == prune.InProgress && len(prg.LastPrunedValue) > 0 {
+		bareKey, dupVal, err = keysC.Seek(prg.LastPrunedValue)
+	} else {
+		bareKey, dupVal, err = keysC.First()
+	}
+	if err != nil {
+		return stat, err
+	}
+
+	for ; bareKey != nil; bareKey, dupVal, err = keysC.Next() {
+		if err != nil {
+			return stat, err
+		}
+		if len(dupVal) != dupRecordLen {
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.ValueProgress = prune.InProgress
+			return stat, nil
+		default:
+		}
+
+		step := kv.Step(^binary.BigEndian.Uint64(dupVal[:8]))
+		txNum := step.ToTxNum(dt.stepSize)
+		if txNum < txFrom || txNum >= txTo {
+			continue
+		}
+
+		var seqKey [8]byte
+		copy(seqKey[:], dupVal[8:])
+		if binary.BigEndian.Uint64(seqKey[:]) != deletionSeqID {
+			if err = rwTx.Delete(dt.d.ValuesTable, seqKey[:]); err != nil {
+				return stat, err
+			}
+		}
+		if err = keysC.DeleteCurrent(); err != nil {
+			return stat, err
+		}
+
+		stat.PruneCountValues++
+		if txNum < stat.MinTxNum {
+			stat.MinTxNum = txNum
+		}
+		if txNum > stat.MaxTxNum {
+			stat.MaxTxNum = txNum
+		}
+
+		select {
+		case <-logEvery.C:
+			dt.d.logger.Info("[snapshots] prune domain", "name", dt.d.FilenameBase, "pruned", stat.PruneCountValues)
+		default:
+		}
+
+		if stat.PruneCountValues >= limit {
+			stat.LastPrunedValue = common.Copy(bareKey)
+			stat.ValueProgress = prune.InProgress
+			return stat, nil
+		}
+	}
+	if err != nil {
+		return stat, err
+	}
+
+	stat.ValueProgress = prune.Done
+	if stat.PruneCountValues == 0 {
+		stat.MinTxNum = 0
+	}
+	return stat, nil
+}
+
 func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	res = []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	if dt.d.LargeValues && dt.d.KeysTable != "" {
+		res = append(res, dt.d.KeysTable)
+	}
+	return res
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

@@ -426,9 +426,12 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"commitment state blockNum=%d must be ≤ unwindTarget=%d after repeated unwinds",
 		postBlock, unwindTarget)
-	// Verify: no commitment values table entries with step > unwindTarget/stepSize.
+	// Verify: no commitment keys-table dups with step > unwindTarget/stepSize.
+	// LargeValues=true layout: TblCommitmentKeys (DupSort) holds bareKey -> invStep(8)+seqID(8);
+	// the dup value's first 8 bytes are ^step (TblCommitmentVals is now plain seqID->value
+	// and no longer carries step in the value prefix).
 	maxStep := unwindTarget / stepSize
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	c, err := rwTx.CursorDupSort(kv.TblCommitmentKeys)
 	require.NoError(err)
 	defer c.Close()
 	offending := 0
@@ -447,7 +450,7 @@ func TestSharedDomain_RepeatedUnwindAcrossStepBoundary(t *testing.T) {
 		}
 	}
 	require.Zerof(offending,
-		"%d commitment values entries have step > %d after repeated unwinds (e.g. step %d); "+
+		"%d commitment keys-table dups have step > %d after repeated unwinds (e.g. step %d); "+
 			"these are the \"orphan\" entries that caused mainnet execution to start at stale commitment state",
 		offending, maxStep, exampleStep)
 }
@@ -605,7 +608,9 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 			table, offending, maxStep, exampleStep)
 	}
 	checkTableForOrphans(kv.TblAccountVals)
-	checkTableForOrphans(kv.TblCommitmentVals)
+	// Commitment is LargeValues=true: TblCommitmentVals is plain seqID->value; step lives
+	// in the keys table (bareKey -> invStep(8)+seqID(8)) which is what we scan for orphans.
+	checkTableForOrphans(kv.TblCommitmentKeys)
 }
 
 // TestSharedDomain_UnwindAcrossStepBoundary reproduces the mainnet corruption
@@ -709,24 +714,26 @@ func TestSharedDomain_UnwindAcrossStepBoundary(t *testing.T) {
 	require.LessOrEqualf(postBlock, unwindTarget,
 		"post-unwind: commitment state blockNum=%d must be ≤ unwindTarget=%d (txNum=%d)",
 		postBlock, unwindTarget, postTxNum)
-	// Fix: also confirm no values table entries exist above the unwind-target step.
+	// Confirm no CommitmentKeys dups remain above the unwind-target step.
+	// TblCommitmentVals stores seqID→value with no step encoding; check the
+	// keys table (DupSort: bareKey → invStep+seqID) instead.
 	maxStep := unwindTarget / stepSize // step 0 for target 4
-	c, err := rwTx.Cursor(kv.TblCommitmentVals)
+	kc, err := rwTx.CursorDupSort(kv.TblCommitmentKeys)
 	require.NoError(err)
-	defer c.Close()
+	defer kc.Close()
 	offending := 0
-	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+	for bareKey, dupVal, err := kc.First(); bareKey != nil; bareKey, dupVal, err = kc.Next() {
 		require.NoError(err)
-		if len(v) < 8 {
+		if len(dupVal) < 8 {
 			continue
 		}
-		step := ^binary.BigEndian.Uint64(v[:8])
+		step := ^binary.BigEndian.Uint64(dupVal[:8])
 		if step > maxStep {
 			offending++
 		}
 	}
 	require.Zerof(offending,
-		"post-unwind: %d commitment values entries have step > %d (maxStep for unwindTarget=%d)",
+		"post-unwind: %d commitment keys dups have step > %d (maxStep for unwindTarget=%d)",
 		offending, maxStep, unwindTarget)
 }
 

@@ -782,6 +782,12 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, pruneTx, s.CurrentSyncCycle.IsInitialCycle, 0)
+			}, logger); err != nil {
+				return err
+			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
@@ -821,6 +827,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, pruneTx, s.CurrentSyncCycle.IsInitialCycle, 0)
+			}, logger); err != nil {
 				return err
 			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
