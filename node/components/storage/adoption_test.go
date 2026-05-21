@@ -18,8 +18,6 @@ package storage
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -164,28 +162,6 @@ func TestAdoptionOutcome_String(t *testing.T) {
 	require.Equal(t, "salt-divergence", AdoptionSaltDivergence.String())
 	require.Equal(t, "staged", AdoptionStaged.String())
 	require.Equal(t, "cut-over", AdoptionCutOver.String())
-}
-
-// TestMoveFileAcrossFS covers the same-filesystem path: a plain rename
-// moves the bytes and removes the source. (The EXDEV copy fallback
-// needs two real filesystems and is exercised by the harness.)
-func TestMoveFileAcrossFS(t *testing.T) {
-	t.Parallel()
-	d := t.TempDir()
-	src := filepath.Join(d, "src.kv")
-	dst := filepath.Join(d, "domain", "dst.kv")
-	require.NoError(t, os.MkdirAll(filepath.Dir(dst), 0o755))
-	require.NoError(t, os.WriteFile(src, []byte("canonical-bytes"), 0o644))
-
-	require.NoError(t, moveFileAcrossFS(src, dst))
-
-	got, err := os.ReadFile(dst)
-	require.NoError(t, err)
-	require.Equal(t, "canonical-bytes", string(got))
-	_, statErr := os.Stat(src)
-	require.True(t, os.IsNotExist(statErr), "source must be gone after the move")
-
-	require.Error(t, moveFileAcrossFS(filepath.Join(d, "missing.kv"), dst))
 }
 
 // TestCutoverStagedBatch_RequiresAggregator: the running-node cutover

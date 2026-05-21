@@ -314,6 +314,15 @@ var snapshotCommand = cli.Command{
 			},
 		},
 		{
+			Name:   "adopt",
+			Usage:  "Cut over snapshot batches staged by --snapshot.adoption-policy=stage|warn (run against a stopped node)",
+			Action: adoptCliAction,
+			Flags: []cli.Flag{
+				&utils.DataDirFlag,
+				&dryRunFlag,
+			},
+		},
+		{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
