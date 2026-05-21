@@ -160,6 +160,15 @@ func (p *Provider) RunStagedAdoption(ctx context.Context, req AdoptionRequest) (
 		return nil, fmt.Errorf("adoption: staged batch failed validation: %w", err)
 	}
 
+	// Intent marker: the batch passed Stage 1 + Stage 2 and is safe to
+	// promote. A crash before the cutover finishes leaves a marked
+	// staging dir that `erigon snapshots adopt` (or a re-run) completes;
+	// an unmarked dir is an interrupted fetch and is never cut over.
+	if err := os.WriteFile(filepath.Join(batch.Dir, snapshot.AdoptionReadyMarker), nil, 0o644); err != nil {
+		_ = dir.RemoveAll(batch.Dir)
+		return nil, fmt.Errorf("adoption: write ready marker: %w", err)
+	}
+
 	// policy=stage stops here — the validated batch waits on disk for an
 	// operator-triggered cutover.
 	if req.Policy == snapshotsync.AdoptionStage {

@@ -60,6 +60,7 @@ func TestCutoverStagedDir(t *testing.T) {
 	domainName := "v1.0-accounts.0-2048.kv"       // domain/ subdir
 	require.NoError(t, os.WriteFile(filepath.Join(stagingDir, blockName), []byte("canon-block"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(stagingDir, domainName), []byte("canon-domain"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(stagingDir, AdoptionReadyMarker), nil, 0o644))
 
 	// A superseded live block file plus its now-stale .torrent sidecar.
 	require.NoError(t, os.WriteFile(PathForName(liveDir, blockName), []byte("minority"), 0o644))
@@ -84,6 +85,9 @@ func TestCutoverStagedDir(t *testing.T) {
 
 	_, statErr := os.Stat(PathForName(liveDir, blockName) + ".torrent")
 	require.True(t, os.IsNotExist(statErr), "stale .torrent sidecar must be removed")
+
+	_, statErr = os.Stat(PathForName(liveDir, AdoptionReadyMarker))
+	require.True(t, os.IsNotExist(statErr), "the ready marker must not be cut over as a snapshot file")
 
 	_, statErr = os.Stat(stagingDir)
 	require.True(t, os.IsNotExist(statErr), "staging dir must be removed after a real cutover")

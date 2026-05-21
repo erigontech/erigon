@@ -28,6 +28,14 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 )
 
+// AdoptionReadyMarker is the file the adoption handler writes into a
+// staging directory once the batch has passed Stage 1 + Stage 2
+// validation. It is the intent journal: a staging directory without
+// this marker holds an interrupted or unvalidated fetch and must never
+// be cut over; one with it is safe to promote, and a re-run after a
+// crash mid-cutover completes the remaining renames.
+const AdoptionReadyMarker = ".adoption-ready"
+
 // MoveFileAcrossFS renames src onto dst, falling back to a fsync'd copy
 // into a sibling temp file plus an atomic same-directory rename when
 // src and dst are on different filesystems. Adoption stages files
@@ -69,8 +77,8 @@ func CutoverStagedDir(liveSnapDir, stagingDir string, dryRun bool, logger log.Lo
 	}
 	swapped := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
+		if e.IsDir() || e.Name() == AdoptionReadyMarker {
+			continue // the marker is journal metadata, not a snapshot file
 		}
 		name := e.Name()
 		if dryRun {

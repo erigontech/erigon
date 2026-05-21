@@ -45,6 +45,14 @@ func adoptCliAction(cliCtx *cli.Context) error {
 	}
 
 	for _, batch := range batches {
+		// Only promote a batch the adoption handler marked as validated.
+		// An unmarked directory is an interrupted or in-progress fetch
+		// whose files were never checked — cutting it over would publish
+		// unverified content.
+		if _, err := os.Stat(filepath.Join(batch, storagesnapshot.AdoptionReadyMarker)); err != nil {
+			logger.Warn("adopt: skipping unvalidated batch (no ready marker)", "batch", filepath.Base(batch))
+			continue
+		}
 		files, err := storagesnapshot.CutoverStagedDir(dirs.Snap, batch, dryRun, logger)
 		if err != nil {
 			return fmt.Errorf("adopt %s: %w", filepath.Base(batch), err)
