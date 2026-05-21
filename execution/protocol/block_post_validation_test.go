@@ -84,3 +84,69 @@ func TestBlockPostValidation_PreByzantiumBloomMismatch(t *testing.T) {
 		t.Fatalf("checkBloom=false should skip bloom validation, got: %v", err)
 	}
 }
+
+func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
+	t.Parallel()
+
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
+	receipts := types.Receipts{
+		{
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: 21_000,
+			Logs: []*types.Log{
+				{
+					Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+					Topics:  []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")},
+				},
+				{
+					Address: common.HexToAddress("0x2222222222222222222222222222222222222222"),
+					Topics:  []common.Hash{common.HexToHash("0x03")},
+				},
+			},
+		},
+		{
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: 42_000,
+			Logs: []*types.Log{
+				{
+					Address: common.HexToAddress("0x3333333333333333333333333333333333333333"),
+					Topics:  []common.Hash{common.HexToHash("0x04")},
+				},
+			},
+		},
+	}
+	expectedBloom := types.CreateBloom(receipts)
+	if expectedBloom == (types.Bloom{}) {
+		t.Fatal("test setup: non-empty logs should produce a non-zero bloom")
+	}
+	for _, receipt := range receipts {
+		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	}
+	receiptHash := types.DeriveSha(receipts)
+	for _, receipt := range receipts {
+		receipt.Bloom = types.Bloom{}
+	}
+
+	header := &types.Header{
+		Number:      *uint256.NewInt(4_370_000),
+		GasUsed:     42_000,
+		ReceiptHash: receiptHash,
+		Bloom:       expectedBloom,
+	}
+
+	const checkReceipts = true
+	const checkBloom = true
+
+	if err := BlockPostValidation(42_000, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New()); err != nil {
+		t.Fatalf("expected receipt+bloom validation to accept OR-merged bloom: %v", err)
+	}
+
+	header.Bloom = types.Bloom{}
+	err := BlockPostValidation(42_000, 0, checkReceipts, checkBloom, receipts, header, nil, cfg, log.New())
+	if err == nil {
+		t.Fatal("expected bloom-mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid bloom") {
+		t.Fatalf("expected \"invalid bloom\" error, got: %v", err)
+	}
+}
