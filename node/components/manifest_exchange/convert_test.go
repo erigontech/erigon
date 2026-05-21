@@ -57,3 +57,45 @@ func TestV2ToPeerManifest_AccessorKind(t *testing.T) {
 	require.Equal(t, snapshot.KindAccessor, byName["v1.0-accounts.0-2048.bt"],
 		"accessor entry must convert to KindAccessor, not be mistaken for a primary")
 }
+
+// TestAccessor_EndToEndRoundTrip drives an inventory containing domain
+// and block accessors through the full producer→consumer chain —
+// GenerateV2 → MarshalV2 → ParseV2 → v2ToPeerManifest — and checks the
+// accessors arrive as peer FileEntries tagged KindAccessor. Each hop has
+// its own unit test; this pins the seams between them.
+func TestAccessor_EndToEndRoundTrip(t *testing.T) {
+	inv := snapshot.NewInventory()
+	add := func(name string, h byte) {
+		require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+			Name: name, TorrentHash: [20]byte{h}, Local: true, Trust: snapshot.TrustVerified,
+		}))
+	}
+	add("v1.0-accounts.0-2048.kv", 0x10)
+	add("v1.0-accounts.0-2048.bt", 0x11)
+	add("v1.0-accounts.0-2048.kvi", 0x12)
+	add("v1.0-accounts.0-2048.kvei", 0x13)
+	add("v1.0-000000-000500-headers.seg", 0x20)
+	add("v1.0-000000-000500-headers.idx", 0x21)
+
+	data, err := downloader.MarshalV2(downloader.GenerateV2(inv))
+	require.NoError(t, err)
+	parsed, err := downloader.ParseV2(data)
+	require.NoError(t, err)
+	peer := v2ToPeerManifest("peer", parsed)
+
+	kinds := map[string]snapshot.FileKind{}
+	for _, e := range peer.Domains[snapshot.DomainAccounts] {
+		kinds[e.Name] = e.Kind
+	}
+	require.Equal(t, snapshot.KindKV, kinds["v1.0-accounts.0-2048.kv"])
+	require.Equal(t, snapshot.KindAccessor, kinds["v1.0-accounts.0-2048.bt"])
+	require.Equal(t, snapshot.KindAccessor, kinds["v1.0-accounts.0-2048.kvi"])
+	require.Equal(t, snapshot.KindAccessor, kinds["v1.0-accounts.0-2048.kvei"])
+
+	blockNames := map[string]bool{}
+	for _, e := range peer.Blocks {
+		blockNames[e.Name] = true
+	}
+	require.True(t, blockNames["v1.0-000000-000500-headers.seg"])
+	require.True(t, blockNames["v1.0-000000-000500-headers.idx"], "block .idx accessor must survive the round trip")
+}

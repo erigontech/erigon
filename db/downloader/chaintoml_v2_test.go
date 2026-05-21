@@ -17,11 +17,15 @@
 package downloader
 
 import (
+	"encoding/hex"
+	"os"
 	"strings"
 	"testing"
 
-	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/require"
+
+	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
 // newCommitmentEntry builds the commitment-domain FileEntry used
@@ -578,4 +582,71 @@ func TestApplyV2Manifest(t *testing.T) {
 		require.Len(t, res.MismatchedAnchors, 1)
 		require.Equal(t, 0, res.Applied)
 	})
+}
+
+// TestGenerateV2_PreverifiedAccessorsSurvive is the round-trip
+// regression for the accessor-advertising fix: an inventory built from
+// the real upstream preverified.toml (which advertises thousands of
+// accessor files) must produce a V2 manifest that still carries
+// accessors. Before the fix, GenerateV2 dropped every accessor.
+func TestGenerateV2_PreverifiedAccessorsSurvive(t *testing.T) {
+	const preverifiedPath = "../snapshotsync/testdata/snapshot-flow/mainnet-2026-05-15-upstream.toml"
+	data, err := os.ReadFile(preverifiedPath)
+	require.NoError(t, err)
+
+	var preverified map[string]string
+	require.NoError(t, toml.Unmarshal(data, &preverified))
+
+	isAccessor := func(name string) bool {
+		for _, ext := range []string{".bt", ".kvi", ".kvei", ".vi", ".efi", ".idx"} {
+			if strings.HasSuffix(name, ext) {
+				return true
+			}
+		}
+		return false
+	}
+
+	inv := snapshotinv.NewInventory()
+	srcAccessors := map[string]bool{}
+	for name, hashHex := range preverified {
+		h, err := hex.DecodeString(hashHex)
+		if err != nil || len(h) != 20 {
+			continue
+		}
+		var th [20]byte
+		copy(th[:], h)
+		if err := inv.AddFile(&snapshotinv.FileEntry{
+			Name: name, TorrentHash: th, Local: true, Trust: snapshotinv.TrustVerified,
+		}); err != nil {
+			continue
+		}
+		if isAccessor(name) {
+			srcAccessors[name] = true
+		}
+	}
+	require.NotEmpty(t, srcAccessors, "fixture must contain accessor files")
+
+	manifest := GenerateV2(inv)
+
+	manifestAccessors := map[string]bool{}
+	for _, dm := range manifest.Domains {
+		for _, f := range dm.Files {
+			if f.Kind == KindAccessorName {
+				manifestAccessors[f.Name] = true
+			}
+		}
+	}
+	for name := range manifest.Blocks {
+		if isAccessor(name) {
+			manifestAccessors[name] = true
+		}
+	}
+
+	require.NotEmpty(t, manifestAccessors,
+		"GenerateV2 dropped every accessor — the regression this guards against")
+	// No fabrication: every emitted accessor traces to a preverified entry.
+	for name := range manifestAccessors {
+		require.True(t, srcAccessors[name],
+			"manifest accessor %q is not in the source preverified set", name)
+	}
 }
