@@ -122,18 +122,25 @@ func buildBlackListForPruning(
 
 	blackList := make(map[string]struct{})
 
+	// History uses .Enabled() because History never carries the
+	// KeepAllBlocksPruneMode sentinel — only DefaultBlocksPruneMode or finite
+	// Distances — so .Enabled() (= "not DefaultBlocksPruneMode") correctly
+	// distinguishes "prune by step" from "keep all state history". For Blocks
+	// we can't rely on .Enabled() because KeepAllBlocksPruneMode also returns
+	// true; check finiteness explicitly.
 	historyEnabled := pruneMode.History.Enabled()
-	blocksByDistance := pruneMode.Blocks.Enabled()
+	blocksByFiniteDistance := pruneMode.Blocks != prune.DefaultBlocksPruneMode &&
+		pruneMode.Blocks != prune.KeepAllBlocksPruneMode
 	var preMergeCutoff uint64
 	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc != nil && cc.MergeHeight != nil {
 		preMergeCutoff = *cc.MergeHeight
 	}
 
-	if !historyEnabled && !blocksByDistance && preMergeCutoff == 0 {
+	if !historyEnabled && !blocksByFiniteDistance && preMergeCutoff == 0 {
 		return blackList, nil
 	}
 
-	if blocksByDistance {
+	if blocksByFiniteDistance {
 		blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
 	}
 
@@ -167,7 +174,7 @@ func buildBlackListForPruning(
 			continue
 		}
 		switch {
-		case blocksByDistance:
+		case blocksByFiniteDistance:
 			if blockPrune >= res.To {
 				blackList[name] = struct{}{}
 			}

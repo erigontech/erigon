@@ -66,6 +66,42 @@ func TestBlackListForPruning(t *testing.T) {
 
 }
 
+// TestBlackListForPruning_BlocksModeKeepsAllTransactions verifies that
+// --prune.mode=blocks (Blocks=KeepAllBlocksPruneMode, History finite)
+// blacklists state history but never transaction segments. Distance.Enabled()
+// returns true for KeepAllBlocksPruneMode, so the finite-distance check
+// in buildBlackListForPruning must be explicit rather than rely on
+// .Enabled() — otherwise tx segments would get accidentally pruned.
+func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
+	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	if !ok {
+		t.Fatal("no known cfg")
+	}
+	preverified := c.Preverified
+
+	// stepPrune is chosen well above the lowest state-history file step
+	// range so at least some history files land in the blacklist; the exact
+	// number depends on the bundled preverified set.
+	const stepPrune = 5000
+	blackList, err := buildBlackListForPruning(prune.BlocksMode, nil, stepPrune, 100_000, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sawHistory := false
+	for p := range blackList {
+		if strings.Contains(p, "transactions") {
+			t.Errorf("blocks mode must not blacklist transaction segments, got %s", p)
+		}
+		if strings.HasPrefix(p, "idx") || strings.HasPrefix(p, "history") || strings.HasPrefix(p, "accessor") {
+			sawHistory = true
+		}
+	}
+	if !sawHistory {
+		t.Error("expected state history files to be blacklisted in blocks mode; got none")
+	}
+}
+
 // TestBlackListForPruning_ChainHistoryExpiry covers the case absorbed from
 // the former isTransactionsSegmentExpired: when Blocks=DefaultBlocksPruneMode
 // and the chain has a MergeHeight, pre-merge transaction segments must be
