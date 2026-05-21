@@ -103,17 +103,40 @@ func canSnapshotBePruned(name string) bool {
 	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
 }
 
+// buildBlackListForPruning returns the set of preverified snapshot names that
+// should be skipped at download time according to pruneMode:
+//   - state history files (idx/history/accessor): blacklisted when stepPrune
+//     reaches their To and pruneMode.History is enabled.
+//   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
+//     finite Distance (res.To <= blockPrune), or by chain history-expiry when
+//     pruneMode.Blocks is DefaultBlocksPruneMode and cc has MergeHeight set
+//     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
+//   - bodies, headers, rcache files: never blacklisted here
+//     (canSnapshotBePruned filters them out).
 func buildBlackListForPruning(
-	pruneMode bool,
+	pruneMode prune.Mode,
+	cc *chain.Config,
 	stepPrune, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
 
 	blackList := make(map[string]struct{})
-	if !pruneMode {
+
+	historyEnabled := pruneMode.History.Enabled()
+	blocksByDistance := pruneMode.Blocks.Enabled()
+	var preMergeCutoff uint64
+	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc != nil && cc.MergeHeight != nil {
+		preMergeCutoff = *cc.MergeHeight
+	}
+
+	if !historyEnabled && !blocksByDistance && preMergeCutoff == 0 {
 		return blackList, nil
 	}
-	blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+
+	if blocksByDistance {
+		blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
+	}
+
 	for _, p := range preverified.Items {
 		name := p.Name
 		// Don't prune unprunable files
@@ -121,6 +144,9 @@ func buildBlackListForPruning(
 			continue
 		}
 		if isStateSnapshot(name) {
+			if !historyEnabled {
+				continue
+			}
 			// parse "from" (0) and "to" (64) from the name
 			// parse the snapshot "kind". e.g kind of 'idx/v1.0-accounts.0-64.ef' is "idx/v1.0-accounts"
 			res, _, ok := snaptype.ParseFileName("", name)
@@ -131,17 +157,24 @@ func buildBlackListForPruning(
 				continue
 			}
 			blackList[name] = struct{}{}
-		} else {
-			// e.g 'v1.0-000000-000100-beaconblocks.seg'
-			// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
-			res, _, ok := snaptype.ParseFileName("", name)
-			if !ok {
-				continue
+			continue
+		}
+		// Block segment (transactions only — canSnapshotBePruned filters bodies/headers/rcache).
+		// e.g 'v1.0-000000-000100-beaconblocks.seg'
+		// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
+		res, _, ok := snaptype.ParseFileName("", name)
+		if !ok {
+			continue
+		}
+		switch {
+		case blocksByDistance:
+			if blockPrune >= res.To {
+				blackList[name] = struct{}{}
 			}
-			if blockPrune < res.To {
-				continue
+		case preMergeCutoff > 0:
+			if res.From < preMergeCutoff {
+				blackList[name] = struct{}{}
 			}
-			blackList[name] = struct{}{}
 		}
 	}
 
@@ -238,21 +271,6 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
-}
-
-// isTransactionsSegmentExpired - check if the transactions segment is expired according to whichever history expiry policy we use.
-func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snapcfg.PreverifiedItem) bool {
-	// History expiry is the default.
-	if pruneMode.Blocks != prune.DefaultBlocksPruneMode {
-		return false
-	}
-
-	// We use the pre-merge data policy.
-	s, _, ok := snaptype.ParseFileName("", p.Name)
-	if !ok {
-		return false
-	}
-	return cc.IsPreMerge(s.From)
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
@@ -382,7 +400,7 @@ func SyncSnapshots(
 				return err
 			}
 
-			blackListForPruning, err = buildBlackListForPruning(wantToPrune, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
+			blackListForPruning, err = buildBlackListForPruning(prune, cc, minStepToDownload, minBlockToDownload, blockPrune, preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
@@ -420,10 +438,6 @@ func SyncSnapshots(
 			}
 
 			if !syncCfg.PersistReceiptsCacheV2 && isStateSnapshot(p.Name) && strings.Contains(p.Name, kv.RCacheDomain.String()) {
-				continue
-			}
-
-			if strings.Contains(p.Name, "transactions") && isTransactionsSegmentExpired(cc, prune, p) {
 				continue
 			}
 

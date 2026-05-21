@@ -20,8 +20,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
@@ -38,7 +40,7 @@ func TestBlackListForPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Prune 64 steps and contain at least all the blocks
-	blackList, err := buildBlackListForPruning(true, 64, 100_000, 25_000_000, preverified)
+	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, 64, 100_000, 25_000_000, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,4 +64,50 @@ func TestBlackListForPruning(t *testing.T) {
 		}
 	}
 
+}
+
+// TestBlackListForPruning_ChainHistoryExpiry covers the case absorbed from
+// the former isTransactionsSegmentExpired: when Blocks=DefaultBlocksPruneMode
+// and the chain has a MergeHeight, pre-merge transaction segments must be
+// blacklisted at download time while post-merge segments stay downloadable.
+func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
+	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	if !ok {
+		t.Fatal("no known cfg")
+	}
+	preverified := c.Preverified
+
+	mergeHeight := uint64(15_537_394) // mainnet merge block
+	cc := &chain.Config{MergeHeight: &mergeHeight}
+
+	// Legacy full-mode shape: History finite, Blocks at the chain-history-expiry sentinel.
+	legacyFull := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(100_000),
+		Blocks:      prune.DefaultBlocksPruneMode,
+	}
+
+	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 100_000, 0, preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sawPreMergeTx := false
+	for p := range blackList {
+		if !strings.Contains(p, "transactions") {
+			continue
+		}
+		info, _, ok := snaptype.ParseFileName("tmp", p)
+		if !ok {
+			continue
+		}
+		if info.From >= mergeHeight {
+			t.Errorf("post-merge tx segment unexpectedly blacklisted: %s (From=%d)", p, info.From)
+		} else {
+			sawPreMergeTx = true
+		}
+	}
+	if !sawPreMergeTx {
+		t.Error("expected at least one pre-merge tx segment to be blacklisted; got none")
+	}
 }
