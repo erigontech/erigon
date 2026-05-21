@@ -195,7 +195,7 @@ func (w *Warmuper) Start() {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompact(hashedKey[:depth])
+		prefix := nibbles.EncodeKeyV2(hashedKey[:depth])
 
 		// Check cache first, then fall back to DB
 		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
