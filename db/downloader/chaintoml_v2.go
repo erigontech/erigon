@@ -154,8 +154,12 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		Domains: make(map[string]*DomainManifest),
 	}
 
-	// Block files.
+	// Block files. Accessors (.idx) are excluded for now — advertising
+	// them is the next commit in the accessor-advertising workstream.
 	for _, f := range inv.BlockFiles() {
+		if f.Kind == snapshotinv.KindAccessor {
+			continue
+		}
 		if f.TorrentHash != [20]byte{} {
 			manifest.Blocks[f.Name] = fmt.Sprintf("%x", f.TorrentHash)
 		}
@@ -202,6 +206,11 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		// Coverage is computed from kv files only — that's the canonical
 		// primary defining the domain's step coverage.
 		for _, f := range files {
+			// Accessors are excluded for now — advertising them is the
+			// next commit in the accessor-advertising workstream.
+			if f.Kind == snapshotinv.KindAccessor {
+				continue
+			}
 			r := f.Range()
 			if !isCanonicalFile(r) {
 				continue

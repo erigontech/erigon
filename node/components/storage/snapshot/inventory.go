@@ -50,12 +50,13 @@ var AllDomains = []Domain{
 type FileKind string
 
 const (
-	KindKV      FileKind = ""        // domain primary (.kv) or block primary (.seg)
-	KindHistory FileKind = "history" // domain history primary (.v)
-	KindIdx     FileKind = "idx"     // domain inverted-index primary (.ef)
-	KindCaplin  FileKind = "caplin"  // caplin beacon archive (.seg)
-	KindMeta    FileKind = "meta"    // chain config (erigondb.toml)
-	KindSalt    FileKind = "salt"    // hash-derivation salt (salt-*.txt)
+	KindKV       FileKind = ""         // domain primary (.kv) or block primary (.seg)
+	KindHistory  FileKind = "history"  // domain history primary (.v)
+	KindIdx      FileKind = "idx"      // domain inverted-index primary (.ef)
+	KindCaplin   FileKind = "caplin"   // caplin beacon archive (.seg)
+	KindMeta     FileKind = "meta"     // chain config (erigondb.toml)
+	KindSalt     FileKind = "salt"     // hash-derivation salt (salt-*.txt)
+	KindAccessor FileKind = "accessor" // index/accessor of a primary (.bt/.kvi/.kvei/.vi/.efi/.idx)
 )
 
 // FileEntry represents a single snapshot file (block, domain primary,
@@ -270,14 +271,12 @@ func (inv *Inventory) AddFile(entry *FileEntry) error {
 	if err := ValidateMetadata(entry); err != nil {
 		return fmt.Errorf("AddFile: %w", err)
 	}
-	// Auto-fill Kind from name pattern when caller didn't set one
-	// explicitly. Resolves the KindKV-zero-value ambiguity (see the
-	// note on ValidateMetadata).
-	if entry.Kind == "" {
-		if inferred, ok := InferKind(entry.Name); ok {
-			entry.Kind = inferred
-		}
-	}
+	// Auto-fill Kind/Domain/range from the file name for any field the
+	// caller left unset — notably the minimal entries the OnFilesChange
+	// wire adds. Resolves the KindKV-zero-value ambiguity and ensures
+	// accessor files (which the primary-only disk scan never enriches)
+	// land in the correct domain/block bucket below.
+	PopulateFromName(entry)
 	if entry.State == LifecycleDeclared && (entry.Local || entry.Advertisable) {
 		entry.State = deriveStateFromFlags(entry.Local, entry.Advertisable)
 	}

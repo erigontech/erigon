@@ -316,6 +316,16 @@ func inferKindFromName(name string) (FileKind, bool) {
 			return KindCaplin, true
 		}
 		return KindKV, true
+	case strings.HasSuffix(name, ".bt"),
+		strings.HasSuffix(name, ".kvi"),
+		strings.HasSuffix(name, ".kvei"),
+		strings.HasSuffix(name, ".vi"),
+		strings.HasSuffix(name, ".efi"),
+		strings.HasSuffix(name, ".idx"):
+		// Accessor/index of a primary file — deterministic from the
+		// primary + salt. Tagged distinctly so it is never mistaken for
+		// a primary in coverage or manifest generation.
+		return KindAccessor, true
 	}
 	return "", false
 }
