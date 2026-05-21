@@ -32,6 +32,16 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// pushAddrSelfdestruct returns init code that pushes `addr` onto the stack and
+// runs SELFDESTRUCT: PUSH20 <addr> ; SELFDESTRUCT  (0x73 || 20 bytes || 0xff).
+func pushAddrSelfdestruct(addr common.Address) []byte {
+	out := make([]byte, 0, 22)
+	out = append(out, 0x73)
+	out = append(out, addr.Bytes()...)
+	out = append(out, 0xff)
+	return out
+}
+
 // TestBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance asserts
 // the EIP-7928 rule that a SELFDESTRUCT records the beneficiary as a
 // state access independently of value transfer, combined with the
@@ -61,11 +71,7 @@ func TestBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T)
 
 	require.True(t, m.ChainConfig.IsAmsterdam(0), "Amsterdam must be active at genesis time for EIP-7928")
 
-	// Init code: PUSH20 SystemAddress; SELFDESTRUCT.
-	// Bytecode: 0x73 || 20-byte SystemAddress || 0xff
-	initCode := append([]byte{0x73},
-		append(params.SystemAddress.Value().Bytes(), 0xff)...,
-	)
+	initCode := pushAddrSelfdestruct(params.SystemAddress.Value())
 
 	baseFee := m.Genesis.BaseFee().Uint64()
 	gasPrice := baseFee * 2
@@ -150,9 +156,7 @@ func TestBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t *testing
 	// Same init code as the zero-balance test — but this time the CREATE
 	// tx sends 1 wei to the new contract so its balance is non-zero at
 	// SELFDESTRUCT time.
-	initCode := append([]byte{0x73},
-		append(params.SystemAddress.Value().Bytes(), 0xff)...,
-	)
+	initCode := pushAddrSelfdestruct(params.SystemAddress.Value())
 
 	baseFee := m.Genesis.BaseFee().Uint64()
 	gasPrice := baseFee * 2
@@ -182,6 +186,7 @@ func TestBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t *testing
 		}
 	}
 	require.NotNil(t, sysEntry, "BAL must include SystemAddress entry on non-zero-balance SELFDESTRUCT to it")
+	require.NotEmpty(t, sysEntry.BalanceChanges, "BAL must record a balance change on the SystemAddress beneficiary when SELFDESTRUCT transfers non-zero value to it")
 }
 
 // TestBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance is a
@@ -213,10 +218,7 @@ func TestBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.
 		execmoduletester.WithKey(privKey),
 	)
 
-	// Init code: PUSH20 <beneficiary>; SELFDESTRUCT.
-	initCode := append([]byte{0x73},
-		append(beneficiary.Bytes(), 0xff)...,
-	)
+	initCode := pushAddrSelfdestruct(beneficiary)
 
 	baseFee := m.Genesis.BaseFee().Uint64()
 	gasPrice := baseFee * 2
