@@ -4,6 +4,25 @@
 
 ### Breaking Changes
 
+#### `--prune.mode=full`: EIP-8252 retention window replaces pre-merge history-expiry
+
+Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` — the inactivity-leak-bounded non-finality window across which an EL must be able to reconstruct state to handle any reorg without external sync. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
+
+**What changed:**
+
+| | Before | After |
+|---|---|---|
+| State history retention | last 100,000 blocks | last 262,144 blocks |
+| Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
+
+`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#20447](https://github.com/erigontech/erigon/issues/20447) for discussion.
+
+**Migration:** existing datadirs upgrade automatically. The prune-config guard now accepts finite distance changes on `History`/`Blocks` in either direction, and the one-way `chain-history-expiry → finite distance` change on `Blocks` for the full-mode case. Operators who want to keep the old "retain all post-merge block data" behavior can switch to `--prune.mode=blocks` or pass `--prune.distance.blocks=18446744073709551615` to preserve the chain-history-expiry sentinel.
+
+Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306); existing on-disk segments persist until that lands. The config-level transition is still recorded so the new cutoff takes effect once the deletion path exists.
+
+---
+
 #### `debug_trace*` RPC: `enableMemory` / `enableReturnData` replace `disableMemory` / `disableReturnData`
 
 Aligns Erigon with the execution-apis specification ([ethereum/execution-apis#762](https://github.com/ethereum/execution-apis/pull/762)) and Geth behavior.
