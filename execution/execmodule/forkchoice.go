@@ -632,12 +632,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
-		// Close the persistent SD and clear e.currentContext so InsertBlocks
-		// creates a fresh overlay for the next block cycle. We close unconditionally:
-		// hasOverlay=true means block data was flushed from the overlay into the FCU
-		// rwTx above; hasOverlay=false means InsertBlocks already committed block data
-		// to DB and cleared the overlay, so the SD is stale either way.
-		if e.currentContext != nil {
+		// Close the persistent SD (overlay was already flushed into rwTx at
+		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
+		// creates a fresh overlay for the next block cycle.
+		if hasOverlay {
 			e.currentContext.Close()
 			e.lock.Lock()
 			e.currentContext = nil
