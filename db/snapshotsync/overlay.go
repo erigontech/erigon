@@ -42,18 +42,30 @@ import (
 // (.idx) sits alongside it in the same directory.
 func OpenRoSnapshotsWithOverrides(cfg ethconfig.BlocksFreezing, liveDir string, overridePaths []string, types []snaptype.Type, alignMin bool, logger log.Logger) (*RoSnapshots, error) {
 	s := NewRoSnapshots(cfg, liveDir, types, alignMin, logger)
-	if err := s.OpenFolder(); err != nil {
+	if err := ApplyBlockOverrides(s, overridePaths); err != nil {
 		s.Close()
 		return nil, err
 	}
+	return s, nil
+}
+
+// ApplyBlockOverrides opens s's folder, substitutes the block segment
+// covering each override path's range, and recomputes the visible set.
+// It is split out of OpenRoSnapshotsWithOverrides so the freezeblocks
+// package can apply overrides to a *freezeblocks.RoSnapshots — the type
+// freezeblocks.NewBlockReader requires — without copying the embedded
+// snapshotsync.RoSnapshots value.
+func ApplyBlockOverrides(s *RoSnapshots, overridePaths []string) error {
+	if err := s.OpenFolder(); err != nil {
+		return err
+	}
 	for _, p := range overridePaths {
 		if err := s.applyBlockOverride(p); err != nil {
-			s.Close()
-			return nil, fmt.Errorf("override %s: %w", filepath.Base(p), err)
+			return fmt.Errorf("override %s: %w", filepath.Base(p), err)
 		}
 	}
 	s.recalcVisibleFiles(s.alignMin)
-	return s, nil
+	return nil
 }
 
 // applyBlockOverride opens the segment at path and swaps it into the
