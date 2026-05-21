@@ -18,7 +18,6 @@ v3.4.2 is a bugfix release recommended for all users.
 
 - db/state, ethconfig: bound domain merge; add `--erigondb.domain.steps-in-frozen-file` (#21148) by
   @wmitsuda
-- `seg retire`: wait for background build/merge before MergeLoop (#21135) by @sudeepdino008
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.1...v3.4.2
 
