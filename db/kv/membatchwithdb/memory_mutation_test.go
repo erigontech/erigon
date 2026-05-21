@@ -227,6 +227,37 @@ func TestFlushEmptyDestinationPlain(t *testing.T) {
 	require.Equal(t, "v2", string(v))
 }
 
+// TestFlushDupsortNonEmptyDestination exercises the Put fallback for a pure
+// DupSort table when the destination already has entries — AppendDup is
+// disallowed in that case, so the flush must use Put for every dup.
+func TestFlushDupsortNonEmptyDestination(t *testing.T) {
+	_, rwTx := newTestTx(t)
+
+	initializeDbDupSort(rwTx) // seeds key1=(1.1, 1.3), key3=(3.1, 3.3)
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2")))
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+
+	c, err := rwTx.CursorDupSort(kv.TblAccountVals)
+	require.NoError(t, err)
+	defer c.Close()
+	var pairs []string
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		pairs = append(pairs, string(k)+"="+string(v))
+	}
+	require.Equal(t, []string{
+		"key1=value1.1", "key1=value1.3",
+		"key2=value2.1", "key2=value2.2",
+		"key3=value3.1", "key3=value3.3",
+	}, pairs)
+}
+
 // TestFlushEmptyDestinationDupsort exercises the AppendDup fast-path for a
 // pure DupSort table when the destination has no existing keys. The batch
 // writes multiple values per key so the dup handling is actually exercised.

@@ -607,7 +607,7 @@ func (m *MemoryMutation) CreateTable(bucket string) error {
 }
 
 func (m *MemoryMutation) Flush(ctx context.Context, tx kv.RwTx) error {
-	// Obtain buckets touched. ListTables only returns non-empty tables.
+	// Obtain buckets touched.
 	buckets, err := m.memTx.ListTables()
 	if err != nil {
 		return err
@@ -667,11 +667,11 @@ func flushPlainBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 	}
 	defer srcCursor.Close()
 
-	srcFirstKey, _, err := srcCursor.First()
+	k, v, err := srcCursor.First()
 	if err != nil {
 		return err
 	}
-	if srcFirstKey == nil {
+	if k == nil {
 		return nil
 	}
 
@@ -685,9 +685,9 @@ func flushPlainBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 	if err != nil {
 		return err
 	}
-	canAppend := dstLastKey == nil || bytes.Compare(srcFirstKey, dstLastKey) > 0
+	canAppend := dstLastKey == nil || bytes.Compare(k, dstLastKey) > 0
 
-	for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+	for ; k != nil; k, v, err = srcCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -713,6 +713,15 @@ func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 		return err
 	}
 	defer srcCursor.Close()
+
+	k, v, err := srcCursor.First()
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		return nil
+	}
+
 	dstCursor, err := tx.RwCursorDupSort(bucket)
 	if err != nil {
 		return err
@@ -723,9 +732,8 @@ func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 	if err != nil {
 		return err
 	}
-	canAppendDup := dstLastKey == nil
-	if canAppendDup {
-		for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+	if dstLastKey == nil {
+		for ; k != nil; k, v, err = srcCursor.Next() {
 			if err != nil {
 				return err
 			}
@@ -735,7 +743,7 @@ func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 		}
 		return nil
 	}
-	for k, v, err := srcCursor.First(); k != nil; k, v, err = srcCursor.Next() {
+	for ; k != nil; k, v, err = srcCursor.Next() {
 		if err != nil {
 			return err
 		}
