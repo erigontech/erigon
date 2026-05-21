@@ -169,10 +169,10 @@ func TestIsRetentionWindowChange(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "blocks finite→DefaultBlocksPruneMode (reverse direction, rejected)",
+			name:      "blocks finite→DefaultBlocksPruneMode (revert after auto-upgrade)",
 			persisted: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
 			requested: Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode},
-			want:      false,
+			want:      true,
 		},
 		{
 			name:      "blocks KeepAllBlocksPruneMode→finite (archive/blocks → finite, rejected)",
@@ -262,15 +262,36 @@ func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 	assert.Equal(t, FullMode, persisted, "shim must rewrite the persisted value")
 }
 
-func TestEnsureNotChanged_BlocksFiniteToDefaultRejected(t *testing.T) {
-	// Reverse direction: starting from a finite Blocks distance, the operator
-	// can't silently flip back to DefaultBlocksPruneMode (chain history-expiry
-	// policy). That'd be a mode-shape change.
+func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
+	// Operator passes --prune.distance.blocks=18446744073709551615 (the
+	// DefaultBlocksPruneMode magic number) after the auto-upgrade already
+	// rewrote Blocks to a finite distance. The shim accepts this reverse
+	// transition so the chain-history-expiry policy can be restored without
+	// manual DB intervention or a re-sync.
 	_, tx := memdb.NewTestTx(t)
 	persisted := Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)}
 	initStoredMode(t, tx, persisted)
 
 	requested := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	got, err := EnsureNotChanged(tx, requested)
+	require.NoError(t, err)
+	assert.Equal(t, requested, got)
+
+	stored, err := Get(tx)
+	require.NoError(t, err)
+	assert.Equal(t, requested, stored, "shim must rewrite the persisted value")
+}
+
+func TestEnsureNotChanged_BlocksKeepAllToFiniteRejected(t *testing.T) {
+	// Narrowing from KeepAllBlocksPruneMode (--prune.mode=blocks or archive)
+	// to a finite distance remains rejected — it's a destructive transition
+	// that the operator must opt into explicitly (e.g., by switching modes
+	// from a fresh datadir).
+	_, tx := memdb.NewTestTx(t)
+	persisted := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
+	initStoredMode(t, tx, persisted)
+
+	requested := Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)}
 	got, err := EnsureNotChanged(tx, requested)
 	require.Error(t, err)
 	assert.Equal(t, persisted, got)

@@ -201,14 +201,16 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		// to 262_144, or any operator-initiated --prune.distance change) are
 		// safe in both directions: widening cannot bring back already-pruned
 		// state but is operationally fine going forward, and narrowing just
-		// causes the next prune pass to delete more. The shim also accepts the
-		// one-way DefaultBlocksPruneMode → finite transition on Blocks so that
-		// existing full-mode datadirs can adopt the EIP-8252 default without
-		// operator intervention. Accept such changes, rewrite the persisted
-		// value so we don't warn on every restart, and log the transition.
-		// Other mode-shape toggles (anything involving KeepAllBlocksPruneMode,
-		// or finite → DefaultBlocksPruneMode) remain rejected — those are
-		// likely typos with destructive consequences.
+		// causes the next prune pass to delete more. On Blocks specifically
+		// the shim also accepts either-direction transitions between a finite
+		// Distance and DefaultBlocksPruneMode (chain-history-expiry policy)
+		// so that existing full-mode datadirs can adopt the EIP-8252 default
+		// without operator intervention, and operators can revert if needed
+		// even after the auto-upgrade rewrites the persisted value. Accept
+		// such changes, rewrite the persisted value so we don't warn on
+		// every restart, and log the transition. KeepAllBlocksPruneMode
+		// transitions remain rejected — narrowing from "keep all" is
+		// destructive enough to require explicit operator action.
 		if isRetentionWindowChange(pm, pruneMode) {
 			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
 				"previous", pm.String(), "current", pruneMode.String())
@@ -226,14 +228,18 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 }
 
 // isRetentionWindowChange reports whether persisted and requested differ only
-// in the size of their block-retention windows. Finite Distance values on
-// either side are a window change in any direction. The one-way transition
-// DefaultBlocksPruneMode → Distance(N) on Blocks is also treated as a window
-// change so that existing full-mode datadirs (persisted Blocks=DefaultBlocksPruneMode
-// from before the EIP-8252 default bump) can upgrade to the new FullMode.Blocks=
-// Distance(DefaultPruneDistance) without operator intervention. The reverse
-// direction (finite → DefaultBlocksPruneMode) and KeepAllBlocksPruneMode on
-// either side remain mode-shape changes and stay rejected.
+// in the size of their block-retention windows.
+//
+// For History: only finite↔finite transitions are accepted (any direction).
+// Toggling between archive (DefaultBlocksPruneMode sentinel) and a finite
+// retention is a mode-shape change that should remain explicit.
+//
+// For Blocks: finite↔finite, plus either-direction transitions between a
+// finite Distance and DefaultBlocksPruneMode (the chain-history-expiry
+// sentinel) are accepted. DefaultBlocksPruneMode → finite is the EIP-8252
+// upgrade path; the reverse lets operators revert to chain-history-expiry
+// even after the auto-upgrade has rewritten the persisted value. Any
+// transition involving KeepAllBlocksPruneMode remains a mode-shape change.
 func isRetentionWindowChange(persisted, requested Mode) bool {
 	if persisted.History == requested.History && persisted.Blocks == requested.Blocks {
 		return false
@@ -241,9 +247,20 @@ func isRetentionWindowChange(persisted, requested Mode) bool {
 	historyOK := persisted.History == requested.History ||
 		(isFiniteDistance(persisted.History) && isFiniteDistance(requested.History))
 	blocksOK := persisted.Blocks == requested.Blocks ||
-		(isFiniteDistance(persisted.Blocks) && isFiniteDistance(requested.Blocks)) ||
-		(persisted.Blocks == DefaultBlocksPruneMode && isFiniteDistance(requested.Blocks))
+		(isBlocksRetentionPolicy(persisted.Blocks) && isBlocksRetentionPolicy(requested.Blocks))
 	return historyOK && blocksOK
+}
+
+// isBlocksRetentionPolicy reports whether b expresses a block-data retention
+// policy that the shim will let operators move between. Finite Distance values
+// and DefaultBlocksPruneMode (chain-history-expiry) both qualify;
+// KeepAllBlocksPruneMode (keep all blocks forever) does not — narrowing from
+// "keep all" to anything is a destructive transition that we keep explicit.
+func isBlocksRetentionPolicy(b BlockAmount) bool {
+	if b == DefaultBlocksPruneMode {
+		return true
+	}
+	return isFiniteDistance(b)
 }
 
 // isFiniteDistance reports whether b is a Distance with a finite retention
