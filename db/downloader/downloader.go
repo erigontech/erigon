@@ -2251,6 +2251,20 @@ func (d *Downloader) AddStaticPeer(addr torrent.PeerInfo) {
 	}
 }
 
+// StaticPeers returns a copy of the static peers registered via
+// AddStaticPeer. Code that adds torrents directly to the torrent client
+// (bypassing addTorrent) uses this to apply the same peer set.
+func (d *Downloader) StaticPeers() []torrent.PeerInfo {
+	d.staticPeersMu.Lock()
+	defer d.staticPeersMu.Unlock()
+	if len(d.staticPeers) == 0 {
+		return nil
+	}
+	peers := make([]torrent.PeerInfo, len(d.staticPeers))
+	copy(peers, d.staticPeers)
+	return peers
+}
+
 func (d *Downloader) makeAddTorrentOpts(
 	infoHash metainfo.Hash,
 ) (ts torrent.AddTorrentOpts) {
