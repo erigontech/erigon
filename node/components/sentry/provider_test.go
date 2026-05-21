@@ -17,12 +17,16 @@
 package sentry
 
 import (
+	"fmt"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/sentry"
 )
 
 // TestConfigureIsPure verifies Configure just stores the config without
@@ -109,4 +113,232 @@ func TestCheckPortIsFree(t *testing.T) {
 	// Probe a very unlikely port (high ephemeral range with no listener).
 	// This is inherently racy but reliable enough in test contexts.
 	require.True(t, checkPortIsFree("127.0.0.1:1"), "port 1 should be free in test env")
+}
+
+// helperGrpcServerWithProtocols returns a minimally-populated *sentry.GrpcServer
+// suitable for startSharedP2PServer dedup / reporter-wiring tests. It does
+// not start any network listeners.
+func helperGrpcServerWithProtocols(protocols ...p2p.Protocol) *sentry.GrpcServer {
+	ss := &sentry.GrpcServer{}
+	ss.Protocols = append(ss.Protocols, protocols...)
+	return ss
+}
+
+// TestBuildSharedP2PConfig_NodeDatabaseUnified verifies that the shared
+// config uses a single nodes/eth path regardless of how many protocol
+// versions are configured.
+func TestBuildSharedP2PConfig_NodeDatabaseUnified(t *testing.T) {
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: "/data/nodes",
+			P2P: p2p.Config{
+				ListenAddr: ":30303",
+			},
+		},
+	}
+	cfg, err := p.buildSharedP2PConfig()
+	require.NoError(t, err)
+	require.Equal(t, "/data/nodes/eth", cfg.NodeDatabase)
+}
+
+// TestBuildSharedP2PConfig_NoAllowedPortsKeepsListenAddr verifies that an
+// explicit ListenAddr is honoured as-is when AllowedPorts is empty.
+func TestBuildSharedP2PConfig_NoAllowedPortsKeepsListenAddr(t *testing.T) {
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: t.TempDir(),
+			P2P: p2p.Config{
+				ListenAddr: "127.0.0.1:39301",
+			},
+		},
+	}
+	cfg, err := p.buildSharedP2PConfig()
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1:39301", cfg.ListenAddr)
+}
+
+// TestBuildSharedP2PConfig_PicksFirstFreeAllowedPort verifies the fallback
+// loop: when the first AllowedPorts entry is busy, the picker moves on to
+// the next.
+func TestBuildSharedP2PConfig_PicksFirstFreeAllowedPort(t *testing.T) {
+	// Reserve one ephemeral port so we have a guaranteed-busy probe target,
+	// and a freshly-released one to use as the "free" candidate.
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer busy.Close()
+	busyPort := uint(busy.Addr().(*net.TCPAddr).Port)
+
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	freePort := uint(free.Addr().(*net.TCPAddr).Port)
+	free.Close() // release before the probe runs
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: t.TempDir(),
+			P2P: p2p.Config{
+				ListenAddr:   "127.0.0.1:0",
+				AllowedPorts: []uint{busyPort, freePort},
+			},
+		},
+	}
+	cfg, err := p.buildSharedP2PConfig()
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("127.0.0.1:%d", freePort), cfg.ListenAddr)
+}
+
+// TestBuildSharedP2PConfig_ErrsWhenAllAllowedPortsBusy guards against the
+// silent-fallback regression Copilot flagged: with every entry held by a
+// live listener the picker must return an error, not keep going with a stale
+// port that will then fail on bind.
+func TestBuildSharedP2PConfig_ErrsWhenAllAllowedPortsBusy(t *testing.T) {
+	l1, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer l1.Close()
+	l2, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer l2.Close()
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: t.TempDir(),
+			P2P: p2p.Config{
+				ListenAddr: "127.0.0.1:0",
+				AllowedPorts: []uint{
+					uint(l1.Addr().(*net.TCPAddr).Port),
+					uint(l2.Addr().(*net.TCPAddr).Port),
+				},
+			},
+		},
+	}
+	_, err = p.buildSharedP2PConfig()
+	require.Error(t, err)
+}
+
+// TestBuildSharedP2PConfig_EmptyHostProbesLoopback exercises the
+// ":port" form of ListenAddr (no explicit host). checkPortIsFree's dial
+// would fail with "missing host" against an empty target and falsely report
+// the port as free; the picker normalises the probe to 127.0.0.1 so a busy
+// listener still gets detected.
+func TestBuildSharedP2PConfig_EmptyHostProbesLoopback(t *testing.T) {
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer busy.Close()
+	busyPort := uint(busy.Addr().(*net.TCPAddr).Port)
+
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	freePort := uint(free.Addr().(*net.TCPAddr).Port)
+	free.Close()
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg: Config{
+			NodesDir: t.TempDir(),
+			P2P: p2p.Config{
+				ListenAddr:   ":0", // empty host
+				AllowedPorts: []uint{busyPort, freePort},
+			},
+		},
+	}
+	cfg, err := p.buildSharedP2PConfig()
+	require.NoError(t, err)
+	// Original empty host preserved (binds on all interfaces); port picked
+	// from the allowlist after the busy one is rejected.
+	require.Equal(t, fmt.Sprintf(":%d", freePort), cfg.ListenAddr)
+}
+
+// TestStartSharedP2PServer_ErrsOnEmptyServers documents the precondition.
+func TestStartSharedP2PServer_ErrsOnEmptyServers(t *testing.T) {
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	cfg := p2p.Config{}
+	err := p.startSharedP2PServer(&cfg, nil, "")
+	require.Error(t, err)
+}
+
+// TestStartSharedP2PServer_DedupesAndWiresReporter is the integration test
+// for the central wiring: protocols collected from all GrpcServers are
+// deduplicated by (name, version), the shared p2p.Server is started once,
+// and only the first sentry reports peers.
+func TestStartSharedP2PServer_DedupesAndWiresReporter(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	first := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
+		p2p.Protocol{Name: "wit", Version: 0, Length: 5},
+	)
+	second := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 70, Length: 17},
+		p2p.Protocol{Name: "wit", Version: 0, Length: 5}, // duplicate, must be dropped
+	)
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	p.Servers = []*sentry.GrpcServer{first, second}
+
+	cfg := p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}
+	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
+	t.Cleanup(func() { p.Close() })
+
+	require.NotNil(t, p.sharedP2PServer)
+	require.Len(t, cfg.Protocols, 3, "eth/71, eth/70, wit/0 — wit deduped")
+
+	require.Same(t, p.sharedP2PServer, first.GetP2PServer())
+	require.Same(t, p.sharedP2PServer, second.GetP2PServer())
+
+	require.True(t, first.IsPeerReporter(), "first sentry must be the peer-list reporter")
+	require.False(t, second.IsPeerReporter(), "non-reporter sentries must report empty peers")
+}
+
+// TestProviderClose_StopsSharedP2PServer mirrors the GrpcServer-side test:
+// Provider.Close must stop the shared p2p.Server it created (GrpcServer.Close
+// is a no-op for external servers by design). We verify by trying to Start
+// the Server again — Start errors when the Server is still running.
+func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	first := helperGrpcServerWithProtocols(
+		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
+	)
+
+	p := &Provider{
+		logger: log.Root(),
+		cfg:    Config{SentryCtx: t.Context()},
+	}
+	p.Servers = []*sentry.GrpcServer{first}
+
+	cfg := p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}
+	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
+	srv := p.sharedP2PServer
+	require.NotNil(t, srv)
+
+	require.NoError(t, p.Close())
+	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
+
+	// Server should be stopped — Start should succeed again.
+	require.NoError(t, srv.Start(t.Context(), log.Root()))
+	t.Cleanup(srv.Stop)
 }

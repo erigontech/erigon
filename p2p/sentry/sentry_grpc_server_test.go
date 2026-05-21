@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -813,4 +814,136 @@ func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("runWitPeer did not return within timeout")
 	}
+}
+
+// minimalP2PServer returns an unstartable-on-network p2p.Server suitable for
+// shared-Server lifecycle tests: no discovery, no dial, no listener.
+func minimalP2PServer(t *testing.T) *p2p.Server {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	return &p2p.Server{Config: p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+	}}
+}
+
+// TestGrpcServer_SetP2PServer_FlagsAndIdempotency verifies the SetP2PServer
+// hook flips external/reportsPeers correctly and refuses a second injection.
+func TestGrpcServer_SetP2PServer_FlagsAndIdempotency(t *testing.T) {
+	srv := minimalP2PServer(t)
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+
+	ss.SetP2PServer(srv, true)
+	require.True(t, ss.external)
+	require.True(t, ss.reportsPeers)
+	require.Same(t, srv, ss.getP2PServer())
+
+	// A second SetP2PServer must panic — ownership is decided up front.
+	require.Panics(t, func() { ss.SetP2PServer(srv, false) })
+}
+
+// TestGrpcServer_PeersGatedOnNonReporter verifies that a sentry sharing a
+// p2p.Server but not marked as the reporter returns an empty Peers reply,
+// so admin_peers aggregation across sentries doesn't N-fold every entry.
+func TestGrpcServer_PeersGatedOnNonReporter(t *testing.T) {
+	srv := minimalP2PServer(t)
+
+	silent := &GrpcServer{statusReady: make(chan struct{})}
+	silent.SetP2PServer(srv, false)
+
+	silentReply, err := silent.Peers(context.Background(), nil)
+	require.NoError(t, err)
+	require.Empty(t, silentReply.Peers)
+
+	silentNodeInfo, err := silent.NodeInfo(context.Background(), nil)
+	require.NoError(t, err)
+	require.Empty(t, silentNodeInfo.Id)
+	require.Empty(t, silentNodeInfo.Enode)
+}
+
+// TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
+// leaves an externally-injected Server running — the coordinator owns its
+// lifecycle. We check by attempting to Start the Server again; Start returns
+// an error when the Server is already running.
+func TestGrpcServer_CloseDoesNotStopExternalServer(t *testing.T) {
+	srv := minimalP2PServer(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+	t.Cleanup(srv.Stop)
+
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	ss.SetP2PServer(srv, true)
+
+	ss.Close()
+
+	require.Error(t, srv.Start(context.Background(), log.Root()),
+		"GrpcServer.Close must not stop an externally-injected p2p.Server")
+}
+
+// TestGrpcServer_CloseStopsOwnedServer covers the inverse: when the
+// GrpcServer created its own Server (legacy lazy path), Close still stops it.
+func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
+	srv := minimalP2PServer(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	ss.p2pServerLock.Lock()
+	ss.p2pServer = srv
+	ss.p2pServerLock.Unlock()
+
+	ss.Close()
+
+	// Server should now be stopped — Start should succeed again.
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+	t.Cleanup(srv.Stop)
+}
+
+// TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path
+// where statusData has already been populated by SetStatus.
+func TestGrpcServer_AwaitStatus_ReturnsExistingImmediately(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+		statusData:  &sentryproto.StatusData{NetworkId: 42},
+	}
+	got := ss.awaitStatus(2 * time.Second)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(42), got.NetworkId)
+}
+
+// TestGrpcServer_AwaitStatus_TimesOutWhenUnset verifies that awaitStatus
+// returns nil when SetStatus never arrives, so Protocol.Run can bail out
+// after the configured window instead of blocking forever.
+func TestGrpcServer_AwaitStatus_TimesOutWhenUnset(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+	}
+	start := time.Now()
+	got := ss.awaitStatus(50 * time.Millisecond)
+	require.Nil(t, got)
+	require.GreaterOrEqual(t, time.Since(start), 50*time.Millisecond)
+}
+
+// TestGrpcServer_AwaitStatus_UnblocksOnSetStatus verifies that awaitStatus
+// returns the freshly-set statusData as soon as the statusReady signal fires
+// — the central startup-window fix.
+func TestGrpcServer_AwaitStatus_UnblocksOnSetStatus(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+	}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		ss.statusDataLock.Lock()
+		ss.statusData = &sentryproto.StatusData{NetworkId: 7}
+		ss.statusDataLock.Unlock()
+		close(ss.statusReady)
+	}()
+	got := ss.awaitStatus(2 * time.Second)
+	require.NotNil(t, got)
+	require.Equal(t, uint64(7), got.NetworkId)
 }

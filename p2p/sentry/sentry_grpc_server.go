@@ -1491,6 +1491,16 @@ func (ss *GrpcServer) GetP2PServer() *p2p.Server {
 	return ss.getP2PServer()
 }
 
+// IsPeerReporter reports whether this GrpcServer is the one that returns
+// the global peer view through Peers / NodeInfo when several GrpcServers
+// share a p2p.Server. Exposed primarily for observability and tests; the
+// coordinator (sentry.Provider) toggles it via SetP2PServer.
+func (ss *GrpcServer) IsPeerReporter() bool {
+	ss.p2pServerLock.RLock()
+	defer ss.p2pServerLock.RUnlock()
+	return ss.reportsPeers
+}
+
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
