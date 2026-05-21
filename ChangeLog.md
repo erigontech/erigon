@@ -15,7 +15,7 @@ Full mode now retains state and block data for the last `262,144` blocks (~36.4 
 | State history retention | last 100,000 blocks | last 262,144 blocks |
 | Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
 
-`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#20447](https://github.com/erigontech/erigon/issues/20447) for discussion.
+`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
 
 **Migration:** existing datadirs upgrade automatically. The prune-config guard now accepts finite distance changes on `History`/`Blocks` in either direction, and the one-way `chain-history-expiry → finite distance` change on `Blocks` for the full-mode case. Operators who want to keep the old "retain all post-merge block data" behavior can switch to `--prune.mode=blocks` or pass `--prune.distance.blocks=18446744073709551615` to preserve the chain-history-expiry sentinel.
 
