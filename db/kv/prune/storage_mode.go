@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -36,7 +37,7 @@ var (
 	}
 	FullMode = Mode{
 		Initialised: true,
-		Blocks:      DefaultBlocksPruneMode,
+		Blocks:      Distance(config3.DefaultPruneDistance),
 		History:     Distance(config3.DefaultPruneDistance),
 	}
 	BlocksMode = Mode{
@@ -46,8 +47,8 @@ var (
 	}
 	MinimalMode = Mode{
 		Initialised: true,
-		Blocks:      Distance(config3.DefaultPruneDistance),
-		History:     Distance(config3.DefaultPruneDistance),
+		Blocks:      Distance(config3.MinimalPruneDistance),
+		History:     Distance(config3.MinimalPruneDistance),
 	}
 
 	DefaultMode = ArchiveMode
@@ -57,8 +58,7 @@ var (
 		Blocks:      Distance(math.MaxUint64),
 	}
 
-	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
-	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
+	ErrUnknownPruneMode = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
 )
 
 const (
@@ -197,12 +197,74 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 			(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
 			return pruneMode, nil
 		}
+		// Retention-window changes (e.g., the EIP-8252 default bump from 100k
+		// to 262_144, or any operator-initiated --prune.distance change) are
+		// safe in both directions: widening cannot bring back already-pruned
+		// state but is operationally fine going forward, and narrowing just
+		// causes the next prune pass to delete more. Accept such changes,
+		// rewrite the persisted value so we don't warn on every restart, and
+		// log the transition. Mode-shape changes that toggle between a finite
+		// Distance and a sentinel (KeepAllBlocksPruneMode / DefaultBlocksPruneMode)
+		// continue to be rejected — those are likely typos with destructive
+		// consequences (e.g., archive → minimal silently pruning the bulk of
+		// the datadir).
+		if isRetentionWindowChange(pm, pruneMode) {
+			log.Warn("[prune] retention window changed from previous run; already-pruned data cannot be recovered",
+				"previous", pm.String(), "current", pruneMode.String())
+			if err := overwriteStoredMode(tx, pruneMode); err != nil {
+				return pruneMode, err
+			}
+			return pruneMode, nil
+		}
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			return pm, errors.New("changing --prune.* flags is prohibited, last time you used: --prune.mode=" + pm.String())
 		}
 	}
 	return pm, nil
+}
+
+// isRetentionWindowChange reports whether persisted and requested differ only
+// in the size of their finite block-retention windows. A field with a sentinel
+// value (KeepAllBlocksPruneMode or DefaultBlocksPruneMode) on either side is
+// treated as a mode-shape change, not a window change, and returns false.
+func isRetentionWindowChange(persisted, requested Mode) bool {
+	if persisted.History == requested.History && persisted.Blocks == requested.Blocks {
+		return false
+	}
+	historyOK := persisted.History == requested.History ||
+		(isFiniteDistance(persisted.History) && isFiniteDistance(requested.History))
+	blocksOK := persisted.Blocks == requested.Blocks ||
+		(isFiniteDistance(persisted.Blocks) && isFiniteDistance(requested.Blocks))
+	return historyOK && blocksOK
+}
+
+// isFiniteDistance reports whether b is a Distance with a finite retention
+// value (i.e., not one of the sentinel values that select a different policy
+// shape).
+func isFiniteDistance(b BlockAmount) bool {
+	d, ok := b.(Distance)
+	if !ok {
+		return false
+	}
+	return d != KeepAllBlocksPruneMode && d != DefaultBlocksPruneMode
+}
+
+func overwriteStoredMode(db kv.GetPut, pm Mode) error {
+	for key, value := range map[string]BlockAmount{
+		string(kv.PruneHistory): pm.History,
+		string(kv.PruneBlocks):  pm.Blocks,
+	} {
+		v := make([]byte, 8)
+		binary.BigEndian.PutUint64(v, value.toValue())
+		if err := db.Put(kv.DatabaseInfo, []byte(key), v); err != nil {
+			return err
+		}
+		if err := db.Put(kv.DatabaseInfo, keyType([]byte(key)), value.dbType()); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
