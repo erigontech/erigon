@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.4.2] "Splashing Saga" – TBD
+
+v3.4.2 is a bugfix release recommended for all users.
+
+**Bugfixes**
+
+- execution/stagedsync: find diffset by actually-executed hash on unwind (#21157) by @JkLondon — fixes a
+  state-leak bug in `unwindExec3` that surfaces as `gas used mismatch` / `Cannot update chain head` after
+  a tip reorg whose unwound block deployed a contract via `CREATE`/`CREATE2` to a counterfactual address
+  (safe-wallets, EIP-1167 clone factories, ERC-4337 accounts, deterministic deployers). The unwind now
+  walks every header at the height to find the diffset of the block actually executed, instead of
+  assuming the (already-flipped) canonical hash matches.
+- rawdb: ignore invalid receipt cache transaction indexes (#21262) by @Sahil-4555
+
+**Improvements**
+
+- db/state, ethconfig: bound domain merge; add `--erigondb.domain.steps-in-frozen-file` (#21148) by
+  @wmitsuda
+- `seg retire`: wait for background build/merge before MergeLoop (#21135) by @sudeepdino008
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.4.1...v3.4.2
+
+---
+
 ## [3.4.1] "Splashing Saga" – 2026-05-11
 
 **Bugfixes**
