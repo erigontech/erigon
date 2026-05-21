@@ -55,9 +55,12 @@ type StagedBatch struct {
 }
 
 // FetchCanonicalBatch downloads every canonical file in files into an
-// isolated staging directory <snapDir>/.staging-<gen>/, using the live
-// torrent client with per-directory scoped storage so the node's live
-// (minority) snapshot files are never touched.
+// isolated staging directory <datadir>/temp/adoption-<gen>/, using the
+// live torrent client with per-directory scoped storage so the node's
+// live (minority) snapshot files are never touched. The cutover that
+// promotes a staged batch handles the temp -> snapshots move with a
+// cross-device fallback, since an operator may symlink the snapshots
+// directory onto a separate volume.
 //
 // anacrolix keys torrents by info-hash, so a canonical file — different
 // bytes, hence a different info-hash — never collides with the live
@@ -84,7 +87,7 @@ func (p *Provider) FetchCanonicalBatch(ctx context.Context, gen string, files []
 		return nil, fmt.Errorf("FetchCanonicalBatch: torrent client nil")
 	}
 
-	stagingDir := filepath.Join(p.dirs.Snap, ".staging-"+gen)
+	stagingDir := filepath.Join(p.dirs.Tmp, "adoption-"+gen)
 	// Start from a clean slate: a prior partial run for the same
 	// generation may have left stale files.
 	if err := dir.RemoveAll(stagingDir); err != nil {

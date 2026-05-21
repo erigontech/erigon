@@ -19,12 +19,15 @@ package storage
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -419,8 +422,8 @@ func (p *Provider) renameAndReopen(swaps []cutoverSwap) error {
 	defer p.Aggregator.UnlockCollation()
 
 	for _, s := range swaps {
-		if err := os.Rename(s.src, s.dst); err != nil {
-			return fmt.Errorf("rename %s: %w", s.name, err)
+		if err := moveFileAcrossFS(s.src, s.dst); err != nil {
+			return fmt.Errorf("move %s: %w", s.name, err)
 		}
 	}
 	if err := p.Aggregator.OpenFolder(); err != nil {
@@ -430,6 +433,28 @@ func (p *Provider) renameAndReopen(swaps []cutoverSwap) error {
 		return fmt.Errorf("reopen snapshots: %w", err)
 	}
 	return nil
+}
+
+// moveFileAcrossFS renames src onto dst, falling back to a fsync'd copy
+// into a sibling temp file plus an atomic same-directory rename when
+// src and dst are on different filesystems. Staging lives under
+// <datadir>/temp; an operator may symlink the snapshots directory onto
+// a separate volume, which makes a direct rename fail with EXDEV.
+func moveFileAcrossFS(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	tmp := dst + ".adopting"
+	if err := datadir.CopyFile(src, tmp); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = dir.RemoveFile(tmp)
+		return err
+	}
+	return dir.RemoveFile(src)
 }
 
 // roOverlayDB wraps the live temporal DB so a read transaction opened

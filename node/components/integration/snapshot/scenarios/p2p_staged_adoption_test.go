@@ -69,8 +69,8 @@ func TestP2P_StagedAdoption_FetchCanonicalBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, batch)
 
-	// Staged into the per-generation isolated directory.
-	require.Equal(t, filepath.Join(minorityNode.Dirs.Snap, ".staging-7"), batch.Dir)
+	// Staged into the per-generation isolated directory under temp.
+	require.Equal(t, filepath.Join(minorityNode.Dirs.Tmp, "adoption-7"), batch.Dir)
 	require.Len(t, batch.Files, 1)
 	require.Equal(t, fixtureName, batch.Files[0].Name)
 	require.Equal(t, canonicalHash, batch.Files[0].InfoHash)
@@ -113,6 +113,6 @@ func TestP2P_StagedAdoption_NameMismatchAbortsBatch(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "does not match expected")
 
-	_, statErr := os.Stat(filepath.Join(minorityNode.Dirs.Snap, ".staging-9"))
+	_, statErr := os.Stat(filepath.Join(minorityNode.Dirs.Tmp, "adoption-9"))
 	require.True(t, os.IsNotExist(statErr), "failed batch must remove the staging directory")
 }
