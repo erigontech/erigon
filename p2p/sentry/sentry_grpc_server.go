@@ -983,12 +983,6 @@ type GrpcServer struct {
 	// multiple GrpcServer instances and their lifecycle is owned by the
 	// coordinator, so this GrpcServer must not Stop() them on Close().
 	external bool
-	// reportsPeers gates the Peers / NodeInfo gRPC methods. When several
-	// GrpcServers share one p2p.Server, returning the full peer list from
-	// every one of them would N-fold duplicate every entry in admin_peers.
-	// The coordinator enables this on exactly one GrpcServer (typically the
-	// first / highest-protocol sentry); the others report empty.
-	reportsPeers bool
 	// statusReady is closed by SetStatus the first time it stores a
 	// non-empty statusData. Protocol.Run waits on it (with a timeout) so
 	// inbound dials that land on the listener before the multi-client has
@@ -1015,23 +1009,23 @@ type GrpcServer struct {
 // one Node ID, one ENR, one listener port). It bypasses the lazy server
 // construction inside SetStatus.
 //
-// reportsPeers selects which sentry exposes the global peer view through the
-// gRPC Peers / NodeInfo calls. Pass true for exactly one GrpcServer per
-// shared p2p.Server; the others must pass false to avoid admin_peers seeing
-// every peer N times once the multi-sentry client aggregates across sentries.
+// Each GrpcServer reports peers via its own goodPeers map (populated by the
+// eth Protocol.Run for its specific protocol version), so the multi-sentry
+// client can route messages to the correct sentry without duplication or
+// misrouting.
 //
 // SetP2PServer must be called before SetStatus and after the Server has been
-// started. Calling it more than once on the same GrpcServer panics — the
-// invariant is that ownership is decided up front.
-func (ss *GrpcServer) SetP2PServer(srv *p2p.Server, reportsPeers bool) {
+// started. Calling it more than once on the same GrpcServer returns an
+// error — ownership is decided up front.
+func (ss *GrpcServer) SetP2PServer(srv *p2p.Server) error {
 	ss.p2pServerLock.Lock()
 	defer ss.p2pServerLock.Unlock()
 	if ss.p2pServer != nil {
-		panic("sentry.GrpcServer: SetP2PServer called when p2pServer is already set")
+		return errors.New("sentry.GrpcServer: SetP2PServer called when p2pServer is already set")
 	}
 	ss.p2pServer = srv
 	ss.external = true
-	ss.reportsPeers = reportsPeers
+	return nil
 }
 
 // cleanupOldWitnessRequests removes witness requests that have been active for too long
@@ -1491,16 +1485,6 @@ func (ss *GrpcServer) GetP2PServer() *p2p.Server {
 	return ss.getP2PServer()
 }
 
-// IsPeerReporter reports whether this GrpcServer is the one that returns
-// the global peer view through Peers / NodeInfo when several GrpcServers
-// share a p2p.Server. Exposed primarily for observability and tests; the
-// coordinator (sentry.Provider) toggles it via SetP2PServer.
-func (ss *GrpcServer) IsPeerReporter() bool {
-	ss.p2pServerLock.RLock()
-	defer ss.p2pServerLock.RUnlock()
-	return ss.reportsPeers
-}
-
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
@@ -1524,32 +1508,39 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}
-	// Unblock awaitStatus on the first non-nil store.
-	ss.statusReadyOnce.Do(func() { close(ss.statusReady) })
+	// Unblock awaitStatus on the first non-nil store. Guard against a nil
+	// channel for callers that construct GrpcServer outside NewGrpcServer
+	// (existing tests do this) — close(nil) would panic.
+	ss.statusReadyOnce.Do(func() {
+		if ss.statusReady != nil {
+			close(ss.statusReady)
+		}
+	})
 	return reply, nil
 }
 
 func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.PeersReply, error) {
-	p2pServer := ss.getP2PServer()
-	if p2pServer == nil {
+	if ss.getP2PServer() == nil {
 		return nil, errors.New("p2p server was not started")
 	}
 
-	// Shared p2p.Server: only the designated reporter returns the global
-	// peer view. Other GrpcServers on the same Server return empty so that
-	// admin_peers aggregation does not multiply every peer by the number of
-	// sentries (see SetP2PServer).
-	if ss.external && !ss.reportsPeers {
-		return &sentryproto.PeersReply{}, nil
-	}
-
-	peers := p2pServer.PeersInfo()
-
+	// Report only peers this sentry actually owns — i.e. the ones for which
+	// either the eth Protocol.Run or the wit Protocol.Run fired here and
+	// populated goodPeers. With a shared p2p.Server each peer ends up in
+	// exactly one eth-sentry's goodPeers (the negotiated version) plus, at
+	// most, the sentry hosting the wit sideprotocol. Returning
+	// p2pServer.PeersInfo() from every sentry would either N-fold the list
+	// in admin_peers aggregation or misroute SendMessageById when the
+	// multi-client maps peers to clients by who first returned them.
 	var reply sentryproto.PeersReply
-	reply.Peers = make([]*typesproto.PeerInfo, 0, len(peers))
-
-	for _, peer := range peers {
-		rpcPeer := typesproto.PeerInfo{
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		// Ghost entries (eth Run never ran, wit Run never ran) shouldn't
+		// surface — they'd just be empty placeholders.
+		if peerInfo.protocol == 0 && peerInfo.witProtocol == 0 {
+			return true
+		}
+		peer := peerInfo.peer.Info()
+		reply.Peers = append(reply.Peers, &typesproto.PeerInfo{
 			Id:             peer.ID,
 			Name:           peer.Name,
 			Enode:          peer.Enode,
@@ -1560,9 +1551,9 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 			ConnIsInbound:  peer.Network.Inbound,
 			ConnIsTrusted:  peer.Network.Trusted,
 			ConnIsStatic:   peer.Network.Static,
-		}
-		reply.Peers = append(reply.Peers, &rpcPeer)
-	}
+		})
+		return true
+	})
 
 	return &reply, nil
 }
@@ -1570,6 +1561,15 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
 	counts := map[uint]int{}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		// Skip ghost goodPeers entries (eth Run never set the protocol).
+		// In shared-Server mode the sentry hosting the deduped wit/0
+		// protocol gets such entries for every wit-speaking peer whose eth
+		// version was negotiated on a different sentry — counting them
+		// under protocol=0 would surface as a bogus eth.ProtocolToString[0]
+		// bucket in the GoodPeers log.
+		if peerInfo.protocol == 0 {
+			return true
+		}
 		counts[peerInfo.protocol]++
 		return true
 	})
@@ -1636,8 +1636,11 @@ func (ss *GrpcServer) GetStatus() *sentryproto.StatusData {
 // awaitStatus returns the current statusData, waiting up to maxWait for the
 // first SetStatus to land if it hasn't yet. The wait absorbs the startup gap
 // when a shared p2p.Server's listener is already accepting connections but
-// the multi-client hasn't broadcast status to this sentry; returns nil on
-// timeout so the caller can disconnect the peer.
+// the multi-client hasn't broadcast status to this sentry yet. On timeout,
+// emits a debug log so an operator can tell "core didn't send status in time"
+// from "core never tried" when the caller disconnects the peer with
+// PeerErrorLocalStatusNeeded. Also returns whatever GetStatus reports when
+// ss.ctx is cancelled — usually nil during shutdown.
 func (ss *GrpcServer) awaitStatus(maxWait time.Duration) *sentryproto.StatusData {
 	if status := ss.GetStatus(); status != nil {
 		return status
@@ -1645,6 +1648,9 @@ func (ss *GrpcServer) awaitStatus(maxWait time.Duration) *sentryproto.StatusData
 	select {
 	case <-ss.statusReady:
 	case <-time.After(maxWait):
+		if ss.logger != nil {
+			ss.logger.Debug("[p2p] sentry timed out waiting for first SetStatus; inbound peer will be disconnected", "after", maxWait)
+		}
 	case <-ss.ctx.Done():
 	}
 	return ss.GetStatus()
@@ -1846,12 +1852,9 @@ func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*typesproto
 		return nil, errors.New("p2p server was not started")
 	}
 
-	// See Peers() — non-reporting sentries on a shared Server return empty
-	// to keep admin_nodeInfo from listing the same enode N times.
-	if ss.external && !ss.reportsPeers {
-		return &typesproto.NodeInfoReply{}, nil
-	}
-
+	// With a shared p2p.Server every sentry returns the same node info
+	// (same Node ID, same enode, same listener port). The multi-sentry
+	// aggregator in node/eth.NodesInfo deduplicates the resulting list.
 	info := p2pServer.NodeInfo()
 	ret := &typesproto.NodeInfoReply{
 		Id:    info.ID,

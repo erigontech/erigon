@@ -832,37 +832,48 @@ func minimalP2PServer(t *testing.T) *p2p.Server {
 }
 
 // TestGrpcServer_SetP2PServer_FlagsAndIdempotency verifies the SetP2PServer
-// hook flips external/reportsPeers correctly and refuses a second injection.
+// hook flips the external flag correctly and refuses a second injection.
 func TestGrpcServer_SetP2PServer_FlagsAndIdempotency(t *testing.T) {
 	srv := minimalP2PServer(t)
 	ss := &GrpcServer{statusReady: make(chan struct{})}
 
-	ss.SetP2PServer(srv, true)
+	require.NoError(t, ss.SetP2PServer(srv))
 	require.True(t, ss.external)
-	require.True(t, ss.reportsPeers)
 	require.Same(t, srv, ss.getP2PServer())
 
-	// A second SetP2PServer must panic — ownership is decided up front.
-	require.Panics(t, func() { ss.SetP2PServer(srv, false) })
+	// A second SetP2PServer must error — ownership is decided up front.
+	require.Error(t, ss.SetP2PServer(srv))
 }
 
-// TestGrpcServer_PeersGatedOnNonReporter verifies that a sentry sharing a
-// p2p.Server but not marked as the reporter returns an empty Peers reply,
-// so admin_peers aggregation across sentries doesn't N-fold every entry.
-func TestGrpcServer_PeersGatedOnNonReporter(t *testing.T) {
+// TestGrpcServer_PeersReturnsPerSentryGoodPeers verifies that Peers reports
+// only peers in this sentry's goodPeers map (i.e. peers whose eth or wit
+// Protocol.Run fired here), not the shared p2p.Server's global peer set.
+// That's what lets the multi-sentry message router map peers to the correct
+// sentry when several sentries share one p2p.Server.
+//
+// Ghost goodPeers entries (protocol == 0 && witProtocol == 0) must be
+// filtered out — they're stubs from getOrCreatePeer before either Run set
+// its protocol field.
+func TestGrpcServer_PeersReturnsPerSentryGoodPeers(t *testing.T) {
 	srv := minimalP2PServer(t)
+	ss := &GrpcServer{statusReady: make(chan struct{}), goodPeers: map[[64]byte]*PeerInfo{}}
+	require.NoError(t, ss.SetP2PServer(srv))
 
-	silent := &GrpcServer{statusReady: make(chan struct{})}
-	silent.SetP2PServer(srv, false)
+	withEth, _ := newTestPeerInfoWithEth(t)
+	var ethKey [64]byte
+	ethKey[0] = 0x42
+	ss.goodPeers[ethKey] = withEth
 
-	silentReply, err := silent.Peers(context.Background(), nil)
+	ghost, _ := newTestPeerInfoWithEth(t)
+	ghost.protocol = 0
+	ghost.witProtocol = 0
+	var ghostKey [64]byte
+	ghostKey[0] = 0x43
+	ss.goodPeers[ghostKey] = ghost
+
+	reply, err := ss.Peers(context.Background(), nil)
 	require.NoError(t, err)
-	require.Empty(t, silentReply.Peers)
-
-	silentNodeInfo, err := silent.NodeInfo(context.Background(), nil)
-	require.NoError(t, err)
-	require.Empty(t, silentNodeInfo.Id)
-	require.Empty(t, silentNodeInfo.Enode)
+	require.Len(t, reply.Peers, 1, "ghost goodPeers entries must be filtered out")
 }
 
 // TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
@@ -875,7 +886,7 @@ func TestGrpcServer_CloseDoesNotStopExternalServer(t *testing.T) {
 	t.Cleanup(srv.Stop)
 
 	ss := &GrpcServer{statusReady: make(chan struct{})}
-	ss.SetP2PServer(srv, true)
+	require.NoError(t, ss.SetP2PServer(srv))
 
 	ss.Close()
 
@@ -946,4 +957,29 @@ func TestGrpcServer_AwaitStatus_UnblocksOnSetStatus(t *testing.T) {
 	got := ss.awaitStatus(2 * time.Second)
 	require.NotNil(t, got)
 	require.Equal(t, uint64(7), got.NetworkId)
+}
+
+// TestGrpcServer_SetStatus_NilStatusReadyIsSafe guards against panics in
+// callers that instantiate GrpcServer directly without using NewGrpcServer
+// (some tests do this). SetStatus closes the statusReady channel; close(nil)
+// would panic, so the close is nil-guarded.
+func TestGrpcServer_SetStatus_NilStatusReadyIsSafe(t *testing.T) {
+	srv := minimalP2PServer(t)
+	require.NoError(t, srv.Start(context.Background(), log.Root()))
+	t.Cleanup(srv.Stop)
+
+	// Build a minimal but valid status payload (genesis + empty forks lists).
+	configNoFork := &chain.Config{HomesteadBlock: common.NewUint64(1), ChainID: uint256.NewInt(1)}
+	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	gspecNoFork := &types.Genesis{Config: configNoFork}
+	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())
+
+	ss := &GrpcServer{} // zero-value statusReady (nil channel)
+	require.NoError(t, ss.SetP2PServer(srv))
+
+	require.NotPanics(t, func() {
+		_, _ = ss.SetStatus(context.Background(), &sentryproto.StatusData{
+			ForkData: &sentryproto.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+		})
+	})
 }

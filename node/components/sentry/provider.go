@@ -361,10 +361,10 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 // name+version so sideprotocols like wit aren't registered N times), starts
 // it, and injects it back into every GrpcServer.
 //
-// Exactly one GrpcServer is marked as the peer-list reporter (the first one
-// in p.Servers, which matches the highest entry in ProtocolVersion); the rest
-// suppress their Peers / NodeInfo gRPC replies so admin_peers aggregation
-// doesn't multiply the peer count by len(p.Servers).
+// Each GrpcServer reports peers via its own goodPeers map (the peers whose
+// eth Protocol.Run fired on that sentry), so admin_peers aggregation across
+// sentries is naturally non-duplicating and the multi-sentry message router
+// maps peers to the correct sentry by negotiated protocol version.
 func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string, chainDNSNetwork string) error {
 	if len(p.Servers) == 0 {
 		return errors.New("sentry provider: no GrpcServers to back with a shared p2p.Server")
@@ -416,9 +416,10 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 	}
 	p.sharedP2PServer = srv
 
-	for i, ss := range p.Servers {
-		// First sentry (highest configured protocol version) reports peers.
-		ss.SetP2PServer(srv, i == 0)
+	for _, ss := range p.Servers {
+		if err := ss.SetP2PServer(srv); err != nil {
+			return fmt.Errorf("sentry provider: inject shared p2p server: %w", err)
+		}
 	}
 	return nil
 }

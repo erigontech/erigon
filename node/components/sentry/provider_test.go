@@ -301,9 +301,6 @@ func TestStartSharedP2PServer_DedupesAndWiresReporter(t *testing.T) {
 
 	require.Same(t, p.sharedP2PServer, first.GetP2PServer())
 	require.Same(t, p.sharedP2PServer, second.GetP2PServer())
-
-	require.True(t, first.IsPeerReporter(), "first sentry must be the peer-list reporter")
-	require.False(t, second.IsPeerReporter(), "non-reporter sentries must report empty peers")
 }
 
 // TestProviderClose_StopsSharedP2PServer mirrors the GrpcServer-side test:
