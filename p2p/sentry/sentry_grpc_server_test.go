@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -730,7 +731,8 @@ func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
 	rw := NewRLPReadWriter()
 	t.Cleanup(rw.Close)
 
-	pi := NewPeerInfo(peer, rw)
+	pi := NewPeerInfo(peer)
+	pi.SetEthRw(rw)
 	// Mark eth handshake as done so WaitForEth returns immediately.
 	pi.SetEthProtocol(direct.ETH68)
 
@@ -816,8 +818,9 @@ func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
 	}
 }
 
-// minimalP2PServer returns an unstartable-on-network p2p.Server suitable for
-// shared-Server lifecycle tests: no discovery, no dial, no listener.
+// minimalP2PServer returns an un-networked p2p.Server (no discovery, no
+// dial, no listener) suitable for tests that only need a non-nil Server
+// to inject into a GrpcServer.
 func minimalP2PServer(t *testing.T) *p2p.Server {
 	t.Helper()
 	key, err := crypto.GenerateKey()
@@ -829,6 +832,39 @@ func minimalP2PServer(t *testing.T) *p2p.Server {
 		NoDiscovery:     true,
 		NoDial:          true,
 	}}
+}
+
+// minimalP2PServerWithListener returns a p2p.Server bound to an ephemeral
+// loopback port. The bound address lets lifecycle tests observe Stop by
+// dialling the port: connect succeeds while the listener is up and is
+// refused once the Server has shut it down. Avoids relying on Start-after-
+// Stop, which p2p.Server documents as unsupported.
+func minimalP2PServerWithListener(t *testing.T) *p2p.Server {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	return &p2p.Server{Config: p2p.Config{
+		PrivateKey:      key,
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
+	}}
+}
+
+// listenerReachable returns true if a TCP dial to the given peer-server's
+// listener succeeds within 200ms. Used by lifecycle tests to verify Stop
+// without depending on Start-after-Stop.
+func listenerReachable(t *testing.T, srv *p2p.Server) bool {
+	t.Helper()
+	addr := srv.NodeInfo().ListenAddr
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
 }
 
 // TestGrpcServer_SetP2PServer_FlagsAndIdempotency verifies the SetP2PServer
@@ -915,38 +951,40 @@ func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
 
 // TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
 // leaves an externally-injected Server running — the coordinator owns its
-// lifecycle. We check by attempting to Start the Server again; Start returns
-// an error when the Server is already running.
+// lifecycle. We dial the listener before and after Close: it must still
+// accept connections after Close because the external Server is alive.
 func TestGrpcServer_CloseDoesNotStopExternalServer(t *testing.T) {
-	srv := minimalP2PServer(t)
+	srv := minimalP2PServerWithListener(t)
 	require.NoError(t, srv.Start(context.Background(), log.Root()))
 	t.Cleanup(srv.Stop)
 
 	ss := &GrpcServer{statusReady: make(chan struct{})}
 	require.NoError(t, ss.SetP2PServer(srv))
+	require.True(t, listenerReachable(t, srv), "listener should be up before Close")
 
 	ss.Close()
 
-	require.Error(t, srv.Start(context.Background(), log.Root()),
+	require.True(t, listenerReachable(t, srv),
 		"GrpcServer.Close must not stop an externally-injected p2p.Server")
 }
 
 // TestGrpcServer_CloseStopsOwnedServer covers the inverse: when the
-// GrpcServer created its own Server (legacy lazy path), Close still stops it.
+// GrpcServer created its own Server (legacy lazy path), Close stops it.
+// We dial the listener after Close and expect the connection to be refused.
 func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
-	srv := minimalP2PServer(t)
+	srv := minimalP2PServerWithListener(t)
 	require.NoError(t, srv.Start(context.Background(), log.Root()))
 
 	ss := &GrpcServer{statusReady: make(chan struct{})}
 	ss.p2pServerLock.Lock()
 	ss.p2pServer = srv
 	ss.p2pServerLock.Unlock()
+	require.True(t, listenerReachable(t, srv), "listener should be up before Close")
 
 	ss.Close()
 
-	// Server should now be stopped — Start should succeed again.
-	require.NoError(t, srv.Start(context.Background(), log.Root()))
-	t.Cleanup(srv.Stop)
+	require.False(t, listenerReachable(t, srv),
+		"GrpcServer.Close (owned server) must close the listener")
 }
 
 // TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path

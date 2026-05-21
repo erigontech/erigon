@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -307,8 +308,10 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 
 // TestProviderClose_StopsSharedP2PServer mirrors the GrpcServer-side test:
 // Provider.Close must stop the shared p2p.Server it created (GrpcServer.Close
-// is a no-op for external servers by design). We verify by trying to Start
-// the Server again — Start errors when the Server is still running.
+// is a no-op for external servers by design). We bind an ephemeral listener
+// and dial it before/after Close — the connection must be refused once the
+// Provider has shut the listener down. Avoids relying on Start-after-Stop,
+// which p2p.Server documents as unsupported.
 func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -329,17 +332,22 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 		MaxPendingPeers: 1,
 		NoDiscovery:     true,
 		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
 	}
 	require.NoError(t, p.startSharedP2PServer(&cfg, nil, ""))
 	srv := p.sharedP2PServer
 	require.NotNil(t, srv)
 
+	addr := srv.NodeInfo().ListenAddr
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	require.NoError(t, err, "listener should be up before Close")
+	c.Close()
+
 	require.NoError(t, p.Close())
 	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
 
-	// Server should be stopped — Start should succeed again.
-	require.NoError(t, srv.Start(t.Context(), log.Root()))
-	t.Cleanup(srv.Stop)
+	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }
 
 // TestLoopbackProbeHost covers the input shapes we expect from

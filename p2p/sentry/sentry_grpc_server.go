@@ -80,12 +80,20 @@ const (
 // PeerInfo collects various extra bits of information about the peer,
 // for example deadlines that is used for regulating requests sent to the peer
 type PeerInfo struct {
-	peer                  *p2p.Peer
-	lock                  sync.RWMutex
-	deadlines             []time.Time // Request deadlines
-	latestDealine         time.Time
-	minBlock, height      uint64
-	rw                    p2p.MsgReadWriter
+	peer             *p2p.Peer
+	lock             sync.RWMutex
+	deadlines        []time.Time // Request deadlines
+	latestDealine    time.Time
+	minBlock, height uint64
+	// ethRw and witRw are the per-subprotocol MsgReadWriters this peer is
+	// using. They live on the SAME RLPx connection but have different code
+	// offsets, so writePeer must select the right one for the message's
+	// protocol — pinning a single "canonical" rw routes wit frames onto
+	// the eth offset (or vice versa) and breaks the receiving side. The
+	// respective Protocol.Run sets each via SetEthRw / SetWitRw before
+	// announcing the peer as ready.
+	ethRw                 p2p.MsgReadWriter
+	witRw                 p2p.MsgReadWriter
 	protocol, witProtocol uint
 	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
 	ethReady              chan struct{}
@@ -151,12 +159,11 @@ func (bp *PeersByMinBlock) Pop() any {
 	return x
 }
 
-func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
+func NewPeerInfo(peer *p2p.Peer) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{
 		peer:           peer,
-		rw:             rw,
 		ethReady:       make(chan struct{}),
 		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
 		removed:        make(chan struct{}),
@@ -191,21 +198,42 @@ func (pi *PeerInfo) ID() [64]byte {
 	return pi.peer.Pubkey()
 }
 
-// SetRw replaces the canonical MsgReadWriter used for outbound writes via
-// writePeer. The eth Run calls it so that even if wit/0 created the
-// PeerInfo first (with the wit protoRW), eth outbound writes go on the
-// eth protoRW instead of injecting eth frames into the wit stream.
-func (pi *PeerInfo) SetRw(rw p2p.MsgReadWriter) {
+// SetEthRw stores the eth protoRW for this peer. Called by the eth Run
+// after getOrCreatePeer so writePeer can route eth-protocol messages
+// through the eth offset on the RLPx connection regardless of which
+// Protocol.Run created the shared PeerInfo first.
+func (pi *PeerInfo) SetEthRw(rw p2p.MsgReadWriter) {
 	pi.lock.Lock()
-	pi.rw = rw
+	pi.ethRw = rw
 	pi.lock.Unlock()
 }
 
-// Rw returns the canonical MsgReadWriter for this peer.
-func (pi *PeerInfo) Rw() p2p.MsgReadWriter {
+// EthRw returns the eth-subprotocol MsgReadWriter, or nil if the eth Run
+// hasn't attached it yet (which means this peer isn't yet ready for eth
+// outbound — writePeer must skip).
+func (pi *PeerInfo) EthRw() p2p.MsgReadWriter {
 	pi.lock.RLock()
 	defer pi.lock.RUnlock()
-	return pi.rw
+	return pi.ethRw
+}
+
+// SetWitRw stores the wit protoRW for this peer (called by the wit Run).
+// Outbound wit messages (GET_BLOCK_WITNESS_W0 etc.) must go through this
+// rw, never through the eth one — they use a different protocol offset.
+func (pi *PeerInfo) SetWitRw(rw p2p.MsgReadWriter) {
+	pi.lock.Lock()
+	pi.witRw = rw
+	pi.lock.Unlock()
+}
+
+// WitRw returns the wit-subprotocol MsgReadWriter, or nil if the wit Run
+// hasn't attached it yet (e.g. peer doesn't advertise wit). Callers
+// targeting wit messages must treat nil as "this peer doesn't speak wit"
+// and skip the write.
+func (pi *PeerInfo) WitRw() p2p.MsgReadWriter {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.witRw
 }
 
 // AddDeadline adds given deadline to the list of deadlines
@@ -863,14 +891,13 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-			peerInfo, err := ss.getOrCreatePeer(peer, rw, eth.ProtocolName)
+			peerInfo, err := ss.getOrCreatePeer(peer, eth.ProtocolName)
 			if err != nil {
 				return err
 			}
-			// In shared-PeerStore mode wit/0 may have created the PeerInfo
-			// first with the wit protoRW; pin the eth protoRW so outbound
-			// writePeer doesn't emit eth frames onto the wit stream.
-			peerInfo.SetRw(rw)
+			// Attach the eth subprotocol rw so writePeer can route
+			// eth-protocol outbound at the right RLPx offset.
+			peerInfo.SetEthRw(rw)
 			peerInfo.SetEthProtocol(protocol)
 
 			if protocol >= direct.ETH69 {
@@ -919,17 +946,21 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			DialCandidates: nil,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
 				peerID := peer.Pubkey()
-				peerInfo, err := ss.getOrCreatePeer(peer, rw, wit.ProtocolName)
+				peerInfo, err := ss.getOrCreatePeer(peer, wit.ProtocolName)
 				if err != nil {
 					return err
 				}
+				peerInfo.SetWitRw(rw)
 				peerInfo.witProtocol = wit.ProtocolVersions[0]
 				// In shared-Server mode wit/0 is deduped to one sentry; if
 				// no eth Run ever fires on this sentry for this peer (which
 				// is the common case — wit lives on sentry[0], eth/* on the
-				// version sentry), nothing else clears the goodPeers entry.
-				// Defer cleanup here so wit's exit always tears it down.
+				// version sentry), nothing else tears down the goodPeers
+				// entry or the PeerInfo task-channel worker. Close is
+				// idempotent (it nil-checks pi.tasks) so it's safe even
+				// when eth Run also runs and defers Close on its side.
 				defer ss.deletePeer(peerID)
+				defer peerInfo.Close()
 
 				return runWitPeer(
 					ctx,
@@ -1162,8 +1193,11 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return peerInfo
 }
 
-// getOrCreatePeer gets or creates PeerInfo
-func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
+// getOrCreatePeer gets or creates PeerInfo. The subprotocol-specific
+// MsgReadWriter is NOT stored here — callers must follow up with
+// peerInfo.SetEthRw or peerInfo.SetWitRw so writePeer can route outbound
+// messages to the correct offset (see PeerInfo.ethRw/witRw).
+func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
 	ss.peers.mu.Lock()
@@ -1171,7 +1205,7 @@ func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, prot
 
 	existingPeerInfo := ss.peers.peers[peerID]
 	if existingPeerInfo == nil {
-		peerInfo := NewPeerInfo(peer, rw)
+		peerInfo := NewPeerInfo(peer)
 		ss.peers.peers[peerID] = peerInfo
 		return peerInfo, nil
 	}
@@ -1239,9 +1273,27 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
 		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
-		// Use the lock-protected accessor: in shared-PeerStore mode the eth
-		// Run replaces an early wit-only rw with the eth protoRW.
-		err := peerInfo.Rw().WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
+		// Select the rw for the message's subprotocol. eth and wit live on
+		// the same RLPx connection but at different code offsets — writing
+		// a wit message via the eth rw (or vice versa) puts it at the wrong
+		// offset and the receiver disconnects on protocol error.
+		var rw p2p.MsgReadWriter
+		switch protocolName {
+		case eth.ProtocolName:
+			rw = peerInfo.EthRw()
+		case wit.ProtocolName:
+			rw = peerInfo.WitRw()
+		}
+		if rw == nil {
+			// Peer hasn't (yet) attached the subprotocol this message
+			// belongs to. Common case: a wit broadcast aimed at every
+			// good peer, some of which negotiated only eth. Treat as a
+			// successful no-op rather than disconnecting — the legacy
+			// single-rw path would have written eth frames onto wit codes
+			// here and broken the peer.
+			return
+		}
+		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
 		} else {
