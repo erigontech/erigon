@@ -406,15 +406,14 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 	}
 
 	var lbloom types.Bloom
-	bloomFromReceipts := false
+	bloomFromReceipts := checkReceipts && checkBloom && !alwaysSkipReceiptCheck
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
-			if checkBloom && len(r.Logs) != 0 {
-				lbloom.Or(r.Bloom)
+			if bloomFromReceipts {
+				lbloom.Or(&r.Bloom)
 			}
 		}
-		bloomFromReceipts = checkBloom
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
 			if dbg.LogHashMismatchReason() {

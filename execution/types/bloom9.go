@@ -107,9 +107,11 @@ func (b Bloom) Test(topic []byte) bool {
 }
 
 // Or merges another bloom filter into b.
-func (b *Bloom) Or(other Bloom) {
-	for i := range b {
-		b[i] |= other[i]
+func (b *Bloom) Or(other *Bloom) {
+	bb := unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
+	ob := unsafe.Slice((*uint64)(unsafe.Pointer(&other[0])), BloomByteLength/8)
+	for i := 0; i < BloomByteLength/8; i++ {
+		bb[i] |= ob[i]
 	}
 }
 
