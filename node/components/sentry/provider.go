@@ -323,15 +323,13 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 		return cfg, nil
 	}
 
-	// checkPortIsFree dials the target, so an empty host (the ":30303" form)
-	// would fail with "missing host" and falsely report the port as free.
-	// Normalize to a concrete loopback target for the probe only — the
-	// returned ListenAddr keeps the original host so the listener still
-	// binds on the configured interface (all interfaces if it was empty).
-	probeHost := listenHost
-	if probeHost == "" {
-		probeHost = "127.0.0.1"
-	}
+	// checkPortIsFree dials the target, so unspecified bind addresses (empty,
+	// 0.0.0.0, ::, [::]) would all fail the dial and falsely report the
+	// port as free. Normalize to a concrete loopback target for the probe
+	// only — the returned ListenAddr keeps the original host so the
+	// listener still binds on the configured interface (all interfaces
+	// if it was empty).
+	probeHost := loopbackProbeHost(listenHost)
 
 	picked := false
 	for _, pc := range cfg.AllowedPorts {
@@ -418,6 +416,10 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 
 	for _, ss := range p.Servers {
 		if err := ss.SetP2PServer(srv); err != nil {
+			// Inject failed after Start: tear the listener back down so
+			// Initialize returns without leaking goroutines / sockets.
+			srv.Stop()
+			p.sharedP2PServer = nil
 			return fmt.Errorf("sentry provider: inject shared p2p server: %w", err)
 		}
 	}

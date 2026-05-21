@@ -983,3 +983,13 @@ func TestGrpcServer_SetStatus_NilStatusReadyIsSafe(t *testing.T) {
 		})
 	})
 }
+
+// TestGrpcServer_SetP2PServer_RejectsNil guards the lifecycle invariant
+// flagged by review: a nil server flipping external=true would later
+// cause Close() to skip Stop() on whatever Server the lazy SetStatus path
+// built — a real listener/goroutine leak. Reject at the door instead.
+func TestGrpcServer_SetP2PServer_RejectsNil(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+	require.Error(t, ss.SetP2PServer(nil))
+	require.False(t, ss.external, "external must not flip when SetP2PServer rejects the input")
+}

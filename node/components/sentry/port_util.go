@@ -47,3 +47,19 @@ func checkPortIsFree(addr string) (free bool) {
 	c.Close()
 	return false
 }
+
+// loopbackProbeHost returns a concrete loopback target for checkPortIsFree
+// to dial. Unspecified bind addresses (empty, 0.0.0.0, ::, [::]) would all
+// produce a dial error and falsely read as "port is free"; normalising them
+// to a loopback IP that the listener actually responds on lets the probe
+// detect the busy port. The original host is preserved on the listener
+// side so binding still happens on all interfaces.
+func loopbackProbeHost(host string) string {
+	switch host {
+	case "", "0.0.0.0":
+		return "127.0.0.1"
+	case "::", "[::]":
+		return "[::1]"
+	}
+	return host
+}

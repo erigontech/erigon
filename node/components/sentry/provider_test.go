@@ -339,3 +339,27 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	require.NoError(t, srv.Start(t.Context(), log.Root()))
 	t.Cleanup(srv.Stop)
 }
+
+// TestLoopbackProbeHost covers the input shapes we expect from
+// splitAddrIntoHostAndPort: the four unspecified forms must all rewrite
+// to a loopback target so checkPortIsFree actually detects busy ports;
+// concrete hosts must pass through.
+func TestLoopbackProbeHost(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", "127.0.0.1"},
+		{"0.0.0.0", "127.0.0.1"},
+		{"::", "[::1]"},
+		{"[::]", "[::1]"},
+		{"127.0.0.1", "127.0.0.1"},
+		{"10.1.2.3", "10.1.2.3"},
+		{"localhost", "localhost"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			require.Equal(t, tt.want, loopbackProbeHost(tt.input))
+		})
+	}
+}

@@ -1016,8 +1016,13 @@ type GrpcServer struct {
 //
 // SetP2PServer must be called before SetStatus and after the Server has been
 // started. Calling it more than once on the same GrpcServer returns an
-// error — ownership is decided up front.
+// error — ownership is decided up front. A nil srv is rejected too: if it
+// were accepted, SetStatus would lazily build its own Server (good) but
+// Close would still see external=true and skip Stop (leak).
 func (ss *GrpcServer) SetP2PServer(srv *p2p.Server) error {
+	if srv == nil {
+		return errors.New("sentry.GrpcServer: SetP2PServer called with nil *p2p.Server")
+	}
 	ss.p2pServerLock.Lock()
 	defer ss.p2pServerLock.Unlock()
 	if ss.p2pServer != nil {
