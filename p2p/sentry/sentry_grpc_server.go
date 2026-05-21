@@ -961,12 +961,24 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 
 type GrpcServer struct {
 	sentryproto.UnimplementedSentryServer
-	ctx                  context.Context
-	Protocols            []p2p.Protocol
-	goodPeersMu          sync.RWMutex
-	goodPeers            map[[64]byte]*PeerInfo
-	p2pServer            *p2p.Server
-	p2pServerLock        sync.RWMutex
+	ctx           context.Context
+	Protocols     []p2p.Protocol
+	goodPeersMu   sync.RWMutex
+	goodPeers     map[[64]byte]*PeerInfo
+	p2pServer     *p2p.Server
+	p2pServerLock sync.RWMutex
+	// external is true when p2pServer was injected by an outer coordinator
+	// (e.g. node/components/sentry.Provider) via SetP2PServer rather than
+	// created lazily inside SetStatus. External Servers are shared across
+	// multiple GrpcServer instances and their lifecycle is owned by the
+	// coordinator, so this GrpcServer must not Stop() them on Close().
+	external bool
+	// reportsPeers gates the Peers / NodeInfo gRPC methods. When several
+	// GrpcServers share one p2p.Server, returning the full peer list from
+	// every one of them would N-fold duplicate every entry in admin_peers.
+	// The coordinator enables this on exactly one GrpcServer (typically the
+	// first / highest-protocol sentry); the others report empty.
+	reportsPeers         bool
 	statusData           *sentryproto.StatusData
 	statusDataLock       sync.RWMutex
 	messageStreams       map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage
@@ -980,6 +992,30 @@ type GrpcServer struct {
 	// witness request tracking
 	activeWitnessRequests map[common.Hash]*WitnessRequest
 	witnessRequestMutex   sync.RWMutex
+}
+
+// SetP2PServer injects an externally-managed p2p.Server into this GrpcServer
+// so that several GrpcServer instances can share one Server (and therefore
+// one Node ID, one ENR, one listener port). It bypasses the lazy server
+// construction inside SetStatus.
+//
+// reportsPeers selects which sentry exposes the global peer view through the
+// gRPC Peers / NodeInfo calls. Pass true for exactly one GrpcServer per
+// shared p2p.Server; the others must pass false to avoid admin_peers seeing
+// every peer N times once the multi-sentry client aggregates across sentries.
+//
+// SetP2PServer must be called before SetStatus and after the Server has been
+// started. Calling it more than once on the same GrpcServer panics — the
+// invariant is that ownership is decided up front.
+func (ss *GrpcServer) SetP2PServer(srv *p2p.Server, reportsPeers bool) {
+	ss.p2pServerLock.Lock()
+	defer ss.p2pServerLock.Unlock()
+	if ss.p2pServer != nil {
+		panic("sentry.GrpcServer: SetP2PServer called when p2pServer is already set")
+	}
+	ss.p2pServer = srv
+	ss.external = true
+	ss.reportsPeers = reportsPeers
 }
 
 // cleanupOldWitnessRequests removes witness requests that have been active for too long
@@ -1471,6 +1507,14 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 		return nil, errors.New("p2p server was not started")
 	}
 
+	// Shared p2p.Server: only the designated reporter returns the global
+	// peer view. Other GrpcServers on the same Server return empty so that
+	// admin_peers aggregation does not multiply every peer by the number of
+	// sentries (see SetP2PServer).
+	if ss.external && !ss.reportsPeers {
+		return &sentryproto.PeersReply{}, nil
+	}
+
 	peers := p2pServer.PeersInfo()
 
 	var reply sentryproto.PeersReply
@@ -1541,6 +1585,13 @@ func (ss *GrpcServer) PeerById(_ context.Context, req *sentryproto.PeerByIdReque
 
 // setupDiscovery creates the node discovery source for the `eth` protocol.
 func setupDiscovery(urls []string) (enode.Iterator, error) {
+	return SetupDNSDiscovery(urls)
+}
+
+// SetupDNSDiscovery exposes the DNS-discovery iterator constructor so outer
+// coordinators (e.g. node/components/sentry.Provider) can attach DialCandidates
+// to Protocols before handing them to a shared p2p.Server.
+func SetupDNSDiscovery(urls []string) (enode.Iterator, error) {
 	if len(urls) == 0 {
 		return nil, nil
 	}
@@ -1629,11 +1680,16 @@ func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentrypr
 	}
 }
 
-// Close performs cleanup operations for the sentry
+// Close performs cleanup operations for the sentry. When the p2p.Server is
+// externally owned (SetP2PServer was used), the coordinator owns lifecycle
+// and we must not stop it here — doing so would tear down the listener for
+// every other GrpcServer sharing the same Server.
 func (ss *GrpcServer) Close() {
-	p2pServer := ss.getP2PServer()
-	if p2pServer != nil {
-		p2pServer.Stop()
+	ss.p2pServerLock.RLock()
+	srv, external := ss.p2pServer, ss.external
+	ss.p2pServerLock.RUnlock()
+	if srv != nil && !external {
+		srv.Stop()
 	}
 }
 
@@ -1743,6 +1799,12 @@ func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*typesproto
 	p2pServer := ss.getP2PServer()
 	if p2pServer == nil {
 		return nil, errors.New("p2p server was not started")
+	}
+
+	// See Peers() — non-reporting sentries on a shared Server return empty
+	// to keep admin_nodeInfo from listing the same enode N times.
+	if ss.external && !ss.reportsPeers {
+		return &typesproto.NodeInfoReply{}, nil
 	}
 
 	info := p2pServer.NodeInfo()
