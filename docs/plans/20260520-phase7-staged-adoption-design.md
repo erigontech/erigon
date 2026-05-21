@@ -98,25 +98,65 @@ when the operator invokes `adopt`.
    canonical entries it is missing entirely.
 2. **Staging dir**: `<snapDir>/.staging-<canonical-version>/`. The canonical
    version is `CanonicalView.Version()`. Never write into the live snapshot dir.
-3. **Fetch** — *the architecture fork* (code survey, 2026-05-21). The torrent
-   client (`db/downloader`) downloads every torrent flat into one configured
-   dir (`cfg.Dirs.Snap`); `torrentsByName` is keyed by file name. A canonical
-   file has the **same name** as the live minority file it replaces, so the
-   canonical torrent cannot be added to the live client without colliding. And
-   the canonical bytes are quorum-peer-seeded, not CDN-served, so a plain
-   webseed HTTP GET is not enough. Two viable approaches:
-   - **(A) Scoped staging client** — the adoption handler spins up a second,
-     short-lived `Downloader`/torrent client rooted at the staging dir, fetches
-     the canonical `(name, info-hash)` set there, then `rename`s into `snapDir`
-     at cutover. Clean isolation; a crashed adoption just leaves a junk dir.
-   - **(B) Custom storage path-mapping** — reuse the live client with an
-     anacrolix/torrent storage impl that maps the canonical fetch into the
-     staging dir. Less process overhead; reaches into torrent-library internals.
-4. **Validate**: every staged file runs the full storage validator chain
-   (the `StepValidator`s). Any failure aborts the **whole batch** — partial
-   adoption would leave the state domain internally inconsistent.
-5. 7b ends here. The staging dir is built and validated; nothing live is touched.
-   This is a safe, independently testable checkpoint.
+3. **Fetch** — RESOLVED (user, 2026-05-21): reuse the **live** torrent client
+   with per-directory scoped storage. anacrolix keys torrents by info-hash, so
+   a canonical file — different bytes → different info-hash — never collides
+   with the same-named live minority torrent; no second `Downloader` is needed.
+   Implemented as `downloader.Provider.FetchCanonicalBatch` (Phase 7b-2,
+   `node/components/downloader/staged_fetch.go`, commit `3a1336250b`): each
+   `CanonicalFile{Name,InfoHash}` is fetched into `<snapDir>/.staging-<gen>/`
+   via the live `*torrent.Client` + `anastorage.NewFileOpts`. Whole-batch
+   abort + staging-dir removal on any failure. The torrent layer verifies
+   pieces against the info-hash, so a completed batch is cryptographically the
+   canonical content.
+4. **Validate** — see "7b-3 detailed design" below. Both stages run against the
+   staged files **before** any live mutation. Stage 1 (per-file) resolves
+   `ContentSource` paths into the staging dir. Stage 2 (cross-file:
+   commitment / header-chain / tx-root / receipt-root) runs through a temporal
+   RO tx constructed with **path overrides** so it reads the staged files in
+   place of the live ones. Any failure aborts the whole batch; the staged
+   files are deleted; the live DB and live snapshot dir are untouched.
+5. 7b ends here. The staging dir is built and fully validated; nothing live is
+   touched. A safe, independently testable checkpoint.
+
+### 7b-3 — staged-file validation + the adoption handler (detailed)
+
+Design resolved with the user 2026-05-21. The adoption handler lives on the
+**storage `Provider`** — it already owns the `Inventory`, the `Aggregator` /
+temporal DB, the `BlockReader`, and the downloader handle, and 7c's cutover
+needs the inventory write lock + `commitGate` anyway. The same code path is
+reached from the `erigon snapshots adopt` operator command.
+
+Flow, gated by `AdoptionPolicy` (`auto` runs all of it; `stage` stops after
+validation; `warn` does nothing until `adopt` is invoked):
+
+1. `*MinorityVerdict.Adopt` → `[]downloader.CanonicalFile` (parse each
+   `CanonicalHash` hex → `[20]byte`).
+2. `FetchCanonicalBatch` → a `*StagedBatch` (files in `<snapDir>/.staging-<gen>/`).
+3. **Stage 1** — `validation.DefaultStage1ChainWithDisk(stagingDir)`: the
+   per-file validators already resolve `ContentSource` paths via a directory
+   argument, so pointing them at the staging dir is a one-argument change.
+4. **Stage 2** — the cross-file validators (`CommitmentDomainValidator`,
+   `HeaderChainValidator`, `TxRootValidator`, `ReceiptRootValidator`) read
+   exclusively through `kv.TemporalTx` + `services.FullBlockReader`; none open
+   files by path. So they are run against a temporal RO tx built with path
+   overrides:
+
+   **`BeginTemporalRoWithOverrides(ctx, overridePaths []string)`** (new, on the
+   temporal DB). For each override path it parses the filename → `(domain,
+   step-range)`, opens a fresh `FilesItem` (decompressor + its accessors) on
+   that staging-dir path, and substitutes it into that tx's `AggregatorRoTx`
+   `DomainRoTx.files` for the matching step-range. Every other file resolves
+   to the live snapshot dir as normal. The live `Aggregator` and all other
+   transactions are **unaffected** — the override exists only in this one tx's
+   visible-file view. The substitute `FilesItem`s are opened per-tx and closed
+   when the tx closes (they are non-frozen, ordinary refcount lifecycle).
+
+   This is the in-code "overlay fileset view" — pure path management at file-
+   open-choice time, no filesystem hardlinks, no second physical directory.
+5. On success the staged files are left in place for 7c. On any failure the
+   staging dir is removed (`dir.RemoveAll`); the live DB and live snapshot dir
+   are pristine, so recovery is simply "delete and retry" — no rollback path.
 
 ### 7c — atomic cutover (the risky part)
 
@@ -158,24 +198,23 @@ another peer.
 
 ## Open questions for the implementation session
 
-- **Where the adoption trigger lives.** A new component, or a method on the
-  storage provider? It needs the minority verdict, the `CanonicalView`, the
-  downloader, and the `Inventory` — that argues for the storage component. The
-  same code path must be reachable both from the automatic policy pipeline and
-  from the `adopt` operator command.
+RESOLVED (user, 2026-05-21):
+- **Where the adoption handler lives** → the storage `Provider` (see "7b-3
+  detailed design").
+- **Staged-fetch mechanism** → reuse the live torrent client with scoped
+  storage; landed as `FetchCanonicalBatch` in Phase 7b-2.
+- **Deep validation of staged files** → full Stage 1 + Stage 2 run
+  *pre-cutover* against the staged files; Stage 2 reads them via a temporal RO
+  tx built with path overrides (`BeginTemporalRoWithOverrides`). On failure the
+  staged files are deleted — no post-cutover rollback path, because nothing
+  live was mutated.
+
+Still open:
 - **`adopt` against a running node.** `reset` runs against a stopped datadir.
   `adopt`'s cutover step needs the live `Inventory` lock + reader barrier, so it
   either (a) requires the node stopped (simplest, matches `reset`), or (b)
   signals the running node to perform the cutover. Decide which; (a) is the
   safer first cut.
-- **Staged-fetch mechanism** — approach (A) scoped staging client vs (B) custom
-  storage path-mapping, in 7b step 3. (A) is the cleaner first cut.
-- **Deep validation of staged files.** `AllFilesPresent` is path-parameterised
-  and works on a staging dir, but `CommitmentDomainValidator` queries the live
-  DB/BlockReader, not arbitrary paths — staged commitment files cannot get the
-  full validator chain until after they are in place. Likely: cheap checks
-  (presence, size, info-hash match) pre-cutover; full `StepValidator` chain
-  post-cutover with rollback-on-fail.
 - **Caplin / beacon files** — are they in scope for adoption, or blocks/state
   domains only?
 - **Crash mid-cutover.** Staging dir + a small intent journal so a crashed
