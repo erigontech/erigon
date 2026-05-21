@@ -161,7 +161,7 @@ func buildBlackListForPruning(
 			continue
 		}
 		// Block segment (transactions only — canSnapshotBePruned filters bodies/headers/rcache).
-		// e.g 'v1.0-000000-000100-beaconblocks.seg'
+		// e.g 'v1.0-000000-000100-transactions.seg'
 		// parse "from" (000000) and "to" (000100) from the name. 100 is 100'000 blocks
 		res, _, ok := snaptype.ParseFileName("", name)
 		if !ok {
