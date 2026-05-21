@@ -192,12 +192,13 @@ func (vr VersionedRead) String() string {
 }
 
 type VersionedWrite struct {
-	Address accounts.Address
-	Path    AccountPath
-	Key     accounts.StorageKey
-	Version Version
-	Val     any
-	Reason  tracing.BalanceChangeReason
+	Address             accounts.Address
+	Path                AccountPath
+	Key                 accounts.StorageKey
+	Version             Version
+	Val                 any
+	BalanceChangeReason tracing.BalanceChangeReason
+	NonceChangeReason   tracing.NonceChangeReason
 }
 
 func (vr VersionedWrite) String() string {
@@ -730,13 +731,13 @@ func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, a
 	for _, w := range writes {
 		if w.Address == addr && w.Path == BalancePath {
 			w.Val = val
-			w.Reason = reason
+			w.BalanceChangeReason = reason
 			return writes
 		}
 	}
 	// Account not in writes — emit complete account fields.
 	return append(writes,
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, BalanceChangeReason: reason},
 		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
 		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
 		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
@@ -824,34 +825,28 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 			}
 		}
-		// Cap the revival lookup at s.txIndex-1 so that a prior incarnation
-		// of the CURRENT tx — whose writes still sit in the versionMap at
-		// (s.txIndex, prevIncarnation) until the new incarnation rewrites
-		// them — doesn't masquerade as a "later tx revived this account."
-		// versionMap.Read uses floor(txIdx-1) for the same reason, but
-		// LatestTxIndex's upper bound is inclusive, so we have to subtract
-		// one explicitly. Without this, TX3 incarnation 1 of
-		// TestDeleteRecreateSlotsAcrossManyBlocks block 1 sees TX3
-		// incarnation 0's BalancePath write at txIndex=3, declares a
-		// spurious revival across TX2's SD at txIndex=2, falls through
-		// the SD short-circuit, reads TX1's stale hash(aaCode) for the
-		// CREATE2 collision check, fails the CREATE2 with
-		// ContractAddressCollision, and BB consumes the failed-child
-		// gas — that's the residual +1602 manifestation.
-		revivalLimit := s.txIndex - 1
+		// Per-path revival resolution (issue #21319): the account was
+		// self-destructed at destructTxIndex. THIS field is revived iff the
+		// version map holds a write to THIS path at a strictly higher
+		// TxIndex. versionMap.Read floors at txIndex-1, so a prior
+		// incarnation of the current tx cannot masquerade as a later tx's
+		// revival (this is why the old explicit revivalLimit subtraction is
+		// no longer needed). Per-path (vs. the old Balance|Nonce|CodeHash
+		// account-wide scan) is precise: a field with no post-SD write
+		// reads as the fresh account's zero value — exactly correct for a
+		// value-transfer revival, where GetOrNewStateObject yields nonce 0
+		// and empty code — and never surfaces a stale pre-SD nonce/codeHash
+		// for an account revived only via BalancePath.
+		//
+		// An in-flight revival (Estimate cell → MVReadResultDependency) also
+		// counts as revived: it must fall through so the normal read below
+		// surfaces the dependency and re-executes, rather than being
+		// swallowed as a zero. This matches the old LatestTxIndex scan,
+		// which descended Estimate cells too.
 		revived := false
-		if hi, ok := s.versionMap.LatestTxIndex(addr, BalancePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+		if pathRevival := s.versionMap.Read(addr, path, key, s.txIndex); pathRevival.DepIdx() > destructTxIndex &&
+			(pathRevival.Status() == MVReadResultDone || pathRevival.Status() == MVReadResultDependency) {
 			revived = true
-		}
-		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, NoncePath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-				revived = true
-			}
-		}
-		if !revived {
-			if hi, ok := s.versionMap.LatestTxIndex(addr, CodeHashPath, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-				revived = true
-			}
 		}
 		if !revived && path != CodePath {
 			// A prior tx self-destructed this account — all state reads must
