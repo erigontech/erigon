@@ -845,23 +845,29 @@ func TestGrpcServer_SetP2PServer_FlagsAndIdempotency(t *testing.T) {
 	require.Error(t, ss.SetP2PServer(srv))
 }
 
-// TestGrpcServer_PeersFiltersGhostEntries verifies that Peers excludes
-// ghost PeerStore entries (peerInfo.protocol == 0) — those represent peers
-// whose only handler on this sentry was wit/0 (in shared-Server mode wit
-// is deduped to one sentry while eth/* lives elsewhere). The wit-only
-// PeerInfo's rw is a WIT MsgReadWriter, so if Peers reported them the
-// multi-sentry router could route an eth SendMessageById here and write
-// eth frames onto the wit stream.
-func TestGrpcServer_PeersFiltersGhostEntries(t *testing.T) {
+// TestGrpcServer_PeersFiltersByProtocol covers the per-sentry filter on
+// Peers: a GrpcServer only reports peers whose negotiated eth version
+// matches its own. Three entries — one matching this sentry's version,
+// one ghost (protocol == 0), one on a different eth version — only the
+// matching entry comes through.
+func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	srv := minimalP2PServer(t)
-	ss := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		peers:       NewPeerStore(),
+		// Pretend this sentry handles eth/68. ethProtocolVersion picks the
+		// first eth Protocol entry, so just set the slice directly.
+		Protocols: []p2p.Protocol{{Name: eth.ProtocolName, Version: direct.ETH68}},
+	}
 	require.NoError(t, ss.SetP2PServer(srv))
 
-	withEth, _ := newTestPeerInfoWithEth(t)
-	var ethKey [64]byte
-	ethKey[0] = 0x42
-	ss.peers.peers[ethKey] = withEth
+	// Owned-by-this-sentry: protocol matches.
+	owned, _ := newTestPeerInfoWithEth(t)
+	var ownedKey [64]byte
+	ownedKey[0] = 0x42
+	ss.peers.peers[ownedKey] = owned
 
+	// Ghost: no protocol set anywhere yet (RLPx-only / in-flight handshake).
 	ghost, _ := newTestPeerInfoWithEth(t)
 	ghost.protocol = 0
 	ghost.witProtocol = 0
@@ -869,9 +875,17 @@ func TestGrpcServer_PeersFiltersGhostEntries(t *testing.T) {
 	ghostKey[0] = 0x43
 	ss.peers.peers[ghostKey] = ghost
 
+	// Owned-by-another-sentry: eth Run for a different version populated
+	// this PeerInfo (shared PeerStore in shared-Server mode).
+	otherVersion, _ := newTestPeerInfoWithEth(t)
+	otherVersion.protocol = direct.ETH69
+	var otherKey [64]byte
+	otherKey[0] = 0x44
+	ss.peers.peers[otherKey] = otherVersion
+
 	reply, err := ss.Peers(context.Background(), nil)
 	require.NoError(t, err)
-	require.Len(t, reply.Peers, 1, "ghost (protocol==0) entries must be filtered out")
+	require.Len(t, reply.Peers, 1, "only the entry matching this sentry's eth version should be reported")
 }
 
 // TestGrpcServer_SharedPeerStore_VisibleToEthAndWit covers the central

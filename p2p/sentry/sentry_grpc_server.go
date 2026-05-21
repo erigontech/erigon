@@ -191,6 +191,23 @@ func (pi *PeerInfo) ID() [64]byte {
 	return pi.peer.Pubkey()
 }
 
+// SetRw replaces the canonical MsgReadWriter used for outbound writes via
+// writePeer. The eth Run calls it so that even if wit/0 created the
+// PeerInfo first (with the wit protoRW), eth outbound writes go on the
+// eth protoRW instead of injecting eth frames into the wit stream.
+func (pi *PeerInfo) SetRw(rw p2p.MsgReadWriter) {
+	pi.lock.Lock()
+	pi.rw = rw
+	pi.lock.Unlock()
+}
+
+// Rw returns the canonical MsgReadWriter for this peer.
+func (pi *PeerInfo) Rw() p2p.MsgReadWriter {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.rw
+}
+
 // AddDeadline adds given deadline to the list of deadlines
 // Deadlines must be added in the chronological order for the function
 // ClearDeadlines to work correctly (it uses binary search)
@@ -850,6 +867,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			if err != nil {
 				return err
 			}
+			// In shared-PeerStore mode wit/0 may have created the PeerInfo
+			// first with the wit protoRW; pin the eth protoRW so outbound
+			// writePeer doesn't emit eth frames onto the wit stream.
+			peerInfo.SetRw(rw)
 			peerInfo.SetEthProtocol(protocol)
 
 			if protocol >= direct.ETH69 {
@@ -1029,24 +1050,15 @@ type GrpcServer struct {
 	witnessRequestMutex   sync.RWMutex
 }
 
-// SetP2PServer injects an externally-managed p2p.Server into this GrpcServer
-// so that several GrpcServer instances can share one Server (and therefore
-// one Node ID, one ENR, one listener port). It bypasses the lazy server
-// construction inside SetStatus.
-//
-// Each GrpcServer reports peers via its own goodPeers map (populated by the
-// eth Protocol.Run for its specific protocol version), so the multi-sentry
-// client can route messages to the correct sentry without duplication or
-// misrouting.
-//
 // SetSharedPeerStore swaps in a coordinator-supplied PeerStore so several
 // GrpcServers backing the same p2p.Server can see one PeerInfo per peer.
 // This is what makes wit/0 (deduped to a single sentry) and the negotiated
 // eth/* (on a different sentry) share the same eth-ready signal — without
-// it, wit's WaitForEth would time out and disconnect every peer.
+// it, wit's WaitForEth would time out and disconnect every peer after
+// ethProtocolTimeout.
 //
-// Must be called BEFORE SetP2PServer / srv.Start; helpers that look up the
-// store don't synchronise on the field itself, so concurrent peer Run
+// Must be called BEFORE SetP2PServer / srv.Start; the helpers that look up
+// the store don't synchronise on the field itself, so concurrent peer Run
 // closures must not be live when this swap happens. NewGrpcServer gives
 // each sentry its own store by default — pass nil here to keep that.
 func (ss *GrpcServer) SetSharedPeerStore(s *PeerStore) {
@@ -1056,11 +1068,26 @@ func (ss *GrpcServer) SetSharedPeerStore(s *PeerStore) {
 	ss.peers = s
 }
 
-// SetP2PServer must be called before SetStatus and after the Server has been
-// started. Calling it more than once on the same GrpcServer returns an
-// error — ownership is decided up front. A nil srv is rejected too: if it
-// were accepted, SetStatus would lazily build its own Server (good) but
-// Close would still see external=true and skip Stop (leak).
+// SetP2PServer injects an externally-managed p2p.Server into this GrpcServer
+// so several GrpcServer instances can share one Server (and therefore one
+// Node ID, one ENR, one listener port). It bypasses the lazy server
+// construction inside SetStatus.
+//
+// Each GrpcServer reports peers (via Peers / SimplePeerCount) filtered by
+// its own eth protocol version — even when SetSharedPeerStore is in
+// effect and every sentry can see the same PeerInfo map. That's what
+// keeps node/eth.Ethereum.Peers aggregation from N-fold-duplicating the
+// result and lets the multi-sentry router map each peer to the correct
+// sentry's gRPC client.
+//
+// Calling order: SetSharedPeerStore (optional), then SetP2PServer, then
+// srv.Start. The Provider follows this order in Initialize before any
+// peer can connect; LocalNode-touching paths (SetStatus) must still wait
+// until after srv.Start because LocalNode is created there. Calling
+// SetP2PServer more than once on the same GrpcServer returns an error —
+// ownership is decided up front. A nil srv is rejected too: if it were
+// accepted, SetStatus would lazily build its own Server (good) but Close
+// would still see external=true and skip Stop (leak).
 func (ss *GrpcServer) SetP2PServer(srv *p2p.Server) error {
 	if srv == nil {
 		return errors.New("sentry.GrpcServer: SetP2PServer called with nil *p2p.Server")
@@ -1212,7 +1239,9 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
 		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
-		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
+		// Use the lock-protected accessor: in shared-PeerStore mode the eth
+		// Run replaces an early wit-only rw with the eth protoRW.
+		err := peerInfo.Rw().WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
 		} else {
@@ -1577,16 +1606,17 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 	}
 
 	// Report only peers this sentry actually owns for eth — i.e. the ones
-	// for which the eth Protocol.Run fired here and set peerInfo.protocol.
-	// With a shared p2p.Server each peer ends up in exactly one eth
-	// sentry's goodPeers (the negotiated version). Wit-only entries on the
-	// sentry hosting wit/0 (protocol==0, witProtocol!=0) must be excluded:
-	// their PeerInfo.rw is the WIT MsgReadWriter, so if the multi-sentry
-	// client routed an eth SendMessageById here it would write eth frames
-	// onto the wit stream. Mirrors SimplePeerCount's protocol==0 filter.
+	// whose negotiated eth version matches this GrpcServer's own version.
+	// With the shared PeerStore (used in shared-Server mode), every sentry
+	// can see every PeerInfo; filtering here is what keeps node/eth
+	// Ethereum.Peers aggregation from N-fold-duplicating the result and
+	// what lets the multi-sentry router map each peer to the correct
+	// sentry's gRPC client. protocol==0 is also dropped (RLPx-only,
+	// wit-only, or in-flight handshake entries).
+	myVersion := ss.ethProtocolVersion()
 	var reply sentryproto.PeersReply
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if peerInfo.protocol == 0 {
+		if peerInfo.protocol == 0 || peerInfo.protocol != myVersion {
 			return true
 		}
 		peer := peerInfo.peer.Info()
@@ -1609,21 +1639,34 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
+	myVersion := ss.ethProtocolVersion()
 	counts := map[uint]int{}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		// Skip ghost goodPeers entries (eth Run never set the protocol).
-		// In shared-Server mode the sentry hosting the deduped wit/0
-		// protocol gets such entries for every wit-speaking peer whose eth
-		// version was negotiated on a different sentry — counting them
-		// under protocol=0 would surface as a bogus eth.ProtocolToString[0]
-		// bucket in the GoodPeers log.
-		if peerInfo.protocol == 0 {
+		// Per-sentry counting: each sentry reports only the peers whose
+		// negotiated eth version matches its own. Mirrors Peers(). Without
+		// this filter the Provider's runPeerCountLogger would aggregate
+		// every peer once per sentry (shared PeerStore makes the map
+		// visible to all sentries).
+		if peerInfo.protocol == 0 || peerInfo.protocol != myVersion {
 			return true
 		}
 		counts[peerInfo.protocol]++
 		return true
 	})
 	return counts
+}
+
+// ethProtocolVersion returns the eth protocol version this GrpcServer was
+// constructed for. NewGrpcServer appends the eth Protocol first, so
+// Protocols[0] is the eth entry. A zero return means the eth Protocol
+// hasn't been registered yet (only possible during construction).
+func (ss *GrpcServer) ethProtocolVersion() uint {
+	for i := range ss.Protocols {
+		if ss.Protocols[i].Name == eth.ProtocolName {
+			return ss.Protocols[i].Version
+		}
+	}
+	return 0
 }
 
 func (ss *GrpcServer) PeerCount(_ context.Context, req *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
