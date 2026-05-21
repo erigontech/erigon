@@ -551,7 +551,19 @@ func (sd *SharedDomains) SavePastChangesetAccumulator(blockHash common.Hash, blo
 }
 
 func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
-	return sd.mem.GetDiffset(tx, blockHash, blockNumber)
+	d, ok, err := sd.mem.GetDiffset(tx, blockHash, blockNumber)
+	if ok || err != nil {
+		return d, ok, err
+	}
+	// Resolve through the parent chain: a fork-validation SD is freshly
+	// constructed with an empty mem batch, so the diffsets of the canonical
+	// blocks it must unwind live in the canonical generation's
+	// pastChangesAccumulator, reachable only via the parent link. Without
+	// this an unwind silently runs with no unwind set.
+	if sd.parent != nil {
+		return sd.parent.GetDiffset(tx, blockHash, blockNumber)
+	}
+	return d, ok, err
 }
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
