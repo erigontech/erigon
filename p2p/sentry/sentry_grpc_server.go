@@ -1513,13 +1513,13 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}
-	// Unblock awaitStatus, but only once we have a status the eth handshake
-	// can actually use — non-zero NetworkId and a non-nil ForkData. A
-	// partial first SetStatus (e.g. an early standalone-txpool update) would
-	// otherwise wake waiters and let Protocol.Run proceed with garbage,
-	// defeating the startup-gap fix. nil-guarded for callers that construct
-	// GrpcServer outside NewGrpcServer (close(nil) would panic).
-	if ss.statusData != nil && ss.statusData.NetworkId != 0 && ss.statusData.ForkData != nil {
+	// Unblock awaitStatus once we have a status the eth handshake can
+	// actually use (statusUsable). A partial first SetStatus (e.g. an early
+	// standalone-txpool update) must not wake waiters — Protocol.Run would
+	// proceed with garbage, defeating the startup-gap fix. nil-guarded for
+	// callers that construct GrpcServer outside NewGrpcServer (close(nil)
+	// would panic).
+	if statusUsable(ss.statusData) {
 		ss.statusReadyOnce.Do(func() {
 			if ss.statusReady != nil {
 				close(ss.statusReady)
@@ -1534,19 +1534,17 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 		return nil, errors.New("p2p server was not started")
 	}
 
-	// Report only peers this sentry actually owns — i.e. the ones for which
-	// either the eth Protocol.Run or the wit Protocol.Run fired here and
-	// populated goodPeers. With a shared p2p.Server each peer ends up in
-	// exactly one eth-sentry's goodPeers (the negotiated version) plus, at
-	// most, the sentry hosting the wit sideprotocol. Returning
-	// p2pServer.PeersInfo() from every sentry would either N-fold the list
-	// in admin_peers aggregation or misroute SendMessageById when the
-	// multi-client maps peers to clients by who first returned them.
+	// Report only peers this sentry actually owns for eth — i.e. the ones
+	// for which the eth Protocol.Run fired here and set peerInfo.protocol.
+	// With a shared p2p.Server each peer ends up in exactly one eth
+	// sentry's goodPeers (the negotiated version). Wit-only entries on the
+	// sentry hosting wit/0 (protocol==0, witProtocol!=0) must be excluded:
+	// their PeerInfo.rw is the WIT MsgReadWriter, so if the multi-sentry
+	// client routed an eth SendMessageById here it would write eth frames
+	// onto the wit stream. Mirrors SimplePeerCount's protocol==0 filter.
 	var reply sentryproto.PeersReply
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		// Ghost entries (eth Run never ran, wit Run never ran) shouldn't
-		// surface — they'd just be empty placeholders.
-		if peerInfo.protocol == 0 && peerInfo.witProtocol == 0 {
+		if peerInfo.protocol == 0 {
 			return true
 		}
 		peer := peerInfo.peer.Info()
@@ -1643,27 +1641,46 @@ func (ss *GrpcServer) GetStatus() *sentryproto.StatusData {
 	return ss.statusData
 }
 
+// statusUsable reports whether a stored statusData is complete enough for
+// Protocol.Run to use as the local side of the eth handshake. A partial
+// payload (e.g. an early standalone-txpool update with NetworkId still 0)
+// must NOT wake awaitStatus or be returned to handshakers.
+func statusUsable(s *sentryproto.StatusData) bool {
+	return s != nil && s.NetworkId != 0 && s.ForkData != nil
+}
+
 // awaitStatus returns the current statusData, waiting up to maxWait for the
-// first SetStatus to land if it hasn't yet. The wait absorbs the startup gap
-// when a shared p2p.Server's listener is already accepting connections but
-// the multi-client hasn't broadcast status to this sentry yet. On timeout,
-// emits a debug log so an operator can tell "core didn't send status in time"
-// from "core never tried" when the caller disconnects the peer with
-// PeerErrorLocalStatusNeeded. Also returns whatever GetStatus reports when
-// ss.ctx is cancelled — usually nil during shutdown.
+// first usable SetStatus to land if it hasn't yet. The wait absorbs the
+// startup gap when a shared p2p.Server's listener is already accepting
+// connections but the multi-client hasn't broadcast status to this sentry
+// yet. Returns nil if no usable status is available before the deadline
+// (or before ss.ctx is cancelled) so the caller can disconnect the peer
+// with PeerErrorLocalStatusNeeded.
+//
+// A debug log fires on timeout to help an operator tell "core didn't send
+// status in time" from "core never tried."
 func (ss *GrpcServer) awaitStatus(maxWait time.Duration) *sentryproto.StatusData {
-	if status := ss.GetStatus(); status != nil {
+	if status := ss.GetStatus(); statusUsable(status) {
 		return status
 	}
+	// Use NewTimer (not time.After) so heavy inbound churn during the
+	// startup window doesn't accumulate one Timer-backed goroutine per
+	// connection until maxWait elapses.
+	timer := time.NewTimer(maxWait)
+	defer timer.Stop()
 	select {
 	case <-ss.statusReady:
-	case <-time.After(maxWait):
+	case <-timer.C:
 		if ss.logger != nil {
 			ss.logger.Debug("[p2p] sentry timed out waiting for first SetStatus; inbound peer will be disconnected", "after", maxWait)
 		}
 	case <-ss.ctx.Done():
 	}
-	return ss.GetStatus()
+	status := ss.GetStatus()
+	if !statusUsable(status) {
+		return nil
+	}
+	return status
 }
 
 func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byte) {

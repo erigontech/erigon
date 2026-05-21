@@ -913,16 +913,34 @@ func TestGrpcServer_CloseStopsOwnedServer(t *testing.T) {
 }
 
 // TestGrpcServer_AwaitStatus_ReturnsExistingImmediately covers the fast path
-// where statusData has already been populated by SetStatus.
+// where a *usable* statusData (statusUsable: NetworkId != 0 && ForkData != nil)
+// has already been populated by SetStatus.
 func TestGrpcServer_AwaitStatus_ReturnsExistingImmediately(t *testing.T) {
 	ss := &GrpcServer{
 		ctx:         context.Background(),
 		statusReady: make(chan struct{}),
-		statusData:  &sentryproto.StatusData{NetworkId: 42},
+		statusData: &sentryproto.StatusData{
+			NetworkId: 42,
+			ForkData:  &sentryproto.Forks{},
+		},
 	}
 	got := ss.awaitStatus(2 * time.Second)
 	require.NotNil(t, got)
 	require.Equal(t, uint64(42), got.NetworkId)
+}
+
+// TestGrpcServer_AwaitStatus_IgnoresPartialStatus exercises the validity
+// gate shared with SetStatus: a non-nil but partial statusData (missing
+// ForkData / zero NetworkId) must NOT be returned to handshakers — they
+// would proceed with garbage and fail the eth handshake anyway.
+func TestGrpcServer_AwaitStatus_IgnoresPartialStatus(t *testing.T) {
+	ss := &GrpcServer{
+		ctx:         context.Background(),
+		statusReady: make(chan struct{}),
+		statusData:  &sentryproto.StatusData{NetworkId: 42}, // ForkData nil
+	}
+	got := ss.awaitStatus(50 * time.Millisecond)
+	require.Nil(t, got, "partial status (no ForkData) must not satisfy awaitStatus")
 }
 
 // TestGrpcServer_AwaitStatus_TimesOutWhenUnset verifies that awaitStatus
@@ -950,7 +968,10 @@ func TestGrpcServer_AwaitStatus_UnblocksOnSetStatus(t *testing.T) {
 	go func() {
 		time.Sleep(20 * time.Millisecond)
 		ss.statusDataLock.Lock()
-		ss.statusData = &sentryproto.StatusData{NetworkId: 7}
+		ss.statusData = &sentryproto.StatusData{
+			NetworkId: 7,
+			ForkData:  &sentryproto.Forks{},
+		}
 		ss.statusDataLock.Unlock()
 		close(ss.statusReady)
 	}()
