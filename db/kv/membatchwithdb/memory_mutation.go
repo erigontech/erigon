@@ -704,9 +704,13 @@ func flushPlainBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 	return nil
 }
 
-// flushDupsortBucket copies a DupSort bucket. AppendDup has stricter ordering
-// requirements than Append (key non-decreasing AND value strictly greater for
-// equal keys), so we stay on Put unless the destination is empty.
+// flushDupsortBucket copies a DupSort bucket. We conservatively use AppendDup
+// only when the destination is empty and fall back to Put otherwise. AppendDup
+// itself does not require global key monotonicity — MDBX only enforces that
+// the new value is greater than the last existing dup for the same key — but
+// reasoning about that precondition over an arbitrary overlay+destination mix
+// is subtle, so we keep the optimization narrow. Extending it to the
+// srcFirstKey > dstLastKey case is a possible follow-up.
 func flushDupsortBucket(memTx kv.Tx, tx kv.RwTx, bucket string) error {
 	srcCursor, err := memTx.CursorDupSort(bucket)
 	if err != nil {

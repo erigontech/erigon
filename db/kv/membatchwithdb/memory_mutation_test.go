@@ -228,8 +228,9 @@ func TestFlushEmptyDestinationPlain(t *testing.T) {
 }
 
 // TestFlushDupsortNonEmptyDestination exercises the Put fallback for a pure
-// DupSort table when the destination already has entries — AppendDup is
-// disallowed in that case, so the flush must use Put for every dup.
+// DupSort table when the destination already has entries. flushDupsortBucket
+// conservatively uses Put for every dup in this case rather than reasoning
+// about AppendDup's per-key value-ordering precondition.
 func TestFlushDupsortNonEmptyDestination(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
