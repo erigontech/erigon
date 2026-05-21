@@ -2420,6 +2420,11 @@ type AggregatorRoTx struct {
 	iis      [kv.StandaloneIdxLen]*InvertedIndexRoTx
 	iisCount int
 
+	// substitutes holds FilesItems opened by BeginFilesRoWithOverrides.
+	// They are not tracked by any DirtyFiles tree, so this tx closes them
+	// itself in Close().
+	substitutes []*FilesItem
+
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
@@ -2632,6 +2637,10 @@ func (at *AggregatorRoTx) Close() {
 	for _, ii := range at.standaloneIIs() {
 		ii.Close()
 	}
+	for _, fi := range at.substitutes {
+		fi.closeFiles()
+	}
+	at.substitutes = nil
 }
 
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {

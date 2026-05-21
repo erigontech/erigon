@@ -116,6 +116,34 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	}
 	return tx, nil
 }
+
+// BeginTemporalRoWithOverrides opens a read-only temporal transaction whose
+// state-file view substitutes the given domain values (.kv) files for their
+// live counterparts — see (*state.Aggregator).BeginFilesRoWithOverrides. It
+// is used to validate staged (not-yet-live) snapshot files in the context
+// of the live state. The substitute files are released on Rollback.
+func (db *DB) BeginTemporalRoWithOverrides(ctx context.Context, overridePaths []string) (kv.TemporalTx, error) {
+	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	tx := &Tx{Tx: kvTx, tx: tx{db: db, ctx: ctx}}
+
+	tx.aggtx, err = db.stateFiles.BeginFilesRoWithOverrides(overridePaths)
+	if err != nil {
+		kvTx.Rollback()
+		return nil, err
+	}
+
+	if len(db.forkaggs) > 0 {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
+	return tx, nil
+}
+
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
