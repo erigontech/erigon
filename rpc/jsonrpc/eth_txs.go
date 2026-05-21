@@ -64,7 +64,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +161,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

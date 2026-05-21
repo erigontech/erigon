@@ -23,7 +23,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
-	eth "github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"

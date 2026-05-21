@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/big"
 	"os"
@@ -327,6 +328,21 @@ func TestCapabilities(t *testing.T) {
 		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
 		require.Nil(t, result.Logs.DeleteStrategy)
+	})
+
+	t.Run("wire_format", func(t *testing.T) {
+		t.Parallel()
+		api, _ := setupAPI(t, testMinimalMode, false, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		raw, err := json.Marshal(result)
+		require.NoError(t, err)
+		s := string(raw)
+		require.Contains(t, s, fmt.Sprintf(`"retentionBlocks":%d`, testPruneDistance), "retentionBlocks must be decimal, not hex")
+		require.NotContains(t, s, `"retentionBlocks":"0x`, "retentionBlocks must not be hex-encoded")
+		require.Contains(t, s, `"oldestBlock":"0x`, "oldestBlock must be hex-encoded")
+		require.Contains(t, s, `"disabled":false`, "disabled:false must be present, not omitted")
+		require.Contains(t, s, `"stateproofs":{"disabled":true}`, "disabled category must serialize as {disabled:true} only")
 	})
 
 	// head_zero pins that ReadCanonicalHash(tx, 0) returns the genesis hash, not the zero hash.

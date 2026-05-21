@@ -372,28 +372,34 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+}
+
+// checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
+// that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
+func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
 	}
 	if p == nil {
-		// no prune info found
 		return nil
 	}
-	if p.History.Enabled() {
-		latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), tx, api._blockReader, api.filters)
-		if err != nil {
-			return err
-		}
-		if latest <= 1 {
-			return nil
-		}
-		prunedTo := p.History.PruneTo(latest)
-		if block < prunedTo {
-			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
-		}
+	amount := field(p)
+	if !amount.Enabled() {
+		return nil
 	}
-
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return err
+	}
+	if block < amount.PruneTo(latest) {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+	}
 	return nil
 }
 

@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 
 	"github.com/holiman/uint256"
@@ -52,8 +53,8 @@ const deleteStrategyWindow = "window"
 // The field is omitted when data is kept indefinitely (archive nodes, or
 // DefaultBlocksPruneMode which uses chain-specific history expiry).
 type DeleteStrategy struct {
-	Type            string         `json:"type"`
-	RetentionBlocks hexutil.Uint64 `json:"retentionBlocks"`
+	Type            string `json:"type"`
+	RetentionBlocks uint64 `json:"retentionBlocks"`
 }
 
 // CapabilityField describes availability of a data category: when Disabled is true the node
@@ -112,16 +113,19 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
-	headHash, err := rawdb.ReadCanonicalHash(overlayTx, headBlock)
+	headHash, ok, err := api._blockReader.CanonicalHash(ctx, overlayTx, headBlock)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("canonical hash not found %d", headBlock)
 	}
 
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
 		if d, ok := dist.(prune.Distance); ok && d != prune.DefaultBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
-			rb := hexutil.Uint64(d)
+			rb := uint64(d)
 			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: rb}
 		}
 		return f
@@ -184,7 +188,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
 		State:       stateField,
-		Tx:          blocksField,
+		Tx:          blocksField, // tx-by-hash goes through block bodies; no independent tx-index pruning
 		Logs:        logsField,
 		Receipts:    receiptsField,
 		Blocks:      blocksField,
