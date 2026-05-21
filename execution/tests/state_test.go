@@ -49,10 +49,10 @@ func TestStateCornerCases(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
 	testDir := path.Join(cornersDir, "state")
 	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
@@ -98,9 +98,9 @@ func TestState(t *testing.T) {
 	// Very slow tests
 	st.skipLoad(`^stTimeConsuming/`)
 
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
 	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
+		dirs := datadir.New(t.TempDir())
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
