@@ -90,7 +90,7 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 	receipts := types.Receipts{
-		&types.Receipt{
+		{
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21_000,
 			Logs: []*types.Log{
@@ -104,7 +104,7 @@ func TestBlockPostValidation_ReceiptBloomReuse(t *testing.T) {
 				},
 			},
 		},
-		&types.Receipt{
+		{
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42_000,
 			Logs: []*types.Log{

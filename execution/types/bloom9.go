@@ -108,8 +108,10 @@ func (b Bloom) Test(topic []byte) bool {
 
 // Or merges another bloom filter into b.
 func (b *Bloom) Or(other *Bloom) {
-	for i := 0; i < BloomByteLength; i += 8 {
-		binary.LittleEndian.PutUint64(b[i:], binary.LittleEndian.Uint64(b[i:])|binary.LittleEndian.Uint64(other[i:]))
+	bb := unsafe.Slice((*uint64)(unsafe.Pointer(&b[0])), BloomByteLength/8)
+	ob := unsafe.Slice((*uint64)(unsafe.Pointer(&other[0])), BloomByteLength/8)
+	for i := 0; i < BloomByteLength/8; i++ {
+		bb[i] |= ob[i]
 	}
 }
 
