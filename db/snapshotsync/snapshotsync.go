@@ -122,25 +122,19 @@ func buildBlackListForPruning(
 
 	blackList := make(map[string]struct{})
 
-	// History uses .Enabled() because History never carries the
-	// KeepAllBlocksPruneMode sentinel — only DefaultBlocksPruneMode or finite
-	// Distances — so .Enabled() (= "not DefaultBlocksPruneMode") correctly
-	// distinguishes "prune by step" from "keep all state history". For Blocks
-	// we can't rely on .Enabled() because KeepAllBlocksPruneMode also returns
-	// true; check finiteness explicitly.
 	historyEnabled := pruneMode.History.Enabled()
-	blocksByFiniteDistance := pruneMode.Blocks != prune.DefaultBlocksPruneMode &&
-		pruneMode.Blocks != prune.KeepAllBlocksPruneMode
-	var preMergeCutoff uint64
-	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc != nil && cc.MergeHeight != nil {
-		preMergeCutoff = *cc.MergeHeight
-	}
+	blocksEnabled := pruneMode.Blocks.Enabled()
+	// preMergeCutoff is non-zero only when Blocks=DefaultBlocksPruneMode and
+	// the chain has a MergeHeight; passing head=0 to blocksRetentionCutoff
+	// suppresses the finite-distance branch (which we handle via blockPrune
+	// below) and keeps just the chain-history-expiry value.
+	preMergeCutoff := blocksRetentionCutoff(pruneMode, cc, 0)
 
-	if !historyEnabled && !blocksByFiniteDistance && preMergeCutoff == 0 {
+	if !historyEnabled && !blocksEnabled && preMergeCutoff == 0 {
 		return blackList, nil
 	}
 
-	if blocksByFiniteDistance {
+	if blocksEnabled {
 		blockPrune = adjustBlockPrune(blockPrune, minBlockToDownload)
 	}
 
@@ -174,7 +168,7 @@ func buildBlackListForPruning(
 			continue
 		}
 		switch {
-		case blocksByFiniteDistance:
+		case blocksEnabled:
 			if blockPrune >= res.To {
 				blackList[name] = struct{}{}
 			}
@@ -280,17 +274,45 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
 }
 
-// isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
+// blocksRetentionCutoff returns the block height below which block-data
+// segments (transactions and receipt-related state) are considered expired
+// under pruneMode:
+//   - finite Distance (full/minimal): head - distance, the EIP-8252-style
+//     window.
+//   - DefaultBlocksPruneMode with a chain MergeHeight: the merge height
+//     (chain history-expiry policy — pre-merge data is expired).
+//   - Otherwise (KeepAllBlocksPruneMode, or DefaultBlocksPruneMode without a
+//     merge height): 0, meaning "nothing is expired".
+//
+// Both the transaction-segment blacklist and the receipts-segment filter use
+// this to pick their cutoff in a consistent way.
+func blocksRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64) uint64 {
+	switch pruneMode.Blocks {
+	case prune.KeepAllBlocksPruneMode:
+		return 0
+	case prune.DefaultBlocksPruneMode:
+		if cc != nil && cc.MergeHeight != nil {
+			return *cc.MergeHeight
+		}
+		return 0
+	default:
+		return pruneMode.Blocks.PruneTo(head)
+	}
+}
+
+// isReceiptsSegmentPruned reports whether a receipt-related preverified
+// segment (rcache, logaddrs, logtopics) should be skipped at download time.
+// It mirrors buildBlackListForPruning's per-mode handling for tx segments,
+// but operates on block height (converted to txNum/step) because receipts
+// are step-aligned in storage.
 func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
-	pruneHeight := pruneMode.Blocks.PruneTo(head) // if a receipt is below this height, it is pruned
-	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc.MergeHeight != nil {
-		pruneHeight = *cc.MergeHeight
+	pruneHeight := blocksRetentionCutoff(pruneMode, cc, head)
+	if pruneHeight == 0 {
+		return false
 	}
-
-	// We use the pre-merge data policy.
 	s, _, ok := snaptype.ParseFileName("", p.Name)
 	if !ok {
 		return false

@@ -835,12 +835,11 @@ func TestDUDetectNodeType(t *testing.T) {
 		require.Equal(t, "archive", duDetectNodeType(files))
 	})
 
-	t.Run("full - has old tx blocks from 0, no old state history", func(t *testing.T) {
-		// Non-archive modes persist receipts (rcache present) but prune old history.
-		// Detector classifies as "full" when tx segments exist below minimal's
-		// cutoff (maxBlock - MinimalPruneDistance) — i.e., segments that full
-		// keeps but minimal would have pruned. maxBlock=2_000_000,
-		// MinimalPruneDistance=100_000, cutoff=1_900_000.
+	t.Run("blocks - has tx blocks from 0, no old state history", func(t *testing.T) {
+		// Blocks mode keeps all tx segments (including from genesis) but
+		// prunes state history. Detector recognises this via a tx segment
+		// starting at From=0 on a chain mature enough for distance pruning
+		// to have kicked in. maxBlock=2_000_000 > MinimalPruneDistance=100_000.
 		files := []duFileInfo{
 			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
 			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
@@ -848,7 +847,7 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
 			{Name: "300-2000-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 2000000, Size: 200},
 		}
-		require.Equal(t, "full", duDetectNodeType(files))
+		require.Equal(t, "blocks", duDetectNodeType(files))
 	})
 
 	t.Run("full - has old transaction blocks not from 0, no old state history", func(t *testing.T) {

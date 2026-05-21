@@ -51,6 +51,30 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	})
 }
 
+func TestModeString_LegacyShapes(t *testing.T) {
+	// Pre-EIP-8252 full mode persisted as {Blocks: DefaultBlocksPruneMode,
+	// History: Distance(100_000)}. Before the recognition logic, this rendered
+	// as "archive --prune.distance=100000 --prune.distance.blocks=18446744073709551615"
+	// — accurate but misleading. It now renders as "full(legacy)".
+	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	assert.Equal(t, "full(legacy) --prune.distance=100000", legacyFull.String())
+
+	// Pre-EIP-8252 full with the current default history distance (262_144) —
+	// label as plain "full(legacy)" with no override clause.
+	legacyFullCurrentHistory := Mode{Initialised: true, History: Distance(262_144), Blocks: DefaultBlocksPruneMode}
+	assert.Equal(t, "full(legacy)", legacyFullCurrentHistory.String())
+
+	// Pre-EIP-8252 blocks mode persisted as {Blocks: KeepAllBlocksPruneMode,
+	// History: Distance(100_000)}. Render as "blocks --prune.distance=100000".
+	legacyBlocks := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepAllBlocksPruneMode}
+	assert.Equal(t, "blocks --prune.distance=100000", legacyBlocks.String())
+
+	// Archive with explicit distance overrides (archive_override) stays on the
+	// "archive" base — historical contract preserved.
+	archiveOverride := Mode{Initialised: true, History: Distance(400500), Blocks: Distance(100500)}
+	assert.Equal(t, "archive --prune.distance=400500 --prune.distance.blocks=100500", archiveOverride.String())
+}
+
 func TestParseCLIMode(t *testing.T) {
 	t.Run("full", func(t *testing.T) {
 		mode, err := FromCli(fullModeStr, 0, 0)

@@ -39,39 +39,59 @@ func TestBlackListForPruning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Prune 64 steps and contain at least all the blocks
-	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, 64, 100_000, 25_000_000, preverified)
+	// stepPrune is chosen well above the lowest state-history step range so
+	// real state history files land in the blacklist. The previous test used
+	// stepPrune=64 which left the blacklist empty (mainnet preverified state
+	// history files start much higher), so it validated nothing about state
+	// blacklisting. blockPrune sits above the 20M mark so tx-segment pruning
+	// gets exercised too.
+	const stepPrune = 5000
+	const minBlockToDownload uint64 = 20_000_000
+	const blockPrune uint64 = 25_000_000
+	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, minBlockToDownload, blockPrune, preverified)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var sawStateHistory, sawTransactions bool
 	for p := range blackList {
-		// take the snapshot file name and parse it to get the "from"
 		info, _, ok := snaptype.ParseFileName("tmp", p)
 		if !ok {
 			continue
 		}
-		if strings.Contains(p, "transactions") {
-			if info.From < 19_000_000 {
-				t.Errorf("Should have pruned %s", p)
+		switch {
+		case strings.Contains(p, "transactions"):
+			sawTransactions = true
+			if info.To > blockPrune {
+				t.Errorf("transaction segment %s should not have been blacklisted (To=%d > blockPrune=%d)", p, info.To, blockPrune)
 			}
-			continue
-		}
-		if strings.Contains(p, "domain") {
-			t.Errorf("Should not have pruned %s", p)
-		}
-		if info.To == maxStep {
-			t.Errorf("Should not have pruned %s", p)
+		case strings.Contains(p, "domain"):
+			t.Errorf("domain segment %s should never be blacklisted", p)
+		default:
+			// State history file (idx/history/accessor).
+			sawStateHistory = true
+			if info.To > stepPrune {
+				t.Errorf("state history %s should not have been blacklisted (To=%d > stepPrune=%d)", p, info.To, stepPrune)
+			}
+			if info.To == maxStep {
+				t.Errorf("freshest state history %s should not have been blacklisted (To==maxStep)", p)
+			}
 		}
 	}
-
+	if !sawStateHistory {
+		t.Error("expected at least one state history file to be blacklisted; got none — test no longer exercises the state-history path")
+	}
+	if !sawTransactions {
+		t.Error("expected at least one transaction segment to be blacklisted; got none — test no longer exercises the tx-segment path")
+	}
 }
 
 // TestBlackListForPruning_BlocksModeKeepsAllTransactions verifies that
 // --prune.mode=blocks (Blocks=KeepAllBlocksPruneMode, History finite)
 // blacklists state history but never transaction segments. Distance.Enabled()
-// returns true for KeepAllBlocksPruneMode, so the finite-distance check
-// in buildBlackListForPruning must be explicit rather than rely on
-// .Enabled() — otherwise tx segments would get accidentally pruned.
+// returns false for KeepAllBlocksPruneMode, which is the contract this test
+// locks down — if .Enabled() ever stopped excluding that sentinel,
+// tx segments would start getting pruned by accident.
 func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
 	if !ok {

@@ -78,26 +78,61 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
 	}
-	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
+	// Exact named matches first.
+	switch {
+	case modeEquals(m, FullMode):
 		return fullModeStr
-	}
-	if m.History.toValue() == MinimalMode.History.toValue() && m.Blocks.toValue() == MinimalMode.Blocks.toValue() {
+	case modeEquals(m, MinimalMode):
 		return minimalModeStr
-	}
-
-	if m.Blocks.toValue() == BlocksMode.Blocks.toValue() && m.History.toValue() == BlocksMode.History.toValue() {
+	case modeEquals(m, BlocksMode):
 		return blockModeStr
+	case modeEquals(m, ArchiveMode):
+		return archiveModeStr
 	}
 
-	var short strings.Builder
-	short.WriteString(archiveModeStr)
+	// Recognise legacy shapes that don't match any current named mode but
+	// would otherwise produce a misleading "archive ..." rendering. These
+	// surface on first start of a pre-EIP-8252 datadir under the new binary
+	// (the compat shim in EnsureNotChanged rewrites the persisted value, so
+	// the legacy label only appears briefly in the upgrade-time warning).
+	if m.Blocks == DefaultBlocksPruneMode && m.History.Enabled() {
+		// Pre-EIP-8252 full mode: chain-history-expiry for blocks + finite
+		// state history. Render as "full(legacy)" + the finite history.
+		var sb strings.Builder
+		sb.WriteString(fullModeStr + "(legacy)")
+		if m.History.toValue() != FullMode.History.toValue() {
+			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
+		}
+		return sb.String()
+	}
+	if m.Blocks == KeepAllBlocksPruneMode && m.History.Enabled() {
+		// Blocks-shape (keep all blocks + finite state) but History distance
+		// differs from the current BlocksMode default.
+		var sb strings.Builder
+		sb.WriteString(blockModeStr)
+		if m.History.toValue() != BlocksMode.History.toValue() {
+			fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
+		}
+		return sb.String()
+	}
+
+	// Fallback: archive + overrides. Preserves the historical rendering for
+	// "archive with custom distances" and for any shape we don't special-case
+	// above (e.g., legacy archive {DefaultBlocksPruneMode, DefaultBlocksPruneMode}
+	// before the archive-default-bump compat rewrites it).
+	var sb strings.Builder
+	sb.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {
-		short.WriteString(fmt.Sprintf(" --prune.distance=%d", m.History.toValue()))
+		fmt.Fprintf(&sb, " --prune.distance=%d", m.History.toValue())
 	}
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
-		short.WriteString(fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue()))
+		fmt.Fprintf(&sb, " --prune.distance.blocks=%d", m.Blocks.toValue())
 	}
-	return strings.TrimLeft(short.String(), " ")
+	return sb.String()
+}
+
+func modeEquals(a, b Mode) bool {
+	return a.History.toValue() == b.History.toValue() && a.Blocks.toValue() == b.Blocks.toValue()
 }
 
 func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {
@@ -168,7 +203,13 @@ type BlockAmount interface {
 // may delete whole db - because of uint64 underflow when pruningDistance > currentStageProgress
 type Distance uint64
 
-func (p Distance) Enabled() bool   { return p != math.MaxUint64 }
+// Enabled reports whether p actively drives distance-based pruning. It is
+// false for the two sentinel values that select a different policy shape
+// (DefaultBlocksPruneMode → chain history-expiry; KeepAllBlocksPruneMode →
+// retain forever) and true for every finite Distance.
+func (p Distance) Enabled() bool {
+	return p != DefaultBlocksPruneMode && p != KeepAllBlocksPruneMode
+}
 func (p Distance) toValue() uint64 { return uint64(p) }
 func (p Distance) dbType() []byte  { return kv.PruneTypeOlder }
 

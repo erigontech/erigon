@@ -3821,15 +3821,16 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 // duDetectNodeType infers the current node mode from which files are present.
 // Archive nodes retain all state history from step 0; non-archive modes have
 // pruned it, so old state history files are absent. Among non-archive modes:
-//   - Full prunes state history and transaction segments below
-//     DefaultPruneDistance from head.
+//   - Blocks mode keeps all transaction segments (from genesis) but prunes
+//     state history. Detected by the presence of a tx segment with From=0
+//     on a chain mature enough for distance-pruning to have kicked in.
+//   - Full prunes both state history and transaction segments older than
+//     DefaultPruneDistance.
 //   - Minimal does the same but at the smaller MinimalPruneDistance, so it
-//     keeps a narrower recent window.
-//
-// `blocks` mode (KeepAllBlocksPruneMode + finite History) is not distinguished
-// here — its retained tx segments make it look like full.
+//     keeps a narrower recent window than full.
 func duDetectNodeType(files []duFileInfo) string {
 	hasOldStateHistory := false
+	hasGenesisTxSegment := false
 	var maxBlock, maxStep uint64
 
 	fullPruneDistance := uint64(config3.DefaultPruneDistance)
@@ -3843,6 +3844,9 @@ func duDetectNodeType(files []duFileInfo) string {
 		if f.Category == duCatBlocks && !f.IsState {
 			if f.To > maxBlock {
 				maxBlock = f.To
+			}
+			if f.From == 0 && strings.Contains(strings.ToLower(f.Name), "transactions") {
+				hasGenesisTxSegment = true
 			}
 		}
 		// Regular state history files (not commitment hist, not rcache) starting
@@ -3861,6 +3865,15 @@ func duDetectNodeType(files []duFileInfo) string {
 	}
 	if hasOldStateHistory && (fullStepPruneDistance == 0 || maxStep > fullStepPruneDistance) {
 		return "archive"
+	}
+
+	// Blocks mode: tx segments from genesis are present (no distance-based tx
+	// pruning) but state history from step 0 is absent. Require maxBlock to
+	// exceed minimalPruneDistance so we don't misclassify a young minimal
+	// chain (which would still have tx from 0 simply because nothing has been
+	// pruned yet).
+	if hasGenesisTxSegment && maxBlock > minimalPruneDistance {
+		return "blocks"
 	}
 
 	// Distinguish full from minimal by looking for transaction segments that
