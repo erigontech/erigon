@@ -85,6 +85,12 @@ type Provider struct {
 	SegmentsBuildLimiter *semaphore.Weighted
 	BlockRetire          services.BlockRetire
 
+	// Aggregator is the state Aggregator. Stored from Deps.Aggregator so
+	// the staged-adoption cutover (adoption.go) can take its commit
+	// barrier and OpenFolder it after swapping files. May be nil for
+	// tools / tests that construct a Provider without state.
+	Aggregator *dbstate.Aggregator
+
 	// Inventory is the storage component's metadata registry of all
 	// known snapshot files (local + remote, per the snapshot-flow PR).
 	// Optional — nil for tools and tests that don't run the full
@@ -276,6 +282,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.GenesisHash = deps.Genesis.Hash()
 	p.SegmentsBuildLimiter = deps.SegmentsBuildLimiter
 	p.Inventory = deps.Inventory
+	p.Aggregator = deps.Aggregator
 
 	// Read current block number. Use deps.Ctx so cancellation/shutdown
 	// propagates into this lookup instead of masking it with Background.

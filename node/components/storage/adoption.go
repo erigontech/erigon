@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -74,9 +76,12 @@ const (
 	// must intervene (memory/salt-divergence-abort-adoption.md).
 	AdoptionSaltDivergence
 	// AdoptionStaged — the canonical delta was fetched and passed both
-	// validation stages. The staging directory is left in place for the
-	// Phase 7c atomic cutover.
+	// validation stages. The staging directory is left in place for a
+	// later cutover (policy=stage).
 	AdoptionStaged
+	// AdoptionCutOver — the staged batch was validated and atomically
+	// swapped over the live files (policy=auto).
+	AdoptionCutOver
 )
 
 func (o AdoptionOutcome) String() string {
@@ -87,6 +92,8 @@ func (o AdoptionOutcome) String() string {
 		return "salt-divergence"
 	case AdoptionStaged:
 		return "staged"
+	case AdoptionCutOver:
+		return "cut-over"
 	default:
 		return "unknown"
 	}
@@ -153,14 +160,29 @@ func (p *Provider) RunStagedAdoption(ctx context.Context, req AdoptionRequest) (
 		return nil, fmt.Errorf("adoption: staged batch failed validation: %w", err)
 	}
 
-	if p.logger != nil {
-		p.logger.Info("[storage] canonical batch staged and validated",
-			"version", req.CanonicalVersion, "files", len(batch.Files), "dir", batch.Dir)
+	// policy=stage stops here — the validated batch waits on disk for an
+	// operator-triggered cutover.
+	if req.Policy == snapshotsync.AdoptionStage {
+		if p.logger != nil {
+			p.logger.Info("[storage] canonical batch staged and validated",
+				"version", req.CanonicalVersion, "files", len(batch.Files), "dir", batch.Dir)
+		}
+		return &AdoptionResult{
+			Outcome: AdoptionStaged,
+			Batch:   batch,
+			Reason:  fmt.Sprintf("%d canonical files staged and validated — awaiting cutover", len(batch.Files)),
+		}, nil
+	}
+
+	// policy=auto — atomically swap the validated batch over the live
+	// files and re-open the views.
+	if err := p.cutoverStagedBatch(batch, req.Downloader); err != nil {
+		return nil, fmt.Errorf("adoption: cutover: %w", err)
 	}
 	return &AdoptionResult{
-		Outcome: AdoptionStaged,
+		Outcome: AdoptionCutOver,
 		Batch:   batch,
-		Reason:  fmt.Sprintf("%d canonical files staged and validated — awaiting cutover", len(batch.Files)),
+		Reason:  fmt.Sprintf("%d canonical files adopted and cut over", len(batch.Files)),
 	}, nil
 }
 
@@ -313,6 +335,99 @@ func (p *Provider) runStage2Validators(ctx context.Context, db kv.TemporalRoDB, 
 				return fmt.Errorf("receipt %s: %w", fe.Name, err)
 			}
 		}
+	}
+	return nil
+}
+
+// cutoverSwap is one file's move from the staging directory to its
+// live location, carrying the canonical info-hash to re-stamp.
+type cutoverSwap struct {
+	src, dst, name string
+	hash           [20]byte
+}
+
+// cutoverStagedBatch atomically swaps a validated staged batch over the
+// live snapshot files on a running node and re-opens the state and
+// block views. The renames and both OpenFolder rebuilds run under the
+// Aggregator commit barrier (LockCollation) — the same lock the merge
+// pipeline takes — so no reader observes a half-swapped file set and no
+// merge runs concurrently.
+//
+// rename(2) is atomic and leaves an open/mmap'd old inode alive for
+// existing readers, so a held view finishes on old bytes; only a new
+// view opened after OpenFolder sees the canonical set. On any failure
+// the error is returned loudly: by then files may be swapped but the
+// live DB and snapshot dir were never validated against — crash-safe
+// recovery via an intent journal is deferred
+// (docs/plans/20260520-phase7-staged-adoption-design.md, open questions).
+func (p *Provider) cutoverStagedBatch(batch *dlcomp.StagedBatch, dl *dlcomp.Provider) error {
+	if p.Aggregator == nil || p.AllSnapshots == nil {
+		return fmt.Errorf("cutover requires Aggregator and AllSnapshots")
+	}
+	liveSnapDir := p.AllSnapshots.Dir()
+
+	// Pre-flight, before taking the barrier: resolve every destination
+	// and create its directory, so the barrier holds only the renames
+	// and the two OpenFolder rebuilds.
+	swaps := make([]cutoverSwap, 0, len(batch.Files))
+	for _, sf := range batch.Files {
+		if _, err := os.Stat(sf.Path); err != nil {
+			return fmt.Errorf("staged file %s: %w", sf.Name, err)
+		}
+		dst := snapshot.PathForName(liveSnapDir, sf.Name)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", sf.Name, err)
+		}
+		swaps = append(swaps, cutoverSwap{src: sf.Path, dst: dst, name: sf.Name, hash: sf.InfoHash})
+	}
+
+	if err := p.renameAndReopen(swaps); err != nil {
+		return err
+	}
+
+	// Post-barrier: re-point inventory + downloader at the canonical
+	// content and re-advertise. A republish failure does not undo the
+	// completed swap — log and continue.
+	for _, s := range swaps {
+		snapshot.SetTorrentHash(p.Inventory, s.name, s.hash)
+		if dl != nil && dl.Downloader != nil {
+			dl.Downloader.DropTorrentByName(s.name)
+			_ = dir.RemoveFile(s.dst + ".torrent")
+		}
+	}
+	if dl != nil && dl.Downloader != nil && p.Inventory != nil {
+		if err := dl.Downloader.PublishLocalChainTomlV2(p.Inventory); err != nil && p.logger != nil {
+			p.logger.Warn("[storage] adoption cutover: republish failed", "err", err)
+		}
+	}
+	if err := dir.RemoveAll(batch.Dir); err != nil && p.logger != nil {
+		p.logger.Warn("[storage] adoption cutover: staging cleanup failed", "dir", batch.Dir, "err", err)
+	}
+	if p.logger != nil {
+		p.logger.Info("[storage] adoption cutover complete", "files", len(swaps))
+	}
+	return nil
+}
+
+// renameAndReopen performs the barrier-held core of the cutover: rename
+// every staged file over its live counterpart, then rebuild the state
+// and block visible-file views. UnlockCollation is deferred so the
+// barrier is released the moment the rebuild finishes, before the
+// caller's post-barrier inventory work.
+func (p *Provider) renameAndReopen(swaps []cutoverSwap) error {
+	p.Aggregator.LockCollation()
+	defer p.Aggregator.UnlockCollation()
+
+	for _, s := range swaps {
+		if err := os.Rename(s.src, s.dst); err != nil {
+			return fmt.Errorf("rename %s: %w", s.name, err)
+		}
+	}
+	if err := p.Aggregator.OpenFolder(); err != nil {
+		return fmt.Errorf("reopen aggregator: %w", err)
+	}
+	if err := p.AllSnapshots.OpenFolder(); err != nil {
+		return fmt.Errorf("reopen snapshots: %w", err)
 	}
 	return nil
 }
