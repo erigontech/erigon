@@ -23,6 +23,11 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # See test-all-erigon.yml for the rationale: full history avoids the
+          # shallow-deepen race in dorny/paths-filter that was failing this
+          # workflow's source-of-changes preflight on pushes to release/3.4.
+          fetch-depth: 0
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter

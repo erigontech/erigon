@@ -30,6 +30,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # dorny/paths-filter needs the merge-base between this ref and the
+          # default branch to diff the push. With the action's default shallow
+          # clone, it has to call `git fetch --deepen=...`, which intermittently
+          # fails on busy runners with `fatal: shallow file has changed since
+          # we read it` (exit 128) — sinking the whole "All tests" workflow
+          # because the matrix `needs: source-of-changes`. Fetching full history
+          # here avoids the deepen path entirely.
+          fetch-depth: 0
 
       - name: Check for changes within out-of-scope dirs or files
         id: filter
