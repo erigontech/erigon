@@ -238,9 +238,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	// CollectorWrites: LightCollector output from MakeWriteSet.
@@ -365,9 +365,9 @@ func coinbaseIsRecipientScenario() *testFinalizeScenario {
 
 	// TxOut: coinbase has transfer amount but NOT tip (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	collectorWrites := state.VersionedWrites{
@@ -422,7 +422,7 @@ func selfTransferScenario() *testFinalizeScenario {
 	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
 
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: sender, Path: state.BalancePath, Val: *senderBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
 	}
 

@@ -1326,7 +1326,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, oldCode)
+	intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified)
 	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
@@ -1340,7 +1340,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
-	intraBlockState.SetCode(contract, newCode)
+	intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified)
 
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
@@ -1373,7 +1373,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code)
+	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
 	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
@@ -1410,7 +1410,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code)
+	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
 	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)

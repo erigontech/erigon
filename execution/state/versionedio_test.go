@@ -440,8 +440,8 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	ibs.SetTxContext(1, 0)
 
 	// Establish nonce and code before selfdestruct — these should be dropped.
-	require.NoError(t, ibs.SetNonce(addr, 5))
-	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}))
+	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true and BalancePath=0.
@@ -776,7 +776,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -827,7 +827,7 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1)},
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1), NonceChangeReason: tracing.NonceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -855,8 +855,8 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
-		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5)},
+		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5), NonceChangeReason: tracing.NonceChangeUnspecified},
 		&VersionedWrite{Address: addrC, Path: StoragePath, Key: storageKey, Val: *uint256.NewInt(99)},
 	})
 	require.NoError(t, err)
@@ -883,7 +883,7 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
