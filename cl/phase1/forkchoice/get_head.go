@@ -329,20 +329,12 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	blockEpoch := f.computeEpochAtSlot(header.Slot)
 	var votingSource solid.Checkpoint
 	if currentEpoch > blockEpoch {
-		var has bool
 		votingSource, has = f.getUnrealizedJustification(blockRoot)
-		if !has {
-			votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-			if !has {
-				return false
-			}
-		}
 	} else {
-		var has bool
 		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-		if !has {
-			return false
-		}
+	}
+	if !has {
+		return false
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
