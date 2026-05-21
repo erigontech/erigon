@@ -147,6 +147,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
+	// On ChainTip - store blocks in Overlay
+	// On Non-ChainTip - flush to db because batches are big
 	if len(blocks) > 16 {
 		if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
 			return 0, err
