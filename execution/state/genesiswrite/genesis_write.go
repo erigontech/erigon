@@ -429,11 +429,11 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetCode(address, account.Code)
+		err = statedb.SetCode(address, account.Code, tracing.CodeChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetNonce(address, account.Nonce)
+		err = statedb.SetNonce(address, account.Nonce, tracing.NonceChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
