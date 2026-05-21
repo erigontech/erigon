@@ -90,6 +90,11 @@ func TestParseCLIMode(t *testing.T) {
 		assert.Equal(t, archiveModeStr, mode.String())
 	})
 	t.Run("archive_override", func(t *testing.T) {
+		// Operator typed `--prune.mode=archive --prune.distance=400500 --prune.distance.blocks=100500`.
+		// FromCli starts with ArchiveMode and overrides both fields to finite
+		// Distances. The resulting mode is shape-wise non-archive (finite
+		// distances cause distance-based pruning), but Mode.String() preserves
+		// the operator's chosen base — see the function docstring.
 		exp := ArchiveMode
 		exp.Blocks = Distance(100500)
 		exp.History = Distance(400500)

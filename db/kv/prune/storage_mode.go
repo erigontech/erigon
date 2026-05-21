@@ -74,6 +74,17 @@ type Mode struct {
 	Blocks      BlockAmount
 }
 
+// String renders m in the shape an operator would type on the CLI: the named
+// mode if m matches one exactly, otherwise a recognized legacy shape
+// ("full(legacy)" / "blocks --prune.distance=N"), otherwise an "archive
+// --prune.distance=...  --prune.distance.blocks=..." fallback that mirrors
+// the FromCli input the operator presumably supplied. The string is
+// informational (used in error messages, warning logs, and seg du output)
+// and reflects the configured shape, not necessarily the named mode's usual
+// retention behaviour — e.g. a mode constructed by `--prune.mode=archive
+// --prune.distance=N --prune.distance.blocks=M` still renders with the
+// "archive" prefix even though the finite distances cause distance-based
+// pruning.
 func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
@@ -315,39 +326,33 @@ func isFiniteDistance(b BlockAmount) bool {
 	return d != KeepAllBlocksPruneMode && d != DefaultBlocksPruneMode
 }
 
-func overwriteStoredMode(db kv.GetPut, pm Mode) error {
-	for key, value := range map[string]BlockAmount{
-		string(kv.PruneHistory): pm.History,
-		string(kv.PruneBlocks):  pm.Blocks,
-	} {
-		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, value.toValue())
-		if err := db.Put(kv.DatabaseInfo, []byte(key), v); err != nil {
-			return err
-		}
-		if err := db.Put(kv.DatabaseInfo, keyType([]byte(key)), value.dbType()); err != nil {
-			return err
-		}
+// writeBlockAmount stores one BlockAmount under the given key, replacing any
+// existing value. Shared by setOnEmpty (write-if-empty) and overwriteStoredMode
+// (unconditional).
+func writeBlockAmount(db kv.GetPut, key []byte, b BlockAmount) error {
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, b.toValue())
+	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
+		return err
 	}
-	return nil
+	return db.Put(kv.DatabaseInfo, keyType(key), b.dbType())
 }
 
-func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
+func overwriteStoredMode(db kv.GetPut, pm Mode) error {
+	if err := writeBlockAmount(db, kv.PruneHistory, pm.History); err != nil {
+		return err
+	}
+	return writeBlockAmount(db, kv.PruneBlocks, pm.Blocks)
+}
+
+func setIfNotExist(db kv.GetPut, pm Mode) error {
 	if !pm.Initialised {
 		pm = DefaultMode
 	}
-
-	pruneDBData := map[string]BlockAmount{
-		string(kv.PruneHistory): pm.History,
-		string(kv.PruneBlocks):  pm.Blocks,
+	if err := setOnEmpty(db, kv.PruneHistory, pm.History); err != nil {
+		return err
 	}
-
-	for key, value := range pruneDBData {
-		if err = setOnEmpty(db, []byte(key), value); err != nil {
-			return err
-		}
-	}
-	return nil
+	return setOnEmpty(db, kv.PruneBlocks, pm.Blocks)
 }
 
 func createBlockAmount(pruneType []byte, v []byte) (BlockAmount, error) {
@@ -390,20 +395,12 @@ func keyType(name []byte) []byte {
 }
 
 func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
-	mode, err := db.GetOne(kv.DatabaseInfo, key)
+	existing, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err
 	}
-	if len(mode) == 0 {
-		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, blockAmount.toValue())
-		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
-			return err
-		}
-		if err = db.Put(kv.DatabaseInfo, keyType(key), blockAmount.dbType()); err != nil {
-			return err
-		}
+	if len(existing) > 0 {
+		return nil
 	}
-
-	return nil
+	return writeBlockAmount(db, key, blockAmount)
 }
