@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -32,7 +33,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -149,11 +152,51 @@ func compareWitness(t *testing.T, blockNum uint64, expected *testutil.ExpectedWi
 		reportSetDiff(t, blockNum, "Codes", expected.Codes, actual.Codes)
 		fieldErrs = append(fieldErrs, err)
 	}
-	if err := compareByteSlices(blockNum, "Headers", expected.Headers, actual.Headers); err != nil {
-		reportSetDiff(t, blockNum, "Headers", expected.Headers, actual.Headers)
+	actualHeaders, err := jsonHeadersToRLP(actual.Headers)
+	if err != nil {
+		fieldErrs = append(fieldErrs, fmt.Errorf("block %d Headers: re-encode RPC headers for comparison: %w", blockNum, err))
+	} else if err := compareByteSlices(blockNum, "Headers", expected.Headers, actualHeaders); err != nil {
+		reportSetDiff(t, blockNum, "Headers", expected.Headers, actualHeaders)
 		fieldErrs = append(fieldErrs, err)
 	}
 	return errors.Join(fieldErrs...)
+}
+
+// jsonHeadersToRLP converts JSON-object headers returned by debug_executionWitness
+// (post PR #21224, which aligned the wire format with Geth) back into RLP-encoded
+// bytes so they can be compared against the EEST fixture format (`hexutil.Bytes`).
+// The reverse path mirrors marshalWitnessHeader: rename "balHash" back to
+// "blockAccessListHash", drop fields not present on types.Header ("hash", "size"),
+// then JSON-unmarshal into types.Header and RLP-encode.
+func jsonHeadersToRLP(maps []map[string]any) ([]hexutil.Bytes, error) {
+	out := make([]hexutil.Bytes, 0, len(maps))
+	for i, m := range maps {
+		normalized := make(map[string]any, len(m))
+		for k, v := range m {
+			switch k {
+			case "balHash":
+				normalized["blockAccessListHash"] = v
+			case "hash", "size":
+				// Not part of types.Header's JSON schema.
+			default:
+				normalized[k] = v
+			}
+		}
+		jsonBytes, err := json.Marshal(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("header[%d]: marshal map to JSON: %w", i, err)
+		}
+		var h types.Header
+		if err := json.Unmarshal(jsonBytes, &h); err != nil {
+			return nil, fmt.Errorf("header[%d]: unmarshal JSON to types.Header: %w", i, err)
+		}
+		rlpBytes, err := rlp.EncodeToBytes(&h)
+		if err != nil {
+			return nil, fmt.Errorf("header[%d]: RLP encode: %w", i, err)
+		}
+		out = append(out, rlpBytes)
+	}
+	return out, nil
 }
 
 // compareByteSlices compares two slices of hexutil.Bytes element-by-element.
