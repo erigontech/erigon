@@ -1578,7 +1578,10 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 // to not extend past the given txNum. Use this when block snapshot files don't
 // cover all txNums (e.g. --no-downloader or lagging block file builder).
 // Set to 0 to remove the cap.
-func (a *Aggregator) SetMaxCollationTxNum(txNum uint64) { a.maxCollationTxNum.Store(txNum) }
+func (a *Aggregator) SetMaxCollationTxNum(txNum uint64) {
+	log.Warn("[dbg] SetMaxCollationTxNum", "step", txNum/a.stepSize.Load(), "stack", dbg.Stack())
+	a.maxCollationTxNum.Store(txNum)
+}
 
 // MaxCollationTxNum returns the current collation cap (0 = uncapped).
 func (a *Aggregator) MaxCollationTxNum() uint64 { return a.maxCollationTxNum.Load() }
