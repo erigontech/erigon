@@ -755,7 +755,7 @@ func TestDUComputeEstimates(t *testing.T) {
 	maxStep := uint64(2000)
 
 	estimates := duComputeEstimates(files, maxBlock, maxStep)
-	require.Len(t, estimates, 3)
+	require.Len(t, estimates, 4)
 
 	// Archive: sum everything
 	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 1234 + 800 + 400 + 200 + 350 + 5000 + 5678 + 3000 + 6000 + 700)
@@ -774,18 +774,29 @@ func TestDUComputeEstimates(t *testing.T) {
 	require.Equal(t, "last 262.144", estimates[1].BlocksDesc)
 	require.Equal(t, "last 262.144", estimates[1].HistoryDesc)
 
+	// Blocks: archive minus commitHist(800) minus old accessor(500) minus
+	// old history(3000) minus old idx(1500). Keeps everything full prunes via
+	// tx/receipt distance (old rcache hist, old logaddrs, old tx, boundary tx).
+	blocksTotal := archiveTotal - 800 - 500 - 3000 - 1500
+	require.Equal(t, "blocks", estimates[2].Mode)
+	require.Equal(t, blocksTotal, estimates[2].TotalBytes)
+	require.Equal(t, blocksTotal-archiveTotal, estimates[2].Delta)
+	require.Equal(t, "all blocks", estimates[2].BlocksDesc)
+	require.Equal(t, "last 262.144", estimates[2].HistoryDesc)
+
 	// Minimal: full minus boundary state(1234) and boundary tx(5678),
 	// which fall in the gap between full's and minimal's cutoffs.
 	minimalTotal := fullTotal - 1234 - 5678
-	require.Equal(t, "minimal", estimates[2].Mode)
-	require.Equal(t, minimalTotal, estimates[2].TotalBytes)
-	require.Equal(t, minimalTotal-archiveTotal, estimates[2].Delta)
-	require.Equal(t, "last 100.000", estimates[2].BlocksDesc)
-	require.Equal(t, "last 100.000", estimates[2].HistoryDesc)
+	require.Equal(t, "minimal", estimates[3].Mode)
+	require.Equal(t, minimalTotal, estimates[3].TotalBytes)
+	require.Equal(t, minimalTotal-archiveTotal, estimates[3].Delta)
+	require.Equal(t, "last 100.000", estimates[3].BlocksDesc)
+	require.Equal(t, "last 100.000", estimates[3].HistoryDesc)
 
-	// Invariant: archive > full > minimal (strict, with boundary files in test data)
-	require.Greater(t, estimates[0].TotalBytes, estimates[1].TotalBytes)
-	require.Greater(t, estimates[1].TotalBytes, estimates[2].TotalBytes)
+	// Invariant: archive > blocks > full > minimal (strict, with boundary files in test data)
+	require.Greater(t, estimates[0].TotalBytes, estimates[2].TotalBytes, "archive > blocks")
+	require.Greater(t, estimates[2].TotalBytes, estimates[1].TotalBytes, "blocks > full")
+	require.Greater(t, estimates[1].TotalBytes, estimates[3].TotalBytes, "full > minimal")
 }
 
 func TestDUComputeEstimates_NoPruning(t *testing.T) {
@@ -801,12 +812,13 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	// All modes include everything (no old files to prune, no commitment/rcache)
 	require.Equal(t, int64(600), estimates[0].TotalBytes) // archive
 	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
-	require.Equal(t, int64(600), estimates[2].TotalBytes) // minimal
+	require.Equal(t, int64(600), estimates[2].TotalBytes) // blocks
+	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
 }
 
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
 	estimates := duComputeEstimates(nil, 0, 0)
-	require.Len(t, estimates, 3)
+	require.Len(t, estimates, 4)
 	for _, e := range estimates {
 		require.Equal(t, int64(0), e.TotalBytes)
 	}
@@ -1157,17 +1169,19 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 
 	// Compute estimates.
 	estimates := duComputeEstimates(files, maxBlock, maxStep)
-	require.Len(t, estimates, 3)
+	require.Len(t, estimates, 4)
 
-	// Verify archive >= full >= minimal (acceptance criterion 3).
-	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= full")
-	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "full >= minimal")
+	// Verify archive >= blocks >= full >= minimal (acceptance criterion 3).
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[2].TotalBytes, "archive >= blocks")
+	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[1].TotalBytes, "blocks >= full")
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[3].TotalBytes, "full >= minimal")
 
 	// Archive delta must be 0.
 	require.Equal(t, int64(0), estimates[0].Delta)
 	// Non-archive deltas must be negative or zero.
 	require.LessOrEqual(t, estimates[1].Delta, int64(0))
 	require.LessOrEqual(t, estimates[2].Delta, int64(0))
+	require.LessOrEqual(t, estimates[3].Delta, int64(0))
 
 	// Build result struct.
 	result := duResult{
@@ -1223,11 +1237,12 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.Equal(t, result.TotalBytes, decoded.TotalBytes)
 	require.Equal(t, result.TotalFiles, decoded.TotalFiles)
 	require.Len(t, decoded.Categories, len(result.Categories))
-	require.Len(t, decoded.Estimates, 3)
+	require.Len(t, decoded.Estimates, 4)
 
-	// Verify JSON estimates also maintain archive >= full >= minimal.
-	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
-	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
+	// Verify JSON estimates also maintain archive >= blocks >= full >= minimal.
+	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[2].TotalBytes, "archive >= blocks")
+	require.GreaterOrEqual(t, decoded.Estimates[2].TotalBytes, decoded.Estimates[1].TotalBytes, "blocks >= full")
+	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[3].TotalBytes, "full >= minimal")
 }
 
 // touchBlockSnap creates an empty file at <dirs.Snap>/<name>, ensuring the snap
