@@ -30,11 +30,14 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// flushBlockOverlayToDB bounds per-batch memory: commits the overlay to DB and
-// closes it so the next InsertBlocks call starts fresh.
+const blockOverlayFlushThreshold = 512 * 1024 * 1024 // 512 MiB
+
+// flushBlockOverlayToDB flushes the block overlay to DB when it exceeds the
+// size threshold, bounding memory during historical backfill while preserving
+// the in-memory overlay for chain-tip (single-block) inserts.
 func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
 	overlay := sd.BlockOverlay()
-	if overlay == nil {
+	if overlay == nil || overlay.Size() < blockOverlayFlushThreshold {
 		return nil
 	}
 	rwTx, err := e.db.BeginTemporalRw(ctx)
@@ -147,10 +150,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Flush block overlay to DB so in-memory usage stays bounded to one batch.
-	// After the commit, the next InsertBlocks call opens a fresh RoTx that sees
-	// the committed TDs, so parent TD lookups in subsequent batches still work.
-	// UpdateForkChoice detects hasOverlay=false and reads block data from DB.
 	if err := e.flushBlockOverlayToDB(ctx, sd); err != nil {
 		return 0, err
 	}
