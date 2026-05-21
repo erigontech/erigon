@@ -80,6 +80,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapshotDelegationPath,
 	&utils.SnapshotTrustRoots,
 	&utils.SnapshotQuorumFlag,
+	&utils.SnapshotAdoptionPolicyFlag,
 	&utils.HttpCompressionFlag,
 	&utils.HTTPCORSDomainFlag,
 	&utils.HTTPVirtualHostsFlag,

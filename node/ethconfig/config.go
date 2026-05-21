@@ -217,6 +217,12 @@ type BlocksFreezing struct {
 	// (--snapshot.quorum). 0 → use the per-chain default
 	// (snapcfg.QuorumConfigFor).
 	QuorumFloor int
+
+	// AdoptionPolicy governs how far a minority publisher carries
+	// staged canonical adoption automatically (--snapshot.adoption-policy):
+	// "auto", "stage" or "warn". Parsed by snapshotsync.ParseAdoptionPolicy;
+	// empty defaults to "auto".
+	AdoptionPolicy string
 }
 
 func (s BlocksFreezing) String() string {
