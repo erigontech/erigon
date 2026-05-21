@@ -527,7 +527,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		st.state.SetNonce(msg.From(), nonce+1)
+		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
 	}
 
 	// Check clause 7, subtract intrinsic gas if everything is correct
@@ -801,17 +801,17 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 
 			// 7. set authority code
 			if auth.Address == (common.Address{}) {
-				if err := st.state.SetCode(authority, nil); err != nil {
+				if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
 					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			} else {
-				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address))); err != nil {
+				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
 					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			}
 
 			// 8. increase the nonce of authority
-			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
+			if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		}
