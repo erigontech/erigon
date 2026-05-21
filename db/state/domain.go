@@ -314,13 +314,7 @@ func (d *Domain) calcVisibleFiles(toTxNum uint64) (*domainVisible, visibleFiles,
 	return dv, hv, hiv
 }
 
-func (d *Domain) Tables() []string {
-	res := append(d.History.Tables(), d.ValuesTable)
-	if d.LargeValues && d.KeysTable != "" {
-		res = append(res, d.KeysTable)
-	}
-	return res
-}
+func (d *Domain) Tables() []string { return d.DomainCfg.Tables() }
 
 func (d *Domain) Close() {
 	if d == nil {
@@ -417,10 +411,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if w.largeVals {
-		// On (bareKey, invStep) collision the hot path is real->real: update the vals
-		// row in place and leave the keys dup alone (saves a vals Delete + a keys
-		// PutCurrent per re-flush, common for commitment branches re-written in the
-		// same step). Other transitions still need the full delete/append/replace.
+		// In-place vals update when an existing real seqID at (bareKey, invStep) is
+		// re-flushed: leaves the keys dup untouched so subsequent re-flushes can
+		// collide-update again. Other transitions go through the full delete/append.
 		keysCursor, err := tx.RwCursorDupSort(w.keysTable)
 		if err != nil {
 			return err
@@ -456,7 +449,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 			hasDup := len(existing) == dupRecordLen && bytes.Equal(existing[:8], invStep)
 
-			// Hot path: in-place update — keysTable dup unchanged.
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID && !newIsDeletion {
 				copy(seqIDBuf[:], existing[8:])
 				return valsCursorRW.Put(seqIDBuf[:], v)
@@ -464,13 +456,11 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 
 			seqID := uint64(deletionSeqID)
 			if hasDup && binary.BigEndian.Uint64(existing[8:]) != deletionSeqID {
-				// real → deletion: remove from vals
 				copy(seqIDBuf[:], existing[8:])
 				if err := valsCursorRW.Delete(seqIDBuf[:]); err != nil {
 					return err
 				}
 			} else if !newIsDeletion {
-				// new or resurrected: append to vals
 				id, err := tx.IncrementSequence(w.valsTable, 1)
 				if err != nil {
 					return err
@@ -481,7 +471,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 					return err
 				}
 			}
-			// else: del→del or !hasDup+deletion → write tombstone seqID to keysTable only
 
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
@@ -2165,13 +2154,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	return dt.ht.iit.stepsRangeInDB(tx)
 }
 
-func (dt *DomainRoTx) Tables() (res []string) {
-	res = []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
-	if dt.d.LargeValues && dt.d.KeysTable != "" {
-		res = append(res, dt.d.KeysTable)
-	}
-	return res
-}
+func (dt *DomainRoTx) Tables() []string { return dt.d.DomainCfg.Tables() }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {
 	for _, item := range dt.files {

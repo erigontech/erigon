@@ -68,11 +68,8 @@ type Migration struct {
 	Name string
 	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error
 
-	// WipeDataIfMajorBelow, when non-zero, makes Apply wipe the target DB's
-	// directory and reopen it when the stored DBSchemaVersion.Major is below
-	// this value. No Up function is called; the migration is purely declarative.
-	// Set this on migrations that introduce a breaking on-disk layout change
-	// that cannot be migrated in place.
+	// WipeDataIfMajorBelow, when non-zero, makes Apply wipe and reopen the DB
+	// when the stored DBSchemaVersion.Major is below this value, ignoring Up.
 	// Requires Migrator.ReopenDB to be set.
 	WipeDataIfMajorBelow uint32
 }
