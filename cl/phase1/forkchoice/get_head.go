@@ -185,14 +185,18 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 // getFilteredBlockTree filters out dumb blocks.
 func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)
-	f.getFilterBlockTree(base, blocks)
+	// Snapshot the store epoch once for the whole walk: OnTick updates f.time
+	// without holding f.mu, so calling f.Slot() per-leaf can mix epochs across
+	// leaves around a slot boundary.
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	f.getFilterBlockTree(base, blocks, currentEpoch)
 	return blocks
 }
 
 // getFilterBlockTree recursively traverses the block tree to identify viable blocks.
 // It takes a block hash and a map of viable blocks as input parameters, and returns a boolean value indicating
 // whether the current block is viable.
-func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader) bool {
+func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[common.Hash]*cltypes.BeaconBlockHeader, currentEpoch uint64) bool {
 	header, has := f.forkGraph.GetHeader(blockRoot)
 	if !has {
 		return false
@@ -204,7 +208,7 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	if len(children) > 0 {
 		isAnyViable := false
 		for _, child := range children {
-			if f.getFilterBlockTree(child, blocks) {
+			if f.getFilterBlockTree(child, blocks, currentEpoch) {
 				isAnyViable = true
 			}
 		}
@@ -213,27 +217,33 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 		}
 		return isAnyViable
 	}
-	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
-	// Fall back to realized checkpoints if unrealized not available
-	currentJustifiedCheckpoint, has := f.getUnrealizedJustification(blockRoot)
-	if !has {
-		currentJustifiedCheckpoint, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+	blockEpoch := f.computeEpochAtSlot(header.Slot)
+	var votingSource solid.Checkpoint
+	if currentEpoch > blockEpoch {
+		var has bool
+		votingSource, has = f.getUnrealizedJustification(blockRoot)
 		if !has {
 			return false
 		}
-	}
-	// Use per-block unrealized finalized checkpoint, fall back to realized
-	finalizedJustifiedCheckpoint, has := f.getUnrealizedFinalization(blockRoot)
-	if !has {
-		finalizedJustifiedCheckpoint, has = f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+	} else {
+		var has bool
+		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
 		if !has {
 			return false
 		}
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)
-	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)
+	justifiedOk := justifiedCheckpoint.Epoch == genesisEpoch ||
+		votingSource.Epoch == justifiedCheckpoint.Epoch ||
+		votingSource.Epoch+2 >= currentEpoch
+
+	finalizedOk := finalizedCheckpoint.Epoch == genesisEpoch
+	if !finalizedOk {
+		finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		finalizedOk = finalizedCheckpoint.Root == f.Ancestor(blockRoot, finalizedSlot)
+	}
+
 	if justifiedOk && finalizedOk {
 		blocks[blockRoot] = header
 		return true
