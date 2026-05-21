@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
+func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
 	if err := db.Update(ctx, ResetWitnesses); err != nil {
 		return err
@@ -58,7 +58,53 @@ func ResetState(db kv.TemporalRwDB, ctx context.Context) error {
 	if err := ResetExec(ctx, db); err != nil {
 		return err
 	}
+	if err := ResetCanonicalAndRefillFromSnapshots(ctx, db, dirs, br, logger); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ResetCanonicalAndRefillFromSnapshots wipes kv.HeaderCanonical, resets
+// Headers/BlockHashes/Bodies/Senders/Snapshots stage progress, and refills
+// the snapshot-covered range via FillDBFromSnapshots — the same pattern
+// stage_header --reset and stage_exec --reset use to rebuild canonical
+// markers and stage progress from frozen snapshot files.
+//
+// Motivation: prior to this, ResetState wiped MDBX state-domain tables and
+// the Execution stage progress, but left kv.HeaderCanonical untouched. A
+// stale canonical pointer at a height above the snapshot tip — typically a
+// sidechain hash deposited by a successful older forkchoice update whose
+// later replacement reorgs failed on execution and rolled back — survived
+// the reset and steered the subsequent forward catchup back onto the
+// sidechain, re-introducing phantom state. Clearing the table and letting
+// FillDBFromSnapshots re-anchor canonical markers from the frozen segments
+// hands canonical-hash assignment for the post-tip range entirely to the
+// next forkchoice update from the consensus layer.
+//
+// kv.HeaderTD is intentionally NOT truncated: TD records live under both
+// canonical and sidechain hashes at the same height and are consulted by
+// the consensus layer's block-import path (Caplin BlockCollector) when it
+// verifies parent.TD of a not-yet-canonical block. Wiping them by-number
+// across the post-tip range would break that path with
+// "parent's total difficulty not found" until the headers were re-fetched
+// from peers. The stale TD records are independently keyed by hash and do
+// not affect canonical assignment, and FillDBFromSnapshots rewrites the
+// snapshot-range TDs as it walks the frozen headers.
+func ResetCanonicalAndRefillFromSnapshots(ctx context.Context, db kv.TemporalRwDB, dirs datadir.Dirs, br services.FullBlockReader, logger log.Logger) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.ClearTable(kv.HeaderCanonical); err != nil {
+			return fmt.Errorf("clear canonical hash table: %w", err)
+		}
+		if err := clearStageProgress(tx, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Snapshots); err != nil {
+			return fmt.Errorf("clear chain-data stage progress: %w", err)
+		}
+		if br.FrozenBlocks() > 0 {
+			if err := FillDBFromSnapshots("reset_state_fill_db_from_snapshots", ctx, tx, dirs, br, logger); err != nil {
+				return fmt.Errorf("refill canonical markers from snapshots: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, logger log.Logger) error {
