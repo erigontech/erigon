@@ -103,6 +103,15 @@ func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.Pend
 	sdc.pendingUpdate = upd
 }
 
+// PeekPendingUpdate returns the current pending update without taking ownership.
+// Returns nil if no pending update is set. Used by the parallel commitment
+// calculator to annotate the pending update with the block hash after a
+// per-block ComputeCommitment, so the next FlushPendingUpdates can route to
+// the exact (BlockNum, BlockHash) past changeset.
+func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.PendingCommitmentUpdate {
+	return sdc.pendingUpdate
+}
+
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
 func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
 	if sdc.pendingUpdate != nil {
@@ -139,11 +148,6 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 
 func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateReader StateReader) {
 	sdc.SetStateReader(stateReader)
-}
-
-// SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
-func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
@@ -793,7 +797,16 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	return sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
+	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
+	// underlying state cache / getter aliases shared storage that another goroutine
+	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
+	// boundary so all downstream consumers are safe.
+	return common.Copy(enc), step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {

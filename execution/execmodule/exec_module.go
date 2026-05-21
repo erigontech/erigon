@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
@@ -225,7 +225,8 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache *cache.StateCache
+	stateCache  *cache.StateCache
+	readAheader *exec.BlockReadAheader
 
 	stopNode func() error
 }
@@ -249,6 +250,7 @@ func NewExecModule(
 	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
+	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
@@ -273,6 +275,7 @@ func NewExecModule(
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
+		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
 
@@ -308,9 +311,8 @@ func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.H
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*uint256.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
-
 }
 
 func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
@@ -418,7 +420,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
+		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
@@ -431,7 +433,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err != nil {
 				return err
 			}
-			exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
+			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 			return nil
 		}); err != nil {

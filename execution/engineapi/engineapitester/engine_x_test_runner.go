@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
@@ -44,9 +45,10 @@ import (
 
 // NewEngineXTestRunner builds a runner that lazily creates engine-api testers
 // per (fork, preAllocHash) tuple. The supplied ctx is forwarded to each tester
-// at construction time. The caller must call Close on the returned runner to
-// release the underlying testers and temp directories.
-func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
+// at construction time. Options may be passed to customise the runner's
+// behaviour (see EngineXTestRunnerOption). The caller must call Close on the
+// returned runner to release the underlying testers and temp directories.
+func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir string, opts ...EngineXTestRunnerOption) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
 	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -74,37 +76,138 @@ func NewEngineXTestRunner(ctx context.Context, logger log.Logger, preAllocsDir s
 		ctx:       ctx,
 		logger:    logger,
 		preAllocs: preAllocs,
-		testers:   make(map[Fork]map[PreAllocHash]EngineApiTester),
+		testers:   make(map[Fork]map[PreAllocHash]testerEntry),
+	}
+	for _, opt := range opts {
+		opt(runner)
 	}
 	return runner, nil
 }
 
+// EngineXTestRunnerOption customises an EngineXTestRunner at construction time.
+type EngineXTestRunnerOption func(*EngineXTestRunner)
+
+// WithRequestProfileHook installs a hook called around each engine API request
+// the runner makes. See RequestProfileHook for the contract.
+func WithRequestProfileHook(hook RequestProfileHook) EngineXTestRunnerOption {
+	return func(r *EngineXTestRunner) {
+		r.profileHook = hook
+	}
+}
+
 type EngineXTestRunner struct {
-	ctx       context.Context
-	logger    log.Logger
-	preAllocs map[PreAllocHash]*PreAlloc
-	mu        sync.Mutex
-	testers   map[Fork]map[PreAllocHash]EngineApiTester
-	wg        sync.WaitGroup
-	cleanups  []func() error
+	ctx         context.Context
+	logger      log.Logger
+	preAllocs   map[PreAllocHash]*PreAlloc
+	mu          sync.Mutex
+	testers     map[Fork]map[PreAllocHash]testerEntry
+	wg          sync.WaitGroup
+	profileHook RequestProfileHook
+}
+
+// RequestProfileHook is invoked immediately before each engine API request the
+// runner makes (NewPayload, FCU). The returned stop function is invoked after
+// the request returns. `kind` is "newpayload" or "fcu"; `id` is a stable
+// per-request suffix (test name + height/hash) suitable for use in a filename.
+// The hook is shared across all goroutines invoking Run on this runner; the
+// hook implementation is responsible for synchronisation if needed (process-
+// global pprof state typically requires serialising profile starts).
+type RequestProfileHook func(kind, id string) (stop func())
+
+// testerEntry pairs a cached EngineApiTester with the temp directory created
+// for it, so eviction can close the tester and remove the directory together.
+type testerEntry struct {
+	tester  EngineApiTester
+	dataDir string
 }
 
 // Close releases all cached testers and removes any temp directories created
-// for them. Cleanup callbacks run LIFO; errors are joined so a single late
-// failure does not skip earlier cleanups.
+// for them. Errors are joined so a single late failure does not skip earlier
+// cleanups. The map is snapshotted under the lock and then drained without
+// it, so the slow tester.Close + dir.RemoveAll work runs in parallel rather
+// than serialised behind extr.mu.
 func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
-	defer extr.mu.Unlock()
+	var entries []testerEntry
+	for _, perAlloc := range extr.testers {
+		for _, entry := range perAlloc {
+			entries = append(entries, entry)
+		}
+	}
+	extr.testers = nil
+	extr.mu.Unlock()
 	var errs []error
-	for i := len(extr.cleanups) - 1; i >= 0; i-- {
-		err := extr.cleanups[i]()
+	for _, entry := range entries {
+		err := extr.evict(entry)
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
-	extr.cleanups = nil
-	extr.testers = nil
 	return errors.Join(errs...)
+}
+
+// Evict closes the tester for (fork, preAllocHash) and removes its temp dir.
+// Safe to call when no such tester exists. Use this to free a tester after a
+// group of tests has finished, so a worker slot can host another (fork,
+// preAllocHash) combination. The lock is held only long enough to remove the
+// entry from the map; the slow tester.Close and dir.RemoveAll run unlocked
+// so other workers can concurrently enter getOrCreateTester / Evict.
+func (extr *EngineXTestRunner) Evict(fork Fork, preAllocHash PreAllocHash) error {
+	extr.mu.Lock()
+	perAlloc, ok := extr.testers[fork]
+	if !ok {
+		extr.mu.Unlock()
+		return nil
+	}
+	entry, ok := perAlloc[preAllocHash]
+	if !ok {
+		extr.mu.Unlock()
+		return nil
+	}
+	delete(perAlloc, preAllocHash)
+	if len(perAlloc) == 0 {
+		delete(extr.testers, fork)
+	}
+	extr.mu.Unlock()
+	return extr.evict(entry)
+}
+
+// evict performs the slow close-and-remove for a single tester. It does NOT
+// touch extr.mu or extr.testers — callers are responsible for removing the
+// entry from the map first. Shared by Evict (single-key) and Close (drain).
+func (extr *EngineXTestRunner) evict(entry testerEntry) error {
+	var errs []error
+	err := entry.tester.Close()
+	if err != nil {
+		errs = append(errs, err)
+	}
+	err = dir.RemoveAll(entry.dataDir)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// testNameKey is the unexported context key callers use to attach a test name
+// to the ctx passed into Run. The profile hook embeds the name in per-request
+// profile ids so callers can route profiles into named files.
+type testNameKey struct{}
+
+// ContextWithTestName returns a copy of ctx that carries the given test name,
+// retrievable inside Run by the runner's per-request profile hook plumbing.
+// An empty name is treated as "no name" and produces unprefixed profile ids.
+func ContextWithTestName(ctx context.Context, name string) context.Context {
+	if name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, testNameKey{}, name)
+}
+
+func testNameFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(testNameKey{}).(string); ok {
+		return v
+	}
+	return ""
 }
 
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
@@ -122,51 +225,73 @@ func (extr *EngineXTestRunner) EnsureTester(test EngineXTestDefinition) error {
 	return err
 }
 
-// Execute runs the payload execution for a test (NewPayload + FCU)
-// without any tester setup. The tester must already exist.
-func (extr *EngineXTestRunner) Execute(ctx context.Context, test EngineXTestDefinition) error {
-	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
-	if err != nil {
-		return err
-	}
-	return extr.execute(ctx, tester, test)
-}
-
 func (extr *EngineXTestRunner) execute(ctx context.Context, tester EngineApiTester, test EngineXTestDefinition) error {
+	name := testNameFromContext(ctx)
 	for _, newPayload := range test.NewPayloads {
-		if err := processNewPayload(ctx, tester, newPayload); err != nil {
+		err := processNewPayload(ctx, tester, newPayload, name, extr.profileHook)
+		if err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// getOrCreateTester returns a cached tester for (fork, preAllocHash) if one
+// exists, otherwise it creates a new one. The slow InitialiseEngineApiTester
+// path runs WITHOUT extr.mu held so other workers can hit the cache or start
+// their own creates concurrently. If two callers race to create for the same
+// key, the second one's tester is closed and the first one's cached tester is
+// returned (rare in practice — workers in the CLI handle distinct keys).
 func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllocHash) (EngineApiTester, error) {
 	extr.mu.Lock()
-	defer extr.mu.Unlock()
-	testersPerAlloc, ok := extr.testers[fork]
-	if ok {
-		tester, ok := testersPerAlloc[preAllocHash]
-		if ok {
-			return tester, nil
+	if perAlloc, ok := extr.testers[fork]; ok {
+		if entry, ok := perAlloc[preAllocHash]; ok {
+			extr.mu.Unlock()
+			return entry.tester, nil
 		}
-	} else {
-		testersPerAlloc = make(map[PreAllocHash]EngineApiTester)
-		extr.testers[fork] = testersPerAlloc
 	}
-	// create an engine api tester for [fork, preAllocHash] tuple
+	extr.mu.Unlock()
+	// Slow path: build the genesis + data dir + node *without* holding the
+	// lock so concurrent getOrCreateTester / Evict calls for other keys can
+	// proceed.
+	entry, err := extr.createTester(fork, preAllocHash)
+	if err != nil {
+		return EngineApiTester{}, err
+	}
+	// Re-acquire the lock to publish the entry. If a concurrent caller for
+	// the same (fork, preAllocHash) pair already published one, discard ours.
+	extr.mu.Lock()
+	perAlloc, ok := extr.testers[fork]
+	if !ok {
+		perAlloc = make(map[PreAllocHash]testerEntry)
+		extr.testers[fork] = perAlloc
+	} else if existing, ok := perAlloc[preAllocHash]; ok {
+		extr.mu.Unlock()
+		// Lost the race; close our duplicate. evict acquires no locks and is
+		// safe to call here.
+		_ = extr.evict(entry)
+		return existing.tester, nil
+	}
+	perAlloc[preAllocHash] = entry
+	extr.mu.Unlock()
+	return entry.tester, nil
+}
+
+// createTester builds a fresh EngineApiTester for (fork, preAllocHash). The
+// caller is responsible for caching/publishing the result. No locks are taken.
+func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash) (testerEntry, error) {
 	forkConfig, ok := testforks.Forks[fork.String()]
 	if !ok {
-		return EngineApiTester{}, testforks.UnsupportedForkError{Name: fork.String()}
+		return testerEntry{}, testforks.UnsupportedForkError{Name: fork.String()}
 	}
 	alloc, ok := extr.preAllocs[preAllocHash]
 	if !ok {
-		return EngineApiTester{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
+		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
 	var forkConfigCopy chain.Config
 	err := copier.Copy(&forkConfigCopy, forkConfig)
 	if err != nil {
-		return EngineApiTester{}, err
+		return testerEntry{}, err
 	}
 	forkConfig = &forkConfigCopy
 	var genesis types.Genesis
@@ -201,11 +326,8 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	}
 	dataDir, err := os.MkdirTemp("", "enginex-tester-*")
 	if err != nil {
-		return EngineApiTester{}, fmt.Errorf("create temp data dir: %w", err)
+		return testerEntry{}, fmt.Errorf("create temp data dir: %w", err)
 	}
-	// Track the temp dir cleanup before tester construction so the directory
-	// is removed even if InitialiseEngineApiTester fails.
-	extr.cleanups = append(extr.cleanups, func() error { return dir.RemoveAll(dataDir) })
 	engineApiClientTimeout := 10 * time.Minute
 	tester, err := InitialiseEngineApiTester(extr.ctx, EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
@@ -213,19 +335,27 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
+		// benchmark fixtures at 150M-gas peak ~2.75GB SizeEstimate
+		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
 		},
+		DisableTxPool: true,
+		DisableSentry: true,
+		// 8 GiB headroom for benchmark fixtures with large pre-alloc bytecode.
+		MdbxDBSizeLimit: 8 * datasize.GB,
 	})
 	if err != nil {
-		return EngineApiTester{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
+		// Best-effort: drop the temp dir we just created. The tester wasn't
+		// returned, so its own cleanups have already run inside
+		// InitialiseEngineApiTester's rollback path.
+		_ = dir.RemoveAll(dataDir)
+		return testerEntry{}, fmt.Errorf("initialise tester for fork=%s preAlloc=%s: %w", fork, preAllocHash, err)
 	}
-	extr.cleanups = append(extr.cleanups, tester.Close)
-	testersPerAlloc[preAllocHash] = tester
-	return tester, nil
+	return testerEntry{tester: tester, dataDir: dataDir}, nil
 }
 
-func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
+func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload, testName string, hook RequestProfileHook) error {
 	var enginePayload enginetypes.ExecutionPayload
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
@@ -252,6 +382,8 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 			return err
 		}
 	}
+	expectFailure := payload.ValidationError != "" || payload.ErrorCode != ""
+	npStop := beginProfile(hook, "newpayload", testName, fmt.Sprintf("h%d_%s", uint64(enginePayload.BlockNumber), enginePayload.BlockHash.Hex()))
 	enginePayloadStatus, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -280,20 +412,47 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 		},
 	)
 	if err != nil {
+		npStop()
+		if expectFailure {
+			return nil
+		}
 		return err
 	}
+	npStop()
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
+		if expectFailure {
+			return nil
+		}
 		return fmt.Errorf("payload status is not valid: %s", enginePayloadStatus.Status)
 	}
-	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
+	if expectFailure {
+		return fmt.Errorf("expected payload to fail (validationError=%q errorCode=%q) but status was Valid", payload.ValidationError, payload.ErrorCode)
+	}
+	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion, testName, hook)
 }
 
-func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string) error {
+// beginProfile invokes the hook (if any) and returns a stop function. When the
+// hook is nil, beginProfile returns a no-op stop so callers can always defer
+// it unconditionally.
+func beginProfile(hook RequestProfileHook, kind, testName, suffix string) func() {
+	if hook == nil {
+		return func() {}
+	}
+	id := suffix
+	if testName != "" {
+		id = testName + "__" + suffix
+	}
+	return hook(kind, id)
+}
+
+func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string, testName string, hook RequestProfileHook) error {
 	fcu := enginetypes.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
+	stop := beginProfile(hook, "fcu", testName, head.Hex())
+	defer stop()
 	r, err := RetryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -338,6 +497,20 @@ type EngineXTestNewPayload struct {
 	Params            []json.RawMessage `json:"params"`
 	NewPayloadVersion string            `json:"newPayloadVersion"`
 	FcuVersion        string            `json:"forkchoiceUpdatedVersion"`
+	// ValidationError is the expected validation error name (e.g.
+	// "BlockException.INCORRECT_BLOCK_FORMAT") for negative tests. When set,
+	// the payload is expected to be rejected: either a non-Valid payload
+	// status or any error returned by the engine API call counts as
+	// success. A Valid status is a failure. Strict code/message matching is
+	// intentionally skipped — EEST fixtures may be rejected at the JSON-RPC
+	// parameter-validation step or by the payload validator depending on
+	// implementation, and both forms are spec-permitted.
+	ValidationError string `json:"validationError,omitempty"`
+	// ErrorCode is the expected JSON-RPC error code (encoded as a string in
+	// the EEST fixtures, e.g. "-32602") for malformed-payload tests. Treated
+	// the same as ValidationError: any non-Valid status or RPC-level error
+	// counts as success.
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 type PreAllocHash string

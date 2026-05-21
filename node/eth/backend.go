@@ -25,13 +25,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
@@ -211,6 +212,8 @@ type Ethereum struct {
 	heimdallService    *heimdall.Service
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
+	readAheader        *exec.BlockReadAheader
+	kzgWarmupDone      chan struct{}
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -260,6 +263,18 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	// warmup kzg init so first block doesn't suffer. kzgWarmupDone is closed
+	// when the goroutine finishes; Stop waits on it so the trailing log can
+	// never fire after the owning scope (e.g. a test) has torn down — a log
+	// from a goroutine after a test completes panics the test runner.
+	kzgWarmupDone := make(chan struct{})
+	go func() {
+		defer close(kzgWarmupDone)
+		t := time.Now()
+		kzg.InitKZGCtx()
+		logger.Info("KZG crypto context ready", "took", time.Since(t))
+	}()
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -331,6 +346,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlocks:               make(chan *types.Block, 1),
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
+		readAheader:               exec.NewBlockReadAheader(),
+		kzgWarmupDone:             kzgWarmupDone,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -456,6 +473,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
 		Events:            backend.notifications.Events,
 		Logger:            logger,
+		Disable:           stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
@@ -866,6 +884,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Genesis,
 			config.Sync,
 			config.ExperimentalBAL,
+			backend.readAheader,
 		),
 		backend.notifications.Events,
 		&vm.Config{},
@@ -912,6 +931,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		defer dbg.LogPanic()
 		for {
 			select {
+			case <-ctx.Done():
+				logger.Debug("[mined blocks listener] ctx done")
+				return
 			case b := <-backend.minedBlocks:
 				if !sentryMcDisableBlockDownload {
 					// Add mined header and block body before broadcast. This is because the broadcast call
@@ -965,18 +987,18 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
-		validationNotifications, blockReader, blockWriter, logger)
+		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
@@ -1005,6 +1027,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.readAheader,
 		backend.stopNode,
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
@@ -1058,7 +1081,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
 			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
-				logger.Error("could not start caplin", "err", err)
+				if !errors.Is(err, context.Canceled) {
+					logger.Error("could not start caplin", "err", err)
+				}
 			}
 			ctxCancel()
 		}()
@@ -1298,7 +1323,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	aggOpts := state.New(dirs).Logger(logger).GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
 	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 		v := *snConfig.ErigondbDomainStepsInFrozenFile
 		stepsStr := "Inf"
@@ -1421,7 +1446,7 @@ func (s *Ethereum) Start() error {
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
 
-	currentTDProvider := func() *big.Int {
+	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
 		if err != nil {
 			panic(err)
@@ -1540,12 +1565,25 @@ func (s *Ethereum) Stop() error {
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
-	// transactions. The global read-aheader spawns fire-and-forget goroutines
-	// via AddHeaderAndBodyToGlobalReadAheader during ValidateChain.
+	// transactions. The read-aheader spawns fire-and-forget goroutines via
+	// AddHeaderAndBody during ValidateChain.
 	{
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		exec.WaitForWarmup(warmCtx)
+		s.readAheader.WaitForWarmup(warmCtx)
 		warmCancel()
+	}
+
+	// Wait for the KZG warmup goroutine (spawned in New) to finish. It logs
+	// on completion; without this wait a slow warmup can log after the owning
+	// scope is gone — in tests that panics the runner ("Log in goroutine
+	// after <test> has completed"). InitKZGCtx is bounded (a one-time trusted
+	// setup load), so the timeout is a safety valve only.
+	if s.kzgWarmupDone != nil {
+		select {
+		case <-s.kzgWarmupDone:
+		case <-time.After(30 * time.Second):
+			s.logger.Warn("KZG warmup goroutine still running at shutdown")
+		}
 	}
 
 	s.chainDB.Close()
@@ -1622,8 +1660,8 @@ func RemoveContents(dirname string) error {
 	return nil
 }
 
-func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*big.Int, error) {
-	var currentTD *big.Int
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*uint256.Int, error) {
+	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
 		h, err := blockReader.CurrentBlock(tx)
 		if err != nil {

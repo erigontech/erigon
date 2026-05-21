@@ -9,9 +9,37 @@ Runs the complete test suite with 60-minute timeout and coverage output. Takes ~
 
 ## Prerequisite: Test fixtures
 
-`make test-all` declares `test-fixtures` as a prerequisite, so fixture tarballs pinned in `test-fixtures.json` are downloaded into `test-fixtures-cache/` (sha256-verified, no-op on cache hit) automatically. No submodule sync needed for `execution/tests/`.
+`make test-all` no longer downloads any fixture tarballs. EEST spec tests (state/blockchain/engine-x) moved out of `go test ./...` and into the dedicated `eest-spec-*` Makefile targets driven by the **EEST spec tests** workflow (`test-eest-spec.yml`); the consensus spec test (`cl/spectest`) is skipped here via `ERIGON_SKIP_CL_SPECTEST=true` (set automatically by the Makefile) and runs only in `test-integration-caplin.yml`.
 
-Two side prerequisites still apply:
+To exercise the EEST suites locally, see `erigon-eest-spec` (or run a specific shard directly):
+
+```bash
+make eest-spec-statetests-stable             # state tests vs eest_stable fixtures
+make eest-spec-blocktests-stable-sequential  # blockchain tests vs eest_stable fixtures (ERIGON_EXEC3_PARALLEL=false)
+make eest-spec-blocktests-stable-parallel    # same, but with ERIGON_EXEC3_PARALLEL=true
+make eest-spec-enginextests-stable-sequential # engine-x tests vs eest_stable (ERIGON_EXEC3_PARALLEL=false)
+make eest-spec-enginextests-stable-parallel  # same, but with ERIGON_EXEC3_PARALLEL=true
+make eest-spec-statetests-devnet             # …vs eest_devnet fixtures
+make eest-spec-blocktests-devnet             # devnet blocktests (always parallel exec3)
+make eest-spec-enginextests-benchmark-1m-sequential
+                                             # engine-x benchmark fixtures @ 1M gas target
+                                             # (with per-test --time stats);
+                                             # -5m/-10m/-30m/-60m/-100m/-150m variants too,
+                                             # each with a "-sequential" / "-parallel" pair
+make eest-spec-blocktests-stable-race-cancun-sequential
+                                             # race-detector variant, sharded per fork:
+                                             # -pre-cancun/-cancun/-prague/-osaka, plus
+                                             # eest-spec-blocktests-devnet-race-amsterdam.
+                                             # Each stable-race sub-shard has a
+                                             # "-sequential" / "-parallel" pair
+                                             # (e.g. ...-race-cancun-{sequential,parallel})
+```
+
+The shard list / failure budgets / `exec3-parallel` flags live in `tools/eest-spec-shards.json` (single source of truth for both this workflow and `tools/run-eest-spec-test.sh`). See `EEST_SPEC_SHARDS` / `EEST_SPEC_RACE_SHARDS` in the root `Makefile` for the partition into race vs non-race targets.
+
+**Pitfall: stale `evm` / `evm.race` binary.** Always invoke shards via `make eest-spec-<shard>` — the Makefile lists `evm` (or `evm.race`) as a prereq and `go build` is cache-aware, so a stale binary gets rebuilt automatically. Calling `bash tools/run-eest-spec-test.sh <shard>` directly **bypasses** the rebuild and silently exercises whatever `build/bin/evm{,.race}` happens to be on disk against current fixtures, inflating failures or hiding regressions. After pulling code, switching branches, or any time you suspect the binary is older than HEAD: `rm -f build/bin/evm build/bin/evm.race && make evm evm.race` before re-running.
+
+Two side prerequisites still apply for tests `make test-all` does run:
 
 ```bash
 git submodule update --init --recursive --force            # only for legacy-tests (TestLegacyCancunState)
@@ -86,8 +114,12 @@ Tests skipped via `-short` in `test-short` run fully here. If a test passes in `
 | Local command | CI workflow | File |
 |---------------|-------------|------|
 | `GOGC=80 make test-all` | All tests | `test-all-erigon.yml` |
+| `make eest-spec-<suite>-<fixtures>` | EEST spec tests | `test-eest-spec.yml` |
+| `cd cl/spectest && make tests && make mainnet` | Consensus spec | `test-integration-caplin.yml` |
 
 To dispatch remotely:
 ```bash
 gh workflow run "All tests" --ref <branch>
+gh workflow run "EEST spec tests" --ref <branch>
+gh workflow run "Consensus spec" --ref <branch>
 ```

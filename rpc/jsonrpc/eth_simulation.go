@@ -173,11 +173,13 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber, blockHashOverrides)
 		if err != nil {
 			return nil, err
 		}
+		blockHashOverrides[current.NumberU64()] = current.Hash()
 		simulatedBlockResults = append(simulatedBlockResults, blockResult)
 		headers[index] = current.Header()
 		parent = current.Header()
@@ -397,9 +399,9 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(new(big.Int).Set(s.chainConfig.ChainID))
+		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID) != 0 {
+		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
@@ -507,6 +509,7 @@ func (s *simulator) simulateBlock(
 	parent *types.Header,
 	ancestors []*types.Header,
 	latest bool,
+	blockHashOverrides ethapi.BlockHashOverrides,
 ) (SimulatedBlockResult, *types.Block, error) {
 	header.ParentHash = parent.Hash()
 	if s.chainConfig.IsLondon(header.Number.Uint64()) {
@@ -529,7 +532,6 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
@@ -788,7 +790,7 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	msg.SetCheckGas(s.validation)
+	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
 	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)

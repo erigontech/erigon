@@ -101,7 +101,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 		var ok bool
-		b, ok = exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+		b, ok = se.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 		if b == nil || !ok {
 			b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
 			if err != nil {
@@ -228,23 +228,24 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if !se.isApplyingBlocks {
-				break
+			if se.isApplyingBlocks {
+				se.LogExecution()
 			}
-			se.LogExecution()
-			isBatchFull := se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
-			needCalcRoot := isBatchFull || havePartialBlock
-			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-			// this will only happen for the first executed block
-			havePartialBlock = false
-			if !needCalcRoot {
-				break
-			}
+		default:
+		}
+
+		isBatchFull := se.isApplyingBlocks && se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
+		// havePartialBlock: partial first block isn't validated, compute root ASAP for fail-fast.
+		needCalcRoot := se.isApplyingBlocks && (isBatchFull || havePartialBlock)
+		havePartialBlock = false
+
+		if needCalcRoot {
 			resetExecGauges(ctx)
 			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
 			if err != nil {
 				return nil, rwTx, err
-			} else if !ok {
+			}
+			if !ok {
 				return b.HeaderNoCopy(), rwTx, nil
 			}
 			resetCommitmentGauges(ctx)
@@ -260,7 +261,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
-		default:
 		}
 
 		select {
@@ -288,11 +288,9 @@ func (se *serialExecutor) LogExecution() {
 	se.progress.LogExecution(se.rs.StateV3, se)
 }
 
-func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	se.committedGas.Add(int64(committedGas))
-	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+func (se *serialExecutor) LogCommitments(committedTransactions uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
 	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
-	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
+	se.progress.LogCommitments(se.rs.StateV3, se, stepsInDb, lastProgress)
 }
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {

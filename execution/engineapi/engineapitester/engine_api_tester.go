@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
@@ -183,12 +185,19 @@ func (h *cleanupHandle) close() error {
 // returning.
 func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs) (EngineApiTester, error) {
 	logger := args.Logger
+	// Derive a child ctx tied to the tester's lifetime so background goroutines
+	// spawned by the eth backend (rpcdaemon state-change loop, etc.) terminate
+	// when Close is called, even if the caller's ctx outlives this tester.
+	// Tests/CLIs that create many testers in one process would otherwise leak
+	// these goroutines.
+	ctx, cancel := context.WithCancel(ctx)
 	cleanup := &cleanupHandle{}
 	success := false
 	defer func() {
 		if success {
 			return
 		}
+		cancel()
 		// Run accumulated cleanups LIFO if init failed before hand-off.
 		err := cleanup.close()
 		if err != nil {
@@ -248,6 +257,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("load/generate node key: %w", err)
 	}
+	mdbxDBSizeLimit := args.MdbxDBSizeLimit
+	if mdbxDBSizeLimit == 0 {
+		mdbxDBSizeLimit = 1 * datasize.GB
+	}
 	nodeConfig := nodecfg.Config{
 		Dirs: dirs,
 		Http: httpConfig,
@@ -261,9 +274,12 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
+		MdbxDBSizeLimit: mdbxDBSizeLimit,
+		DisableSentry:   args.DisableSentry,
 	}
 	txPoolConfig := txpoolcfg.DefaultConfig
 	txPoolConfig.DBDir = dirs.TxPool
+	txPoolConfig.Disable = args.DisableTxPool
 	syncDefault := ethconfig.Defaults.Sync
 	syncDefault.ParallelStateFlushing = false
 	ethConfig := ethconfig.Config{
@@ -276,7 +292,11 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
+		BatchSize:             512 * datasize.MB,
 		KeepStoredChainConfig: true,
+	}
+	if args.BatchSize > 0 {
+		ethConfig.BatchSize = args.BatchSize
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -363,6 +383,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			return EngineApiTester{}, fmt.Errorf("build initial empty block 1: %w", err)
 		}
 	}
+	// Cancel runs as the FIRST cleanup on Close (cleanups are LIFO, so this
+	// must be appended last) — that way ctx-watching background goroutines
+	// see Done before downstream resources (DB, node) are torn down.
+	addCleanup(func() error { cancel(); return nil })
 	success = true
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -386,9 +410,13 @@ type EngineApiTesterInitArgs struct {
 	Genesis                *types.Genesis
 	CoinbaseKey            *ecdsa.PrivateKey
 	EthConfigTweaker       func(*ethconfig.Config)
+	BatchSize              datasize.ByteSize
 	MockClState            *MockClState
 	NoEmptyBlock1          bool
 	EngineApiClientTimeout *time.Duration
+	DisableTxPool          bool
+	DisableSentry          bool
+	MdbxDBSizeLimit        datasize.ByteSize
 }
 
 type EngineApiTester struct {
@@ -414,7 +442,7 @@ func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *t
 	test(t.Context(), t, eat)
 }
 
-func (eat EngineApiTester) ChainId() *big.Int {
+func (eat EngineApiTester) ChainId() *uint256.Int {
 	return eat.ChainConfig.ChainID
 }
 

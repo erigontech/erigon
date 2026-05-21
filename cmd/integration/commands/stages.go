@@ -24,6 +24,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,11 +37,13 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
@@ -322,6 +325,7 @@ func init() {
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
+	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withStageBase(cmdStageExecReplay)
@@ -602,7 +606,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */)
+	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */, exec.NewBlockReadAheader())
 	if unwind > 0 {
 		if unwind > s.BlockNumber {
 			return errors.New("cannot unwind past 0")
@@ -624,9 +628,6 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if _, ok := os.LookupEnv("EXEC3_PARALLEL"); !ok {
-		dbg.Exec3Parallel = true // default for integration tool
-	}
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -676,7 +677,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, false /*experimentalBAL*/)
+		dirs, br, nil, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -700,7 +701,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer func() { tx.Rollback() }()
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
@@ -1073,7 +1078,28 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
 			return
 		}
-		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
+		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+		if erigondbDomainStepsInFrozenFile != "" {
+			var v uint64
+			if strings.EqualFold(erigondbDomainStepsInFrozenFile, "inf") {
+				v = config3.UnboundedDomainMerge
+			} else {
+				parsed, perr := strconv.ParseUint(erigondbDomainStepsInFrozenFile, 10, 64)
+				if perr != nil || parsed == 0 {
+					err = fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
+						utils.ErigondbDomainStepsInFrozenFileFlag.Name, erigondbDomainStepsInFrozenFile)
+					return
+				}
+				v = parsed
+			}
+			stepsStr := "Inf"
+			if v != config3.UnboundedDomainMerge {
+				stepsStr = fmt.Sprintf("%d", v)
+			}
+			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+		}
+		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 		_aggSingleton.SetFrozenBlocksProvider(blockReader)
@@ -1233,7 +1259,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil)
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, engine, vmConfig, sync
 }

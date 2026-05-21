@@ -86,18 +86,6 @@ func (r *ForkableAgg) RegisterUnmarkedForkable(ap *Forkable[UnmarkedTxI]) {
 	}
 }
 
-func (r *ForkableAgg) SetCollateAndBuildWorkers(n int) {
-	r.collateAndBuildWorkers = n
-}
-
-func (r *ForkableAgg) SetMergeWorkers(n int) {
-	r.mergeWorkers = n
-}
-
-func (r *ForkableAgg) SetCompressWorkers(n int) {
-	r.compressWorkers = n
-}
-
 func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
 	r.mergeDisabled.Store(disabled)
 }

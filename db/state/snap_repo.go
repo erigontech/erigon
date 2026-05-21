@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	btree2 "github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -29,7 +27,7 @@ import (
 // NOTE: not thread safe; synchronization done on the caller side
 // specially when accessing dirtyFiles or current.
 type SnapshotRepo struct {
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *DirtyFiles
 
 	// latest version of visible files (derived from dirtyFiles)
 	// when repo is used in the context of rotx, one might want to think
@@ -54,7 +52,7 @@ func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRe
 
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: newDirtyFiles(),
 		name:       name,
 		entity:     entity,
 		cfg:        cfg,
@@ -214,23 +212,16 @@ func (f *SnapshotRepo) Close() {
 }
 
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
-	var toClose []*FilesItem
 	rootNum := uint64(after)
-	f.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.startTxNum >= rootNum {
-			toClose = append(toClose, item)
+	f.dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.startTxNum < rootNum {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("instructed_close_after_%d", rootNum))
 		}
 		return true
 	})
-	for _, item := range toClose {
-		f.dirtyFiles.Delete(item)
-		fName := ""
-		if item.decompressor != nil {
-			fName = item.decompressor.FileName()
-		}
-		log.Debug(fmt.Sprintf("[snapshots] closing %s, instructed_close_after_%d", fName, rootNum))
-		item.closeFiles()
-	}
 }
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
@@ -423,10 +414,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	}
 	iter.Release()
 
-	for _, item := range invalidFileItems {
-		item.closeFiles()
-		f.dirtyFiles.Delete(item)
-	}
+	f.dirtyFiles.CloseItems(invalidFileItems)
 
 	return nil
 }

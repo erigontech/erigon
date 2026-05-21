@@ -209,7 +209,7 @@ var tpEncodeTests = []struct {
 // enclosing transaction remains valid (the sender still pays for every tuple).
 func TestEIP7702BatchPoisoning(t *testing.T) {
 	chainID := uint256.NewInt(1)
-	signer := types.LatestSignerForChainID(chainID.ToBig())
+	signer := types.LatestSignerForChainID(chainID)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 

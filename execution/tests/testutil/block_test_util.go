@@ -268,7 +268,7 @@ func (bt *BlockTest) RunCLI() error {
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
 	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
-	defer m.DB.Close()
+	defer m.Close()
 	bt.M = m
 
 	bt.br = m.BlockReader

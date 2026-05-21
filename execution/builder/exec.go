@@ -104,7 +104,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	vmConfig := *cfg.vmConfig
 	vmConfig.NoReceipts = false
 	cfg.vmConfig = &vmConfig
-	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+	chainID := cfg.chainConfig.ChainID
 	current := cfg.builderState.BuiltBlock
 
 	// sd writes accumulate in-memory and are discarded when Build returns.

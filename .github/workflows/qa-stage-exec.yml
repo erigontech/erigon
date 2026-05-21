@@ -119,7 +119,7 @@ jobs:
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json
+          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
