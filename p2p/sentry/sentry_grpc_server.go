@@ -69,6 +69,11 @@ const (
 	// ethProtocolTimeout is the maximum allowed time for the ETH protocol to be ready
 	// before dropping the connection. This prevents goroutine leaks and DOS attacks.
 	ethProtocolTimeout = 30 * time.Second
+	// awaitStatusTimeout caps how long an inbound peer's Protocol.Run waits
+	// for the multi-client's first SetStatus to populate ss.statusData. It
+	// only matters during the startup window when the shared p2p.Server is
+	// already listening but SetStatus hasn't propagated yet.
+	awaitStatusTimeout = 10 * time.Second
 	maxPermitsPerPeer  = 4 // How many outstanding requests per peer we may have
 )
 
@@ -788,6 +793,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 		bootnodes:             bootnodes,
 		dnsNetwork:            dnsNetwork,
+		statusReady:           make(chan struct{}),
 	}
 
 	var disc enode.Iterator
@@ -806,7 +812,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			peerID := peer.Pubkey()
 			printablePeerID := hex.EncodeToString(peerID[:])
 			logger.Trace("[p2p] start with peer", "peerId", printablePeerID)
-			status := ss.GetStatus()
+			// Wait briefly for the multi-client's first SetStatus to land.
+			// With a shared p2p.Server (SetP2PServer) the listener can be up
+			// before status arrives — without this wait those inbound dials
+			// would all bounce off DiscProtocolError.
+			status := ss.awaitStatus(awaitStatusTimeout)
 			if status == nil {
 				return p2p.NewPeerError(p2p.PeerErrorLocalStatusNeeded, p2p.DiscProtocolError, nil, "could not get status message from core")
 			}
@@ -978,7 +988,13 @@ type GrpcServer struct {
 	// every one of them would N-fold duplicate every entry in admin_peers.
 	// The coordinator enables this on exactly one GrpcServer (typically the
 	// first / highest-protocol sentry); the others report empty.
-	reportsPeers         bool
+	reportsPeers bool
+	// statusReady is closed by SetStatus the first time it stores a
+	// non-empty statusData. Protocol.Run waits on it (with a timeout) so
+	// inbound dials that land on the listener before the multi-client has
+	// broadcast SetStatus don't get an instant DiscProtocolError disconnect.
+	statusReady          chan struct{}
+	statusReadyOnce      sync.Once
 	statusData           *sentryproto.StatusData
 	statusDataLock       sync.RWMutex
 	messageStreams       map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage
@@ -1498,6 +1514,8 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}
+	// Unblock awaitStatus on the first non-nil store.
+	ss.statusReadyOnce.Do(func() { close(ss.statusReady) })
 	return reply, nil
 }
 
@@ -1603,6 +1621,23 @@ func (ss *GrpcServer) GetStatus() *sentryproto.StatusData {
 	ss.statusDataLock.RLock()
 	defer ss.statusDataLock.RUnlock()
 	return ss.statusData
+}
+
+// awaitStatus returns the current statusData, waiting up to maxWait for the
+// first SetStatus to land if it hasn't yet. The wait absorbs the startup gap
+// when a shared p2p.Server's listener is already accepting connections but
+// the multi-client hasn't broadcast status to this sentry; returns nil on
+// timeout so the caller can disconnect the peer.
+func (ss *GrpcServer) awaitStatus(maxWait time.Duration) *sentryproto.StatusData {
+	if status := ss.GetStatus(); status != nil {
+		return status
+	}
+	select {
+	case <-ss.statusReady:
+	case <-time.After(maxWait):
+	case <-ss.ctx.Done():
+	}
+	return ss.GetStatus()
 }
 
 func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byte) {

@@ -189,10 +189,11 @@ type Provider struct {
 	ExecutionP2PPeerPenalizer   *execp2p.PeerPenalizer
 
 	// Internal
-	cfg     Config
-	logger  log.Logger
-	started bool           // guards Start from firing twice
-	eg      errgroup.Group // tracks background goroutines launched in Start
+	cfg             Config
+	logger          log.Logger
+	started         bool           // guards Start from firing twice
+	eg              errgroup.Group // tracks background goroutines launched in Start
+	sharedP2PServer *p2p.Server    // shared p2p.Server backing all GrpcServers in local mode; Close() stops it
 }
 
 // Configure stores the Provider's configuration. Call before Initialize.
@@ -322,18 +323,34 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 		return cfg, nil
 	}
 
+	// checkPortIsFree dials the target, so an empty host (the ":30303" form)
+	// would fail with "missing host" and falsely report the port as free.
+	// Normalize to a concrete loopback target for the probe only — the
+	// returned ListenAddr keeps the original host so the listener still
+	// binds on the configured interface (all interfaces if it was empty).
+	probeHost := listenHost
+	if probeHost == "" {
+		probeHost = "127.0.0.1"
+	}
+
+	picked := false
 	for _, pc := range cfg.AllowedPorts {
 		pcInt := int(pc)
 		if pcInt == 0 {
 			listenPort = 0 // ephemeral; OS picks a port at bind time
+			picked = true
 			break
 		}
-		if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pcInt)) {
+		if !checkPortIsFree(fmt.Sprintf("%s:%d", probeHost, pcInt)) {
 			p.logger.Warn("[p2p] candidate listen port is busy", "port", pcInt)
 			continue
 		}
 		listenPort = pcInt
+		picked = true
 		break
+	}
+	if !picked {
+		return cfg, fmt.Errorf("sentry provider: every entry in --p2p.allowed-ports is busy %v; extend the list or free a port", cfg.AllowedPorts)
 	}
 	cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 	return cfg, nil
@@ -397,6 +414,7 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 		srv.Stop()
 		return fmt.Errorf("sentry provider: start shared p2p server: %w", err)
 	}
+	p.sharedP2PServer = srv
 
 	for i, ss := range p.Servers {
 		// First sentry (highest configured protocol version) reports peers.
@@ -635,6 +653,14 @@ func (p *Provider) runPeerCountLogger() error {
 func (p *Provider) Close() error {
 	for _, srv := range p.Servers {
 		srv.Close()
+	}
+	// Stop the shared p2p.Server (if any). Each GrpcServer.Close above is a
+	// no-op for externally-owned Servers, so the listener and discovery
+	// goroutines would otherwise outlive Provider.Close until SentryCtx is
+	// cancelled.
+	if p.sharedP2PServer != nil {
+		p.sharedP2PServer.Stop()
+		p.sharedP2PServer = nil
 	}
 	return p.eg.Wait()
 }
