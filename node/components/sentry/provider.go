@@ -319,7 +319,6 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 
 	if len(cfg.AllowedPorts) == 0 {
 		// Caller passed an explicit ListenAddr only — honour it as-is.
-		cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 		return cfg, nil
 	}
 

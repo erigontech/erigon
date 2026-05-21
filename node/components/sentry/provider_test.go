@@ -263,11 +263,13 @@ func TestStartSharedP2PServer_ErrsOnEmptyServers(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestStartSharedP2PServer_DedupesAndWiresReporter is the integration test
-// for the central wiring: protocols collected from all GrpcServers are
+// TestStartSharedP2PServer_DedupesAndInjects is the integration test for
+// the central wiring: protocols collected from all GrpcServers are
 // deduplicated by (name, version), the shared p2p.Server is started once,
-// and only the first sentry reports peers.
-func TestStartSharedP2PServer_DedupesAndWiresReporter(t *testing.T) {
+// and that same Server is injected into every GrpcServer. Each GrpcServer
+// then reports peers from its own goodPeers subset — there is no
+// designated "reporter" sentry.
+func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 

@@ -1513,14 +1513,19 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}
-	// Unblock awaitStatus on the first non-nil store. Guard against a nil
-	// channel for callers that construct GrpcServer outside NewGrpcServer
-	// (existing tests do this) — close(nil) would panic.
-	ss.statusReadyOnce.Do(func() {
-		if ss.statusReady != nil {
-			close(ss.statusReady)
-		}
-	})
+	// Unblock awaitStatus, but only once we have a status the eth handshake
+	// can actually use — non-zero NetworkId and a non-nil ForkData. A
+	// partial first SetStatus (e.g. an early standalone-txpool update) would
+	// otherwise wake waiters and let Protocol.Run proceed with garbage,
+	// defeating the startup-gap fix. nil-guarded for callers that construct
+	// GrpcServer outside NewGrpcServer (close(nil) would panic).
+	if ss.statusData != nil && ss.statusData.NetworkId != 0 && ss.statusData.ForkData != nil {
+		ss.statusReadyOnce.Do(func() {
+			if ss.statusReady != nil {
+				close(ss.statusReady)
+			}
+		})
+	}
 	return reply, nil
 }
 
