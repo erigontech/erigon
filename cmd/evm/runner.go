@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -319,7 +320,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code)
+			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
