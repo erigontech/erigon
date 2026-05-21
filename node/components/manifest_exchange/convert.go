@@ -155,6 +155,8 @@ func domainKindFromV2(s string) snapshot.FileKind {
 		return snapshot.KindHistory
 	case downloader.KindIdxName:
 		return snapshot.KindIdx
+	case downloader.KindAccessorName:
+		return snapshot.KindAccessor
 	default:
 		return snapshot.KindKV
 	}
