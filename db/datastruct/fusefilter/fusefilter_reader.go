@@ -67,6 +67,8 @@ func NewReader(filePath string) (*Reader, error) {
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderOnBytes(content, fileName)
 	if err != nil {
+		_ = m.Unmap() //nolint
+		_ = f.Close() //nolint
 		return nil, err
 	}
 	r.f = f
