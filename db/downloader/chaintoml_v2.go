@@ -39,9 +39,10 @@ const ChainTomlV2Version = 2
 // always uses these explicit strings; an empty Kind from an older
 // publisher is normalized to KindKVName by the parser.
 const (
-	KindKVName      = "kv"
-	KindHistoryName = "history"
-	KindIdxName     = "idx"
+	KindKVName       = "kv"
+	KindHistoryName  = "history"
+	KindIdxName      = "idx"
+	KindAccessorName = "accessor" // index/accessor of a primary (.bt/.kvi/.kvei/.vi/.efi/.idx)
 )
 
 // ChainTomlV2 is the structured representation of a V2 chain.toml manifest.
@@ -97,7 +98,8 @@ type DomainFileEntry struct {
 	// Range is the [from, to) step range this file covers.
 	Range [2]uint64 `toml:"range"`
 	// Kind is "kv" (default when empty for back-compat), "history" (.v),
-	// or "idx" (.ef).
+	// "idx" (.ef), or "accessor" (a primary's index — .bt/.kvi/.kvei/
+	// .vi/.efi).
 	Kind  string `toml:"kind,omitempty"`
 	Hash  string `toml:"hash"`
 	Trust string `toml:"trust"`
@@ -154,12 +156,9 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		Domains: make(map[string]*DomainManifest),
 	}
 
-	// Block files. Accessors (.idx) are excluded for now — advertising
-	// them is the next commit in the accessor-advertising workstream.
+	// Block files, including their .idx accessors — both are flat
+	// name→hash entries in the Blocks map.
 	for _, f := range inv.BlockFiles() {
-		if f.Kind == snapshotinv.KindAccessor {
-			continue
-		}
 		if f.TorrentHash != [20]byte{} {
 			manifest.Blocks[f.Name] = fmt.Sprintf("%x", f.TorrentHash)
 		}
@@ -206,11 +205,6 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		// Coverage is computed from kv files only — that's the canonical
 		// primary defining the domain's step coverage.
 		for _, f := range files {
-			// Accessors are excluded for now — advertising them is the
-			// next commit in the accessor-advertising workstream.
-			if f.Kind == snapshotinv.KindAccessor {
-				continue
-			}
 			r := f.Range()
 			if !isCanonicalFile(r) {
 				continue
@@ -245,9 +239,11 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			dm.Files = append(dm.Files, entry)
 		}
 
-		// Sort files deterministically: by range[0], then range[1], then kind.
-		// Mixing kinds with overlapping ranges (kv + history + idx all on
-		// [0, 128)) needs a tiebreak so the output is byte-stable.
+		// Sort files deterministically: by range, then kind, then name.
+		// Mixing kinds with overlapping ranges (kv + history + idx + the
+		// accessors all on [0, 128)) needs a tiebreak so the output is
+		// byte-stable; name breaks the final tie between same-range
+		// same-kind entries (a primary's several accessors).
 		sort.Slice(dm.Files, func(i, j int) bool {
 			a, b := dm.Files[i], dm.Files[j]
 			if a.Range[0] != b.Range[0] {
@@ -256,7 +252,10 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			if a.Range[1] != b.Range[1] {
 				return a.Range[1] < b.Range[1]
 			}
-			return a.Kind < b.Kind
+			if a.Kind != b.Kind {
+				return a.Kind < b.Kind
+			}
+			return a.Name < b.Name
 		})
 
 		// Coverage from kv-kind entries only.

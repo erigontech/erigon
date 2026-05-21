@@ -107,6 +107,68 @@ func TestGenerateV2FromInventory(t *testing.T) {
 	require.Equal(t, "consensus", acc.Files[1].Trust)
 }
 
+// TestGenerateV2_AdvertisesAccessors verifies that accessor files
+// (a domain primary's .bt/.kvi/.kvei and a block .seg's .idx) are
+// carried in the V2 manifest — the domain section as Kind="accessor"
+// entries, the block .idx as a flat Blocks map entry — and survive a
+// Marshal/Parse round trip.
+func TestGenerateV2_AdvertisesAccessors(t *testing.T) {
+	inv := snapshotinv.NewInventory()
+
+	// Block primary + its .idx accessor.
+	require.NoError(t, inv.AddFile(&snapshotinv.FileEntry{
+		Name: "v1.0-000000-000500-headers.seg", TorrentHash: [20]byte{0x01},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	}))
+	require.NoError(t, inv.AddFile(&snapshotinv.FileEntry{
+		Name: "v1.0-000000-000500-headers.idx", TorrentHash: [20]byte{0x02},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	}))
+
+	// Domain primary + its three accessors, all on [0, 2048).
+	require.NoError(t, inv.AddFile(&snapshotinv.FileEntry{
+		Name: "v1.0-accounts.0-2048.kv", TorrentHash: [20]byte{0x10},
+		Local: true, Trust: snapshotinv.TrustVerified,
+	}))
+	for ext, h := range map[string]byte{".bt": 0x11, ".kvi": 0x12, ".kvei": 0x13} {
+		require.NoError(t, inv.AddFile(&snapshotinv.FileEntry{
+			Name: "v1.0-accounts.0-2048" + ext, TorrentHash: [20]byte{h},
+			Local: true, Trust: snapshotinv.TrustVerified,
+		}))
+	}
+
+	manifest := GenerateV2(inv)
+
+	// Block .idx rides in the flat Blocks map alongside the .seg.
+	require.Contains(t, manifest.Blocks, "v1.0-000000-000500-headers.seg")
+	require.Contains(t, manifest.Blocks, "v1.0-000000-000500-headers.idx")
+
+	acc := manifest.Domains["accounts"]
+	require.NotNil(t, acc)
+	require.Len(t, acc.Files, 4) // .kv + .bt + .kvi + .kvei
+	require.Equal(t, [2]uint64{0, 2048}, acc.Coverage, "coverage from kv only, unaffected by accessors")
+
+	accessorNames := map[string]bool{}
+	for _, f := range acc.Files {
+		if f.Kind == KindAccessorName {
+			accessorNames[f.Name] = true
+		}
+	}
+	require.Equal(t, map[string]bool{
+		"v1.0-accounts.0-2048.bt":   true,
+		"v1.0-accounts.0-2048.kvi":  true,
+		"v1.0-accounts.0-2048.kvei": true,
+	}, accessorNames)
+
+	// Round trip.
+	data, err := MarshalV2(manifest)
+	require.NoError(t, err)
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.Len(t, parsed.Domains["accounts"].Files, 4)
+	require.Contains(t, parsed.Blocks, "v1.0-000000-000500-headers.idx")
+}
+
 func TestV2MarshalRoundTrip(t *testing.T) {
 	inv := snapshotinv.NewInventory()
 	inv.AddFile(&snapshotinv.FileEntry{
