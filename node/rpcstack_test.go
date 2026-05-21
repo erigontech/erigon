@@ -69,6 +69,10 @@ func TestVhosts(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
+	respUpper := rpcRequest(t, url, "host", "TeSt:1234")
+	defer respUpper.Body.Close()
+	assert.Equal(t, http.StatusOK, respUpper.StatusCode)
+
 	resp2 := rpcRequest(t, url, "host", "bad")
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusForbidden, resp2.StatusCode)

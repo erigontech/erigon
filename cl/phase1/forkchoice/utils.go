@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -79,8 +80,6 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	})
 
 	// Clean up per-block unrealized justifications/finalizations for finalized blocks.
-	// Also delete entries whose headers have already been pruned from the fork graph
-	// to prevent orphaned entries from accumulating.
 	f.unrealizedJustifications.Range(func(k, v any) bool {
 		blockRoot := k.(common.Hash)
 		header, has := f.forkGraph.GetHeader(blockRoot)
@@ -97,6 +96,34 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+	// Clean up block timeliness entries for finalized blocks.
+	f.blockTimeliness.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if !has || header.Slot <= finalizedSlot {
+			f.blockTimeliness.Delete(k)
+		}
+		return true
+	})
+	// Clean up GLOAS-specific payload votes for finalized blocks.
+	// Note: envelope files are cleaned up in forkGraph.Prune().
+	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {
+		f.payloadTimelinessVote.Range(func(k, v any) bool {
+			root := k.(common.Hash)
+			if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+				f.payloadTimelinessVote.Delete(k)
+			}
+			return true
+		})
+		f.payloadDataAvailabilityVote.Range(func(k, v any) bool {
+			// Key is stored as common.Hash
+			root := k.(common.Hash)
+			if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+				f.payloadDataAvailabilityVote.Delete(k)
+			}
+			return true
+		})
+	}
 
 	// Guard against uint64 underflow during the first 3 epochs after genesis.
 	if newFinalized.Epoch > 3 {
@@ -131,19 +158,45 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 }
 
 // Ancestor returns the ancestor to the given root.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) common.Hash {
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+// Spec: if block.slot <= slot (block is at or before the target), return PENDING.
+// Otherwise traverse up and return get_parent_payload_status for the found ancestor.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
 	header, has := f.forkGraph.GetHeader(root)
 	if !has {
-		return common.Hash{}
+		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
+
+	// Spec: if block.slot <= slot, return (root, PENDING)
+	if header.Slot <= slot {
+		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	// Traverse up: find the ancestor block whose parent is at or before the target slot.
+	// This mirrors the spec's "while parent.slot > slot" loop, tracking the child (block)
+	// so we can call get_parent_payload_status(block) at the end.
+	childRoot := root
 	for header.Slot > slot {
+		childRoot = root
 		root = header.ParentRoot
 		header, has = f.forkGraph.GetHeader(header.ParentRoot)
 		if !has {
-			return common.Hash{}
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 	}
-	return root
+
+	// root is now the ancestor at or before the target slot.
+	// childRoot is the block whose parent_root == root (i.e. "block" in the spec).
+	// Spec: return ForkChoiceNode(root=block.parent_root, payload_status=get_parent_payload_status(store, block))
+	payloadStatus := cltypes.PayloadStatusPending
+	if block, hasBlock := f.forkGraph.GetBlock(childRoot); hasBlock && block != nil {
+		payloadStatus = f.getParentPayloadStatus(block.Block)
+	}
+
+	return ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: payloadStatus,
+	}
 }
 
 // getCheckpointState computes and caches checkpoint states.
@@ -154,6 +207,9 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	}
 
 	// If it is not in cache compute it and then put in cache.
+	if f.forkGraph == nil {
+		return nil, errors.New("getCheckpointState: forkGraph not initialized")
+	}
 	baseState, err := f.forkGraph.GetState(checkpoint.Root, true)
 	if err != nil {
 		return nil, err

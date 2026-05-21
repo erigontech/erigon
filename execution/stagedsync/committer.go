@@ -222,6 +222,23 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 
 	case *blockResult:
+		// Block-validity rejection (set by the worker-result path in
+		// nextResult — insufficient funds, gas overflow, finalize error,
+		// scheduler-exhausted incarnations). The apply loop's case
+		// *blockResult fast-paths Err != nil and returns it directly;
+		// we must NOT compute commitment for this block because (a)
+		// sd.mem may contain partial-tx writes from txs that succeeded
+		// before the failing one, so the computed root would be
+		// non-canonical, and (b) computing here would emit an
+		// ErrWrongTrieRoot through rootResults that races with the apply
+		// loop's Err return — the wrong-trie-root error wins and masks
+		// the original validation diagnostic (EEST assertions on the
+		// underlying exception class then fail). Skip silently and let
+		// the apply loop surface the worker's diagnosis.
+		if r.Err != nil {
+			return
+		}
+
 		// Track the latest block boundary.
 		cc.lastBlockResult = r
 
@@ -419,10 +436,6 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, br *blockRe
 
 	cc.lastComputedBlock = br.BlockNum
 	cc.hasComputed = true
-
-	// Trim old version entries from sd.mem — only keeps the latest
-	// entry at or before this block's txNum. Reclaims memory from
-	// accumulated inMemHistoryReads entries during batch processing.
 
 	// Only publish on mismatch — success is silent.
 	if mismatch := !bytes.Equal(rh, br.StateRoot.Bytes()); mismatch {

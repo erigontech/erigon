@@ -211,7 +211,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		TipCap:     u256.Num0,
 		AccessList: accesses,
 	}
-	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
+	tx2, err := tx2.WithSignature(*LatestSignerForChainID(uint256.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
 	if err != nil {
 		t.Fatal("invalid signature error: ", err)
 	}
@@ -283,7 +283,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		AccessList: AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}},
 	}
 	sig2 := common.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
-	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
+	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(uint256.NewInt(1)), sig2)
 
 	check("len(Transactions)", len(block.Transactions()), 2)
 	check("Transactions[0].Hash", block.Transactions()[0].Hash(), tx1.Hash())
@@ -632,8 +632,8 @@ func TestCopyHeader(t *testing.T) {
 	}
 }
 
-func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
-	// Covers an EncodeBigInt() panic that can happen if a malicious peer sends a header with a big.Int with a 32-byte value
+func TestEncodeUint256BufferOverflowPrevention(t *testing.T) {
+	// Covers an EncodeUint256() panic that can happen if a malicious peer sends a header with a uint256 with a 32-byte value
 	// Create a 249-bit base fee value (32 bytes in big-endian)
 	// This is the minimum bit length that requires 32 bytes of storage
 	maliciousBaseFee := new(uint256.Int).Lsh(uint256.NewInt(1), 248) // 2^248, BitLen() = 249
@@ -655,6 +655,6 @@ func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
 		MixDigest:   common.Hash{},
 		Nonce:       BlockNonce{},
 	}
-	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeBigInt() -> panic
+	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeUint256() — make sure this doesn't panic.
 	_ = header.Hash()
 }

@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"reflect"
 	"strings"
 	"sync"
@@ -196,7 +195,6 @@ func DecodeBytesPartial(b []byte, val any) error {
 
 var (
 	decoderInterface = reflect.TypeFor[Decoder]()
-	bigInt           = reflect.TypeFor[big.Int]()
 	u256Int          = reflect.TypeFor[uint256.Int]()
 )
 
@@ -205,10 +203,6 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 	switch {
 	case typ == rawValueType:
 		return decodeRawValue, nil
-	case typ.AssignableTo(reflect.PointerTo(bigInt)):
-		return decodeBigInt, nil
-	case typ.AssignableTo(bigInt):
-		return decodeBigIntNoPtr, nil
 	case typ == reflect.PointerTo(u256Int):
 		return decodeU256, nil
 	case typ == u256Int:
@@ -280,24 +274,6 @@ func decodeString(s *Stream, val reflect.Value) error {
 		return wrapStreamError(err, val.Type())
 	}
 	val.SetString(string(b))
-	return nil
-}
-
-func decodeBigIntNoPtr(s *Stream, val reflect.Value) error {
-	return decodeBigInt(s, val.Addr())
-}
-
-func decodeBigInt(s *Stream, val reflect.Value) error {
-	i := val.Interface().(*big.Int)
-	if i == nil {
-		i = new(big.Int)
-		val.Set(reflect.ValueOf(i))
-	}
-
-	err := s.decodeBigInt(i)
-	if err != nil {
-		return wrapStreamError(err, val.Type())
-	}
 	return nil
 }
 
@@ -642,6 +618,9 @@ type ByteReader interface {
 type Stream struct {
 	r ByteReader
 
+	// Inline storage for NewBytesStream so the slice header doesn't escape per call.
+	sliceRdr sliceReader
+
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
@@ -687,6 +666,24 @@ func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done fun
 	return stream, func() {
 		streamPool.Put(stream)
 	}
+}
+
+// NewBytesStream returns a pooled Stream reading from b. The caller MUST
+// return it via PutStream. Pair as:
+//
+//	stream := rlp.NewBytesStream(b)
+//	defer rlp.PutStream(stream)
+func NewBytesStream(b []byte) *Stream {
+	stream := streamPool.Get().(*Stream)
+	stream.sliceRdr = b
+	stream.Reset(&stream.sliceRdr, uint64(len(b)))
+	return stream
+}
+
+// PutStream returns a Stream to the pool.
+func PutStream(stream *Stream) {
+	stream.sliceRdr = nil // release caller's backing array
+	streamPool.Put(stream)
 }
 
 // Bytes reads an RLP string and returns its contents as a byte slice.
@@ -743,6 +740,40 @@ func (s *Stream) ReadBytes(b []byte) error {
 		return nil
 	default:
 		return ErrExpectedString
+	}
+}
+
+// AppendBytes decodes the next RLP string and appends its contents to dst,
+// returning the extended slice. Pass dst[:0] to reuse a buffer's capacity;
+// pass nil to allocate fresh.
+func (s *Stream) AppendBytes(dst []byte) ([]byte, error) {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return dst, err
+	}
+	switch kind {
+	case Byte:
+		s.kind = -1
+		return append(dst, s.byteval), nil
+	case String:
+		cur := len(dst)
+		need := cur + int(size)
+		if cap(dst) < need {
+			grown := make([]byte, need)
+			copy(grown, dst)
+			dst = grown
+		} else {
+			dst = dst[:need]
+		}
+		if err = s.readFull(dst[cur:]); err != nil {
+			return dst, err
+		}
+		if size == 1 && dst[cur] < 128 {
+			return dst, ErrCanonSize
+		}
+		return dst, nil
+	default:
+		return dst, ErrExpectedString
 	}
 }
 
@@ -885,58 +916,6 @@ func (s *Stream) ListEnd() error {
 func (s *Stream) MoreDataInList() bool {
 	_, listLimit := s.listLimit()
 	return listLimit > 0
-}
-
-// BigInt decodes an arbitrary-size integer value.
-func (s *Stream) BigInt() (*big.Int, error) {
-	i := new(big.Int)
-	if err := s.decodeBigInt(i); err != nil {
-		return nil, err
-	}
-	return i, nil
-}
-
-func (s *Stream) decodeBigInt(dst *big.Int) error {
-	var buffer []byte
-	kind, size, err := s.Kind()
-	switch {
-	case err != nil:
-		return err
-	case kind == List:
-		return ErrExpectedString
-	case kind == Byte:
-		buffer = s.uintbuf[:1]
-		buffer[0] = s.byteval
-		s.kind = -1 // re-arm Kind
-	case size == 0:
-		// Avoid zero-length read.
-		s.kind = -1
-	case size <= uint64(len(s.uintbuf)):
-		// For integers smaller than s.uintbuf, allocating a buffer
-		// can be avoided.
-		buffer = s.uintbuf[:size]
-		if err := s.readFull(buffer); err != nil {
-			return err
-		}
-		// Reject inputs where single byte encoding should have been used.
-		if size == 1 && buffer[0] < 128 {
-			return ErrCanonSize
-		}
-	default:
-		// For large integers, a temporary buffer is needed.
-		buffer = make([]byte, size)
-		if err := s.readFull(buffer); err != nil {
-			return err
-		}
-	}
-
-	// Reject leading zero bytes.
-	if len(buffer) > 0 && buffer[0] == 0 {
-		return ErrCanonInt
-	}
-	// Set the integer bytes.
-	dst.SetBytes(buffer)
-	return nil
 }
 
 // ReadUint256 decodes the next value as a uint256.

@@ -20,9 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -146,7 +146,7 @@ func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r headerReader) GetTd(common.Hash, uint64) *big.Int {
+func (r headerReader) GetTd(common.Hash, uint64) *uint256.Int {
 	return nil
 }
 
@@ -435,7 +435,7 @@ func TestSendBlock(t *testing.T) {
 
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: sealedBlocks[0],
-		TD:    big.NewInt(1), // This is ignored anyway
+		TD:    *uint256.NewInt(1), // This is ignored anyway
 	})
 
 	if err != nil {

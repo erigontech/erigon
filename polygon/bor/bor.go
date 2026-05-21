@@ -849,7 +849,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 
 			for addr, account := range allocs {
 				c.logger.Trace("[bor] change contract code", "address", addr)
-				state.SetCode(accounts.InternAddress(addr), account.Code)
+				state.SetCode(accounts.InternAddress(addr), account.Code, tracing.CodeChangeUnspecified)
 			}
 		}
 	}

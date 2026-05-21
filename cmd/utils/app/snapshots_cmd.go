@@ -2265,6 +2265,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if info.IsDir() {
 			return nil
 		}
+		if filepath.Ext(info.Name()) == ".tmp" {
+			return nil
+		}
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
@@ -2368,6 +2371,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(info.Name()) == ".tmp" {
 			return nil
 		}
 
@@ -3540,7 +3546,7 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err != nil {
 		panic(err)
 	}
-	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}
