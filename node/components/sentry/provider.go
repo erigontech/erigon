@@ -407,21 +407,28 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 
 	cfg.Protocols = protocols
 	srv := &p2p.Server{Config: *cfg}
+
+	// Wire the shared PeerStore + Server reference into every GrpcServer
+	// BEFORE srv.Start. Once the listener is up peers can connect and
+	// Protocol.Run fires immediately; if SetSharedPeerStore happened later
+	// the early Runs would land in per-sentry stores and wit/0's
+	// WaitForEth would never see the eth handshake complete (it lives on
+	// a different sentry post-dedup), disconnecting the peer after
+	// ethProtocolTimeout. The shared store keeps one PeerInfo per peer
+	// across sentries.
+	shared := sentry.NewPeerStore()
+	for _, ss := range p.Servers {
+		ss.SetSharedPeerStore(shared)
+		if err := ss.SetP2PServer(srv); err != nil {
+			return fmt.Errorf("sentry provider: inject shared p2p server: %w", err)
+		}
+	}
+
 	if err := srv.Start(p.cfg.SentryCtx, p.logger); err != nil {
 		srv.Stop()
 		return fmt.Errorf("sentry provider: start shared p2p server: %w", err)
 	}
 	p.sharedP2PServer = srv
-
-	for _, ss := range p.Servers {
-		if err := ss.SetP2PServer(srv); err != nil {
-			// Inject failed after Start: tear the listener back down so
-			// Initialize returns without leaking goroutines / sockets.
-			srv.Stop()
-			p.sharedP2PServer = nil
-			return fmt.Errorf("sentry provider: inject shared p2p server: %w", err)
-		}
-	}
 	return nil
 }
 

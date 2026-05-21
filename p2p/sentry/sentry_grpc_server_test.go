@@ -845,35 +845,58 @@ func TestGrpcServer_SetP2PServer_FlagsAndIdempotency(t *testing.T) {
 	require.Error(t, ss.SetP2PServer(srv))
 }
 
-// TestGrpcServer_PeersReturnsPerSentryGoodPeers verifies that Peers reports
-// only peers in this sentry's goodPeers map (i.e. peers whose eth or wit
-// Protocol.Run fired here), not the shared p2p.Server's global peer set.
-// That's what lets the multi-sentry message router map peers to the correct
-// sentry when several sentries share one p2p.Server.
-//
-// Ghost goodPeers entries (protocol == 0 && witProtocol == 0) must be
-// filtered out — they're stubs from getOrCreatePeer before either Run set
-// its protocol field.
-func TestGrpcServer_PeersReturnsPerSentryGoodPeers(t *testing.T) {
+// TestGrpcServer_PeersFiltersGhostEntries verifies that Peers excludes
+// ghost PeerStore entries (peerInfo.protocol == 0) — those represent peers
+// whose only handler on this sentry was wit/0 (in shared-Server mode wit
+// is deduped to one sentry while eth/* lives elsewhere). The wit-only
+// PeerInfo's rw is a WIT MsgReadWriter, so if Peers reported them the
+// multi-sentry router could route an eth SendMessageById here and write
+// eth frames onto the wit stream.
+func TestGrpcServer_PeersFiltersGhostEntries(t *testing.T) {
 	srv := minimalP2PServer(t)
-	ss := &GrpcServer{statusReady: make(chan struct{}), goodPeers: map[[64]byte]*PeerInfo{}}
+	ss := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
 	require.NoError(t, ss.SetP2PServer(srv))
 
 	withEth, _ := newTestPeerInfoWithEth(t)
 	var ethKey [64]byte
 	ethKey[0] = 0x42
-	ss.goodPeers[ethKey] = withEth
+	ss.peers.peers[ethKey] = withEth
 
 	ghost, _ := newTestPeerInfoWithEth(t)
 	ghost.protocol = 0
 	ghost.witProtocol = 0
 	var ghostKey [64]byte
 	ghostKey[0] = 0x43
-	ss.goodPeers[ghostKey] = ghost
+	ss.peers.peers[ghostKey] = ghost
 
 	reply, err := ss.Peers(context.Background(), nil)
 	require.NoError(t, err)
-	require.Len(t, reply.Peers, 1, "ghost goodPeers entries must be filtered out")
+	require.Len(t, reply.Peers, 1, "ghost (protocol==0) entries must be filtered out")
+}
+
+// TestGrpcServer_SharedPeerStore_VisibleToEthAndWit covers the central
+// invariant of SetSharedPeerStore: two GrpcServers backing one p2p.Server,
+// after the swap, see the same PeerInfo when one of them calls
+// getOrCreatePeer. That's what unblocks wit/0's WaitForEth in shared-
+// Server mode — eth/* runs on a different sentry but populates the same
+// PeerInfo's protocol field.
+func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
+	shared := NewPeerStore()
+	ethSentry := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
+	witSentry := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
+	ethSentry.SetSharedPeerStore(shared)
+	witSentry.SetSharedPeerStore(shared)
+
+	pi, peerID := newTestPeerInfoWithEth(t)
+	ethSentry.peers.mu.Lock()
+	ethSentry.peers.peers[peerID] = pi
+	ethSentry.peers.mu.Unlock()
+
+	// witSentry shares the same store, so the entry placed via ethSentry
+	// must be visible through witSentry too.
+	got := witSentry.getPeer(peerID)
+	require.NotNil(t, got, "shared PeerStore: wit-side sentry must see entry placed by eth-side sentry")
+	require.Same(t, pi, got)
 }
 
 // TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close

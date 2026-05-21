@@ -789,7 +789,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		p2p:                   cfg,
 		peersStreams:          NewPeersStreams(),
 		logger:                logger,
-		goodPeers:             make(map[[64]byte]*PeerInfo),
+		peers:                 NewPeerStore(),
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 		bootnodes:             bootnodes,
 		dnsNetwork:            dnsNetwork,
@@ -903,6 +903,12 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return err
 				}
 				peerInfo.witProtocol = wit.ProtocolVersions[0]
+				// In shared-Server mode wit/0 is deduped to one sentry; if
+				// no eth Run ever fires on this sentry for this peer (which
+				// is the common case — wit lives on sentry[0], eth/* on the
+				// version sentry), nothing else clears the goodPeers entry.
+				// Defer cleanup here so wit's exit always tears it down.
+				defer ss.deletePeer(peerID)
 
 				return runWitPeer(
 					ctx,
@@ -969,12 +975,31 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 	return nil
 }
 
+// PeerStore is the per-peer state registry shared by GrpcServers that back
+// the same p2p.Server. With wit/0 deduped to a single GrpcServer in shared-
+// Server mode, the wit Run and the negotiated eth/* Run land on different
+// sentries; without a shared store they each create their own PeerInfo and
+// wit's WaitForEth never observes the eth handshake complete, so the peer
+// would be disconnected after ethProtocolTimeout. The shared store keeps
+// one PeerInfo per peer regardless of which sentry's Run touched it first.
+//
+// Each GrpcServer owns its own PeerStore by default (set up in
+// NewGrpcServer); SetSharedPeerStore swaps in a coordinator-supplied store.
+type PeerStore struct {
+	mu    sync.RWMutex
+	peers map[[64]byte]*PeerInfo
+}
+
+// NewPeerStore returns an empty PeerStore ready for sentries to share.
+func NewPeerStore() *PeerStore {
+	return &PeerStore{peers: make(map[[64]byte]*PeerInfo)}
+}
+
 type GrpcServer struct {
 	sentryproto.UnimplementedSentryServer
 	ctx           context.Context
 	Protocols     []p2p.Protocol
-	goodPeersMu   sync.RWMutex
-	goodPeers     map[[64]byte]*PeerInfo
+	peers         *PeerStore
 	p2pServer     *p2p.Server
 	p2pServerLock sync.RWMutex
 	// external is true when p2pServer was injected by an outer coordinator
@@ -1014,6 +1039,23 @@ type GrpcServer struct {
 // client can route messages to the correct sentry without duplication or
 // misrouting.
 //
+// SetSharedPeerStore swaps in a coordinator-supplied PeerStore so several
+// GrpcServers backing the same p2p.Server can see one PeerInfo per peer.
+// This is what makes wit/0 (deduped to a single sentry) and the negotiated
+// eth/* (on a different sentry) share the same eth-ready signal — without
+// it, wit's WaitForEth would time out and disconnect every peer.
+//
+// Must be called BEFORE SetP2PServer / srv.Start; helpers that look up the
+// store don't synchronise on the field itself, so concurrent peer Run
+// closures must not be live when this swap happens. NewGrpcServer gives
+// each sentry its own store by default — pass nil here to keep that.
+func (ss *GrpcServer) SetSharedPeerStore(s *PeerStore) {
+	if s == nil {
+		return
+	}
+	ss.peers = s
+}
+
 // SetP2PServer must be called before SetStatus and after the Server has been
 // started. Calling it more than once on the same GrpcServer returns an
 // error — ownership is decided up front. A nil srv is rejected too: if it
@@ -1068,9 +1110,9 @@ func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool 
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
-	ss.goodPeersMu.RLock()
-	defer ss.goodPeersMu.RUnlock()
-	for _, peerInfo := range ss.goodPeers {
+	ss.peers.mu.RLock()
+	defer ss.peers.mu.RUnlock()
+	for _, peerInfo := range ss.peers.peers {
 		if peerInfo == nil {
 			continue
 		}
@@ -1082,9 +1124,9 @@ func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
 }
 
 func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
-	ss.goodPeersMu.RLock()
-	peerInfo, ok := ss.goodPeers[peerID]
-	ss.goodPeersMu.RUnlock()
+	ss.peers.mu.RLock()
+	peerInfo, ok := ss.peers.peers[peerID]
+	ss.peers.mu.RUnlock()
 	if ok && peerInfo == nil {
 		go func() {
 			ss.deletePeer(peerID)
@@ -1097,13 +1139,13 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
-	ss.goodPeersMu.Lock()
-	defer ss.goodPeersMu.Unlock()
+	ss.peers.mu.Lock()
+	defer ss.peers.mu.Unlock()
 
-	existingPeerInfo := ss.goodPeers[peerID]
+	existingPeerInfo := ss.peers.peers[peerID]
 	if existingPeerInfo == nil {
 		peerInfo := NewPeerInfo(peer, rw)
-		ss.goodPeers[peerID] = peerInfo
+		ss.peers.peers[peerID] = peerInfo
 		return peerInfo, nil
 	}
 
@@ -1138,19 +1180,19 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 }
 
 func (ss *GrpcServer) loadAndDeletePeer(peerID [64]byte) (*PeerInfo, bool) {
-	ss.goodPeersMu.Lock()
-	defer ss.goodPeersMu.Unlock()
-	peerInfo, ok := ss.goodPeers[peerID]
+	ss.peers.mu.Lock()
+	defer ss.peers.mu.Unlock()
+	peerInfo, ok := ss.peers.peers[peerID]
 	if ok {
-		delete(ss.goodPeers, peerID)
+		delete(ss.peers.peers, peerID)
 	}
 	return peerInfo, ok
 }
 
 func (ss *GrpcServer) deletePeer(peerID [64]byte) {
-	ss.goodPeersMu.Lock()
-	defer ss.goodPeersMu.Unlock()
-	delete(ss.goodPeers, peerID)
+	ss.peers.mu.Lock()
+	defer ss.peers.mu.Unlock()
+	delete(ss.peers.peers, peerID)
 }
 
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
