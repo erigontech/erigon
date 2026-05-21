@@ -405,10 +405,16 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 			blobGasUsed, *h.BlobGasUsed, h.Number.Uint64(), h.Hash())
 	}
 
+	var lbloom types.Bloom
+	bloomFromReceipts := false
 	if checkReceipts && !alwaysSkipReceiptCheck {
 		for _, r := range receipts {
 			r.Bloom = types.CreateBloom(types.Receipts{r})
+			if checkBloom && len(r.Logs) != 0 {
+				lbloom.Or(r.Bloom)
+			}
 		}
+		bloomFromReceipts = checkBloom
 		receiptHash := types.DeriveSha(receipts)
 		if receiptHash != h.ReceiptHash {
 			if dbg.LogHashMismatchReason() {
@@ -426,7 +432,9 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts, checkB
 	// a pre-Byzantium block (e.g. hive bcInvalidHeaderTest/log1_wrongBloom)
 	// is silently accepted.
 	if checkBloom && !alwaysSkipReceiptCheck {
-		lbloom := types.CreateBloom(receipts)
+		if !bloomFromReceipts {
+			lbloom = types.CreateBloom(receipts)
+		}
 		if lbloom != h.Bloom {
 			return fmt.Errorf("invalid bloom (remote: %x  local: %x)", h.Bloom, lbloom)
 		}

@@ -106,6 +106,13 @@ func (b Bloom) Test(topic []byte) bool {
 		v3 == v3&b[i3]
 }
 
+// Or merges another bloom filter into b.
+func (b *Bloom) Or(other Bloom) {
+	for i := range b {
+		b[i] |= other[i]
+	}
+}
+
 // MarshalText encodes b as a hex string with 0x prefix.
 func (b Bloom) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(b[:]).MarshalText()

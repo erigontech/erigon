@@ -83,6 +83,28 @@ func TestBloomExtensively(t *testing.T) {
 	}
 }
 
+func TestBloomOr(t *testing.T) {
+	t.Parallel()
+
+	var left Bloom
+	left.Add([]byte("left"))
+	var right Bloom
+	right.Add([]byte("right"))
+
+	merged := left
+	merged.Or(right)
+
+	if !merged.Test([]byte("left")) {
+		t.Fatal("expected merged bloom to contain left input")
+	}
+	if !merged.Test([]byte("right")) {
+		t.Fatal("expected merged bloom to contain right input")
+	}
+	if left.Test([]byte("right")) {
+		t.Fatal("Or should not mutate the source bloom")
+	}
+}
+
 func BenchmarkBloom9(b *testing.B) {
 	test := []byte("testestestest")
 	for b.Loop() {
