@@ -1256,7 +1256,14 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 	delete(ss.peers.peers, peerID)
 }
 
-func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode uint64, data []byte, ttl time.Duration) {
+// writePeer sends a message to a peer over the correct RLPx subprotocol
+// offset. msgID must be the high-level sentryproto.MessageId — it's used
+// to look up the subprotocol (eth vs wit) and pick the corresponding
+// PeerInfo.{Eth,Wit}Rw. Routing by numeric msgcode would be wrong:
+// eth and wit reuse the same low code values (e.g. msgcode 0x01 is both
+// eth.NewBlockHashesMsg and wit.NewWitnessHashesMsg), so a numeric lookup
+// can match the wrong subprotocol and emit frames at the wrong offset.
+func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sentryproto.MessageId, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
 		// Async enqueue can win the race against Remove closing pi.removed, so a
 		// queued task may be scheduled to run on a peer we have already asked
@@ -1270,8 +1277,8 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 		default:
 		}
 
-		msgType, protocolName, protocolVersion := ss.protoMessageID(msgcode)
-		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgType.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
+		protocolName, protocolVersion := ss.protocolForMessageID(msgID)
+		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
 
 		// Select the rw for the message's subprotocol. eth and wit live on
 		// the same RLPx connection but at different code offsets — writing
@@ -1288,9 +1295,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 			// Peer hasn't (yet) attached the subprotocol this message
 			// belongs to. Common case: a wit broadcast aimed at every
 			// good peer, some of which negotiated only eth. Treat as a
-			// successful no-op rather than disconnecting — the legacy
-			// single-rw path would have written eth frames onto wit codes
-			// here and broken the peer.
+			// successful no-op rather than disconnecting.
 			return
 		}
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
@@ -1433,7 +1438,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	if inreq.MaxPeers == 1 {
 		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
 		if found {
-			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+			ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 30*time.Second)
 			reply.Peers = []*typesproto.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
 			return reply, nil
 		}
@@ -1441,7 +1446,7 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *sentryprot
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*typesproto.H512, len(peerInfos))
 	for i, peerInfo := range peerInfos {
-		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 15*time.Second)
+		ss.writePeer("[sentry] sendMessageByMinBlock", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 15*time.Second)
 		reply.Peers[i] = gointerfaces.ConvertHashToH512(peerInfo.ID())
 	}
 	return reply, nil
@@ -1463,7 +1468,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.protocol)
 	}
 
-	ss.writePeer("[sentry] sendMessageById", peerInfo, msgcode, inreq.Data.Data, 0)
+	ss.writePeer("[sentry] sendMessageById", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 0)
 	reply.Peers = []*typesproto.H512{inreq.PeerId}
 	return reply, nil
 }
@@ -1480,10 +1485,15 @@ func (ss *GrpcServer) messageCode(id sentryproto.MessageId) (code uint64, protoc
 	return
 }
 
-func (ss *GrpcServer) protoMessageID(code uint64) (id sentryproto.MessageId, protocolName string, protocolVersion uint) {
+// protocolForMessageID returns the subprotocol name and version that
+// declares the given sentryproto.MessageId. Lookup is by MessageId (which
+// is globally unique across subprotocols), unlike a lookup by numeric
+// msgcode which would be ambiguous: eth and wit reuse the same low code
+// values within their respective offsets.
+func (ss *GrpcServer) protocolForMessageID(id sentryproto.MessageId) (protocolName string, protocolVersion uint) {
 	for i := 0; i < len(ss.Protocols); i++ {
-		if val, ok := ss.Protocols[i].ToProto[code]; ok {
-			return val, ss.Protocols[i].Name, ss.Protocols[i].Version
+		if _, ok := ss.Protocols[i].FromProto[id]; ok {
+			return ss.Protocols[i].Name, ss.Protocols[i].Version
 		}
 	}
 	return
@@ -1522,7 +1532,7 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *sentryp
 
 	// Send the block to a subset of our peers at random
 	for _, peerInfo := range peerInfos[:peersToSendCount] {
-		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
+		ss.writePeer("[sentry] sendMessageToRandomPeers", peerInfo, req.Data.Id, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 	}
 	return reply, nil
@@ -1546,7 +1556,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if protocolVersions.Contains(peerInfo.protocol) {
-			ss.writePeer("[sentry] SendMessageToAll", peerInfo, msgcode, req.Data, 0)
+			ss.writePeer("[sentry] SendMessageToAll", peerInfo, req.Id, msgcode, req.Data, 0)
 			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 		}
 		return true

@@ -949,6 +949,41 @@ func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
 	require.Same(t, pi, got)
 }
 
+// TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId guards the
+// disambiguation that writePeer relies on: eth and wit reuse the same
+// numeric msg codes (e.g. 0x01 is both eth.NewBlockHashesMsg and
+// wit.NewWitnessHashesMsg). Routing by numeric code would always pick
+// the eth Protocol entry when eth is registered first, sending wit
+// frames at the wrong RLPx offset. Looking up by sentryproto.MessageId
+// (which is globally unique) avoids the collision.
+func TestGrpcServer_ProtocolForMessageID_ResolvesByMessageId(t *testing.T) {
+	ss := &GrpcServer{
+		Protocols: []p2p.Protocol{
+			{
+				Name:      eth.ProtocolName,
+				Version:   direct.ETH69,
+				FromProto: eth.FromProto[direct.ETH69],
+			},
+			{
+				Name:      wit.ProtocolName,
+				Version:   wit.ProtocolVersions[0],
+				FromProto: wit.FromProto[wit.ProtocolVersions[0]],
+			},
+		},
+	}
+
+	name, version := ss.protocolForMessageID(sentryproto.MessageId_NEW_BLOCK_HASHES_66)
+	require.Equal(t, eth.ProtocolName, name)
+	require.Equal(t, uint(direct.ETH69), version)
+
+	// wit.NewWitnessHashesMsg shares the same numeric code (0x01) as
+	// eth.NewBlockHashesMsg. The MessageId-based lookup must still
+	// resolve to wit here.
+	name, version = ss.protocolForMessageID(sentryproto.MessageId_NEW_WITNESS_HASHES_W0)
+	require.Equal(t, wit.ProtocolName, name)
+	require.Equal(t, wit.ProtocolVersions[0], version)
+}
+
 // TestGrpcServer_CloseDoesNotStopExternalServer verifies that GrpcServer.Close
 // leaves an externally-injected Server running — the coordinator owns its
 // lifecycle. We dial the listener before and after Close: it must still

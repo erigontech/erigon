@@ -269,9 +269,10 @@ func (p *Provider) Initialize(ctx context.Context) error {
 	}
 
 	// Create one GrpcServer per protocol version. Each instance keeps its own
-	// statusData / goodPeers / message streams (so the MultiClient can address
-	// them by protocol), but they will all be wired to the same p2p.Server
-	// below — no per-protocol port allocation here.
+	// statusData / message streams so the MultiClient can address them by
+	// protocol; the per-peer state lives in a shared PeerStore that
+	// startSharedP2PServer injects below (so wit/0, deduped to one sentry,
+	// shares PeerInfo with the eth Run that ran on a different sentry).
 	for _, protocol := range p.cfg.P2P.ProtocolVersion {
 		// Pass the shared p2p.Config to NewGrpcServer. The sentry will not
 		// build its own Server (SetP2PServer below blocks the lazy path), but
@@ -358,10 +359,13 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 // name+version so sideprotocols like wit aren't registered N times), starts
 // it, and injects it back into every GrpcServer.
 //
-// Each GrpcServer reports peers via its own goodPeers map (the peers whose
-// eth Protocol.Run fired on that sentry), so admin_peers aggregation across
-// sentries is naturally non-duplicating and the multi-sentry message router
-// maps peers to the correct sentry by negotiated protocol version.
+// All GrpcServers are wired to one shared sentry.PeerStore so wit/0 (which
+// is deduped to a single GrpcServer here) and the negotiated eth/* (which
+// fires on a different GrpcServer per peer) see the same PeerInfo and
+// share its eth-ready signal. Each GrpcServer still reports peers filtered
+// by its own eth protocol version, so admin_peers aggregation across
+// sentries is non-duplicating and the multi-sentry message router maps
+// each peer to the correct sentry's gRPC client.
 func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string, chainDNSNetwork string) error {
 	if len(p.Servers) == 0 {
 		return errors.New("sentry provider: no GrpcServers to back with a shared p2p.Server")
