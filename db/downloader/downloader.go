@@ -19,6 +19,7 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -71,6 +72,7 @@ import (
 var debugWebseed = false
 
 const TorrentClientStatusPath = "/downloader/torrentClientStatus"
+const TorrentsInfoPath = "/downloader/torrentsInfo"
 
 func init() {
 	_, debugWebseed = os.LookupEnv("DOWNLOADER_DEBUG_WEBSEED")
@@ -115,6 +117,10 @@ type Downloader struct {
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
+
+	// syncTarget is the current download phase name (e.g. "header-chain", "remaining snapshots").
+	// Set by DownloadSnapshots, read by HandleTorrentsInfo.
+	syncTarget atomic.Value // string
 
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
@@ -796,6 +802,7 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 // Logging is bound specific and bound to the lifetime of the call. Target is a name for what we're
 // syncing.
 func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
+	d.syncTarget.Store(target)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	wait, err := d.startSnapshotsDownload(ctx, items, target)
@@ -1615,6 +1622,33 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	defaultMux.Handle(TorrentClientStatusPath, h)
 	if debugMux != nil && debugMux != defaultMux {
 		debugMux.Handle(TorrentClientStatusPath, h)
+	}
+}
+
+// HandleTorrentsInfo exposes a JSON endpoint with torrent completion counts for the etui.
+func (d *Downloader) HandleTorrentsInfo(debugMux *http.ServeMux) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		allTorrents := d.torrentClient.Torrents()
+		total := len(allTorrents)
+		complete := 0
+		for _, t := range allTorrents {
+			if t.Complete().Bool() {
+				complete++
+			}
+		}
+		phase, _ := d.syncTarget.Load().(string)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"total":    total,
+			"complete": complete,
+			"phase":    phase,
+		})
+	})
+
+	defaultMux := http.DefaultServeMux
+	defaultMux.Handle(TorrentsInfoPath, h)
+	if debugMux != nil && debugMux != defaultMux {
+		debugMux.Handle(TorrentsInfoPath, h)
 	}
 }
 
