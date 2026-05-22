@@ -48,6 +48,9 @@ func TestBlackListForPruning(t *testing.T) {
 	const stepPrune = 5000
 	const minBlockToDownload uint64 = 20_000_000
 	const blockPrune uint64 = 25_000_000
+	// effectiveCutoff mirrors the internal adjustBlockPrune clamp; without
+	// it the assertion accepts segments above the cutoff the function actually used.
+	effectiveCutoff := adjustBlockPrune(blockPrune, minBlockToDownload)
 	blackList, err := buildBlackListForPruning(prune.MinimalMode, nil, stepPrune, minBlockToDownload, blockPrune, preverified)
 	if err != nil {
 		t.Fatal(err)
@@ -62,8 +65,8 @@ func TestBlackListForPruning(t *testing.T) {
 		switch {
 		case strings.Contains(p, "transactions"):
 			sawTransactions = true
-			if info.To > blockPrune {
-				t.Errorf("transaction segment %s should not have been blacklisted (To=%d > blockPrune=%d)", p, info.To, blockPrune)
+			if info.To > effectiveCutoff {
+				t.Errorf("transaction segment %s should not have been blacklisted (To=%d > effectiveCutoff=%d)", p, info.To, effectiveCutoff)
 			}
 		case strings.Contains(p, "domain"):
 			t.Errorf("domain segment %s should never be blacklisted", p)
