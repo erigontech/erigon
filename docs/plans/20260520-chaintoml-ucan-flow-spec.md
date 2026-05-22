@@ -39,6 +39,14 @@ consumer-side fetch planning, which queries each layer and combines locally.
 
 ## Layer 1 — Deterministic Quorum Promotion
 
+> **Revised.** The Layer 1 and Layer 2 sections below are superseded by
+> `20260522-canonical-layer-revision.md`, which corrects the canonical model:
+> the view is not monotonic (it demotes on a chain rewind), it is keyed by
+> logical slot (reversioning), and the version counter is replaced by a content
+> digest. Read that document for the current canonical-layer design; the text
+> below is retained as historical context.
+
+
 Snapshot retire is deterministic: same chain state + same retire algorithm +
 same compression parameters → byte-identical files → identical BitTorrent
 info-hashes. Honest publishers converge naturally; this is the foundation the
