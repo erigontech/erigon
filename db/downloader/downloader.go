@@ -183,6 +183,15 @@ type Downloader struct {
 	// paired UCAN sidecar and stamps the manifest's AuthorityUCANHash.
 	delegationSource DelegationSource
 
+	// v2PublishGate{Enabled,Open} implement the chain.v2 first-publish
+	// gate — see EnableV2PublishGate. Default: both false → ungated.
+	v2PublishGateEnabled atomic.Bool
+	v2PublishGateOpen    atomic.Bool
+
+	// resumeSeedingOnce bounds the per-restart RollingV2Publisher.ResumeSeeding
+	// to one run — PublishLocalChainTomlV2 builds a fresh publisher per call.
+	resumeSeedingOnce sync.Once
+
 	// onPeerWithChainTomlDiscovered is called whenever the legacy
 	// chain.toml discovery loop finds a peer advertising a chain-toml
 	// ENR entry. Production wiring (backend.go) plugs in a function
@@ -520,6 +529,22 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 	d.enrUpdater = fn
 }
 
+// EnableV2PublishGate closes the chain.v2 first-publish gate:
+// PublishLocalChainTomlV2 becomes a no-op until OpenV2PublishGate is
+// called. Production calls this at startup and opens the gate when the
+// orchestrator fires flow.InitialDownloadsComplete, so the node's first
+// chain.v2 advertisement reflects a complete download set. Tests and
+// non-orchestrator nodes never call it → publication is ungated.
+func (d *Downloader) EnableV2PublishGate() {
+	d.v2PublishGateEnabled.Store(true)
+}
+
+// OpenV2PublishGate opens the gate closed by EnableV2PublishGate.
+// Idempotent; a no-op if the gate was never enabled.
+func (d *Downloader) OpenV2PublishGate() {
+	d.v2PublishGateOpen.Store(true)
+}
+
 // SetManifestSelfCheck installs the producer-side self-check callback
 // used by RollingV2Publisher.Publish to validate each generation
 // before any file is written. Wired from outside this package (which
@@ -762,6 +787,12 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if d == nil || inv == nil {
 		return nil
 	}
+	// First-publish gate: while enabled and not yet open, hold back the
+	// chain.v2 advertisement — the node is still completing its initial
+	// download set. See docs/plans/20260522-publisher-startup-preflight.md.
+	if d.v2PublishGateEnabled.Load() && !d.v2PublishGateOpen.Load() {
+		return nil
+	}
 	d.lock.RLock()
 	updater := d.enrUpdater
 	d.lock.RUnlock()
@@ -800,6 +831,13 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	if delegationSource != nil {
 		pub.SetDelegationSource(delegationSource)
 	}
+	// Re-seed the generations a fresh publisher recovered from disk
+	// (see RollingV2Publisher.ResumeSeeding), once.
+	d.resumeSeedingOnce.Do(func() {
+		if rerr := pub.ResumeSeeding(context.Background()); rerr != nil {
+			d.log(log.LvlWarn, "resume-seeding retained chain.v2 generations failed", "err", rerr)
+		}
+	})
 	hash, err := pub.Publish(context.Background(), inv, authoritativeBlocks, updater)
 	if err != nil {
 		return fmt.Errorf("publishing chain.toml.v2: %w", err)

@@ -279,6 +279,64 @@ func TestV2FullScopeRoundTrip(t *testing.T) {
 	require.Equal(t, data, again, "GenerateV2 + MarshalV2 must be deterministic")
 }
 
+// TestV2SerializationIsCanonical is the manifest-determinism guard.
+// genID and the manifest's BitTorrent info-hash are derived from the
+// exact MarshalV2 bytes, so a node MUST serialize the same logical
+// inventory to byte-identical TOML regardless of the order files were
+// discovered/added — otherwise its own genID would shift across runs
+// or releases, defeating no-op-republish dedup and restart stability.
+// (The L3 advertisement is per-node by design and is not expected to
+// match across publishers — this is purely a per-node determinism
+// requirement.) If the property is lost — a dropped sort.Slice, a
+// swapped encoder — this test fails. It builds the same archive in two
+// opposite insertion orders and pins byte-identical output and an
+// identical genID.
+func TestV2SerializationIsCanonical(t *testing.T) {
+	// A varied archive: multiple block / meta / salt / caplin entries
+	// and two domains with several ranges × kinds, so map-key sorting
+	// and the domain-file sort.Slice both matter.
+	files := []*snapshotinv.FileEntry{
+		{Name: "v1.1-000200-000300-headers.seg", TorrentHash: [20]byte{0xb3}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Name: "v1.1-000000-000100-headers.seg", TorrentHash: [20]byte{0xb1}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Name: "v1.1-000100-000200-bodies.seg", TorrentHash: [20]byte{0xb2}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindMeta, Name: "erigondb.toml", TorrentHash: [20]byte{0x1e}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindMeta, Name: "aaa-meta.toml", TorrentHash: [20]byte{0x1f}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindSalt, Name: "salt-state.txt", TorrentHash: [20]byte{0x5b}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindSalt, Name: "salt-blocks.txt", TorrentHash: [20]byte{0x5a}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindCaplin, Name: "v1.1-000010-000020-beaconblocks.seg", TorrentHash: [20]byte{0xc2}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Kind: snapshotinv.KindCaplin, Name: "v1.1-000000-000010-beaconblocks.seg", TorrentHash: [20]byte{0xc1}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Domain: snapshotinv.DomainStorage, Kind: snapshotinv.KindKV, FromStep: 0, ToStep: 128, Name: "v1.1-storage.0-128.kv", TorrentHash: [20]byte{0x50}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Domain: snapshotinv.DomainAccounts, Kind: snapshotinv.KindKV, FromStep: 128, ToStep: 256, Name: "v1.1-accounts.128-256.kv", TorrentHash: [20]byte{0xa2}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Domain: snapshotinv.DomainAccounts, Kind: snapshotinv.KindKV, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.kv", TorrentHash: [20]byte{0xa0}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Domain: snapshotinv.DomainAccounts, Kind: snapshotinv.KindHistory, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.v", TorrentHash: [20]byte{0xa1}, Local: true, Trust: snapshotinv.TrustVerified},
+		{Domain: snapshotinv.DomainAccounts, Kind: snapshotinv.KindIdx, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.ef", TorrentHash: [20]byte{0xa3}, Local: true, Trust: snapshotinv.TrustVerified},
+	}
+
+	build := func(order []*snapshotinv.FileEntry) []byte {
+		inv := snapshotinv.NewInventory()
+		for _, f := range order {
+			cp := *f
+			inv.AddFile(&cp)
+		}
+		data, err := MarshalV2(GenerateV2(inv))
+		require.NoError(t, err)
+		return data
+	}
+
+	forward := append([]*snapshotinv.FileEntry(nil), files...)
+	reversed := make([]*snapshotinv.FileEntry, len(files))
+	for i, f := range files {
+		reversed[len(files)-1-i] = f
+	}
+
+	fwdBytes := build(forward)
+	revBytes := build(reversed)
+	require.Equal(t, fwdBytes, revBytes,
+		"MarshalV2 must be byte-identical regardless of inventory insertion order")
+	require.Equal(t, genIDFromContent(fwdBytes), genIDFromContent(revBytes),
+		"insertion order must not change the content-addressed genID")
+}
+
 func TestDomainManifestStepRanges(t *testing.T) {
 	dm := &DomainManifest{
 		Coverage: [2]uint64{0, 4096},

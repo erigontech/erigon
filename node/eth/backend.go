@@ -98,6 +98,7 @@ import (
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
 	"github.com/erigontech/erigon/node/components/snapshotauth"
 	storagecomp "github.com/erigontech/erigon/node/components/storage"
+	"github.com/erigontech/erigon/node/components/storage/flow"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/views"
 	"github.com/erigontech/erigon/node/direct"
@@ -684,6 +685,32 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			if err := backend.components.Downloader.BindBus(ctx, bus); err != nil {
 				return nil, fmt.Errorf("downloader BindBus: %w", err)
 			}
+
+			// First-publish gate
+			// (docs/plans/20260522-publisher-startup-preflight.md): hold
+			// the chain.v2 advertisement until the orchestrator signals
+			// the initial download set is complete. Until then
+			// PublishLocalChainTomlV2 is a no-op; on the signal the gate
+			// opens and the first complete generation is published. Only
+			// wired here, under the orchestrator-running branch — that is
+			// the only configuration where flow.InitialDownloadsComplete
+			// is ever fired.
+			if dl := backend.components.Downloader.Downloader; dl != nil {
+				dl.EnableV2PublishGate()
+				downloadsComplete := flow.InitialDownloadsCompleteChannel(bus)
+				go func() {
+					select {
+					case <-ctx.Done():
+						return
+					case <-downloadsComplete:
+					}
+					dl.OpenV2PublishGate()
+					if err := dl.PublishLocalChainToml(); err != nil {
+						logger.Warn("[snapshot-flow] first gated chain.toml publish failed", "err", err)
+					}
+				}()
+			}
+
 			mx := &manifestexchange.Provider{}
 
 			// Consumer-side canonical validation + on-disk cache per

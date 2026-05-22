@@ -244,6 +244,71 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	require.ElementsMatch(t, second.History(), listV2Generations(t, snapDir))
 }
 
+// TestRollingV2Publisher_RestartRepublishIdenticalDedups covers the
+// content-addressing restart interaction: after a restart the discovery
+// scan rebuilds history in directory-scan order, NOT publish order.
+// Re-publishing content identical to an already-discovered generation
+// produces the same content-addressed genID — it must be recognised as
+// the same generation and not appended a second time, regardless of
+// where that generation sits in the scanned history.
+func TestRollingV2Publisher_RestartRepublishIdenticalDedups(t *testing.T) {
+	snapDir := t.TempDir()
+
+	// Publish three distinct generations, remembering each inventory so
+	// the exact same content can be republished after the restart.
+	first, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	first.SetENRFingerprint(testENRFP)
+	invs := []*snapshotinv.Inventory{
+		rollingTestInventory(t, 0x70),
+		rollingTestInventory(t, 0x71),
+		rollingTestInventory(t, 0x72),
+	}
+	for i, inv := range invs {
+		_, err := first.Publish(context.Background(), inv, 0, nil)
+		require.NoError(t, err, "publish %d", i)
+	}
+	require.Len(t, first.History(), 3)
+
+	// Restart: discovery rebuilds history in directory-scan (genID-sorted)
+	// order — generally NOT the order they were published in.
+	second, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	second.SetENRFingerprint(testENRFP)
+	require.Len(t, second.History(), 3)
+
+	// Re-publish each original inventory. Every one is byte-identical to
+	// a generation already in history, so each is a no-op republish: the
+	// history must stay exactly the three discovered generations. With a
+	// last-entry-only dedup this fails the moment a republished
+	// generation isn't the current tail — a duplicate genID is appended.
+	for i, inv := range invs {
+		_, err := second.Publish(context.Background(), inv, 0, nil)
+		require.NoError(t, err, "republish %d", i)
+		require.Len(t, second.History(), 3,
+			"republish %d of identical content must not grow history", i)
+		require.ElementsMatch(t, second.History(), listV2Generations(t, snapDir),
+			"republish %d: history must stay in sync with on-disk generations", i)
+	}
+}
+
+// TestRollingV2Publisher_ResumeSeeding_NilDownloaderNoop pins that
+// ResumeSeeding is a clean no-op when no downloader is wired — the
+// default for unit tests. Production wires a downloader; this only
+// guards the defensive path.
+func TestRollingV2Publisher_ResumeSeeding_NilDownloaderNoop(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x80), 0, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, pub.ResumeSeeding(context.Background()),
+		"ResumeSeeding with no downloader must be a clean no-op")
+}
+
 // TestRollingV2Publisher_CleanupOrphans drops chain.v2.<genID>.toml
 // files whose genID isn't in history — simulating a crash mid-publish
 // that wrote files but never advanced the in-memory state.

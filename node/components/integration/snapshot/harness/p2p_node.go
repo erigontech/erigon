@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,10 @@ type P2PNode struct {
 	v2Publisher *dl.RollingV2Publisher // lazy — constructed on first PublishV2Manifest
 	ctx         context.Context
 	cancel      context.CancelFunc
+
+	logger      log.Logger
+	realStorage bool
+	closeOnce   sync.Once
 }
 
 // LocalTorrentAddr returns the BT endpoint the underlying torrent client
@@ -202,29 +207,52 @@ func (n *P2PNode) EnableAutoPublishV2(debounce time.Duration) {
 
 // Close tears down every subcomponent. Cancels the context up front so
 // sentry / downloader background goroutines can exit, then waits for
-// them via their respective Close methods.
+// them via their respective Close methods. Idempotent — Restart calls
+// it explicitly and t.Cleanup calls it again at test end.
 func (n *P2PNode) Close() {
-	if n.unregPeer != nil {
-		n.unregPeer()
-	}
-	if n.cancel != nil {
-		n.cancel()
-	}
-	_ = n.Mx.UnbindBus()
-	_ = n.Downloader.UnbindAutoPublish()
-	_ = n.Orch.Close()
-	n.Downloader.Close()
-	_ = n.Sentry.Close()
-	if n.cfg != nil {
-		_ = n.cfg.CloseTorrentLogFile()
-	}
-	n.Bus.WaitAsync()
-	if n.pool != nil {
-		n.pool.wg.Wait()
-	}
-	if n.workers != nil {
-		n.workers.StopWait()
-	}
+	n.closeOnce.Do(func() {
+		if n.unregPeer != nil {
+			n.unregPeer()
+		}
+		if n.cancel != nil {
+			n.cancel()
+		}
+		_ = n.Mx.UnbindBus()
+		_ = n.Downloader.UnbindAutoPublish()
+		_ = n.Orch.Close()
+		n.Downloader.Close()
+		_ = n.Sentry.Close()
+		if n.cfg != nil {
+			_ = n.cfg.CloseTorrentLogFile()
+		}
+		n.Bus.WaitAsync()
+		if n.pool != nil {
+			n.pool.wg.Wait()
+		}
+		if n.workers != nil {
+			n.workers.StopWait()
+		}
+	})
+}
+
+// Restart simulates a process restart: it tears the node down and
+// rebuilds a fresh one over the SAME data directory. The snap dir — its
+// snapshot files, chain.v2.<fp>.<genID>.toml generations and .torrent
+// sidecars — survives, so the rebuilt node exercises the on-disk
+// discovery paths (RollingV2Publisher generation recovery, torrent
+// re-registration).
+//
+// In-memory state does NOT survive: the rebuilt node has a fresh empty
+// inventory and a fresh torrent client. A caller that needs the
+// inventory repopulated must re-seed the on-disk files (e.g. via
+// SeedExistingFile), exactly as production's startup disk scan does.
+//
+// Returns the new node; the old handle is closed and must not be used
+// again.
+func (n *P2PNode) Restart() *P2PNode {
+	n.T.Helper()
+	n.Close()
+	return newP2PNodeAt(n.T, n.Dirs.DataDir, n.logger, n.realStorage)
 }
 
 // SeedFile writes real content to the node's snap directory, registers it
@@ -314,6 +342,23 @@ func (n *P2PNode) PublishV2Manifest() [20]byte {
 // loop instead of constructing a parallel publisher that wouldn't
 // share the rolling history.
 func (n *P2PNode) V2Publisher() *dl.RollingV2Publisher { return n.v2Publisher }
+
+// ResumePublisherSeeding constructs the rolling V2 publisher if it does
+// not yet exist — its directory scan rediscovers on-disk generations —
+// and re-registers every retained generation's torrents with the
+// downloader. This mirrors the post-restart re-seed step production
+// runs at BindAutoPublish time; a restart test calls it before
+// PublishV2Manifest so old generations stay fetchable.
+func (n *P2PNode) ResumePublisherSeeding() {
+	n.T.Helper()
+	if n.v2Publisher == nil {
+		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, dl.NewAtomicTorrentFS(n.Dirs.Snap), n.dCore)
+		require.NoError(n.T, err)
+		pub.SetENRFingerprint(harnessENRFP)
+		n.v2Publisher = pub
+	}
+	require.NoError(n.T, n.v2Publisher.ResumeSeeding(n.ctx))
+}
 
 // convertGenesisDifficulty wraps gointerfaces.ConvertUint256IntToH256
 // for a genesis block — Difficulty() returns a value (uint256.Int) but
@@ -498,6 +543,8 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage b
 		unregPeer:         unregPeer,
 		ctx:               ctx,
 		cancel:            cancel,
+		logger:            logger,
+		realStorage:       realStorage,
 	}
 	t.Cleanup(n.Close)
 	return n

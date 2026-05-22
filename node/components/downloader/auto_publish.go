@@ -74,6 +74,18 @@ type AutoPublishOpts struct {
 	// AuthorityUCANHash and consumers running with TrustConfig will reject this
 	// peer.
 	DelegationSource dl.DelegationSource
+
+	// GateUntilInitialDownloadsComplete, when true, holds back the FIRST
+	// publish until flow.InitialDownloadsComplete is observed on Bus —
+	// so the first chain.v2 advertisement reflects a complete download
+	// set rather than the empty/partial inventory of a node still
+	// syncing. Subsequent generations are unaffected (TrustPromoted-
+	// driven, as before).
+	//
+	// Production sets this true; tests / the harness leave it false to
+	// publish eagerly. See
+	// docs/plans/20260522-publisher-startup-preflight.md.
+	GateUntilInitialDownloadsComplete bool
 }
 
 // BindAutoPublish wires automatic re-publication of chain.v2.<seq>.toml
@@ -129,11 +141,24 @@ func (p *Provider) BindAutoPublish(ctx context.Context, opts AutoPublishOpts) er
 		publisher.SetDelegationSource(opts.DelegationSource)
 	}
 
+	// Re-seed the V2 generations a fresh publisher recovered from disk
+	// (see RollingV2Publisher.ResumeSeeding).
+	if err := publisher.ResumeSeeding(ctx); err != nil {
+		p.logger.Warn("[downloader] resume-seeding retained V2 generations failed", "err", err)
+	}
+
+	// Build the first-publish gate channel before spawning the loop so
+	// the bus subscription is in place well ahead of the event firing.
+	var gateCh <-chan struct{}
+	if opts.GateUntilInitialDownloadsComplete {
+		gateCh = flow.InitialDownloadsCompleteChannel(opts.Bus)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	tick := make(chan struct{}, 1)
 	done := make(chan struct{})
 
-	go p.autoPublishLoop(ctx, opts, publisher, tick, done, debounce)
+	go p.autoPublishLoop(ctx, opts, publisher, tick, done, debounce, gateCh)
 
 	handler := func(flow.TrustPromoted) {
 		// Non-blocking nudge — the loop coalesces.
@@ -187,8 +212,23 @@ func (p *Provider) autoPublishLoop(
 	tick <-chan struct{},
 	done chan<- struct{},
 	debounce time.Duration,
+	gateCh <-chan struct{},
 ) {
 	defer close(done)
+
+	// First-publish gate: hold back the initial generation until the
+	// node has a complete download set (gateCh closes on
+	// flow.InitialDownloadsComplete). nil gateCh = ungated (tests).
+	if gateCh != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gateCh:
+		}
+		if _, err := publisher.Publish(ctx, opts.Inventory, opts.AuthoritativeBlocks, opts.ENRUpdater); err != nil {
+			p.logger.Warn("[downloader] gated first auto-publish failed", "err", err)
+		}
+	}
 
 	for {
 		// Wait for the first nudge.

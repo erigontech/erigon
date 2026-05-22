@@ -147,6 +147,12 @@ type Orchestrator struct {
 	stateDomainsSeen map[snapshot.Domain]struct{}
 	blocksQueued     []queuedBlock
 
+	// initialDownloadsCompleteFired guards the one-shot
+	// InitialDownloadsComplete event — fired the first time `pending`
+	// is empty after stateReadyFired (all phase-1 and phase-2 downloads
+	// drained). Guarded by peerMu, like stateReadyFired.
+	initialDownloadsCompleteFired bool
+
 	// phase1Files records the names of every file that contributes to
 	// InitialStateReady's "ready" condition: state-domain + meta + salt +
 	// block-header files. Populated by the request* paths AND by the
@@ -791,6 +797,29 @@ func (o *Orchestrator) fireInitialStateReady() {
 			Range: qb.entry.Range(),
 		})
 	}
+
+	// Covers the no-phase-2 case: if there were no queued blocks (or none
+	// survived the trust re-check) and nothing else is pending, the
+	// initial sync is already fully drained the moment stateReadyFired is
+	// set.
+	o.maybeFireInitialDownloadsComplete()
+}
+
+// maybeFireInitialDownloadsComplete publishes InitialDownloadsComplete
+// the first time the initial sync has fully drained — InitialStateReady
+// has fired AND the in-flight `pending` set is empty (every phase-1 and
+// phase-2 download done). Fire-once and idempotent; safe to call from
+// any path that can empty `pending` or set stateReadyFired. Caller must
+// NOT hold peerMu.
+func (o *Orchestrator) maybeFireInitialDownloadsComplete() {
+	o.peerMu.Lock()
+	if o.initialDownloadsCompleteFired || !o.stateReadyFired || len(o.pending) != 0 {
+		o.peerMu.Unlock()
+		return
+	}
+	o.initialDownloadsCompleteFired = true
+	o.peerMu.Unlock()
+	o.bus.Publish(InitialDownloadsComplete{})
 }
 
 // onDownloadFailed removes the failed download from the pending map so a
@@ -801,6 +830,11 @@ func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
 	o.peerMu.Lock()
 	delete(o.pending, e.FileName)
 	o.peerMu.Unlock()
+
+	// A failure that drains the last in-flight download settles the
+	// initial set as far as it will go — fire the completion check so
+	// the publish gate is not held shut forever on an un-retried file.
+	o.maybeFireInitialDownloadsComplete()
 }
 
 // fileRole extracts a role token that distinguishes non-interchangeable
@@ -1044,4 +1078,8 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	if shouldFireStateReady {
 		o.tryFireInitialStateReady(o.ctx)
 	}
+
+	// Covers the phase-2 case: this completion may have drained the last
+	// caplin (or any post-stateReady) download.
+	o.maybeFireInitialDownloadsComplete()
 }

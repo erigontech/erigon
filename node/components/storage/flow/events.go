@@ -66,6 +66,28 @@ func InitialStateReadyChannel(bus event.BusSubscriber) <-chan struct{} {
 	return ch
 }
 
+// InitialDownloadsCompleteChannel returns a channel that closes the
+// first time InitialDownloadsComplete is published on bus. Same
+// sync.Once + plain-Subscribe construction as InitialStateReadyChannel
+// (SubscribeOnce is unreliable for struct-typed events on this bus); if
+// the subscription itself fails, the channel is closed immediately so
+// callers do not block forever.
+//
+// The manifest auto-publisher uses this to gate its first chain.v2
+// generation — it holds back the first advertisement until the channel
+// closes, so the first manifest reflects a complete download set.
+func InitialDownloadsCompleteChannel(bus event.BusSubscriber) <-chan struct{} {
+	ch := make(chan struct{})
+	var once sync.Once
+	closeOnce := func() { once.Do(func() { close(ch) }) }
+	if err := bus.Subscribe(func(InitialDownloadsComplete) {
+		closeOnce()
+	}); err != nil {
+		closeOnce()
+	}
+	return ch
+}
+
 // --- Inventory events ---
 
 // InventoryLoaded fires once per Storage lifecycle, after the initial scan.
@@ -217,6 +239,17 @@ type InitialStateReady struct {
 	// can ignore it.
 	StateDomains []snapshot.Domain
 }
+
+// InitialDownloadsComplete signals that every file the initial sync set
+// out to fetch — phase 1 (state domains, blocks, meta, salt) and phase 2
+// (caplin) — has been downloaded into the local inventory. Fires at most
+// once per orchestrator lifetime, after InitialStateReady, the first
+// time the orchestrator's `pending` set is empty.
+//
+// Observational only — it gates no orchestrator or execution work; it
+// gates the first chain.v2 advertisement (see
+// docs/plans/20260522-publisher-startup-preflight.md).
+type InitialDownloadsComplete struct{}
 
 // BlockHeadersReady is the primary state transition that signals the
 // EL has opened its frozen block-header (and body) snapshot files —

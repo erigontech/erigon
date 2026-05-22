@@ -31,7 +31,7 @@ that closes those gaps.
 |---|---|---|
 | L1 — Swarm agreement | how does the swarm converge on canonical? | mechanism, not a file |
 | L2 — Canonical chain.toml | what files are in the chain, at what info-hash? | consumer-computed view |
-| L3 — Per-node advertisement | what does THIS node hold and seed? | `chain.v2.<enr-fp>.<seq>.toml` |
+| L3 — Per-node advertisement | what does THIS node hold and seed? | `chain.v2.<enr-fp>.<genID>.toml` |
 
 Layers are strictly independent in code: no path reads more than one layer's
 input and persists a fused artefact. Cross-layer decisions happen in
@@ -121,22 +121,41 @@ pinned `canonical.v0.toml` for each supported chain.
 
 ## Layer 3 — Per-node advertisement
 
-- **Filename**: `chain.v2.<enr-fp>.<seq>.toml`, where `<enr-fp>` is the first
-  16 hex chars (8 bytes) of `sha256(enr-bytes)` — constant-width, not the raw
-  long/noisy ENR. The literal `chain.v2.` prefix and `.toml` suffix mirror the
-  canonical name; `<enr-fp>` is the only addition.
-- **`<seq>` is mandatory and explicit.** Multiple advertisement generations from
-  the *same* node legitimately co-exist on the swarm — a node republishes while
-  peers still seed the prior generation, and the validity-eviction rule keeps an
-  older generation alive while its set stays a subset of inventory. A bare
-  `chain.<enr>.toml` would alias across generations; `<seq>` makes each a
-  distinct torrent, cache entry, and UCAN sidecar.
+- **Filename**: `chain.v2.<enr-fp>.<genID>.toml`. `<enr-fp>` is 16 hex chars
+  (8 bytes) — the first 8 bytes of the node's discv5 ID (`keccak(pubkey)`),
+  stable across ENR-record updates so it identifies the node, not a record
+  version. The literal `chain.v2.` prefix and `.toml` suffix mirror the
+  canonical name; `<enr-fp>` and `<genID>` are the only additions.
+- **`<genID>` is content-addressed, not a counter.** It is the first 8 bytes
+  (16 hex chars) of `sha256(manifest-core-bytes ‖ Authority-UCAN-bytes)`.
+  Content-addressing gives the genID two **per-node** properties: a node's own
+  no-op republish of unchanged content reuses the same `<genID>` (so it dedups
+  rather than minting a junk generation), and the `<genID>` is stable across
+  that node's restart. It does **not** converge across publishers — the
+  advertisement is a Layer-3, per-node artefact and is unique by definition:
+  the filename carries the node's own `<enr-fp>`, and the manifest embeds the
+  node's own Authority UCAN, so two publishers never share a `<genID>` even
+  for byte-identical inventory. Swarm-wide agreement is a Layer-2 property
+  (the consumer-computed canonical view), not a property of any L3
+  advertisement. A monotonic `<seq>` was rejected: it would leak a
+  publisher's republish rate to a passive discv5 scraper. The genID is
+  derived from the manifest *before* its `AuthorityUCANHash` field is stamped
+  — breaking the circular dependency, since `AuthorityUCANHash` names the
+  UCAN torrent which is itself named by the genID.
+- **Multiple generations co-exist.** A node republishes while peers still
+  seed the prior generation, and the validity-eviction rule keeps an older
+  generation alive while its set stays a subset of inventory. Distinct
+  `<genID>`s make each a distinct torrent, cache entry, and UCAN sidecar.
 - **Content**: lists ONLY the files this node holds locally, with the
   info-hashes it seeds. Sparse by construction — no implicit ranges, no merging
   across entries.
-- **Validity rule** (already implemented): a retained generation is valid iff
+- **Validity rule** (implemented): a retained generation is valid iff
   every name it lists is present in the publisher's current inventory. An
-  invalid generation is removed from disk and unseeded.
+  invalid generation is removed from disk and unseeded. A publisher that
+  restarts re-seeds every retained generation it rediscovers on disk
+  (`RollingV2Publisher.ResumeSeeding`) — the validity rule's promise that a
+  peer holding a stale ENR can still fetch the generation it handshook on
+  must survive a process restart.
 - **No canonical-seq in the advertisement name.** The advertisement→canonical
   binding is per-entry by content (`ValidateAdvertisement`), not by version
   number — a name-embedded canonical-seq is a brittle second channel.
@@ -144,20 +163,55 @@ pinned `canonical.v0.toml` for each supported chain.
 The canonical name stays `chain.v2.<canonical-seq>.toml`. The legacy unversioned
 `chain.toml` is the V1 artefact, untouched.
 
+### Canonical manifest serialization
+
+`<genID>` and the manifest's BitTorrent info-hash are derived from the *exact*
+`MarshalV2` byte stream. The genID's per-node properties — no-op-republish
+dedup and restart stability — therefore require that `MarshalV2` is
+canonical: byte-identical for the same logical inventory every time, on the
+same node and across releases. (It does not need to be byte-identical across
+*different* publishers — the L3 advertisement is per-node by design — but a
+deterministic encoder is the simplest way to guarantee the per-node property,
+and it is also what lets any consumer-side serialization of the canonical
+view be reproducible.) This is a normative wire requirement, not an
+implementation convenience:
+
+- **Map keys are emitted in sorted order.** The `[blocks]`, `[meta]`, `[salt]`
+  and `[domains.*]` keys are sorted lexicographically by the TOML encoder.
+- **Slices are emitted in a fixed total order.** `GenerateV2` sorts
+  `[[caplin]]` by name and each domain's `files` by
+  (range-from, range-to, kind, name) — a total order, so no two entries tie.
+- **The encoder is fixed.** A single TOML encoder produces the bytes; swapping
+  it, or dropping any sort above, breaks the per-node guarantee — a node's
+  `<genID>` would change across releases or even runs, defeating
+  no-op-republish dedup and restart stability.
+- **`<genID>` definition.** `<genID> = sha256(core ‖ authority-ucan)[:8]`,
+  where `core` is the `MarshalV2` output of the manifest *before*
+  `AuthorityUCANHash` is stamped, and `authority-ucan` is the Authority UCAN's
+  canonical CBOR (empty when the node publishes without attestation).
+
+The regression test `TestV2SerializationIsCanonical` builds one inventory in
+two opposite insertion orders and pins byte-identical output and an identical
+`<genID>`; it fails loudly if any of the above is lost.
+
 ## Manifest authentication — two UCANs
 
 The interim `.sig` sidecar is replaced entirely. Authentication flows through
 two UCANs at two cadences:
 
-- **Authority UCAN** — `chain.ucan.authority.<enr-fp>.<rev>.bin`. Root authority
-  → operator pubkey; capability `snapshot.publish:<chain>`; long-lived (months);
-  `<rev>` is its own revision. Loaded via
-  `snapshotauth.LoadOrGenerateDelegation`. Its info-hash is carried in the
-  manifest field `AuthorityUCANHash`.
-- **Content UCAN** — `chain.v2.<enr-fp>.<seq>.ucan`. Operator → self; capability
-  `chain.v2:hash:<sha256_of_toml>`; short-lived (per-generation, expires at the
-  next regeneration); `ParentHash` references the Authority UCAN. Discovered by
-  name pattern (no manifest field).
+- **Authority UCAN** — `chain.ucan.<enr-fp>.<genID>.bin` (the
+  `chain.ucan.authority.<enr-fp>.<rev>.bin` content-deduped rename is deferred,
+  Phase 4d — it blocks nothing, since the consumer fetches the Authority UCAN
+  by its `AuthorityUCANHash` info-hash, never by name). Root authority →
+  operator pubkey; capability `snapshot.publish:<chain>`; long-lived (months).
+  Loaded via `snapshotauth.LoadOrGenerateDelegation`. Its info-hash is carried
+  in the manifest field `AuthorityUCANHash`.
+- **Content UCAN** — `chain.v2.<enr-fp>.<genID>.ucan`. Operator → self;
+  capability `chain.v2:hash:<sha256_of_toml>`; short-lived (per-generation,
+  expires at the next regeneration); `ParentHash` references the Authority
+  UCAN. Its torrent info-hash is carried in the peer's ENR `chain-toml` entry
+  (`ContentUCANHash`) — BitTorrent fetch is info-hash-addressed, so the
+  consumer fetches by that hash, not by name.
 
 ### Resolved design questions (from `20260516-two-ucan-shape.md`)
 
@@ -176,8 +230,9 @@ two UCANs at two cadences:
   `VerifyAdvertisement` are deleted — `Delegation.Sign` / `VerifySignature`
   already provide the secp256k1 primitive. A capability constant
   `CapContentHash` (prefix `chain.v2:hash:`) is added.
-- **(e)** `ChainTomlV2.UCANHash` is renamed `AuthorityUCANHash`; the Content
-  UCAN is name-derived, no manifest field.
+- **(e)** `ChainTomlV2.UCANHash` is renamed `AuthorityUCANHash`. The Content
+  UCAN has no manifest field; its torrent info-hash travels in the ENR
+  `chain-toml` entry's `ContentUCANHash` field.
 - **(f)** `TrustConfig` / `trustState` stay; the `gateOnUCAN` flow expands to
   walk both UCANs.
 - **(g) Hard cutover** — `.sig` is removed in the same commit the Content UCAN
@@ -189,7 +244,7 @@ two UCANs at two cadences:
 `RollingV2Publisher` replaces `signer`/`SetSigner` with
 `contentMinter`/`SetContentUCANMinter`. On each `Publish`, after the manifest
 bytes are written, it mints a Content UCAN over those bytes, persists
-`chain.v2.<enr-fp>.<seq>.ucan`, builds the torrent, and seeds it.
+`chain.v2.<enr-fp>.<genID>.ucan`, builds the torrent, and seeds it.
 `DelegationSource` yields the Authority UCAN. All `.sig` paths are deleted.
 `backend.go` wires `SetContentUCANMinter` (same secp256k1 key as discv5/sentry).
 
@@ -197,8 +252,10 @@ bytes are written, it mints a Content UCAN over those bytes, persists
 
 On a received peer manifest, `gateOnUCAN` runs the full chain:
 
-1. Fetch `chain.v2.<enr-fp>.<seq>.toml`.
-2. Fetch the Content UCAN by name-derived info-hash.
+1. Fetch `chain.v2.<enr-fp>.<genID>.toml` by the manifest info-hash in the
+   peer's ENR `chain-toml` entry.
+2. Fetch the Content UCAN by the `ContentUCANHash` info-hash in the same ENR
+   entry.
 3. Verify the Content UCAN's signature against its issuer.
 4. Check the `chain.v2:hash:<H>` capability: `H == sha256(manifest bytes)`.
 5. Check the Content UCAN's `nbf`/`exp` cover now.

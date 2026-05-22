@@ -45,6 +45,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,8 +73,7 @@ const ChainUCANBaseName = "chain.ucan"
 // GenIDLen is the byte length of a generation ID. The ID is derived
 // from the artefact's own content (see genIDFromContent), NOT a
 // counter — replacing a monotonic <seq> so a passive discv5 scraper
-// cannot read a publisher's republish rate from its ENR, while still
-// giving two publishers of byte-identical content the same ID. 8 bytes
+// cannot read a publisher's republish rate from its ENR. 8 bytes
 // renders as 16 lowercase hex chars in filenames.
 const GenIDLen = 8
 
@@ -87,6 +87,10 @@ var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.([0-9a-f
 // sidecar shape paired with each V2 generation.
 var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.([0-9a-f]{16})\.([0-9a-f]{16})\.bin$`)
 
+// chainV2ContentUCANNameRE matches chain.v2.<enr-fp>.<genID>.ucan — the
+// Content UCAN sidecar shape paired with each V2 generation.
+var chainV2ContentUCANNameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.([0-9a-f]{16})\.ucan$`)
+
 // ENRFingerprint formats the 16-hex-char node fingerprint used in
 // per-node advertisement filenames — the first 8 bytes of the node's
 // discv5 ID. The node ID is keccak(pubkey), stable across ENR-record
@@ -98,10 +102,14 @@ func ENRFingerprint(nodeID [32]byte) string {
 
 // genIDFromContent derives a generation ID deterministically from an
 // artefact's own bytes — the first GenIDLen bytes of their SHA-256,
-// lowercase hex. Two publishers of byte-identical content get the same
-// ID, hence the same filename and the same torrent info-hash, so an
-// honest swarm converges on one artefact per distinct manifest; any
-// content change yields a fresh ID.
+// lowercase hex. The ID is a per-node property: a node's own republish
+// of byte-identical content yields the same ID (so a no-op republish
+// dedups) and the ID is stable across a restart. It does NOT converge
+// across publishers — the manifest embeds the node's own Authority UCAN
+// hash and the filename carries the node's <enr-fp>, so each node's L3
+// advertisement is unique by design. Swarm-wide agreement is a property
+// of the canonical chain.toml (a consumer-computed quorum view), never
+// of any per-node advertisement.
 func genIDFromContent(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:GenIDLen])
@@ -152,6 +160,34 @@ func ParseChainUCANFileName(name string) (enrFP, genID string, ok bool) {
 		return "", "", false
 	}
 	return m[1], m[2], true
+}
+
+// ParseChainV2ContentUCANFileName extracts the ENR fingerprint and
+// generation ID from a filename matching chain.v2.<enr-fp>.<genID>.ucan.
+// ok=false for any other shape.
+func ParseChainV2ContentUCANFileName(name string) (enrFP, genID string, ok bool) {
+	m := chainV2ContentUCANNameRE.FindStringSubmatch(name)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
+// generationArtefactGenID returns the genID of a per-generation
+// artefact filename — the chain.v2.<fp>.<genID>.toml manifest, its
+// Content UCAN chain.v2.<fp>.<genID>.ucan, or the Authority UCAN
+// chain.ucan.<fp>.<genID>.bin. ok=false for anything else.
+func generationArtefactGenID(name string) (genID string, ok bool) {
+	if _, genID, ok = ParseChainTomlV2FileName(name); ok {
+		return genID, true
+	}
+	if _, genID, ok = ParseChainV2ContentUCANFileName(name); ok {
+		return genID, true
+	}
+	if _, genID, ok = ParseChainUCANFileName(name); ok {
+		return genID, true
+	}
+	return "", false
 }
 
 // generationEntry caches the genID and the set of snapshot names a
@@ -471,13 +507,14 @@ func (r *RollingV2Publisher) Publish(
 
 	// The generation ID is derived from this generation's content — the
 	// inventory-derived manifest bytes plus the Authority UCAN bytes.
-	// Two publishers of byte-identical inventory and UCAN get the same
-	// genID (hence the same filenames and manifest torrent info-hash),
-	// so an honest swarm converges on one artefact per generation; any
-	// inventory or UCAN change yields a fresh one. It is derived from
-	// the manifest BEFORE its AuthorityUCANHash is stamped, breaking the
-	// circular dependency — AuthorityUCANHash names the UCAN torrent,
-	// which is itself named by this genID.
+	// This makes the genID a per-node property: a no-op republish of
+	// unchanged content reuses the same genID (and dedups), and the ID
+	// is stable across a restart. It is NOT a cross-publisher converger
+	// — each node embeds its own Authority UCAN, so two nodes never
+	// share a genID. It is derived from the manifest BEFORE its
+	// AuthorityUCANHash is stamped, breaking the circular dependency —
+	// AuthorityUCANHash names the UCAN torrent, which is itself named by
+	// this genID.
 	coreBytes, err := MarshalV2(manifest)
 	if err != nil {
 		return metainfo.Hash{}, fmt.Errorf("marshal chain.v2 manifest: %w", err)
@@ -607,11 +644,20 @@ func (r *RollingV2Publisher) Publish(
 	}
 
 	canonical := manifestFileNames(manifest)
-	// A no-op republish (unchanged inventory) produces the same content
-	// genID; don't record a duplicate generation.
-	if n := len(r.history); n == 0 || r.history[n-1].genID != genID {
-		r.history = append(r.history, generationEntry{genID: genID, names: canonical})
+	// Content-addressed genID: republishing identical content yields the
+	// same genID. If this generation is already in history — a no-op
+	// republish, or one a post-restart directory scan re-discovered
+	// (discovery rebuilds history in scan order, not publish order) —
+	// drop the stale entry so the just-published generation lands at the
+	// tail. evictInvalidLocked treats the tail as the canonical
+	// generation, so the freshly published one must be there.
+	for i, gen := range r.history {
+		if gen.genID == genID {
+			r.history = append(r.history[:i], r.history[i+1:]...)
+			break
+		}
 	}
+	r.history = append(r.history, generationEntry{genID: genID, names: canonical})
 	r.evictInvalidLocked(enrFP, canonical)
 
 	return spec.InfoHash, nil
@@ -718,10 +764,65 @@ func (r *RollingV2Publisher) evictGenerationLocked(enrFP, genID string) {
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName+".torrent"))
 }
 
-// Cleanup removes any chain.v2.<genID>.toml + chain.ucan.<genID>.bin
-// file (and their .torrent sidecars) in snapDir whose genID is not in
-// the current history. Useful after a crash mid-publish (file written
-// but the genID never reached history). Idempotent.
+// ResumeSeeding re-registers every retained generation's artefacts —
+// the chain.v2.<fp>.<genID>.toml manifest plus any Content UCAN
+// (.ucan) and Authority UCAN (.bin) sidecars on disk — with the
+// downloader, so a restarted publisher keeps seeding the generations
+// NewRollingV2Publisher recovered from disk.
+//
+// NewRollingV2Publisher's directory scan rebuilds history but does NOT
+// seed, and the downloader's general AddTorrentsFromDisk pass
+// deliberately skips chain.v2.* / chain.ucan.* files (consumers fetch
+// those on demand). Without this call a restarted publisher would stop
+// seeding every retained generation until its next Publish — breaking
+// the validity rule's promise that a peer holding a stale ENR can
+// still fetch the generation it handshook on.
+//
+// No-op when no downloader is wired (tests). Idempotent — re-seeding an
+// already-registered torrent is harmless. Per-artefact errors are
+// joined and returned, never fatal individually, so one missing
+// sidecar can't stop the rest being re-seeded.
+func (r *RollingV2Publisher) ResumeSeeding(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.downloader == nil {
+		return nil
+	}
+
+	retained := make(map[string]struct{}, len(r.history))
+	for _, gen := range r.history {
+		retained[gen.genID] = struct{}{}
+	}
+
+	entries, err := os.ReadDir(r.snapDir)
+	if err != nil {
+		return fmt.Errorf("RollingV2Publisher.ResumeSeeding: %w", err)
+	}
+	var errs []error
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		genID, ok := generationArtefactGenID(e.Name())
+		if !ok {
+			continue
+		}
+		if _, kept := retained[genID]; !kept {
+			continue
+		}
+		if err := r.downloader.AddNewSeedableFile(ctx, e.Name()); err != nil {
+			errs = append(errs, fmt.Errorf("re-seed %s: %w", e.Name(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Cleanup removes any per-generation artefact (chain.v2.<genID>.toml,
+// its Content UCAN .ucan, the Authority UCAN chain.ucan.<genID>.bin,
+// and their .torrent sidecars) in snapDir whose genID is not in the
+// current history. Useful after a crash mid-publish (file written but
+// the genID never reached history). Idempotent.
 //
 // The current generations stay registered in the torrent client; only
 // orphans are removed.
@@ -742,11 +843,7 @@ func (r *RollingV2Publisher) Cleanup() error {
 		if e.IsDir() {
 			continue
 		}
-		var genID string
-		var ok bool
-		if _, genID, ok = ParseChainTomlV2FileName(e.Name()); !ok {
-			_, genID, ok = ParseChainUCANFileName(e.Name())
-		}
+		genID, ok := generationArtefactGenID(e.Name())
 		if !ok {
 			continue
 		}
