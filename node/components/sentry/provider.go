@@ -124,9 +124,9 @@ type Config struct {
 	// config.Snapshot.ChainName. Not used in external-sentry mode.
 	ChainName string
 
-	// NodesDir is the node database directory; the Provider appends
-	// per-protocol subdirectories beneath it (e.g. "eth68", "eth69").
-	// Not used in external-sentry mode.
+	// NodesDir is the node database directory; the Provider appends a
+	// single "eth" subdirectory beneath it for the shared p2p.Server's
+	// enode database. Not used in external-sentry mode.
 	NodesDir string
 
 	// EnableWitProtocol toggles the WIT sideprotocol on the direct
@@ -263,10 +263,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		chainDNSNetwork = spec.DNSNetwork
 	}
 
-	sharedCfg, err := p.buildSharedP2PConfig()
-	if err != nil {
-		return err
-	}
+	sharedCfg := p.buildSharedP2PConfig()
 
 	// Create one GrpcServer per protocol version. Each instance keeps its own
 	// statusData / message streams so the MultiClient can address them by
@@ -302,9 +299,9 @@ func (p *Provider) Initialize(ctx context.Context) error {
 }
 
 // buildSharedP2PConfig returns the p2p.Config used by the single shared
-// p2p.Server. It picks one listener port (honouring AllowedPorts for fallback)
-// and points NodeDatabase at a single unified directory.
-func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
+// p2p.Server. Sets NodeDatabase to a unified subdirectory; the caller's
+// ListenAddr is honoured as-is (binding fails if the port is busy).
+func (p *Provider) buildSharedP2PConfig() p2p.Config {
 	cfg := p.cfg.P2P
 
 	// Single enode database. Previously each protocol Server had its own
@@ -312,46 +309,7 @@ func (p *Provider) buildSharedP2PConfig() (p2p.Config, error) {
 	// per-protocol dirs become inert on upgrade — peer discovery rebuilds
 	// quickly from bootnodes.
 	cfg.NodeDatabase = filepath.Join(p.cfg.NodesDir, "eth")
-
-	listenHost, listenPort, err := splitAddrIntoHostAndPort(cfg.ListenAddr)
-	if err != nil {
-		return cfg, err
-	}
-
-	if len(cfg.AllowedPorts) == 0 {
-		// Caller passed an explicit ListenAddr only — honour it as-is.
-		return cfg, nil
-	}
-
-	// checkPortIsFree dials the target, so unspecified bind addresses (empty,
-	// 0.0.0.0, ::, [::]) would all fail the dial and falsely report the
-	// port as free. Normalize to a concrete loopback target for the probe
-	// only — the returned ListenAddr keeps the original host so the
-	// listener still binds on the configured interface (all interfaces
-	// if it was empty).
-	probeHost := loopbackProbeHost(listenHost)
-
-	picked := false
-	for _, pc := range cfg.AllowedPorts {
-		pcInt := int(pc)
-		if pcInt == 0 {
-			listenPort = 0 // ephemeral; OS picks a port at bind time
-			picked = true
-			break
-		}
-		if !checkPortIsFree(fmt.Sprintf("%s:%d", probeHost, pcInt)) {
-			p.logger.Warn("[p2p] candidate listen port is busy", "port", pcInt)
-			continue
-		}
-		listenPort = pcInt
-		picked = true
-		break
-	}
-	if !picked {
-		return cfg, fmt.Errorf("sentry provider: every entry in --p2p.allowed-ports is busy %v; extend the list or free a port", cfg.AllowedPorts)
-	}
-	cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-	return cfg, nil
+	return cfg
 }
 
 // startSharedP2PServer collects the per-protocol Protocols registered by each
