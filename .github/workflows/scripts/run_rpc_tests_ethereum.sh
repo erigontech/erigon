@@ -51,7 +51,7 @@ DISABLED_TEST_LIST=(
   debug_traceTransaction/test_12.json
   # disable temporray for this branch to make debug single test
   debug_executionWitness/test_01.json
-  debug_executionWitness/test_03.json
+  debug_executionWitness/test_02.json
   debug_executionWitness/test_04.json
   debug_executionWitness/test_05.json
   debug_executionWitness/test_06.json
