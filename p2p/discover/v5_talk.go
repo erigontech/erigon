@@ -103,7 +103,7 @@ func (t *talkSystem) handleRequest(id enode.ID, addr netip.AddrPort, req *v5wire
 	case <-timeout.C:
 		// Couldn't get it in time, drop the request.
 		if time.Since(t.lastLog) > 5*time.Second {
-			log.Warn("Dropping TALKREQ due to overload", "ndrop", t.dropCount)
+			log.Warn("[p2p] Dropping TALKREQ due to overload", "ndrop", t.dropCount)
 			t.lastLog = time.Now()
 			t.dropCount++
 		}

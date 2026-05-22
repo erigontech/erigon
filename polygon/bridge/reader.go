@@ -18,11 +18,7 @@ package bridge
 
 import (
 	"context"
-	"fmt"
 	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -30,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -210,19 +205,7 @@ func (r *RemoteReader) Close() {
 }
 
 func (r *RemoteReader) EnsureVersionCompatibility() bool {
-	versionReply, err := r.client.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
-	if err != nil {
-		r.logger.Error("getting Version", "err", err)
-		return false
-	}
-	if !gointerfaces.EnsureVersion(r.version, versionReply) {
-		r.logger.Error("incompatible interface versions", "client", r.version.String(),
-			"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-		return false
-	}
-	r.logger.Info("interfaces compatible", "client", r.version.String(),
-		"server", fmt.Sprintf("%d.%d.%d", versionReply.Major, versionReply.Minor, versionReply.Patch))
-	return true
+	return gointerfaces.EnsureVersionCompatibility(r.client, r.version, r.logger)
 }
 
 func messageFromData(to accounts.Address, data []byte) *types.Message {
@@ -242,32 +225,4 @@ func messageFromData(to accounts.Address, data []byte) *types.Message {
 	)
 
 	return msg
-}
-
-// NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
-func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract accounts.Address, gasLimit uint64) []*types.Message {
-	msgs := make([]*types.Message, len(stateSyncEvents))
-	for i, event := range stateSyncEvents {
-		msg := types.NewMessage(
-			params.SystemAddress, // from
-			stateReceiverContract,
-			0,          // nonce
-			&u256.Num0, // amount
-			gasLimit,
-			&u256.Num0, // gasPrice
-			nil,        // feeCap
-			nil,        // tip
-			event,
-			nil,   // accessList
-			false, // checkNonce
-			false, // checkTransaction
-			false, // checkGas
-			true,  // isFree
-			nil,   // maxFeePerBlobGas
-		)
-
-		msgs[i] = msg
-	}
-
-	return msgs
 }

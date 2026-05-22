@@ -104,16 +104,16 @@ func getUint256FromField(rawTx map[string]any, field string) *uint256.Int {
 // buildDynamicFeeFields sets the common dynamic fee fields from rawTx.
 func buildDynamicFeeFields(tx *types.DynamicFeeTransaction, rawTx map[string]any) {
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
-		tx.ChainID = chainID
+		tx.ChainID = *chainID
 	}
 	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
 	}
 	if tipCap := getUint256FromField(rawTx, "maxPriorityFeePerGas"); tipCap != nil {
-		tx.TipCap = tipCap
+		tx.TipCap = *tipCap
 	}
 	if feeCap := getUint256FromField(rawTx, "maxFeePerGas"); feeCap != nil {
-		tx.FeeCap = feeCap
+		tx.FeeCap = *feeCap
 	}
 }
 
@@ -138,7 +138,6 @@ func parseCommonTx(rawTx map[string]any) (*types.CommonTx, error) {
 		commonTx.To = &addr
 	}
 	if valueStr, ok := rawTx["value"].(string); ok {
-		commonTx.Value = new(uint256.Int)
 		commonTx.Value.SetFromBig(convertHexToBigInt(valueStr))
 	}
 	if inputStr, ok := rawTx["input"].(string); ok && len(inputStr) >= 2 && inputStr[:2] == "0x" {
@@ -189,6 +188,14 @@ func decodeBlobVersionedHashes(rawVersionedHashes []string) []common.Hash {
 	return hashes
 }
 
+// derefUint256 returns *v if v is non-nil, otherwise a zero uint256.Int.
+func derefUint256(v *uint256.Int) uint256.Int {
+	if v != nil {
+		return *v
+	}
+	return uint256.Int{}
+}
+
 // --- Transaction builders ---
 
 // makeLegacyTx builds a legacy transaction.
@@ -204,7 +211,7 @@ func makeLegacyTx(commonTx *types.CommonTx, rawTx map[string]any) types.Transact
 			R:        commonTx.R,
 			S:        commonTx.S,
 		},
-		GasPrice: getUint256FromField(rawTx, "gasPrice"),
+		GasPrice: derefUint256(getUint256FromField(rawTx, "gasPrice")),
 	}
 	return tx
 }
@@ -223,11 +230,11 @@ func makeAccessListTx(commonTx *types.CommonTx, rawTx map[string]any) types.Tran
 				R:        commonTx.R,
 				S:        commonTx.S,
 			},
-			GasPrice: getUint256FromField(rawTx, "gasPrice"),
+			GasPrice: derefUint256(getUint256FromField(rawTx, "gasPrice")),
 		},
 	}
 	if chainID := getUint256FromField(rawTx, "chainId"); chainID != nil {
-		tx.ChainID = chainID
+		tx.ChainID = *chainID
 	}
 	if accessListRaw, ok := rawTx["accessList"].([]any); ok {
 		tx.AccessList = decodeAccessList(accessListRaw)
@@ -266,7 +273,7 @@ func makeEip4844Tx(commonTx *types.CommonTx, rawTx map[string]any) types.Transac
 		}},
 	}
 	buildDynamicFeeFields(&blobTx.DynamicFeeTransaction, rawTx)
-	blobTx.MaxFeePerBlobGas = getUint256FromField(rawTx, "maxFeePerBlobGas")
+	blobTx.MaxFeePerBlobGas = derefUint256(getUint256FromField(rawTx, "maxFeePerBlobGas"))
 	// The raw JSON is expected to contain a slice of strings.
 	if rawHashes, ok := rawTx["blobVersionedHashes"].([]any); ok {
 		var hashStrs []string

@@ -179,10 +179,10 @@ func (h *Header) EncodingSize() int {
 func (h *Header) EncodeRLP(w io.Writer) error {
 	encodingSize := h.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// Prefix
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -239,13 +239,13 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeUint256(h.Number, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.GasLimit, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasUsed, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.GasUsed, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(h.Time, w, b[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
@@ -253,7 +253,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if len(h.AuRaSeal) > 0 {
-		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(h.AuRaStep, w, b[:]); err != nil {
 			return err
 		}
 		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
@@ -293,12 +293,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BlobGasUsed != nil {
-		if err := rlp.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.BlobGasUsed, w, b[:]); err != nil {
 			return err
 		}
 	}
 	if h.ExcessBlobGas != nil {
-		if err := rlp.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.ExcessBlobGas, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -334,20 +334,37 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.SlotNumber != nil {
-		if err := rlp.EncodeInt(*h.SlotNumber, w, b[:]); err != nil {
+		if err := rlp.EncodeU64(*h.SlotNumber, w, b[:]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// DecodeHeader decodes one RLP-encoded header from b into dst, calling
+// dst.DecodeRLP directly. Returns rlp.ErrMoreThanOneValue if b has
+// trailing data after the header.
+func DecodeHeader(b []byte, dst *Header) error {
+	stream := rlp.NewBytesStream(b)
+	defer rlp.PutStream(stream)
+	if err := dst.DecodeRLP(stream); err != nil {
+		return err
+	}
+	if stream.Remaining() != 0 {
+		return rlp.ErrMoreThanOneValue
+	}
+	return nil
+}
+
 func (h *Header) DecodeRLP(s *rlp.Stream) error {
+	// Clear cached hash so a reused *Header doesn't return a stale value.
+	h.hash.Store(nil)
+
 	_, err := s.List()
 	if err != nil {
 		return err
 		// return fmt.Errorf("open header struct: %w", err)
 	}
-	var b []byte
 	if err = s.ReadBytes(h.ParentHash[:]); err != nil {
 		return fmt.Errorf("read ParentHash: %w", err)
 	}
@@ -375,16 +392,16 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&h.Number); err != nil {
 		return fmt.Errorf("read Number: %w", err)
 	}
-	if h.GasLimit, err = s.Uint(); err != nil {
+	if h.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if h.GasUsed, err = s.Uint(); err != nil {
+	if h.GasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasUsed: %w", err)
 	}
-	if h.Time, err = s.Uint(); err != nil {
+	if h.Time, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Time: %w", err)
 	}
-	if h.Extra, err = s.Bytes(); err != nil {
+	if h.Extra, err = s.AppendBytes(h.Extra[:0]); err != nil {
 		return fmt.Errorf("read Extra: %w", err)
 	}
 
@@ -393,10 +410,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
-		if h.AuRaStep, err = s.Uint(); err != nil {
+		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
-		if h.AuRaSeal, err = s.Bytes(); err != nil {
+		if h.AuRaSeal, err = s.AppendBytes(h.AuRaSeal[:0]); err != nil {
 			return fmt.Errorf("read AuRaSeal: %w", err)
 		}
 	} else {
@@ -408,125 +425,97 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 	}
 
-	var baseFee uint256.Int
-	if err = s.ReadUint256(&baseFee); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.BaseFee = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no BaseFee): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.BaseFee = nil
+		return s.ListEnd()
+	}
+	if h.BaseFee == nil {
+		h.BaseFee = new(uint256.Int)
+	}
+	if err = s.ReadUint256(h.BaseFee); err != nil {
 		return fmt.Errorf("read BaseFee: %w", err)
 	}
-	h.BaseFee = &baseFee
 
 	// WithdrawalsHash
-	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.WithdrawalsHash = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no WithdrawalsHash): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.WithdrawalsHash = nil
+		return s.ListEnd()
+	}
+	if h.WithdrawalsHash == nil {
+		h.WithdrawalsHash = new(common.Hash)
+	}
+	if err = s.ReadBytes(h.WithdrawalsHash[:]); err != nil {
 		return fmt.Errorf("read WithdrawalsHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for WithdrawalsHash: %d", len(b))
-	}
-	h.WithdrawalsHash = new(common.Hash)
-	h.WithdrawalsHash.SetBytes(b)
 
-	var blobGasUsed uint64
-	if blobGasUsed, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.BlobGasUsed = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no BlobGasUsed): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.BlobGasUsed = nil
+		return s.ListEnd()
+	}
+	if h.BlobGasUsed == nil {
+		h.BlobGasUsed = new(uint64)
+	}
+	if *h.BlobGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
-	h.BlobGasUsed = &blobGasUsed
 
-	var excessBlobGas uint64
-	if excessBlobGas, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.ExcessBlobGas = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no ExcessBlobGas): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.ExcessBlobGas = nil
+		return s.ListEnd()
+	}
+	if h.ExcessBlobGas == nil {
+		h.ExcessBlobGas = new(uint64)
+	}
+	if *h.ExcessBlobGas, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
-	h.ExcessBlobGas = &excessBlobGas
 
 	// ParentBeaconBlockRoot
-	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.ParentBeaconBlockRoot = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no ParentBeaconBlockRoot): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.ParentBeaconBlockRoot = nil
+		return s.ListEnd()
+	}
+	if h.ParentBeaconBlockRoot == nil {
+		h.ParentBeaconBlockRoot = new(common.Hash)
+	}
+	if err = s.ReadBytes(h.ParentBeaconBlockRoot[:]); err != nil {
 		return fmt.Errorf("read ParentBeaconBlockRoot: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for ParentBeaconBlockRoot: %d", len(b))
-	}
-	h.ParentBeaconBlockRoot = new(common.Hash)
-	h.ParentBeaconBlockRoot.SetBytes(b)
 
 	// RequestsHash
-	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.RequestsHash = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no RequestsHash): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.RequestsHash = nil
+		return s.ListEnd()
+	}
+	if h.RequestsHash == nil {
+		h.RequestsHash = new(common.Hash)
+	}
+	if err = s.ReadBytes(h.RequestsHash[:]); err != nil {
 		return fmt.Errorf("read RequestsHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for RequestsHash: %d", len(b))
-	}
-	h.RequestsHash = new(common.Hash)
-	h.RequestsHash.SetBytes(b)
 
 	// BlockAccessListHash
-	if b, err = s.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.BlockAccessListHash = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no BlockAccessListHash): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.BlockAccessListHash = nil
+		return s.ListEnd()
+	}
+	if h.BlockAccessListHash == nil {
+		h.BlockAccessListHash = new(common.Hash)
+	}
+	if err = s.ReadBytes(h.BlockAccessListHash[:]); err != nil {
 		return fmt.Errorf("read BlockAccessListHash: %w", err)
 	}
-	if len(b) != 32 {
-		return fmt.Errorf("wrong size for BlockAccessListHash: %d", len(b))
-	}
-	h.BlockAccessListHash = new(common.Hash)
-	h.BlockAccessListHash.SetBytes(b)
 
-	var slotNumber uint64
-	if slotNumber, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.SlotNumber = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no SlotNumber): %w", err)
-			}
-			return nil
-		}
+	if !s.MoreDataInList() {
+		h.SlotNumber = nil
+		return s.ListEnd()
+	}
+	if h.SlotNumber == nil {
+		h.SlotNumber = new(uint64)
+	}
+	if *h.SlotNumber, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
-	h.SlotNumber = &slotNumber
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
@@ -548,24 +537,29 @@ type headerMarshaling struct {
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
-// Hash returns the block hash of the header, which is simply the keccak256 hash of its
-// RLP encoding.
-func (h *Header) Hash() (hash common.Hash) {
-	if h.mutable {
-		return rlpHash(h)
+// Hash returns the keccak256 hash of the header's RLP encoding.
+//
+// The cacheEntry variable is intentionally scoped to the miss branch:
+// taking &cacheEntry there forces only cacheEntry to escape. An earlier
+// formulation with a single named return had `h.hash.Store(&hash)` force
+// the return value to escape on every path including the cache hit.
+func (h *Header) Hash() common.Hash {
+	if !h.mutable {
+		if cached := h.hash.Load(); cached != nil {
+			return *cached
+		}
+		computed := RlpHash(h)
+		cacheEntry := computed
+		h.hash.Store(&cacheEntry)
+		return computed
 	}
-	if hash := h.hash.Load(); hash != nil {
-		return *hash
-	}
-	hash = rlpHash(h)
-	h.hash.Store(&hash)
-	return hash
+	return RlpHash(h)
 }
 
 // CalcHash calculates the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) CalcHash() (hash common.Hash) {
-	hash = rlpHash(h)
+	hash = RlpHash(h)
 	if hashLoaded := h.hash.Load(); hashLoaded != nil {
 		if hashLoaded.Cmp(hash) == 0 {
 			return hash
@@ -743,6 +737,9 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
+	// BlockAccessList holds the RLP-encoded block access list for Amsterdam+
+	// blocks.  Nil for pre-Amsterdam blocks.
+	BlockAccessList []byte
 }
 
 func (r RawBlock) EncodingSize() int {
@@ -850,14 +847,14 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := rlp.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
 	for _, txn := range rb.Transactions {
@@ -933,11 +930,11 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -1018,10 +1015,10 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -1222,7 +1219,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(rlp.ListSize(size))
+	bb.size.Store(uint64(rlp.ListLen(int(size))))
 
 	// decode header
 	var h Header
@@ -1278,10 +1275,10 @@ func (bb *Block) EncodingSize() int {
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Header
@@ -1445,7 +1442,7 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	if len(uncles) == 0 {
 		return empty.UncleHash
 	}
-	return rlpHash(uncles)
+	return RlpHash(uncles)
 }
 
 func CopyTxs(in Transactions) Transactions {
@@ -1558,7 +1555,7 @@ func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 }
 
 func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
-	if err := rlp.EncodeStructSizePrefix(_len, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(_len, w, b); err != nil {
 		return err
 	}
 	for _, item := range arr {

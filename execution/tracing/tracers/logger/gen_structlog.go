@@ -30,7 +30,7 @@ func (s StructLog) MarshalJSON() ([]byte, error) {
 		RefundCounter uint64                      `json:"refund"`
 		Err           error                       `json:"-"`
 		OpName        string                      `json:"opName"`
-		ErrorString   string                      `json:"error"`
+		ErrorString   string                      `json:"error,omitempty"`
 	}
 	var enc StructLog
 	enc.Pc = s.Pc

@@ -22,11 +22,11 @@ import (
 	"path/filepath"
 	"reflect"
 
-	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/common"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -62,7 +62,7 @@ func (br *BlockRetire) retireBorBlocks(
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.chainConfig)
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.snCfg)
 		if ok {
 			blocksRetired = true
 
@@ -86,8 +86,8 @@ func (br *BlockRetire) retireBorBlocks(
 			rangeExtractor := snapshots.RangeExtractor(snap)
 			indexBuilder := snapshots.IndexBuilder(snap)
 
-			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
-				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
+			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), br.snCfg) {
+				end := chooseSegmentEnd(i, blockTo, snap.Enum(), br.snCfg)
 				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger, br.blockReader); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}

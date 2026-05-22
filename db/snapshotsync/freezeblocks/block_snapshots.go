@@ -29,7 +29,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/downloader"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -128,14 +128,8 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 	return res, missingSnapshots, nil
 }
 
-func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) uint64 {
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-	snapCfg, _ := snapcfg.KnownCfg(chainName)
-	blocksPerFile := snapcfg.MergeLimitFromCfg(snapCfg, snapType, from)
+func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
@@ -166,6 +160,8 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 	config      *ethconfig.Config
 
+	snCfg *snapcfg.Cfg
+
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
@@ -185,6 +181,11 @@ func NewBlockRetire(
 	snBuildAllowed *semaphore.Weighted,
 	logger log.Logger,
 ) *BlockRetire {
+	var chainName string
+	if chainConfig != nil {
+		chainName = chainConfig.ChainName
+	}
+	snCfg := snapcfg.KnownCfgOrDevnet(chainName)
 	r := &BlockRetire{
 		tmpDir:                dirs.Tmp,
 		dirs:                  dirs,
@@ -194,6 +195,7 @@ func NewBlockRetire(
 		snBuildAllowed:        snBuildAllowed,
 		chainConfig:           chainConfig,
 		config:                config,
+		snCfg:                 snCfg,
 		notifier:              notifier,
 		logger:                logger,
 		heimdallStore:         heimdallStore,
@@ -206,6 +208,18 @@ func NewBlockRetire(
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
+
+// SetCommitGate wraps the retirement's chain DB reads with the given gate so
+// each db.View acquires RLock, serializing against a writer (Aggregator
+// commit+prune path) that briefly holds Lock during MDBX commit. Prevents a
+// retirement RO tx from pinning the freelist and blocking page reclamation.
+// Safe to call with nil — no-op. Must be called before retirement starts.
+func (br *BlockRetire) SetCommitGate(gate *sync.RWMutex) {
+	if gate == nil {
+		return
+	}
+	br.db = kv.NewGatedRoDB(br.db, gate)
+}
 
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
@@ -223,13 +237,13 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 }
 
-func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
+func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
+	var keep uint64 = dbg.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, chainConfig)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, snCfg)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -285,7 +299,7 @@ func (br *BlockRetire) retireBlocks(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.snCfg)
 
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
@@ -296,7 +310,7 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -562,10 +576,10 @@ func (br *BlockRetire) DisableReadAhead() {
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}
@@ -1031,13 +1045,15 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	view := s.View()
 	defer view.Close()
 
+	// header is hoisted: walker must not retain &header beyond its callback.
+	var header types.Header
+
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func() error {
 			g := sn.Src().MakeGetter()
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
-				var header types.Header
-				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
+				if err := types.DecodeHeader(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {

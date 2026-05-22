@@ -35,8 +35,7 @@ func BenchmarkKeyToHexNibbleHash(b *testing.B) {
 	for i := range key {
 		key[i] = byte(i)
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		KeyToHexNibbleHash(key)
 	}
 }

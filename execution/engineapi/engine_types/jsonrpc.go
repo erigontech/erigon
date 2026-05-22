@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -32,25 +33,26 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash      common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient    common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot       common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot    common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom       hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao      common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber     hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit        hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas   *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
+	ParentHash      common.Hash           `json:"parentHash"    gencodec:"required"`
+	FeeRecipient    common.Address        `json:"feeRecipient"  gencodec:"required"`
+	StateRoot       common.Hash           `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot    common.Hash           `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom       hexutil.Bytes         `json:"logsBloom"     gencodec:"required"`
+	PrevRandao      common.Hash           `json:"prevRandao"    gencodec:"required"`
+	BlockNumber     hexutil.Uint64        `json:"blockNumber"   gencodec:"required"`
+	GasLimit        hexutil.Uint64        `json:"gasLimit"      gencodec:"required"`
+	GasUsed         hexutil.Uint64        `json:"gasUsed"       gencodec:"required"`
+	Timestamp       hexutil.Uint64        `json:"timestamp"     gencodec:"required"`
+	ExtraData       hexutil.Bytes         `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash       common.Hash           `json:"blockHash"     gencodec:"required"`
+	Transactions    []hexutil.Bytes       `json:"transactions"  gencodec:"required"`
+	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64       `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64       `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64       `json:"slotNumber,omitempty"`
+	BlockAccessList hexutil.Bytes         `json:"blockAccessList,omitempty"`
+	SSZVersion      clparams.StateVersion `json:"-"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -62,12 +64,13 @@ type ForkChoiceState struct {
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
-	Timestamp             hexutil.Uint64      `json:"timestamp"             gencodec:"required"`
-	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
-	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
-	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
-	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
-	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
+	Timestamp             hexutil.Uint64        `json:"timestamp"             gencodec:"required"`
+	PrevRandao            common.Hash           `json:"prevRandao"            gencodec:"required"`
+	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient" gencodec:"required"`
+	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
+	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
+	SSZVersion            clparams.StateVersion `json:"-"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -81,9 +84,45 @@ type TransitionConfiguration struct {
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes `json:"commitments" gencodec:"required"`
-	Proofs      []hexutil.Bytes `json:"proofs"      gencodec:"required"`
-	Blobs       []hexutil.Bytes `json:"blobs"       gencodec:"required"`
+	Commitments []hexutil.Bytes       `json:"commitments" gencodec:"required"`
+	Proofs      []hexutil.Bytes       `json:"proofs"      gencodec:"required"`
+	Blobs       []hexutil.Bytes       `json:"blobs"       gencodec:"required"`
+	SSZVersion  clparams.StateVersion `json:"-"`
+}
+
+// BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,
+// commitments, and proofs from blob transactions in the given list.
+func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
+	bundle := &BlobsBundle{
+		Commitments: make([]hexutil.Bytes, 0),
+		Proofs:      make([]hexutil.Bytes, 0),
+		Blobs:       make([]hexutil.Bytes, 0),
+	}
+	for i, txn := range txs {
+		if txn.Type() != types.BlobTxType {
+			continue
+		}
+		blobTx, ok := txn.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected BlobTxWrapper for tx %d, got %T", i, txn)
+		}
+		for _, c := range blobTx.Commitments {
+			cp := make([]byte, len(c))
+			copy(cp, c[:])
+			bundle.Commitments = append(bundle.Commitments, cp)
+		}
+		for _, p := range blobTx.Proofs {
+			pp := make([]byte, len(p))
+			copy(pp, p[:])
+			bundle.Proofs = append(bundle.Proofs, pp)
+		}
+		for _, b := range blobTx.Blobs {
+			bp := make([]byte, len(b))
+			copy(bp, b[:])
+			bundle.Blobs = append(bundle.Blobs, bp)
+		}
+	}
+	return bundle, nil
 }
 
 // BlobAndProofV1 holds one item for engine_getBlobsV1
@@ -106,7 +145,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList,omitempty"`
 }
 
 type PayloadStatus struct {

@@ -22,14 +22,15 @@ package js
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -52,7 +53,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	var (
 		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, state.New(state.NewNoopReader()), chaincfg, vm.Config{Tracer: tracer.Hooks})
 		gasLimit uint64 = 31000
-		startGas uint64 = 10000
+		startGas        = mdgas.MdGas{Regular: 10000}
 		value           = uint256.Int{}
 		contract        = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, value)
 	)
@@ -62,11 +63,11 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	}
 
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, gasLimit, nil, nil), contract.Caller())
-	tracer.OnEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas, value, contractCode)
-	ret, endGas, err := env.Run(contract, startGas, []byte{}, false)
-	tracer.OnExit(0, ret, startGas-endGas, err, true)
+	tracer.OnEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas.Total(), value, contractCode)
+	ret, endGas, _, err := env.Run(contract, startGas, []byte{}, false)
+	tracer.OnExit(0, ret, startGas.Total()-endGas.Total(), err, true)
 	// Rest gas assumes no refund
-	tracer.OnTxEnd(&types.Receipt{GasUsed: gasLimit - endGas}, nil)
+	tracer.OnTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +81,7 @@ func TestTracer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ret, err := runTrace(tracer, testCtx(), chain.TestChainConfig, contract)
+		ret, err := runTrace(tracer, testCtx(), chain.AllProtocolChanges, contract)
 		if err != nil {
 			return nil, err.Error() // Stringify to allow comparison without nil checks
 		}
@@ -165,7 +166,7 @@ func TestHalt(t *testing.T) {
 		time.Sleep(1 * time.Second)
 		tracer.Stop(timeout)
 	}()
-	if _, err = runTrace(tracer, testCtx(), chain.TestChainConfig, nil); !strings.Contains(err.Error(), "stahp") {
+	if _, err = runTrace(tracer, testCtx(), chain.AllProtocolChanges, nil); !strings.Contains(err.Error(), "stahp") {
 		t.Errorf("Expected timeout error, got %v", err)
 	}
 }
@@ -176,7 +177,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+	env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}, state.New(state.NewNoopReader()), chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 	scope := &vm.CallContext{
 		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
@@ -201,7 +202,7 @@ func TestNoStepExec(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(100)}, state.New(state.NewNoopReader()), chain.TestChainConfig, vm.Config{Tracer: tracer.Hooks})
+		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(100)}, state.New(state.NewNoopReader()), chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 		tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
 		tracer.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, 1000, uint256.Int{}, []byte{})
 		tracer.OnExit(0, nil, 0, nil, false)
@@ -227,10 +228,10 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
-	chaincfg.ByzantiumBlock = big.NewInt(100)
-	chaincfg.IstanbulBlock = big.NewInt(200)
-	chaincfg.BerlinBlock = big.NewInt(300)
+	chaincfg := &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), DAOForkBlock: nil, TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), ByzantiumBlock: common.NewUint64(100), ConstantinopleBlock: common.NewUint64(0), PetersburgBlock: common.NewUint64(0), IstanbulBlock: common.NewUint64(200), MuirGlacierBlock: common.NewUint64(0), BerlinBlock: common.NewUint64(300), LondonBlock: common.NewUint64(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig)}
+	chaincfg.ByzantiumBlock = common.NewUint64(100)
+	chaincfg.IstanbulBlock = common.NewUint64(200)
+	chaincfg.BerlinBlock = common.NewUint64(300)
 	txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(100000)}
 	tracer, err := newJsTracer("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", nil, nil)
 	if err != nil {

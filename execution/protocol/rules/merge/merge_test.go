@@ -17,9 +17,9 @@
 package merge
 
 import (
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
@@ -64,7 +64,7 @@ func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
+func (r readerMock) GetTd(common.Hash, uint64) *uint256.Int {
 	return nil
 }
 
@@ -122,7 +122,7 @@ func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	chainConfig := chainspec.Mainnet.Config
 	header := &types.Header{ // fake PoS header *after* Cancun fork
 		Difficulty: *ProofOfStakeDifficulty,
-		Time:       chainConfig.CancunTime.Uint64() + 1,
+		Time:       *chainConfig.CancunTime + 1,
 	}
 	logger := log.New()
 	chainReader := consensuschain.NewReader(chainConfig, nil, nil, logger) // tx and blockReader don't care

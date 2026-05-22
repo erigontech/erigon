@@ -29,10 +29,10 @@ type handle func(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName strin
 // all possible types that this generator can handle for the time being.
 // to add a new type add a string representation of type here and write the handle function for it in the `handlers.go`
 var handlers = map[string]handle{
+	"bool":                boolHandle,
+	"*bool":               boolPtrHandle,
 	"uint64":              uintHandle,
 	"*uint64":             uintPtrHandle,
-	"big.Int":             bigIntHandle,
-	"*big.Int":            bigIntPtrHandle,
 	"uint256.Int":         uint256Handle,
 	"*uint256.Int":        uint256PtrHandle,
 	"types.BlockNonce":    blockNonceHandle,
@@ -50,7 +50,7 @@ var handlers = map[string]handle{
 	"[]*types.BlockNonce": blockNoncePtrSliceHandle,
 	"[]common.Address":    addressSliceHandle,
 	"[]*common.Address":   addressPtrSliceHandle,
-	"[]common.Hash":       hashSliceHandle,
+	"[]common.Hash":       hashSliceHandleOptimized,
 	"[]*common.Hash":      hashPtrSliceHandle,
 	"[n]byte":             byteArrayHandle,
 	"*[n]byte":            byteArrayPtrHandle,
@@ -76,9 +76,13 @@ func matchTypeToString(fieldType types.Type, in string) string {
 // matches string representation of a type to a corresponding function
 func matchStrTypeToFunc(strType string) handle {
 	switch strType {
-	case "int16", "int32", "int", "int64", "uint16", "uint32", "uint", "uint64":
+	case "bool":
+		return handlers["bool"]
+	case "*bool":
+		return handlers["*bool"]
+	case "int8", "int16", "int32", "int", "int64", "uint8", "uint16", "uint32", "uint", "uint64":
 		return handlers["uint64"]
-	case "*int16", "*int32", "*int", "*int64", "*uint16", "*uint32", "*uint", "*uint64":
+	case "*int8", "*int16", "*int32", "*int", "*int64", "*uint8", "*uint16", "*uint32", "*uint", "*uint64":
 		return handlers["*uint64"]
 	default:
 		if fn, ok := handlers[strType]; ok {

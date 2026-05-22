@@ -88,6 +88,9 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH68][eth.GetBlockBodiesMsg],
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
+		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
+		// eth/71 (EIP-8159) BAL exchange
+		eth.ToProto[direct.ETH71][eth.GetBlockAccessListsMsg],
 		wit.ToProto[direct.WIT0][wit.GetWitnessMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
@@ -125,6 +128,8 @@ func (cs *MultiClient) RecvMessageLoop(
 		wit.ToProto[direct.WIT0][wit.NewWitnessMsg],
 		wit.ToProto[direct.WIT0][wit.WitnessMsg],
 		eth.ToProto[direct.ETH69][eth.BlockRangeUpdateMsg],
+		// eth/71 (EIP-8159) BAL responses to outbound GetBlockAccessLists requests
+		eth.ToProto[direct.ETH71][eth.BlockAccessListsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
@@ -214,9 +219,18 @@ type MultiClient struct {
 	logger                           log.Logger
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
+
+	// balFetcher routes eth/71 (EIP-8159) BlockAccessLists responses to the
+	// goroutine that issued the corresponding GetBlockAccessLists request.
+	// Owned by MultiClient so it's shared across all sentries.
+	balFetcher *BALFetcher
 }
 
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
+
+// DefaultBlockBufferSize is the default block buffer depth passed to
+// NewMultiClient by both production and integration tooling.
+const DefaultBlockBufferSize = 128
 
 func NewMultiClient(
 	dirs datadir.Dirs,
@@ -290,6 +304,7 @@ func NewMultiClient(
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
 		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
+		balFetcher:                        NewBALFetcher(),
 	}
 
 	return cs, nil
@@ -358,7 +373,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *sentryproto.Inbou
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
-	if _, err := rlpStream.Uint(); err != nil { // Now stream is at the requestID field
+	if _, err := rlpStream.Uint64(); err != nil { // Now stream is at the requestID field
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Now stream is at the BlockHeadersPacket, which is list of headers
@@ -595,6 +610,101 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	return nil
 }
 
+// blockAccessLists71 handles an inbound eth/71 BlockAccessLists response
+// (EIP-8159) by decoding it and delivering to the waiting fetcher via
+// request id. Unknown / late / peer-mismatch arrivals are silently dropped —
+// that's not a bad-peer signal; legitimate races exist (e.g. timeouts).
+// Payload-hash validation lives in BALFetcher.FetchBlockAccessLists; peers
+// that return garbage are penalised there.
+func (cs *MultiClient) blockAccessLists71(_ context.Context, inreq *sentryproto.InboundMessage, _ sentryproto.SentryClient) error {
+	if cs.balFetcher == nil {
+		// MultiClient was constructed without a BAL fetcher (e.g. unit-test
+		// builds that build &MultiClient{} directly). Drop the message.
+		return nil
+	}
+	var packet eth.BlockAccessListsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &packet); err != nil {
+		return fmt.Errorf("decoding blockAccessLists71: %w, data: %x", err, inreq.Data)
+	}
+	peerID := sentry.ConvertH512ToPeerID(inreq.PeerId)
+	cs.balFetcher.Deliver(peerID, &packet)
+	return nil
+}
+
+// FetchBlockAccessLists issues a one-shot GetBlockAccessLists (eth/71,
+// EIP-8159) request to peerID via the sentry at sentryIndex, returning the
+// validated BALs aligned with blockHashes. expectedHashes must match
+// blockHashes in length and carry the BlockAccessListHash from each block's
+// header. See BALFetcher for validation and bad-peer semantics.
+//
+// sentryIndex MUST be the sentry where peerID is actually connected. In
+// multi-sentry deployments, GrpcServer.SendMessageById currently has no
+// peer-to-sentry routing (sentry_grpc_server.go: "TODO: enable after support
+// peer to sentry mapping") and silently returns an empty Peers reply with
+// nil error when the peer isn't local — so picking a random sentry would
+// produce defaultFetchTimeout-bounded silent failures roughly (N-1)/N of
+// the time on N sentries. Use BALDownloader.pickEth71Peer to obtain a
+// matched (peer, sentryIndex) pair.
+//
+// Returns an error if sentryIndex is out of range or that sentry is not
+// ready. Responses come back through the normal inbound-message path and
+// are delivered by blockAccessLists71.
+func (cs *MultiClient) FetchBlockAccessLists(
+	ctx context.Context,
+	sentryIndex int,
+	peerID [64]byte,
+	blockHashes []common.Hash,
+	expectedHashes []common.Hash,
+) ([]rlp.RawValue, error) {
+	if sentryIndex < 0 || sentryIndex >= len(cs.sentries) {
+		return nil, fmt.Errorf("bal: sentry index %d out of range [0,%d)", sentryIndex, len(cs.sentries))
+	}
+	sc := cs.sentries[sentryIndex]
+	if ready, ok := sc.(interface{ Ready() bool }); ok && !ready.Ready() {
+		return nil, fmt.Errorf("bal: sentry %d not ready", sentryIndex)
+	}
+	return cs.balFetcher.FetchBlockAccessLists(ctx, sc, peerID, blockHashes, expectedHashes)
+}
+
+// getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
+// (EIP-8159) by looking up stored BALs from rawdb and replying with a
+// BlockAccessLists response positionally aligned to the request.
+func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
+	var query eth.GetBlockAccessListsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
+	}
+	tx, err := cs.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	response := eth.AnswerGetBlockAccessListsQuery(tx, query.GetBlockAccessListsPacket, cs.blockReader)
+	tx.Rollback()
+	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
+		RequestId:              query.RequestId,
+		BlockAccessListsPacket: response,
+	})
+	if err != nil {
+		return fmt.Errorf("encode BlockAccessLists response: %w", err)
+	}
+	outreq := sentryproto.SendMessageByIdRequest{
+		PeerId: inreq.PeerId,
+		Data: &sentryproto.OutboundMessageData{
+			Id:   sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
+			Data: b,
+		},
+	}
+	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
+	if err != nil {
+		if libsentry.IsPeerNotFoundErr(err) {
+			return nil
+		}
+		return fmt.Errorf("send BlockAccessLists response: %w", err)
+	}
+	return nil
+}
+
 func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
@@ -633,25 +743,73 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 }
 
 func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	return cs.getReceiptsInner(ctx, inreq, sentryClient, false)
-}
-
-func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	return cs.getReceiptsInner(ctx, inreq, sentryClient, true)
-}
-
-func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, isEth69 bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
-	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, query.GetReceiptsPacket, isEth69)
+	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
+		id:         query.RequestId,
+		query:      query.GetReceiptsPacket,
+		ethVersion: direct.ETH68,
+	})
+}
+
+func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+	var query eth.GetReceiptsPacket66
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getReceipts69: %w, data: %x", err, inreq.Data)
+	}
+	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
+		id:         query.RequestId,
+		query:      query.GetReceiptsPacket,
+		ethVersion: direct.ETH69,
+	})
+}
+
+func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+	var query eth.GetReceiptsPacket70
+	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
+		return fmt.Errorf("decoding getReceipts70: %w, data: %x", err, inreq.Data)
+	}
+	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
+		id:                     query.RequestId,
+		query:                  query.GetReceiptsPacket,
+		ethVersion:             direct.ETH70,
+		firstBlockReceiptIndex: query.FirstBlockReceiptIndex,
+	})
+}
+
+// requestParams groups the per-request parameters for getReceiptsInner.
+type requestParams struct {
+	id                     uint64
+	query                  eth.GetReceiptsPacket
+	ethVersion             uint
+	firstBlockReceiptIndex uint64
+}
+
+// getReceiptsInner handles GetReceipts for all protocol versions.
+func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.H512, sentryClient sentryproto.SentryClient, p requestParams) error {
+	sizeLimit := eth.NoSizeLimit
+	if p.ethVersion >= direct.ETH70 {
+		sizeLimit = eth.Eth70ResponseSizeLimit
+	}
+	opts := eth.ReceiptQueryOpts{
+		EthVersion:             p.ethVersion,
+		FirstBlockReceiptIndex: p.firstBlockReceiptIndex,
+		SizeLimit:              sizeLimit,
+	}
+
+	cached, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly(ctx, cs.ethApiWrapper, p.query, opts)
 	if err != nil {
 		return err
 	}
-	var receiptsList []rlp.RawValue
-	if cachedReceipts != nil {
-		receiptsList = cachedReceipts.EncodedReceipts
+	var (
+		receiptsList        []rlp.RawValue
+		lastBlockIncomplete bool
+	)
+	if cached != nil {
+		receiptsList = cached.EncodedReceipts
+		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
 		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
@@ -665,23 +823,37 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *sentryproto.
 			return err
 		}
 		defer tx.Rollback()
-		receiptsList, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, cachedReceipts, isEth69)
+		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, p.query, cached, opts)
 		if err != nil {
 			return err
 		}
-
 	}
-	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         query.RequestId,
-		ReceiptsRLPPacket: receiptsList,
-	})
+
+	var b []byte
+	if p.ethVersion >= direct.ETH70 {
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket70{
+			RequestId:           p.id,
+			LastBlockIncomplete: lastBlockIncomplete,
+			ReceiptsRLPPacket:   receiptsList,
+		})
+	} else {
+		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
+			RequestId:         p.id,
+			ReceiptsRLPPacket: receiptsList,
+		})
+	}
 	if err != nil {
-		return fmt.Errorf("encode header response: %w", err)
+		return fmt.Errorf("encode receipts response: %w", err)
+	}
+
+	msgId := sentryproto.MessageId_RECEIPTS_66
+	if p.ethVersion >= direct.ETH70 {
+		msgId = sentryproto.MessageId_RECEIPTS_70
 	}
 	outreq := sentryproto.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
+		PeerId: peerId,
 		Data: &sentryproto.OutboundMessageData{
-			Id:   sentryproto.MessageId_RECEIPTS_66,
+			Id:   msgId,
 			Data: b,
 		},
 	}
@@ -831,6 +1003,17 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 	witnessTotalPages := make(map[common.Hash]uint64)
 
 	for _, pageResponse := range query.WitnessPacketResponse {
+		if pageResponse.TotalPages > wit.MaxWitnessPages {
+			return fmt.Errorf("witness response advertises TotalPages %d > max %d for hash %x", pageResponse.TotalPages, wit.MaxWitnessPages, pageResponse.Hash)
+		}
+		// Page >= TotalPages is the empty-response sentinel documented on
+		// wit.WitnessPageResponse.Page; skip without allocating.
+		if pageResponse.Page >= pageResponse.TotalPages {
+			continue
+		}
+		if prev, ok := witnessTotalPages[pageResponse.Hash]; ok && prev != pageResponse.TotalPages {
+			return fmt.Errorf("witness response has inconsistent TotalPages for hash %x: %d vs %d", pageResponse.Hash, prev, pageResponse.TotalPages)
+		}
 		if witnessPages[pageResponse.Hash] == nil {
 			witnessPages[pageResponse.Hash] = make(map[uint64][]byte)
 		}
@@ -968,6 +1151,13 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
 	if err := query.Validate(); err != nil {
+		cs.logger.Debug("Kick peer for invalid BlockRangeUpdate", "peer", inreq.PeerId.String(), "err", err)
+		if _, err1 := sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+			PeerId:  inreq.PeerId,
+			Penalty: sentryproto.PenaltyKind_Kick,
+		}, &grpc.EmptyCallOption{}); err1 != nil {
+			cs.logger.Error("Could not send penalty", "err", err1)
+		}
 		return err
 	}
 
@@ -1041,6 +1231,14 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *sentrypr
 		return cs.getBlockWitnesses(ctx, inreq, sentry)
 	case sentryproto.MessageId_GET_RECEIPTS_69:
 		return cs.getReceipts69(ctx, inreq, sentry)
+	case sentryproto.MessageId_GET_RECEIPTS_70:
+		return cs.getReceipts70(ctx, inreq, sentry)
+	case sentryproto.MessageId_RECEIPTS_70:
+		return cs.receipts66(ctx, inreq, sentry) // client-side receipt handling is a no-op
+	case sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71:
+		return cs.getBlockAccessLists71(ctx, inreq, sentry)
+	case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
+		return cs.blockAccessLists71(ctx, inreq, sentry)
 	case sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:
 		return cs.blockRange69(ctx, inreq, sentry)
 	default:

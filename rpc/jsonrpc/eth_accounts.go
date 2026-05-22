@@ -25,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -32,33 +34,52 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// maxGetStorageSlots caps the total number of storage slots allowed across
+// all addresses in a single eth_getStorageValues request.
+const maxGetStorageSlots = 1024
+
+// stateReaderAt opens a temporal read transaction, resolves the canonical block number,
+// checks prune history and block execution, and creates a state reader.
+// The caller must defer tx.Rollback() on the returned tx.
+func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
+	tx, err := api.db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, nil, err
+	}
+
+	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		tx.Rollback()
+		return nil, nil, err
+	}
+
+	if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+		tx.Rollback()
+		return nil, nil, err
+	}
+
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	if err = rpchelper.CheckBlockExecuted(stateTx, blockNumber); err != nil {
+		tx.Rollback()
+		return nil, nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		tx.Rollback()
+		return nil, nil, err
+	}
+	return tx, reader, nil
+}
+
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
@@ -84,31 +105,14 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 			reply.Nonce++
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
+		// txpool doesn't know about this address yet: fall through to DB lookup
 	}
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 	nonce := hexutil.Uint64(0)
 	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if acc == nil || err != nil {
@@ -119,30 +123,11 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	if err != nil {
+		return nil, err
 	}
 	defer tx.Rollback()
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return nil, err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
@@ -154,6 +139,68 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return hexutil.Bytes(""), nil
 	}
 	return res, nil
+}
+
+// GetStorageValues implements eth_getStorageValues. Returns the values of multiple
+// storage slots for multiple accounts in a single request.
+func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error) {
+	var totalSlots int
+
+	for _, keys := range requests {
+		totalSlots += len(keys)
+		if totalSlots > maxGetStorageSlots {
+			return nil, clientLimitExceededError(fmt.Sprintf("too many slots (max %d)", maxGetStorageSlots))
+		}
+	}
+	if totalSlots == 0 {
+		return nil, &rpc.InvalidParamsError{Message: "empty request"}
+	}
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNrOrHash.RequireCanonical = true
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	err = rpchelper.CheckBlockExecuted(stateTx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[common.Address][]hexutil.Bytes, len(requests))
+	for addr, keys := range requests {
+		vals := make([]hexutil.Bytes, len(keys))
+		address := accounts.InternAddress(addr)
+		for i, key := range keys {
+			location := accounts.InternKey(key)
+			res, _, err := reader.ReadAccountStorage(address, location)
+			if err != nil {
+				return nil, err
+			}
+
+			vals[i] = res.PaddedBytes(32)
+		}
+		result[addr] = vals
+	}
+
+	return result, nil
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
@@ -168,32 +215,11 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if len(indexBytes) > 32 {
 		return "", &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 	defer tx.Rollback()
-
-	blockNrOrHash.RequireCanonical = true
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
-	}
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
@@ -211,31 +237,12 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 
 // Exist returns whether an account for a given address exists in the database.
 func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
-	tx, err1 := api.db.BeginTemporalRo(ctx)
-	if err1 != nil {
-		return false, err1
+	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
+	if err != nil {
+		return false, err
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return false, err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
-	if err != nil {
-		return false, err
-	}
-
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
-	if err != nil {
-		return false, err
-	}
-
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
-	if err != nil {
-		return false, err
-	}
 	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if err != nil {
 		return false, err

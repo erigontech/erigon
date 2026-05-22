@@ -199,13 +199,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in bodies", bodiesPathPattern)
 				}
-				if bVer.Less(statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      bVer,
-						MinSupported: statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(bodiesPath), verToPanic)
-				}
+				statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MustSupport(bVer, filepath.Base(bodiesPath))
 				bodiesSegment, err := seg.NewDecompressor(bodiesPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
@@ -228,13 +222,7 @@ var (
 				if !ok {
 					return fmt.Errorf("can't find files with vers by pattern %s for indexing in txs", txPathPattern)
 				}
-				if tVer.Less(statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported) {
-					verToPanic := version.Versions{
-						Current:      tVer,
-						MinSupported: statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported,
-					}
-					version.VersionTooLowPanic(filepath.Base(txPath), verToPanic)
-				}
+				statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MustSupport(tVer, filepath.Base(txPath))
 				d, err := seg.NewDecompressor(txPath)
 				if err != nil {
 					return fmt.Errorf("can't open %s for indexing in transactions: %w", sn.Path, err)
@@ -242,12 +230,6 @@ var (
 				defer d.Close()
 				if d.Count() != expectedCount {
 					return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", sn.From, sn.To, expectedCount, d.Count())
-				}
-
-				if p != nil {
-					name := sn.Name()
-					p.Name.Store(&name)
-					p.Total.Store(uint64(d.Count() * 2))
 				}
 
 				txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -291,6 +273,7 @@ var (
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
 				for {
+					txnHashIdx.SetProgress(p)
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
 					blockNum := firstBlockNum
@@ -302,10 +285,6 @@ var (
 					}
 
 					for g.HasNext() {
-						if p != nil {
-							p.Processed.Add(1)
-						}
-
 						word, nextPos = g.Next(word[:0])
 						select {
 						case <-ctx.Done():

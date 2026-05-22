@@ -25,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestInvalidReceiptHashHighMgas(t *testing.T) {
@@ -39,10 +41,14 @@ func TestInvalidReceiptHashHighMgas(t *testing.T) {
 	testDir := path.Join(cornersDir, "invalid-receipt-hash-high-mgas")
 	preAllocsDir := path.Join(testDir, "pre_alloc")
 	payloadsDir := path.Join(testDir, "payloads")
-	engineXRunner, err := NewEngineXTestRunner(t, logger, preAllocsDir)
+	engineXRunner, err := engineapitester.NewEngineXTestRunner(ctx, logger, preAllocsDir)
 	require.NoError(t, err)
-	tm := testMatcher{}
-	tm.walk(t, payloadsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
+	t.Cleanup(func() {
+		err := engineXRunner.Close()
+		require.NoError(t, err)
+	})
+	tm := testutil.TestMatcher{}
+	tm.Walk(t, payloadsDir, func(t *testing.T, name string, test engineapitester.EngineXTestDefinition) {
 		err := engineXRunner.Run(ctx, test)
 		require.NoError(t, err)
 	})

@@ -114,38 +114,6 @@ func TestWarmupCache_Eviction(t *testing.T) {
 	}
 }
 
-// TestWarmupCache_Enable tests enable/disable
-func TestWarmupCache_Enable(t *testing.T) {
-	cache := NewWarmupCache()
-
-	key := []byte("12345678901234567890")
-	cache.PutAccount(key, &Update{Flags: BalanceUpdate})
-
-	// Should find when enabled
-	_, found := cache.GetAccount(key)
-	if !found {
-		t.Fatal("expected to find account when enabled")
-	}
-
-	// Disable cache
-	cache.Enable(false)
-
-	// Should not find when disabled
-	_, found = cache.GetAccount(key)
-	if found {
-		t.Error("expected not to find account when disabled")
-	}
-
-	// Re-enable
-	cache.Enable(true)
-
-	// Should find again
-	_, found = cache.GetAccount(key)
-	if !found {
-		t.Error("expected to find account after re-enabling")
-	}
-}
-
 // TestWarmupCache_Clear tests clearing the cache
 func TestWarmupCache_Clear(t *testing.T) {
 	cache := NewWarmupCache()
@@ -222,7 +190,7 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetBranch(key)
 	}
@@ -231,15 +199,15 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 // BenchmarkWarmupCache_Branch_Put benchmarks Put operations
 func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 	cache := NewWarmupCache()
-	keys := generateTestKeys(b.N, 52)
+	const keyCount = 10000
+	keys := generateTestKeys(keyCount, 52)
 	data := make([]byte, 100)
 	rand.Read(data)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
-		cache.PutBranch(keys[i], data)
+	for i := 0; b.Loop(); i++ {
+		cache.PutBranch(keys[i%keyCount], data)
 	}
 }
 
@@ -256,7 +224,7 @@ func BenchmarkWarmupCache_Account(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetAccount(key)
 	}
@@ -275,7 +243,7 @@ func BenchmarkWarmupCache_Storage(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetStorage(key)
 	}
@@ -304,7 +272,7 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		switch i % 3 {
 		case 0:
 			cache.GetAccount(accountKeys[i%len(accountKeys)])
@@ -329,7 +297,7 @@ func BenchmarkComparison_Map_100k(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		cache.GetStorage(keys[i%len(keys)])
 	}
 }

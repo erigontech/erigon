@@ -27,6 +27,9 @@ import (
 	"unicode"
 
 	"github.com/c2h5oh/datasize"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -37,9 +40,12 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+// PeerBanner is an interface for banning misbehaving peers.
+type PeerBanner interface {
+	BanPeer(pid string)
+}
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
@@ -52,6 +58,7 @@ type GossipManager struct {
 	registeredServices []GossipService
 	stats              *gossipMessageStats
 	p2p                p2p.P2PManager
+	peerBanner         PeerBanner
 
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
@@ -90,8 +97,13 @@ func NewGossipManager(
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
-	gm.stats.goPrintStats(cctx)
+	//gm.stats.goPrintStats(cctx)
 	return gm
+}
+
+// SetPeerBanner sets the peer banner used to ban peers that fail message verification.
+func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
+	g.peerBanner = pb
 }
 
 // Close gracefully shuts down the GossipManager and all its goroutines
@@ -101,6 +113,10 @@ func (g *GossipManager) Close() error {
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
+	var selfID peer.ID
+	if h := g.p2p.Host(); h != nil {
+		selfID = h.ID()
+	}
 	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -108,6 +124,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 				result = pubsub.ValidationReject
 			}
 		}()
+		// Skip validation for self-published messages: they were already validated
+		// by ProcessMessage before Publish was called.
+		if selfID != "" && pid == selfID {
+			return pubsub.ValidationAccept
+		}
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()
@@ -167,8 +188,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addIgnore(name)
 			return pubsub.ValidationIgnore
 		} else if err != nil {
-			log.Warn("[GossipManager] reject message", "topic", name, "err", err)
+			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
+			if g.peerBanner != nil {
+				g.peerBanner.BanPeer(string(pid))
+			}
 			return pubsub.ValidationReject
 		}
 
@@ -180,7 +204,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) error {
-	validator := g.newPubsubValidator(service)
+	validator := g.newPubsubValidator(service, conditions...)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
@@ -252,8 +276,18 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
+	// Log peer count for attestation topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) {
+		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
+		if peerCount == 0 {
+			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
+		} else if peerCount < 3 {
+			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
+		}
+	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
-	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
+	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
@@ -269,6 +303,15 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 
 	slotLookahead := uint64(8)
 	for {
+		// Wait for the next slot tick before checking. This ensures that
+		// RegisterGossipServices has completed before we attempt to
+		// re-subscribe topics for an upcoming fork.
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
 		upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
@@ -277,7 +320,7 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			continue
 		}
 		if upcomingForkDigest != forkDigest {
-			log.Debug("[GossipManager] upcoming fork digest", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
+			log.Info("[GossipManager] upcoming fork digest change detected", "old", fmt.Sprintf("%x", forkDigest), "new", fmt.Sprintf("%x", upcomingForkDigest))
 			oldForkDigest := fmt.Sprintf("%x", forkDigest)
 
 			// Start goroutine to unsubscribe old topics after delay
@@ -302,13 +345,10 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 			}(oldForkDigest)
 
 			// subscribe new topics immediately
-			g.subscribeUpcomingTopics(upcomingForkDigest)
+			if err := g.subscribeUpcomingTopics(upcomingForkDigest); err != nil {
+				log.Warn("[GossipManager] failed to subscribe upcoming topics", "err", err)
+			}
 			forkDigest = upcomingForkDigest
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }
@@ -337,11 +377,15 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
 				return err
 			}
 		}
+		if err := g.p2p.Pubsub().RegisterTopicValidator(newTopic, prevTopicHandle.validator); err != nil {
+			topicHandle.Close()
+			return err
+		}
 		if err := g.subscriptions.Add(newTopic, topicHandle, prevTopicHandle.validator); err != nil {
 			topicHandle.Close()
 			return err
 		}
-		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil {
+		if err := g.subscriptions.SubscribeWithExpiry(newTopic, prevTopicHandle.expiry); err != nil && !errors.Is(err, ErrExpiryInThePast) {
 			return err
 		}
 	}
@@ -359,6 +403,9 @@ func extractTopicName(topic string) string {
 
 func extractSubnetIndexByGossipTopic(name string) int {
 	// e.g blob_sidecar_3, we want to extract 3
+	if name == "" {
+		return -1
+	}
 	// reject if last character is not a number
 	if !unicode.IsNumber(rune(name[len(name)-1])) {
 		return -1

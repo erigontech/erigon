@@ -2,13 +2,8 @@ package stagedsync
 
 import (
 	"errors"
-	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
-
-	"github.com/erigontech/erigon/execution/state"
 )
 
 type ExecutionStat struct {
@@ -17,86 +12,10 @@ type ExecutionStat struct {
 	Duration    time.Duration
 }
 
-// Find the longest execution path in the DAG
-func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
-	prev := make(map[int]int, len(d.GetVertices()))
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		prev[i] = -1
-	}
-
-	pathWeights := make(map[int]uint64, len(d.GetVertices()))
-
-	maxPath := 0
-	maxPathWeight := uint64(0)
-
-	idxToId := make(map[int]string, len(d.GetVertices()))
-
-	for k, i := range d.GetVertices() {
-		idxToId[i.(int)] = k
-	}
-
-	for i := 0; i < len(idxToId); i++ {
-		parents, _ := d.GetParents(idxToId[i])
-
-		if len(parents) > 0 {
-			for _, p := range parents {
-				weight := pathWeights[p.(int)] + uint64(stats[i].Duration)
-				if weight > pathWeights[i] {
-					pathWeights[i] = weight
-					prev[i] = p.(int)
-				}
-			}
-		} else {
-			pathWeights[i] = uint64(stats[i].Duration)
-		}
-
-		if pathWeights[i] > maxPathWeight {
-			maxPath = i
-			maxPathWeight = pathWeights[i]
-		}
-	}
-
-	path := make([]int, 0)
-	for i := maxPath; i != -1; i = prev[i] {
-		path = append(path, i)
-	}
-
-	// Reverse the path so the transactions are in the ascending order
-	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-		path[i], path[j] = path[j], path[i]
-	}
-
-	return path, maxPathWeight
-}
-
-func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
-	longestPath, weight := LongestPath(d, stats)
-
-	serialWeight := uint64(0)
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		serialWeight += uint64(stats[i].Duration)
-	}
-
-	makeStrs := func(ints []int) (ret []string) {
-		for _, v := range ints {
-			ret = append(ret, strconv.Itoa(v))
-		}
-
-		return
-	}
-
-	out("Longest execution path:")
-	out(fmt.Sprintf("(%v) %v", len(longestPath), strings.Join(makeStrs(longestPath), "->")))
-
-	out(fmt.Sprintf("Longest path ideal execution time: %v of %v (serial total), %v%%", time.Duration(weight),
-		time.Duration(serialWeight), fmt.Sprintf("%.1f", float64(weight)*100.0/float64(serialWeight))))
-}
-
 type execStatusList struct {
 	pending    []int
 	inProgress []int
+	deferred   []int // txs whose retry waits on a directed-delay predicate
 	complete   []int
 	dependency map[int]map[int]bool
 	blocker    map[int]map[int]bool
@@ -151,6 +70,47 @@ func (m execStatusList) maxComplete() int {
 
 func (m *execStatusList) pushPending(tx int) {
 	m.pending = insertInList(m.pending, tx)
+}
+
+// pushDeferred parks a tx that hit ErrDependency with no effective blocker
+// (or was invalidated mid-flight). Immediate re-dispatch re-enters the
+// race; drainDeferredIfReady gates retry on a directed-delay predicate.
+func (m *execStatusList) pushDeferred(tx int) {
+	m.deferred = insertInList(m.deferred, tx)
+}
+
+// drainDeferred unconditionally moves deferred → pending. Forward-progress
+// safety net when no workers are in flight.
+func (m *execStatusList) drainDeferred() {
+	for _, tx := range m.deferred {
+		m.pending = insertInList(m.pending, tx)
+	}
+	m.deferred = m.deferred[:0]
+}
+
+func (m *execStatusList) drainDeferredIfReady(ready func(tx int) bool) {
+	if len(m.deferred) == 0 {
+		return
+	}
+	kept := m.deferred[:0]
+	for _, tx := range m.deferred {
+		if ready(tx) {
+			m.pending = insertInList(m.pending, tx)
+		} else {
+			kept = append(kept, tx)
+		}
+	}
+	m.deferred = kept
+}
+
+func (m *execStatusList) inProgressCount() int { return len(m.inProgress) }
+
+// minInProgress returns the lowest in-progress tx index, or -1 if empty.
+func (m *execStatusList) minInProgress() int {
+	if len(m.inProgress) == 0 {
+		return -1
+	}
+	return m.inProgress[0]
 }
 
 func removeFromList(l []int, v int, expect bool) []int {

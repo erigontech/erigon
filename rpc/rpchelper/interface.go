@@ -45,5 +45,8 @@ type ApiBackend interface {
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	AddPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
 	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	SetHead(ctx context.Context, req *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
 }

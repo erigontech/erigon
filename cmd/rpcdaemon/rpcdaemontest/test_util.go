@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
 	"sync"
 	"testing"
@@ -62,6 +63,11 @@ type testAddresses struct {
 	address2 common.Address
 }
 
+var randSrc = rand.New(rand.NewSource(42)) // fixed seed
+var randMu sync.Mutex
+
+var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf storage mapping (of address1)
+
 func makeTestAddresses() testAddresses {
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -92,7 +98,7 @@ func genTestChainOnce(t *testing.T) {
 	testChainOnce.Do(func() {
 		addresses := makeTestAddresses()
 		gspec := &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 				addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -123,7 +129,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 
 	addresses := makeTestAddresses()
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 			addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -159,7 +165,7 @@ func generateChain(
 		address1 = addresses.address1
 		address2 = addresses.address2
 		theAddr  = common.Address{1}
-		chainId  = big.NewInt(1337)
+		chainId  = uint256.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
@@ -169,9 +175,10 @@ func generateChain(
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
+	var tokenContract2 *contracts.Token
 
 	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
-	return blockgen.GenerateChain(config, parent, engine, db, 11, func(i int, block *blockgen.BlockGen) {
+	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -275,8 +282,49 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+
 		case 10:
-			// Empty block
+			break
+		case 11:
+			// Mint to address so it has a known balance to drain in the next block
+			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			txn, err = tokenContract2.Mint(transactOpts, address1, big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
+			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
+			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+
+			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
+			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
+			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+
+			// Assert first nibble of the hashed storage key is the same (trie path)
+			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
+				panic("hashed storage key prefix mismatch in trie")
+			}
+			txn, err = tokenContract2.Mint(transactOpts, common.Address(sameStoragePrefixAddresses[0]), big.NewInt(500))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 12:
+			// transfer everything out of address1
+			txn, err = tokenContract2.Transfer(transactOpts1, common.Address(address), big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 13:
+			// Empty block after storage deletes
 			break
 		}
 
@@ -292,6 +340,80 @@ func generateChain(
 		}
 		contractBackend.Commit()
 	})
+}
+
+func computeMappingStorageKey(addr common.Address, slot uint64) common.Hash {
+	// Create 64-byte buffer: address (32 bytes, left-padded) || slot (32 bytes)
+	var buf [64]byte
+
+	// Copy address to bytes 12-31 (left-padded with zeros)
+	copy(buf[12:32], addr[:])
+
+	// Write slot number to bytes 56-63 (big-endian, left-padded)
+	binary.BigEndian.PutUint64(buf[56:64], slot)
+
+	return crypto.Keccak256Hash(buf[:])
+}
+
+// findAddressWithMatchingStorageKeyPrefix finds an address whose computeMappingStorageKey
+// result shares the first nNibbles with the target storage key.
+// This is useful for creating storage entries that share trie paths to test node collapses.
+func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int) common.Address {
+	// The trie path for a storage slot is keccak256(computeMappingStorageKey(addr, slot)).
+	// We need to match the first nNibbles of that hashed value.
+	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
+	targetNibbles := make([]byte, nNibbles)
+	for i := 0; i < nNibbles; i++ {
+		if i%2 == 0 {
+			targetNibbles[i] = targetHashedKey[i/2] >> 4
+		} else {
+			targetNibbles[i] = targetHashedKey[i/2] & 0x0f
+		}
+	}
+
+	var addr common.Address
+	for {
+		randMu.Lock()
+		randSrc.Read(addr[:])
+		randMu.Unlock()
+
+		storageKey := computeMappingStorageKey(addr, slot)
+		hashedStorageKey := crypto.Keccak256Hash(storageKey[:])
+
+		// Compare nibbles of the hashed storage key (the actual trie path)
+		match := true
+		for i := 0; i < nNibbles; i++ {
+			var nibble byte
+			if i%2 == 0 {
+				nibble = hashedStorageKey[i/2] >> 4
+			} else {
+				nibble = hashedStorageKey[i/2] & 0x0f
+			}
+			if nibble != targetNibbles[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return addr
+		}
+	}
+}
+
+// findAddressesWithMatchingStorageKeyPrefix finds multiple addresses whose storage keys
+// share the first nNibbles with the target, useful for populating a trie subtree.
+func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int, count int) []common.Address {
+	addresses := make([]common.Address, 0, count)
+	seen := make(map[common.Address]bool)
+
+	for len(addresses) < count {
+		addr := findAddressWithMatchingStorageKeyPrefix(targetKey, slot, nNibbles)
+		if !seen[addr] {
+			seen[addr] = true
+			addresses = append(addresses, addr)
+		}
+	}
+	return addresses
 }
 
 type IsMiningMock struct{}
@@ -350,7 +472,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -503,12 +625,12 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
 	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -530,7 +652,9 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 			},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	// This test uses intra-block SELFDESTRUCT + CREATE2 reincarnation which the
+	// parallel executor doesn't handle correctly yet. Use serial execution.
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithoutExperimentalBAL())
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it

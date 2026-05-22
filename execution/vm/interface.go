@@ -56,15 +56,3 @@ type VMInterface interface {
 	IntraBlockState() *state.IntraBlockState
 	TxContext() evmtypes.TxContext
 }
-
-// VMInterpreter exposes additional EVM methods for use in the interpreter.
-type VMInterpreter interface {
-	VMInterface
-	Cancelled() bool
-	SetCallGasTemp(gas uint64)
-	CallGasTemp() uint64
-	StaticCall(caller common.Address, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
-	DelegateCall(caller common.Address, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
-	CallCode(caller common.Address, addr common.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error)
-	Create2(caller common.Address, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error)
-}

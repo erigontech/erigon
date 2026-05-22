@@ -16,6 +16,10 @@
 
 package integrity
 
+import (
+	"sort"
+)
+
 type Check string
 
 const (
@@ -90,6 +94,13 @@ const (
 	// consistent. This is a statistical check used to catch corruption without checking every value.
 	CommitmentHistVal Check = "CommitmentHistVal"
 
+	// StateRootVerifyByHistory verifies block state roots against commitment history over a
+	// specific block range. For each sampled block, it reads the commitment trie state from
+	// history snapshots and checks that the re-derived root matches the header's stored state
+	// root. Does NOT re-execute transactions — relies solely on history domain reads.
+	// More targeted than CommitmentHistVal when a particular block range is suspect.
+	StateRootVerifyByHistory Check = "StateRootVerifyByHistory"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files
@@ -108,13 +119,50 @@ const (
 	// snapshots, and required metadata files (salt files). This is the final check before
 	// publishing snapshots for external distribution.
 	Publishable Check = "Publishable"
+
+	// ReceiptRootIntegrity verifies that receipts from RCache domain produce receipt roots
+	// matching block headers. Reads receipts from RCache, computes the receipt root via
+	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
+	// but for receipt roots instead of state roots.
+	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
 )
 
+// FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
+// budget to the heavier checks at the tail.
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
-	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref,
+	StateProgress, Publishable, HeaderNoGaps, BlocksTxnID, Blocks,
+	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
+	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{CommitmentHistVal, StateVerify}
-var AllChecks = append(append([]Check{}, FastChecks...), SlowChecks...)
+var SlowChecks = []Check{StateVerify}
+var DeprecatedChecks = []Check{
+	BorEvents, BorSpans, BorCheckpoints,
+	CommitmentKvDeref, //StateVerify - will overcome
+}
+var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+
+// SortChecksByCost returns a copy of checks ordered by their position in FastChecks
+// (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.
+func SortChecksByCost(checks []Check) []Check {
+	rank := make(map[Check]int, len(FastChecks))
+	for i, c := range FastChecks {
+		rank[c] = i
+	}
+	out := append([]Check{}, checks...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, oki := rank[out[i]]
+		rj, okj := rank[out[j]]
+		switch {
+		case oki && okj:
+			return ri < rj
+		case oki:
+			return true
+		case okj:
+			return false
+		default:
+			return false
+		}
+	})
+	return out
+}

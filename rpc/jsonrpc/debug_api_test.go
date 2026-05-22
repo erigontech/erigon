@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -29,8 +30,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -38,13 +42,21 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/builder"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 var dumper = spew.ConfigState{Indent: "    "}
@@ -77,9 +89,9 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
-	api := NewPrivateDebugAPI(baseApi, m.DB, 0, false)
+	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -130,7 +142,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -161,7 +173,7 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -188,9 +200,19 @@ func TestTraceTransaction(t *testing.T) {
 	}
 }
 
+func TestTraceTransactionNotFound(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+
+	var buf bytes.Buffer
+	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	err := api.TraceTransaction(m.Ctx, common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &tracersConfig.TraceConfig{}, s)
+	require.ErrorContains(t, err, "transaction not found")
+}
+
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -220,7 +242,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
@@ -314,7 +336,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, true) // gethCompatibility=true
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, true) // gethCompatibility=true
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
@@ -368,12 +390,19 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
+
+		// negative maxResult should be handled safely and must not panic.
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, -1)
+		require.NoError(t, err)
+		require.Empty(t, result.Storage)
+		require.NotNil(t, result.NextKey)
+		require.Equal(t, keys[0], *result.NextKey)
 	})
 }
 
 func TestAccountRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -432,13 +461,15 @@ func TestAccountRange(t *testing.T) {
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
 		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
+		// block 2 sends ETH to theAddr{1} — verify it appears in the result
+		require.Contains(t, result, common.Address{1})
 
 		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
@@ -450,20 +481,29 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 40)
 
-		//nil value means: to = from + 1
+		// nil second param: returns accounts modified exactly in block startNum (Geth semantics)
 		n = rpc.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		// latest block is 11, should work both ways: [11,12) and [11,nil)
 		n2 = rpc.BlockNumber(12)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+		require.NotEmpty(t, result)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+	})
+	t.Run("storage-only modified contracts", func(t *testing.T) {
+		// Block 8 (i=7) executes a token.Transfer which writes to the ERC20 balances
+		// mapping in storage, but does NOT change the contract's balance/nonce/code.
+		// Without the StorageDomain pass the contract would be invisible to this API.
+		// The token contract was deployed in block 7 and is known from the AccountRange test.
+		tokenContract := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+		n, n2 := rpc.BlockNumber(7), rpc.BlockNumber(8)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Contains(t, result, tokenContract, "storage-only modified contract must be included")
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
@@ -472,6 +512,11 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 		n = rpc.BlockNumber(11)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
+		require.Error(t, err)
+
+		// end block beyond latest is an error (Geth semantics)
+		n2 := rpc.BlockNumber(77)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
 }
@@ -531,16 +576,16 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
+	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
 		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
 		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
+		blockHashNonExistent, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
+		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent
 		return nil
 	})
 
@@ -560,8 +605,8 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(1, int(results.Nonce))
 
-		//only 11 blocks in chain
-		results, err = api.AccountAt(m.Ctx, blockHash12, 0, addr)
+		// block 20 doesn't exist in the chain
+		results, err = api.AccountAt(m.Ctx, blockHashNonExistent, 0, addr)
 		require.NoError(err)
 		require.Nil(results)
 	})
@@ -582,7 +627,7 @@ func TestAccountAt(t *testing.T) {
 		// and too big txIndex
 		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
 		require.NoError(err)
-		require.Equal(39, int(results.Nonce))
+		require.Equal(42, int(results.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -594,7 +639,7 @@ func TestAccountAt(t *testing.T) {
 
 func TestGetBadBlocks(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -667,7 +712,7 @@ func TestGetBadBlocks(t *testing.T) {
 
 func TestGetRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -704,4 +749,327 @@ func TestGetRawTransaction(t *testing.T) {
 		}
 	}
 	require.True(testedOnce, "Test flow didn't touch the target flow")
+}
+
+func TestExecutionWitness(t *testing.T) {
+	// Enable historical commitment schema so the test aggregator maintains per-block history.
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, 0, false)
+	ctx := context.Background()
+
+	// Write the DB flag so that debug_executionWitness accepts the request.
+	err := m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	})
+	require.NoError(t, err)
+
+	// Get the latest block number
+	var latestBlockNum uint64
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		latestBlockNum, _ = stages.GetStageProgress(tx, stages.Execution)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Greater(t, latestBlockNum, uint64(0), "test chain should have at least one block")
+	t.Run("genesis block", func(t *testing.T) {
+		// Note: commitment history starts from 1 in this test suite
+		blockNum := rpc.BlockNumber(0)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+		require.NotNil(t, result.Codes, "Codes should not be nil")
+
+		t.Logf("Genesis: %d state nodes, %d codes",
+			len(result.State), len(result.Codes))
+	})
+
+	t.Run("by block number", func(t *testing.T) {
+		// Test with block number 1
+		blockNum := rpc.BlockNumber(1)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+		require.Nil(t, result.Keys, "Keys must remain nil (Geth compatibility)")
+		if len(result.Headers) > 0 {
+			require.Contains(t, result.headerByNumber, uint64(0), "parent header (block 0) must be present in lookup map when Headers is non-empty")
+		}
+	})
+
+	t.Run("by block hash", func(t *testing.T) {
+		var blockHash common.Hash
+		err := m.DB.View(ctx, func(tx kv.Tx) error {
+			blockHash, _, _ = m.BlockReader.CanonicalHash(ctx, tx, 1)
+			return nil
+		})
+		require.NoError(t, err)
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	})
+
+	t.Run("multiple blocks", func(t *testing.T) {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+
+			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
+			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
+			require.NotNil(t, result.State, "State should not be nil for block %d", blockNum)
+		}
+	})
+
+	t.Run("latest block", func(t *testing.T) {
+		blockNum := rpc.LatestBlockNumber
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+	})
+
+	t.Run("non-existent block", func(t *testing.T) {
+		// Very high block number that doesn't exist
+		blockNum := rpc.BlockNumber(999999999)
+		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		require.Error(t, err, "should error for non-existent block")
+	})
+}
+
+// mockEthBackend implements privateapi.EthBackend for testing
+type mockEthBackend struct {
+	setHeadCalled bool
+	setHeadBlock  uint64
+	setHeadErr    error
+}
+
+var _ privateapi.EthBackend = (*mockEthBackend)(nil) // compile-time interface check
+
+func (m *mockEthBackend) Etherbase() (common.Address, error) {
+	return common.Address{}, nil
+}
+
+func (m *mockEthBackend) NetVersion() (uint64, error) {
+	return 1, nil
+}
+
+func (m *mockEthBackend) NetPeerCount() (uint64, error) {
+	return 0, nil
+}
+
+func (m *mockEthBackend) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
+	return &remoteproto.NodesInfoReply{}, nil
+}
+
+func (m *mockEthBackend) Peers(ctx context.Context) (*remoteproto.PeersReply, error) {
+	return &remoteproto.PeersReply{}, nil
+}
+
+func (m *mockEthBackend) AddPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	return &remoteproto.AddPeerReply{}, nil
+}
+
+func (m *mockEthBackend) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	return &remoteproto.RemovePeerReply{}, nil
+}
+
+func (m *mockEthBackend) AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	return nil, nil
+}
+
+func (m *mockEthBackend) RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	return nil, nil
+}
+
+func (m *mockEthBackend) SetHead(ctx context.Context, targetBlock uint64) error {
+	m.setHeadCalled = true
+	m.setHeadBlock = targetBlock
+	return m.setHeadErr
+}
+
+// TestSetHead tests debug_setHead RPC validation.
+func TestSetHead(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := m.Ctx
+	logger := log.New()
+
+	// Determine the canonical head of the test chain.
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	head, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	roTx.Rollback()
+	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
+
+	// Helper to build a DebugAPIImpl wired to a mockEthBackend
+	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
+		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+		backendClient := direct.NewEthBackendClientDirect(backendServer)
+		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
+		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
+	}
+
+	// Rewinding one block below the current head is the simplest valid rewind.
+	t.Run("set head one below current", func(t *testing.T) {
+		mock := &mockEthBackend{}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(head-1))
+		require.NoError(t, err)
+		require.True(t, mock.setHeadCalled)
+		require.Equal(t, head-1, mock.setHeadBlock)
+	})
+
+	// We accept setting head to the current block as a harmless no-op; the backend receives
+	// the call and can short-circuit internally.
+	t.Run("set head to current block is allowed", func(t *testing.T) {
+		mock := &mockEthBackend{}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(head))
+		require.NoError(t, err)
+		require.True(t, mock.setHeadCalled)
+		require.Equal(t, head, mock.setHeadBlock)
+	})
+
+	// Setting head one beyond the current canonical head must be rejected before reaching the backend.
+	t.Run("block exactly one past head is rejected", func(t *testing.T) {
+		mock := &mockEthBackend{}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(head+1))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "in the future")
+		require.False(t, mock.setHeadCalled, "backend must not be called for a future block")
+	})
+
+	// A far-future block number must be rejected.
+	t.Run("far future block is rejected", func(t *testing.T) {
+		mock := &mockEthBackend{}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(99999))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "in the future")
+		require.False(t, mock.setHeadCalled, "backend must not be called for a future block")
+	})
+
+	// Backend errors must propagate unmodified to the caller.
+	t.Run("backend error propagates", func(t *testing.T) {
+		mock := &mockEthBackend{setHeadErr: fmt.Errorf("execution module is busy")}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(5))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "execution module is busy")
+	})
+
+	// Pruned blocks should be rejected by checkPruneHistory.
+	// On a default test sentry there is no pruning configured, so we verify the
+	// wiring by confirming that a low block passes validation.
+	t.Run("low block passes when not pruned", func(t *testing.T) {
+		mock := &mockEthBackend{}
+		api := makeAPI(mock)
+		err := api.SetHead(ctx, hexutil.Uint64(1))
+		require.NoError(t, err)
+		require.True(t, mock.setHeadCalled)
+		require.Equal(t, uint64(1), mock.setHeadBlock)
+	})
+}
+
+// TestSetHeadCanonicalCleanup verifies that ExecModule.SetHead properly cleans
+// up canonical chain metadata after unwinding. Specifically it checks that:
+//   - Canonical hashes above the target block are removed
+//   - HeadHeaderHash is updated to match the target block
+func TestSetHeadCanonicalCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := m.Ctx
+
+	// Snapshot canonical state before the unwind.
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	head, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Greater(t, head, uint64(2), "test chain must have at least 3 blocks")
+
+	targetBlock := head - 2
+
+	// Record canonical hashes that should be removed after unwind.
+	staleHashes := make(map[uint64]common.Hash)
+	for i := targetBlock + 1; i <= head; i++ {
+		h, err := rawdb.ReadCanonicalHash(roTx, i)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, h, "block %d must have a canonical hash before unwind", i)
+		staleHashes[i] = h
+	}
+
+	// Record the target block hash (should survive the unwind).
+	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, targetHash)
+	roTx.Rollback()
+
+	// --- Perform the unwind ---
+	err = m.ExecModule.SetHead(ctx, targetBlock)
+	require.NoError(t, err)
+
+	// --- Verify DB state after unwind ---
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// 1) Canonical hashes above targetBlock must be gone.
+	for blockNum := range staleHashes {
+		h, err := rawdb.ReadCanonicalHash(roTx, blockNum)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, h,
+			"canonical hash at block %d should be removed after SetHead(%d)", blockNum, targetBlock)
+	}
+
+	// 2) The target block's canonical hash must still be intact.
+	h, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	require.Equal(t, targetHash, h, "canonical hash at target block must survive the unwind")
+
+	// 3) HeadHeaderHash must point to the target block.
+	headHeaderHash := rawdb.ReadHeadHeaderHash(roTx)
+	require.Equal(t, targetHash, headHeaderHash,
+		"HeadHeaderHash should equal the target block hash after SetHead")
+
+	// 4) rpchelper.GetLatestBlockNumber must return the target block, not the stale
+	//    forkchoice head that pointed to the old (unwound) chain tip.
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, targetBlock, latestBlock,
+		"GetLatestBlockNumber should return targetBlock after SetHead, not the stale forkchoice head")
+
+	// Record the original head hash (before unwind) for the FCU below.
+	originalHeadHash := staleHashes[head]
+	roTx.Rollback()
+
+	// 5) A subsequent UpdateForkChoice back to the original head must succeed,
+	//    proving that SetHead left the DB in a consistent state.
+	receipt, err := m.ExecModule.UpdateForkChoice(ctx, originalHeadHash, originalHeadHash, originalHeadHash)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, receipt.Status,
+		"UpdateForkChoice back to original head should succeed after SetHead")
+
+	// Verify the chain is back at the original head.
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	restoredHead, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
 }

@@ -251,14 +251,14 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 					if trace {
 						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, &ch.prev)
 					}
-					v.Val = ch.prev
+					s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: SelfDestructPath}, ch.prev)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
 					val := v.Val.(uint256.Int)
 					if trace {
 						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
 					}
-					v.Val = ch.prevbalance
+					s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: BalancePath}, ch.prevbalance)
 				}
 			}
 		}
@@ -274,16 +274,12 @@ func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
 func (ch touchAccount) revert(s *IntraBlockState) error {
-	if reads, ok := s.versionedReads[ch.account]; ok {
-		if len(reads) == 1 {
-			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
-				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
-					delete(s.versionedReads, ch.account)
-					delete(s.addressAccess, ch.account)
-				}
-			}
-		}
-	}
+	// Do NOT delete versionedReads here.  Even though the touch is being
+	// reverted (e.g. a CREATE that ran out of gas), the read that triggered
+	// the touch already happened — the tx observed the account's state and
+	// branched on it (e.g. Empty() returning true vs false).  Removing the
+	// read-set entry causes ValidateVersion to miss the dependency, allowing
+	// stale reads to pass validation and produce incorrect results.
 	return nil
 }
 
@@ -317,7 +313,7 @@ func (ch balanceChange) revert(s *IntraBlockState) error {
 					val := v.Val.(uint256.Int)
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prev)
 				}
-				v.Val = ch.prev
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: BalancePath}, ch.prev)
 			}
 		}
 	}
@@ -378,7 +374,7 @@ func (ch nonceChange) revert(s *IntraBlockState) error {
 				if trace {
 					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, ch.prev)
 				}
-				v.Val = ch.prev
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: NoncePath}, ch.prev)
 			}
 		}
 	}
@@ -420,6 +416,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			}
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
+			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeSizePath})
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 				if trace {
@@ -427,13 +424,16 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 					_, ps := printCode(ch.prevcode)
 					fmt.Printf("%s WRT Revert %x: %s -> %s\n", tracePrefix, ch.account, cs, ps)
 				}
-				v.Val = ch.prevcode
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodePath}, ch.prevcode)
 			}
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
 				if trace {
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
 				}
-				v.Val = ch.prevhash
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
+			}
+			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
 			}
 		}
 	}
@@ -452,10 +452,9 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 
 	trace := dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(ch.account.Handle()))
 	var tracePrefix string
-	var val uint256.Int
 	if trace {
 		tracePrefix = fmt.Sprintf("%d (%d.%d)", s.blockNum, s.txIndex, s.version)
-		val, _ = obj.GetState(ch.key)
+		val, _ := obj.GetState(ch.key)
 		commited, _ := obj.GetCommittedState(ch.key)
 		fmt.Printf("%s Revert State %x %x: %d, prev: %d, orig: %d, commited: %v\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue, &commited, ch.wasCommited)
 	}
@@ -474,7 +473,7 @@ func (ch storageChange) revert(s *IntraBlockState) error {
 					val := v.Val.(uint256.Int)
 					fmt.Printf("%s WRT Revert %x: %x: %d -> %d\n", tracePrefix, ch.account, ch.key, &val, &ch.prevalue)
 				}
-				v.Val = ch.prevalue
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: StoragePath, Key: ch.key}, ch.prevalue)
 			}
 		}
 	}

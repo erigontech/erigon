@@ -24,6 +24,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -85,17 +87,14 @@ func (ts *testServer) Recv() (*remoteproto.LogsFilterRequest, error) {
 	return request, nil
 }
 
-func createLog() *remoteproto.SubscribeLogsReply {
-	return &remoteproto.SubscribeLogsReply{
-		Address:          gointerfaces.ConvertAddressToH160([20]byte{}),
-		BlockHash:        gointerfaces.ConvertHashToH256([32]byte{}),
-		BlockNumber:      0,
-		Data:             []byte{},
-		LogIndex:         0,
-		Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256([32]byte{99, 99})},
-		TransactionHash:  gointerfaces.ConvertHashToH256([32]byte{}),
-		TransactionIndex: 0,
-		Removed:          false,
+func createLog() *notifications.LogNotification {
+	return &notifications.LogNotification{
+		Log: &types.Log{
+			Address: common.Address{},
+			Topics:  []common.Hash{{99, 99}},
+			Data:    []byte{},
+		},
+		Removed: false,
 	}
 }
 
@@ -124,8 +123,8 @@ func TestLogsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	<-srv.receiveCompleted
 
 	// now see if a log would be sent or not
-	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg := createLog()
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty")
@@ -157,22 +156,24 @@ func TestLogsFilter_AllAddressesAndTopicsFilter_DistributesLogRegardless(t *test
 	<-srv.receiveCompleted
 
 	// now see if a log would be sent or not
-	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg := createLog()
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the sent slice to have the log present")
 	}
 
-	log = createLog()
-	log.Topics = []*typesproto.H256{topic1H256}
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg = createLog()
+	lg.Topics = []common.Hash{topic1}
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 2 {
 		t.Error("expected any topic to be allowed through the filter")
 	}
 
-	log = createLog()
-	log.Address = address160
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg = createLog()
+	var addr common.Address
+	addr.SetBytes(address1.Bytes())
+	lg.Address = addr
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 3 {
 		t.Error("expected any address to be allowed through the filter")
 	}
@@ -203,15 +204,15 @@ func TestLogsFilter_TopicFilter_OnlyAllowsThatTopicThrough(t *testing.T) {
 	<-srv.receiveCompleted
 
 	// now see if a log would be sent or not
-	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg := createLog()
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the topic didn't match")
 	}
 
-	log = createLog()
-	log.Topics = []*typesproto.H256{topic1H256}
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg = createLog()
+	lg.Topics = []common.Hash{topic1}
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the topic matched")
 	}
@@ -242,15 +243,17 @@ func TestLogsFilter_AddressFilter_OnlyAllowsThatAddressThrough(t *testing.T) {
 	<-srv.receiveCompleted
 
 	// now see if a log would be sent or not
-	log := createLog()
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg := createLog()
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the address didn't match")
 	}
 
-	log = createLog()
-	log.Address = address160
-	_ = agg.distributeLogs([]*remoteproto.SubscribeLogsReply{log})
+	lg = createLog()
+	var addr common.Address
+	addr.SetBytes(address1.Bytes())
+	lg.Address = addr
+	_ = agg.distributeLogs([]*notifications.LogNotification{lg})
 	if len(srv.sent) != 1 {
 		t.Error("expected the log to be distributed as the address matched")
 	}

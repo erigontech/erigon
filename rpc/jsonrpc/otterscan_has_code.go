@@ -33,7 +33,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return false, err
 	}
@@ -43,7 +43,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 		return false, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
 	if err != nil {
 		return false, err
 	}

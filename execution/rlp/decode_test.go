@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,24 +69,6 @@ func TestStreamKind(t *testing.T) {
 	}
 }
 
-func TestNewListStream(t *testing.T) {
-	ls := NewListStream(bytes.NewReader(unhex("0101010101")), 3)
-	if k, size, err := ls.Kind(); k != List || size != 3 || err != nil {
-		t.Errorf("Kind() returned (%v, %d, %v), expected (List, 3, nil)", k, size, err)
-	}
-	if size, err := ls.List(); size != 3 || err != nil {
-		t.Errorf("List() returned (%d, %v), expected (3, nil)", size, err)
-	}
-	for i := 0; i < 3; i++ {
-		if val, err := ls.Uint(); val != 1 || err != nil {
-			t.Errorf("Uint() returned (%d, %v), expected (1, nil)", val, err)
-		}
-	}
-	if err := ls.ListEnd(); err != nil {
-		t.Errorf("ListEnd() returned %v, expected (3, nil)", err)
-	}
-}
-
 func TestStreamErrors(t *testing.T) {
 	withoutInputLimit := func(b []byte) *Stream {
 		return NewStream(newPlainReader(b), 0)
@@ -106,29 +87,29 @@ func TestStreamErrors(t *testing.T) {
 		error     error
 	}{
 		{"C0", calls{"Bytes"}, nil, ErrExpectedString},
-		{"C0", calls{"Uint"}, nil, ErrExpectedString},
-		{"89000000000000000001", calls{"Uint"}, nil, errUintOverflow},
+		{"C0", calls{"Uint64"}, nil, ErrExpectedString},
+		{"89000000000000000001", calls{"Uint64"}, nil, errUintOverflow},
 		{"00", calls{"List"}, nil, ErrExpectedList},
 		{"80", calls{"List"}, nil, ErrExpectedList},
-		{"C0", calls{"List", "Uint"}, nil, EOL},
+		{"C0", calls{"List", "Uint64"}, nil, EOL},
 		{"C8C9010101010101010101", calls{"List", "Kind"}, nil, ErrElemTooLarge},
-		{"C3C2010201", calls{"List", "List", "Uint", "Uint", "ListEnd", "Uint"}, nil, EOL},
+		{"C3C2010201", calls{"List", "List", "Uint64", "Uint64", "ListEnd", "Uint64"}, nil, EOL},
 		{"00", calls{"ListEnd"}, nil, errNotInList},
-		{"C401020304", calls{"List", "Uint", "ListEnd"}, nil, errNotAtEOL},
+		{"C401020304", calls{"List", "Uint64", "ListEnd"}, nil, errNotAtEOL},
 
 		// Non-canonical integers (e.g. leading zero bytes).
-		{"00", calls{"Uint"}, nil, ErrCanonInt},
-		{"820002", calls{"Uint"}, nil, ErrCanonInt},
-		{"8133", calls{"Uint"}, nil, ErrCanonSize},
-		{"817F", calls{"Uint"}, nil, ErrCanonSize},
-		{"8180", calls{"Uint"}, nil, nil},
+		{"00", calls{"Uint64"}, nil, ErrCanonInt},
+		{"820002", calls{"Uint64"}, nil, ErrCanonInt},
+		{"8133", calls{"Uint64"}, nil, ErrCanonSize},
+		{"817F", calls{"Uint64"}, nil, ErrCanonSize},
+		{"8180", calls{"Uint64"}, nil, nil},
 
 		// Non-valid boolean
 		{"02", calls{"Bool"}, nil, errors.New("rlp: invalid boolean value: 2")},
 
 		// Size tags must use the smallest possible encoding.
 		// Leading zero bytes in the size tag are also rejected.
-		{"8100", calls{"Uint"}, nil, ErrCanonSize},
+		{"8100", calls{"Uint64"}, nil, ErrCanonSize},
 		{"8100", calls{"Bytes"}, nil, ErrCanonSize},
 		{"8101", calls{"Bytes"}, nil, ErrCanonSize},
 		{"817F", calls{"Bytes"}, nil, ErrCanonSize},
@@ -144,41 +125,41 @@ func TestStreamErrors(t *testing.T) {
 
 		// Expected EOF
 		{"", calls{"Kind"}, nil, io.EOF},
-		{"", calls{"Uint"}, nil, io.EOF},
+		{"", calls{"Uint64"}, nil, io.EOF},
 		{"", calls{"List"}, nil, io.EOF},
-		{"8180", calls{"Uint", "Uint"}, nil, io.EOF},
+		{"8180", calls{"Uint64", "Uint64"}, nil, io.EOF},
 		{"C0", calls{"List", "ListEnd", "List"}, nil, io.EOF},
 
 		{"", calls{"List"}, withoutInputLimit, io.EOF},
-		{"8180", calls{"Uint", "Uint"}, withoutInputLimit, io.EOF},
+		{"8180", calls{"Uint64", "Uint64"}, withoutInputLimit, io.EOF},
 		{"C0", calls{"List", "ListEnd", "List"}, withoutInputLimit, io.EOF},
 
 		// Input limit errors.
 		{"81", calls{"Bytes"}, nil, ErrValueTooLarge},
-		{"81", calls{"Uint"}, nil, ErrValueTooLarge},
+		{"81", calls{"Uint64"}, nil, ErrValueTooLarge},
 		{"81", calls{"Raw"}, nil, ErrValueTooLarge},
 		{"BFFFFFFFFFFFFFFFFFFF", calls{"Bytes"}, nil, ErrValueTooLarge},
 		{"C801", calls{"List"}, nil, ErrValueTooLarge},
 
 		// Test for list element size check overflow.
-		{"CD04040404FFFFFFFFFFFFFFFFFF0303", calls{"List", "Uint", "Uint", "Uint", "Uint", "List"}, nil, ErrElemTooLarge},
+		{"CD04040404FFFFFFFFFFFFFFFFFF0303", calls{"List", "Uint64", "Uint64", "Uint64", "Uint64", "List"}, nil, ErrElemTooLarge},
 
 		// Test for input limit overflow. Since we are counting the limit
 		// down toward zero in Stream.remaining, reading too far can overflow
 		// remaining to a large value, effectively disabling the limit.
-		{"C40102030401", calls{"Raw", "Uint"}, withCustomInputLimit(5), io.EOF},
-		{"C4010203048180", calls{"Raw", "Uint"}, withCustomInputLimit(6), ErrValueTooLarge},
+		{"C40102030401", calls{"Raw", "Uint64"}, withCustomInputLimit(5), io.EOF},
+		{"C4010203048180", calls{"Raw", "Uint64"}, withCustomInputLimit(6), ErrValueTooLarge},
 
 		// Check that the same calls are fine without a limit.
-		{"C40102030401", calls{"Raw", "Uint"}, withoutInputLimit, nil},
-		{"C4010203048180", calls{"Raw", "Uint"}, withoutInputLimit, nil},
+		{"C40102030401", calls{"Raw", "Uint64"}, withoutInputLimit, nil},
+		{"C4010203048180", calls{"Raw", "Uint64"}, withoutInputLimit, nil},
 
 		// Unexpected EOF. This only happens when there is
 		// no input limit, so the reader needs to be 'dumbed down'.
 		{"81", calls{"Bytes"}, withoutInputLimit, io.ErrUnexpectedEOF},
-		{"81", calls{"Uint"}, withoutInputLimit, io.ErrUnexpectedEOF},
+		{"81", calls{"Uint64"}, withoutInputLimit, io.ErrUnexpectedEOF},
 		{"BFFFFFFFFFFFFFFF", calls{"Bytes"}, withoutInputLimit, io.ErrUnexpectedEOF},
-		{"C801", calls{"List", "Uint", "Uint"}, withoutInputLimit, io.ErrUnexpectedEOF},
+		{"C801", calls{"List", "Uint64", "Uint64"}, withoutInputLimit, io.ErrUnexpectedEOF},
 
 		// This test verifies that the input position is advanced
 		// correctly when calling Bytes for empty strings. Kind can be called
@@ -241,14 +222,14 @@ func TestStreamList(t *testing.T) {
 	}
 
 	for i := uint64(1); i <= 8; i++ {
-		if v, err := s.Uint(); err != nil {
+		if v, err := s.Uint64(); err != nil {
 			t.Fatalf("Uint error: %v", err)
 		} else if i != v {
 			t.Errorf("Uint returned wrong value, got %d, want %d", v, i)
 		}
 	}
 
-	if _, err := s.Uint(); !errors.Is(err, EOL) {
+	if _, err := s.Uint64(); !errors.Is(err, EOL) {
 		t.Errorf("Uint error mismatch, got %v, want %v", err, EOL)
 	}
 	if err := s.ListEnd(); err != nil {
@@ -330,11 +311,6 @@ type recstruct struct {
 	Child *recstruct `rlp:"nil"`
 }
 
-type bigIntStruct struct {
-	I *big.Int
-	B string
-}
-
 type invalidNilTag struct {
 	X []byte `rlp:"nil"`
 }
@@ -389,11 +365,6 @@ type optionalAndTailField struct {
 	Tail []uint `rlp:"tail"`
 }
 
-type optionalBigIntField struct {
-	A uint
-	B *big.Int `rlp:"optional"`
-}
-
 type optionalPtrField struct {
 	A uint
 	B *[3]byte `rlp:"optional"`
@@ -410,13 +381,9 @@ type ignoredField struct {
 	C uint
 }
 
-var (
-	veryBigInt = uint256.NewInt(0).Add(
-		uint256.NewInt(0).Lsh(uint256.NewInt(0xFFFFFFFFFFFFFF), 16),
-		uint256.NewInt(0xFFFF),
-	)
-	realBigInt     = big.NewInt(0).SetBytes(unhex("010000000000000000000000000000000000000000000000000000000000000000"))
-	veryVeryBigInt = new(big.Int).Exp(veryBigInt.ToBig(), big.NewInt(8), nil)
+var veryBigInt = uint256.NewInt(0).Add(
+	uint256.NewInt(0).Lsh(uint256.NewInt(0xFFFFFFFFFFFFFF), 16),
+	uint256.NewInt(0xFFFF),
 )
 
 var decodeTests = []decodeTest{
@@ -486,18 +453,6 @@ var decodeTests = []decodeTest{
 	{input: "8D6162636465666768696A6B6C6D", ptr: new(string), value: "abcdefghijklm"},
 	{input: "C0", ptr: new(string), error: "rlp: expected input string or byte for string"},
 
-	// big ints
-	{input: "80", ptr: new(*big.Int), value: big.NewInt(0)},
-	{input: "01", ptr: new(*big.Int), value: big.NewInt(1)},
-	{input: "89FFFFFFFFFFFFFFFFFF", ptr: new(*big.Int), value: veryBigInt.ToBig()},
-	{input: "A1010000000000000000000000000000000000000000000000000000000000000000", ptr: new(*big.Int), value: realBigInt},
-	{input: "B848FFFFFFFFFFFFFFFFF800000000000000001BFFFFFFFFFFFFFFFFC8000000000000000045FFFFFFFFFFFFFFFFC800000000000000001BFFFFFFFFFFFFFFFFF8000000000000000001", ptr: new(*big.Int), value: veryVeryBigInt},
-	{input: "10", ptr: new(big.Int), value: *big.NewInt(16)}, // non-pointer also works
-	{input: "C0", ptr: new(*big.Int), error: "rlp: expected input string or byte for *big.Int"},
-	{input: "00", ptr: new(*big.Int), error: "rlp: non-canonical integer (leading zero bytes) for *big.Int"},
-	{input: "820001", ptr: new(*big.Int), error: "rlp: non-canonical integer (leading zero bytes) for *big.Int"},
-	{input: "8105", ptr: new(*big.Int), error: "rlp: non-canonical size information for *big.Int"},
-
 	// uint256
 	{input: "01", ptr: new(*uint256.Int), value: uint256.NewInt(1)},
 	{input: "89FFFFFFFFFFFFFFFFFF", ptr: new(*uint256.Int), value: veryBigInt},
@@ -518,14 +473,6 @@ var decodeTests = []decodeTest{
 		ptr:   new(recstruct),
 		value: recstruct{1, &recstruct{2, &recstruct{3, nil}}},
 	},
-	{
-		// This checks that empty big.Int works correctly in struct context. It's easy to
-		// miss the update of s.kind for this case, so it needs its own test.
-		input: "C58083343434",
-		ptr:   new(bigIntStruct),
-		value: bigIntStruct{new(big.Int), "444"},
-	},
-
 	// struct errors
 	{
 		input: "C0",
@@ -686,16 +633,6 @@ var decodeTests = []decodeTest{
 		input: "C401020304",
 		ptr:   new(optionalAndTailField),
 		value: optionalAndTailField{A: 1, B: 2, Tail: []uint{3, 4}},
-	},
-	{
-		input: "C101",
-		ptr:   new(optionalBigIntField),
-		value: optionalBigIntField{A: 1, B: nil},
-	},
-	{
-		input: "C20102",
-		ptr:   new(optionalBigIntField),
-		value: optionalBigIntField{A: 1, B: big.NewInt(2)},
 	},
 	{
 		input: "C101",
@@ -884,7 +821,7 @@ func TestDecodeStreamReset(t *testing.T) {
 type testDecoder struct{ called bool }
 
 func (t *testDecoder) DecodeRLP(s *Stream) error {
-	if _, err := s.Uint(); err != nil {
+	if _, err := s.Uint64(); err != nil {
 		return err
 	}
 	t.called = true
@@ -937,7 +874,7 @@ func TestDecodeDecoderNilPointer(t *testing.T) {
 type byteDecoder byte
 
 func (bd *byteDecoder) DecodeRLP(s *Stream) error {
-	_, err := s.Uint()
+	_, err := s.Uint64()
 	*bd = 255
 	return err
 }
@@ -1080,8 +1017,8 @@ func ExampleStream() {
 	}
 
 	// Decode elements
-	fmt.Println(s.Uint())
-	fmt.Println(s.Uint())
+	fmt.Println(s.Uint64())
+	fmt.Println(s.Uint64())
 	fmt.Println(s.Bytes())
 
 	// Acknowledge end of list

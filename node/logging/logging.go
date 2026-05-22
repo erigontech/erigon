@@ -18,6 +18,7 @@ package logging
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -234,10 +235,33 @@ func initSeparatedLogging(
 		return
 	}
 
-	err := os.MkdirAll(dirPath, 0755)
-	if err != nil {
-		logger.Warn("failed to create log dir, console logging only")
-		return
+	// Create the log directory with owner-only permissions (0700) so that
+	// by default only the erigon user can read logs. Group or world access
+	// must be explicitly granted by the operator (e.g. chmod 750 <logs-dir>).
+	// If the directory already exists we inspect its permissions: any group
+	// or world access bits are reported as a warning but we proceed running.
+	if info, err := os.Stat(dirPath); err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warn("failed to stat log dir, console logging only", "err", err)
+			return
+		}
+		if err := os.MkdirAll(dirPath, 0700); err != nil {
+			logger.Warn("failed to create log dir, console logging only", "err", err)
+			return
+		}
+	} else {
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			logger.Warn("log directory has non-default permissions; group or world access is enabled",
+				"dir", dirPath, "mode", fmt.Sprintf("%04o", mode))
+		}
+	}
+
+	// Pre-create the log file with group-readable permissions (0640).
+	// lumberjack.v2 copies the mode of the existing file when rotating, so
+	// all subsequent rotated files will also be created with 0640.
+	logFilePath := filepath.Join(dirPath, filePrefix+".log")
+	if f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640); err == nil {
+		_ = f.Close()
 	}
 
 	dirFormat := log.TerminalFormatNoColor()
@@ -246,7 +270,7 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   filepath.Join(dirPath, filePrefix+".log"),
+		Filename:   logFilePath,
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days

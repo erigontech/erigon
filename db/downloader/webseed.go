@@ -29,6 +29,7 @@ import (
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -227,7 +228,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		if err != nil {
 			return nil, err
 		}
-		insertCloudflareHeaders(request)
+		snapcfg.InsertCloudflareHeaders(request)
 		resp, err := d.client.Do(request)
 		if err != nil {
 			return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
@@ -240,7 +241,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		return nil, err
 	}
 
-	insertCloudflareHeaders(request)
+	snapcfg.InsertCloudflareHeaders(request)
 
 	resp, err := d.client.Do(request)
 	if err != nil {

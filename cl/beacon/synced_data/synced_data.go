@@ -37,8 +37,6 @@ var (
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
-func EmptyCancel() {}
-
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
@@ -103,6 +101,46 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	return nil
 }
 
+// OnHeadStateWithBlockRoot updates the head state with a known block root,
+// avoiding recomputation of BlockRoot() which can produce incorrect results
+// when the state's incremental hashing cache has been dirtied by operations
+// like unrealized justification/finality processing.
+func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) (err error) {
+	if !s.enabled {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
+
+	// Save current state as previous state, if available.
+	if s.headState != nil {
+		if s.previousHeadState != nil {
+			err = s.headState.CopyInto(s.previousHeadState)
+		} else {
+			s.previousHeadState, err = s.headState.Copy()
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	// Update headState with the new state.
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
+	} else {
+		err = newState.CopyInto(s.headState)
+	}
+	if err != nil {
+		return err
+	}
+	s.headSlot.Store(newState.Slot())
+	s.headRoot.Store(blockRoot)
+	return nil
+}
+
 // ViewHeadState allows safe, read-only access to the current head state.
 func (s *SyncedDataManager) ViewHeadState(fn ViewHeadStateFn) error {
 	_, synced := s.headRoot.Load().(common.Hash)
@@ -164,6 +202,11 @@ func (s *SyncedDataManager) HeadRoot() common.Hash {
 }
 
 func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
+	s.accessLock.RLock()
+	defer s.accessLock.RUnlock()
+	if s.headState == nil {
+		return 0
+	}
 	return s.headState.CommitteeCount(epoch)
 }
 

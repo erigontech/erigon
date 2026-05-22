@@ -90,7 +90,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	defer unlock()
 
-	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs)
+	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs, chainName)
 	if err != nil {
 		return
 	}
@@ -121,6 +121,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	r := reset.Reset{
 		Dirs:                 &dirs,
 		RemoveUnknown:        removeLocal,
+		RemoveLocal:          removeLocal,
 		Logger:               logger,
 		PreverifiedSnapshots: cfg.Preverified.Items,
 		RemoveFunc: func(osName reset.OsFilePath) error {

@@ -125,3 +125,7 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 	}
 	return ret, nil
 }
+
+func (r *ExecutionSnapshotReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	// No-op: local snapshot reader doesn't need caching — EL data is always available.
+}

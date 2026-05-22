@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -63,7 +63,7 @@ type ttFork struct {
 	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
-func (tt *TransactionTest) Run(chainID *big.Int) error {
+func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *chain.Rules) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
@@ -80,7 +80,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if stx, ok := tx.(*types.SetCodeTransaction); ok {
 			authorizationsLen = uint64(len(stx.GetAuthorizations()))
 		}
-		intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               msg.Data(),
 			AuthorizationsLen:  authorizationsLen,
 			AccessListLen:      uint64(len(msg.AccessList())),
@@ -90,6 +90,9 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			IsEIP2028:          rules.IsIstanbul,
 			IsEIP3860:          rules.IsShanghai,
 			IsEIP7623:          rules.IsPrague,
+			IsEIP7976:          rules.IsAmsterdam,
+			IsEIP7981:          rules.IsAmsterdam,
+			IsEIP8037:          rules.IsAmsterdam,
 		})
 		requiredGas := intrinsicGasResult.RegularGas
 		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {

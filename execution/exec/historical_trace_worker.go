@@ -302,6 +302,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 
 	if len(result.ValidationResults) == 0 {
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return result
 	}
 
 	aaTxn := txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
@@ -315,7 +316,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())

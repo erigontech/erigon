@@ -25,21 +25,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
 )
-
-func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *lru.Cache[K, V] {
-	dst.Purge()
-	for _, key := range src.Keys() {
-		val, has := src.Get(key)
-		if !has {
-			continue
-		}
-		dst.Add(key, val)
-	}
-	return dst
-}
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
 	// Sort the attestation indicies.
@@ -142,14 +129,23 @@ func GetActivationExitChurnLimit(s abstract.BeaconState) uint64 {
 }
 
 func GetBalanceChurnLimit(s abstract.BeaconState) uint64 {
+	churnLimitQuotient := s.BeaconConfig().ChurnLimitQuotient
+	if s.Version() >= clparams.GloasVersion {
+		churnLimitQuotient = s.BeaconConfig().ChurnLimitQuotientGloas
+	}
 	churn := max(
 		s.BeaconConfig().MinPerEpochChurnLimitElectra,
-		s.GetTotalActiveBalance()/s.BeaconConfig().ChurnLimitQuotient,
+		s.GetTotalActiveBalance()/churnLimitQuotient,
 	)
 	return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
 }
 
 func GetConsolidationChurnLimit(s abstract.BeaconState) uint64 {
+	if s.Version() >= clparams.GloasVersion {
+		// [Modified in Gloas:EIP8061] Independent consolidation churn, no max() with min churn
+		churn := s.GetTotalActiveBalance() / s.BeaconConfig().ConsolidationChurnLimitQuotient
+		return churn - churn%s.BeaconConfig().EffectiveBalanceIncrement
+	}
 	return GetBalanceChurnLimit(s) - GetActivationExitChurnLimit(s)
 }
 
@@ -191,4 +187,23 @@ func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []
 		max(count, s.BeaconConfig().ValidatorCustodyRequirement),
 		s.BeaconConfig().NumberOfCustodyGroups,
 	)
+}
+
+// IsAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
+func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) (bool, error) {
+	if data.Slot == 0 {
+		return true, nil
+	}
+
+	blockRoot := data.BeaconBlockRoot
+	slotBlockRoot, err := s.GetBlockRootAtSlot(data.Slot)
+	if err != nil {
+		return false, err
+	}
+	prevBlockRoot, err := s.GetBlockRootAtSlot(data.Slot - 1)
+	if err != nil {
+		return false, err
+	}
+
+	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot, nil
 }

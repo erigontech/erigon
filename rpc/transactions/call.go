@@ -19,13 +19,12 @@ package transactions
 import (
 	"context"
 	"fmt"
-	"maps"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -40,72 +39,6 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 )
-
-type BlockOverrides struct {
-	BlockNumber *hexutil.Uint64         `json:"number"`
-	Coinbase    *common.Address         `json:"feeRecipient"`
-	Timestamp   *hexutil.Uint64         `json:"time"`
-	GasLimit    *hexutil.Uint           `json:"gasLimit"`
-	Difficulty  *hexutil.Uint64         `json:"difficulty"`
-	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
-	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
-	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
-	BeaconRoot  *common.Hash            `json:"beaconRoot"`
-	Withdrawals *types.Withdrawals      `json:"withdrawals"`
-	PrevRandao  *common.Hash            `json:"prevRandao"`
-}
-
-type BlockHashOverrides map[uint64]common.Hash
-
-func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
-	h := types.CopyHeader(header)
-	if o.BlockNumber != nil {
-		h.Number.SetUint64(uint64(*o.BlockNumber))
-	}
-	if o.Difficulty != nil {
-		h.Difficulty.SetUint64(uint64(*o.Difficulty))
-	}
-	if o.Timestamp != nil {
-		h.Time = o.Timestamp.Uint64()
-	}
-	if o.GasLimit != nil {
-		h.GasLimit = uint64(*o.GasLimit)
-	}
-	if o.Coinbase != nil {
-		h.Coinbase = *o.Coinbase
-	}
-	if o.BaseFee != nil {
-		h.BaseFee = o.BaseFee
-	}
-	if o.PrevRandao != nil {
-		h.MixDigest = *o.PrevRandao
-	}
-	return h
-}
-
-func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, overrideBlockHash BlockHashOverrides) {
-	if o.BlockNumber != nil {
-		blockCtx.BlockNumber = uint64(*o.BlockNumber)
-	}
-	if o.BaseFee != nil {
-		blockCtx.BaseFee = *o.BaseFee
-	}
-	if o.Coinbase != nil {
-		blockCtx.Coinbase = accounts.InternAddress(*o.Coinbase)
-	}
-	if o.Difficulty != nil {
-		blockCtx.Difficulty = *uint256.NewInt(uint64(*o.Difficulty))
-	}
-	if o.Timestamp != nil {
-		blockCtx.Time = uint64(*o.Timestamp)
-	}
-	if o.GasLimit != nil {
-		blockCtx.GasLimit = uint64(*o.GasLimit)
-	}
-	if o.BlockHash != nil {
-		maps.Copy(overrideBlockHash, *o.BlockHash)
-	}
-}
 
 func DoCall(
 	ctx context.Context,
@@ -145,29 +78,41 @@ func DoCall(
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+
 	// Get a new instance of the EVM.
-	msg, err := args.ToMessage(gasCap, header.BaseFee)
+	msg, err := args.ToMessage(gasCap, effectiveHeader.BaseFee)
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
-		blockOverrides.Override(&blockCtx)
+		if err := blockOverrides.Override(&blockCtx); err != nil {
+			return nil, err
+		}
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -180,14 +125,14 @@ func DoCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 	return result, nil
 }
 
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
-	reader services.CanonicalReader, config *chain.Config, blockOverrides *BlockOverrides, blockHashOverrides BlockHashOverrides) evmtypes.BlockContext {
+	reader services.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
@@ -204,7 +149,7 @@ func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, require
 
 type BlockHashProvider func(blockNum uint64) (common.Hash, error)
 
-func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.CanonicalReader, overrides BlockHashOverrides) BlockHashProvider {
+func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader services.CanonicalReader, overrides ethapi2.BlockHashOverrides) BlockHashProvider {
 	return func(blockNum uint64) (common.Hash, error) {
 		if blockHash, ok := overrides[blockNum]; ok {
 			return blockHash, nil
@@ -272,10 +217,19 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	timedOut := false
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the shared EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		timedOut = true
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			r.evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
@@ -286,7 +240,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if timedOut {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", r.callTimeout)
 	}
 
@@ -320,7 +274,9 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 
 	if blockOverrides != nil {
-		blockOverrides.Override(&blockCtx)
+		if err := blockOverrides.Override(&blockCtx); err != nil {
+			return nil, err
+		}
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 

@@ -25,7 +25,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -44,7 +45,7 @@ func init() {
 	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
-	for _, spec := range registeredChainsByName {
+	for name, spec := range registeredChainsByName {
 		if spec.IsEmpty() {
 			panic("chain spec is empty for chain " + spec.Name)
 		}
@@ -56,14 +57,12 @@ func init() {
 		}
 		if spec.GenesisStateRoot == (common.Hash{}) {
 			spec.GenesisStateRoot = empty.RootHash
+			registeredChainsByName[name] = spec
 		}
 
 		if spec.Config == nil {
 			panic("chain config is not set for chain " + spec.Name)
 		}
-
-		registeredChainsByName[spec.Name] = spec
-		registeredChainsByGenesisHash[spec.GenesisHash] = spec
 	}
 
 	for _, name := range chainNamesPoS {
@@ -106,13 +105,18 @@ func ChainSpecByName(chainName string) (Spec, error) {
 	return spec, nil
 }
 
-// ChainSpecByGenesisHash returns the chain spec for the given genesis hash
-func ChainSpecByGenesisHash(genesisHash common.Hash) (Spec, error) {
-	spec, ok := registeredChainsByGenesisHash[genesisHash]
-	if !ok || spec.IsEmpty() {
-		return Spec{}, fmt.Errorf("%w with genesis %x", ErrChainSpecUnknown, genesisHash)
+// ChainSpecsByGenesisHash returns all chain specs matching the given genesis hash.
+// Multiple chains can share a genesis hash (e.g. mainnet and bloatnet).
+//
+// ONLY USED FOR ERROR LOGGING.
+func ChainSpecsByGenesisHash(genesisHash common.Hash) []Spec {
+	var result []Spec
+	for _, spec := range registeredChainsByName {
+		if spec.GenesisHash == genesisHash {
+			result = append(result, spec)
+		}
 	}
-	return spec, nil
+	return result
 }
 
 // RegisterChainSpec registers a new chain spec with the given name and spec.
@@ -126,10 +130,6 @@ func RegisterChainSpec(name string, spec Spec) {
 		networkID = spec.Config.ChainID.Uint64()
 	}
 	NetworkNameByID[networkID] = name
-
-	if spec.GenesisHash != (common.Hash{}) {
-		registeredChainsByGenesisHash[spec.GenesisHash] = spec
-	}
 }
 
 type Spec struct {
@@ -148,14 +148,11 @@ func (cs Spec) IsEmpty() bool {
 }
 
 var ( // listings filled by init()
-	// mapping of chain genesis hashes to chain specs.
-	registeredChainsByGenesisHash = map[common.Hash]Spec{}
-
 	// mapping of chain names to chain specs.
 	registeredChainsByName = map[string]Spec{}
 
 	// list of chain IDs that are considered Proof of Stake (PoS) chains
-	chainIdsPoS = []*big.Int{}
+	chainIdsPoS = []*uint256.Int{}
 )
 
 var (
@@ -208,7 +205,7 @@ var (
 		Name:             networkname.Test,
 		GenesisHash:      common.HexToHash("0x6116de25352c93149542e950162c7305f207bbc17b0eb725136b78c80aed79cc"),
 		GenesisStateRoot: empty.RootHash,
-		Config:           chain.TestChainConfig,
+		Config:           chain.TestChainBerlinConfig,
 		//Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
 	}
@@ -233,11 +230,11 @@ var chainNamesPoS = []string{
 	networkname.Bloatnet,
 }
 
-func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	return isChainIDPoS(chainConfig.ChainID) || hasChainPassedTerminalTD(chainConfig, currentTDProvider)
 }
 
-func isChainIDPoS(chainID *big.Int) bool {
+func isChainIDPoS(chainID *uint256.Int) bool {
 	for _, id := range chainIdsPoS {
 		if id.Cmp(chainID) == 0 {
 			return true
@@ -246,7 +243,7 @@ func isChainIDPoS(chainID *big.Int) bool {
 	return false
 }
 
-func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {
+func hasChainPassedTerminalTD(chainConfig *chain.Config, currentTDProvider func() *uint256.Int) bool {
 	if chainConfig.TerminalTotalDifficultyPassed {
 		return true
 	}

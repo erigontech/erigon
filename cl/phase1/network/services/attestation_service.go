@@ -182,7 +182,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
 	currentSlot := s.ethClock.GetCurrentSlot()
 	if currentSlot < slot || currentSlot > slot+s.netCfg.AttestationPropagationSlotRange {
-		return fmt.Errorf("not in propagation range")
+		return fmt.Errorf("not in propagation range: %w", ErrIgnore)
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
 	if targetEpoch != slot/s.beaconCfg.SlotsPerEpoch {
@@ -195,6 +195,14 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// If our head state is too far from the attestation epoch, committee
+		// computations will use a stale RANDAO mix and produce wrong results.
+		// Allow current and previous epoch (spec permits both).
+		headEpoch := state.Epoch(headState)
+		if attEpoch != headEpoch && attEpoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from attestation epoch %d: %w",
+				headEpoch, attEpoch, ErrIgnore)
+		}
 		// [REJECT] The committee index is within the expected range
 		committeeCount := computeCommitteeCountPerSlot(headState, slot, s.beaconCfg.SlotsPerEpoch)
 		if committeeIndex >= committeeCount {
@@ -246,24 +254,30 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			attestation = att.Attestation
 		} else {
 			// electra and after
-			// [REJECT] attestation.data.index == 0
-			if att.SingleAttestation.Data.CommitteeIndex != 0 {
-				return errors.New("committee index must be 0")
+			if clVersion >= clparams.GloasVersion {
+				// [New in Gloas] [REJECT] attestation.data.index < 2
+				if att.SingleAttestation.Data.CommitteeIndex >= 2 {
+					return errors.New("attestation data index must be less than 2")
+				}
+			} else {
+				// [REJECT] attestation.data.index == 0
+				if att.SingleAttestation.Data.CommitteeIndex != 0 {
+					return errors.New("committee index must be 0")
+				}
 			}
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				//return errors.New("attester is not a member of the committee")
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
-			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee))
+			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee), int(s.beaconCfg.MaxCommitteesPerSlot), s.beaconCfg)
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return nil
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
@@ -287,21 +301,29 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
-	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
+	if !ok {
 		//s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
+	}
+
+	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
+	if clVersion >= clparams.GloasVersion {
+		if blockHeader.Slot == data.Slot && data.CommitteeIndex != 0 {
+			return errors.New("attestation data index must be 0 when block slot equals attestation slot")
+		}
 	}
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != data.Target.Root {
-		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Hex())
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock.Root != data.Target.Root {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Root.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
 	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().Root {
+	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch).Root != s.forkchoiceStore.FinalizedCheckpoint().Root {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 

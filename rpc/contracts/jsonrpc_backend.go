@@ -60,6 +60,20 @@ func (b JsonRpcBackend) PendingNonceAt(ctx context.Context, account common.Addre
 	return res.Uint64(), nil
 }
 
+func (b JsonRpcBackend) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
+	var blockRef rpc.BlockReference
+	if blockNumber == nil {
+		blockRef = rpc.LatestBlock
+	} else {
+		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
+	}
+	res, err := b.client.GetTransactionCount(account, blockRef)
+	if err != nil {
+		return 0, err
+	}
+	return res.Uint64(), nil
+}
+
 func (b JsonRpcBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 	return b.client.GasPrice()
 }

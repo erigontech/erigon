@@ -17,13 +17,16 @@
 package recsplit
 
 import (
-	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -47,16 +50,16 @@ func TestRecSplit2(t *testing.T) {
 	if err = rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, too few keys added")
 	}
 	if err = rs.AddKey([]byte("second_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err != nil {
+	if err = rs.Build(t.Context()); err != nil {
 		t.Error(err)
 	}
-	if err = rs.Build(context.Background()); err == nil {
+	if err = rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, hash gunction was built already")
 	}
 	if err = rs.AddKey([]byte("key_to_fail"), 0); err == nil {
@@ -86,7 +89,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 	if err := rs.AddKey([]byte("first_key"), 0); err != nil {
 		t.Error(err)
 	}
-	if err := rs.Build(context.Background()); err == nil {
+	if err := rs.Build(t.Context()); err == nil {
 		t.Errorf("test is expected to fail, duplicate key")
 	}
 }
@@ -125,7 +128,7 @@ func TestIndexLookup(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		idx := MustOpen(indexFile)
@@ -156,6 +159,11 @@ func TestIndexLookup(t *testing.T) {
 	t.Run("v1", func(t *testing.T) {
 		cfg := cfg
 		cfg.Version = 1
+		test(t, cfg)
+	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
 		test(t, cfg)
 	})
 }
@@ -302,7 +310,6 @@ func BenchmarkFindSplit(b *testing.B) {
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
 	count := make([]uint16, secondaryAggrBound)
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findSplit(buckets[i][:], salt, fanout, unit, count)
@@ -325,7 +332,6 @@ func BenchmarkFindBijection(b *testing.B) {
 	}
 	salt := uint64(0x106393c187cae2a) // startSeed[0]
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findBijection(buckets[i][:], salt)
@@ -367,7 +373,7 @@ func BenchmarkBuild(b *testing.B) {
 			}
 		}
 		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(b.Context()); err != nil {
 			b.Fatal(err)
 		}
 		b.StopTimer()
@@ -393,7 +399,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 			name = "enums"
 		}
 		b.Run(name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				b.StopTimer()
 				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
 				rs, err := NewRecSplit(RecSplitArgs{
@@ -415,11 +421,12 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
-				if err := rs.Build(context.Background()); err != nil {
+				if err := rs.Build(b.Context()); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()
 				rs.Close()
+				b.StartTimer()
 			}
 		})
 	}
@@ -443,7 +450,7 @@ func TestTwoLayerIndex(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := rs.Build(context.Background()); err != nil {
+		if err := rs.Build(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 
@@ -479,4 +486,160 @@ func TestTwoLayerIndex(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+	t.Run("v2", func(t *testing.T) {
+		cfg := cfg
+		cfg.Version = 2
+		test(t, cfg)
+	})
+}
+
+func TestIndexLookupParallel(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const N = 1000
+
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_w%d", workers))
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:   N,
+				BucketSize: 10,
+				Salt:       &salt,
+				TmpDir:     tmpDir,
+				IndexFile:  indexFile,
+				LeafSize:   8,
+				Workers:    workers,
+				NoFsync:    true,
+			}, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rs.Close()
+			for i := 0; i < N; i++ {
+				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := rs.Build(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			idx := MustOpen(indexFile)
+			defer idx.Close()
+			for i := 0; i < N; i++ {
+				reader := NewIndexReader(idx)
+				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+				assert.True(t, ok)
+				if offset != uint64(i*17) {
+					t.Errorf("workers=%d key %d: expected offset %d, got %d", workers, i, i*17, offset)
+				}
+			}
+		})
+	}
+}
+
+// TestParallelMatchesSequential checks that the index file produced by the parallel
+// build path is byte-for-byte identical to the one produced by the sequential path.
+func TestParallelMatchesSequential(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(42)
+	const N = 10_000
+
+	keys := make([][]byte, N)
+	for i := range keys {
+		keys[i] = fmt.Appendf(nil, "key-%d", i)
+	}
+
+	fileChecksum := func(path string) []byte {
+		t.Helper()
+		f, err := os.Open(path)
+		require.NoError(t, err)
+		defer f.Close()
+		h := sha256.New()
+		_, err = io.Copy(h, f)
+		require.NoError(t, err)
+		return h.Sum(nil)
+	}
+
+	build := func(workers int, indexFile string) {
+		t.Helper()
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   N,
+			BucketSize: 100,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+			Workers:    workers,
+		}, logger)
+		require.NoError(t, err)
+		defer rs.Close()
+		for i, k := range keys {
+			require.NoError(t, rs.AddKey(k, uint64(i*17)))
+		}
+		require.NoError(t, rs.Build(t.Context()))
+	}
+
+	seqFile := filepath.Join(tmpDir, "seq.idx")
+	build(1, seqFile)
+	seqSum := fileChecksum(seqFile)
+
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			parFile := filepath.Join(tmpDir, fmt.Sprintf("par_w%d.idx", workers))
+			build(workers, parFile)
+			assert.Equal(t, seqSum, fileChecksum(parFile),
+				"parallel (workers=%d) index file differs from sequential", workers)
+		})
+	}
+}
+
+func BenchmarkBuildParallel(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	keys := make([][]byte, KeysN)
+	for j := 0; j < KeysN; j++ {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+
+	for _, workers := range []int{1, 2, 4, 8} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; b.Loop(); i++ {
+				b.StopTimer()
+				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_par_%d_w%d", i, workers))
+				rs, err := NewRecSplit(RecSplitArgs{
+					KeyCount:   KeysN,
+					BucketSize: 2000,
+					Salt:       &salt,
+					TmpDir:     tmpDir,
+					IndexFile:  indexFile,
+					LeafSize:   8,
+					NoFsync:    true,
+					Workers:    workers,
+				}, logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				for j := 0; j < KeysN; j++ {
+					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StartTimer()
+				if err := rs.Build(b.Context()); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				rs.Close()
+				b.StartTimer()
+			}
+		})
+	}
 }

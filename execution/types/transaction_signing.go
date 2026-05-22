@@ -23,7 +23,6 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -45,10 +44,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config != nil {
 		var chainId uint256.Int
 		if config.ChainID != nil {
-			overflow := chainId.SetFromBig(config.ChainID)
-			if overflow {
-				panic("chainID higher than 2^256-1")
-			}
+			chainId.Set(config.ChainID)
 		}
 		signer.unprotected = true
 		switch {
@@ -117,13 +113,9 @@ func MakeFrontierSigner() *Signer {
 func LatestSigner(config *chain.Config) *Signer {
 	var signer Signer
 	signer.unprotected = true
-	chainId, overflow := uint256.FromBig(config.ChainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
+		signer.chainID.Set(config.ChainID)
+		signer.chainIDMul.Lsh(config.ChainID, 1) // ×2
 		if config.CancunTime != nil {
 			signer.blob = true
 		}
@@ -153,18 +145,14 @@ func LatestSigner(config *chain.Config) *Signer {
 // Use this in transaction-handling code where the current block number and fork
 // configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
 // If you have a ChainConfig and know the current block number, use MakeSigner instead.
-func LatestSignerForChainID(chainID *big.Int) *Signer {
+func LatestSignerForChainID(chainID *uint256.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
 	if chainID == nil {
 		return &signer
 	}
-	chainId, overflow := uint256.FromBig(chainID)
-	if overflow {
-		panic("chainID higher than 2^256-1")
-	}
-	signer.chainID.Set(chainId)
-	signer.chainIDMul.Lsh(chainId, 1) // ×2
+	signer.chainID.Set(chainID)
+	signer.chainIDMul.Lsh(chainID, 1) // ×2
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true
@@ -175,7 +163,7 @@ func LatestSignerForChainID(chainID *big.Int) *Signer {
 
 // SignTx signs the transaction using the given signer and private key.
 func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -185,7 +173,7 @@ func SignTx(txn Transaction, s Signer, prv *ecdsa.PrivateKey) (Transaction, erro
 
 // SignNewTx creates a transaction and signs it.
 func SignNewTx(prv *ecdsa.PrivateKey, s Signer, txn Transaction) (Transaction, error) {
-	h := txn.SigningHash(s.chainID.ToBig())
+	h := txn.SigningHash(&s.chainID)
 	sig, err := crypto.Sign(h[:], prv)
 	if err != nil {
 		return nil, err
@@ -234,7 +222,7 @@ func (sg Signer) Sender(tx Transaction) (accounts.Address, error) {
 func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) (accounts.Address, error) {
 	var V uint256.Int
 	var R, S *uint256.Int
-	signChainID := sg.chainID.ToBig() // This is reset to nil if txn is unprotected
+	signChainID := &sg.chainID // This is reset to nil if txn is unprotected
 	// recoverPlain below will subtract 27 from V
 	switch t := txn.(type) {
 	case *LegacyTx:
@@ -259,11 +247,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.accessList {
 			return accounts.NilAddress, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
@@ -274,11 +258,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.dynamicFee {
 			return accounts.NilAddress, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
@@ -289,11 +269,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.blob {
 			return accounts.NilAddress, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, and blob txs are defined to use 0 and 1 as their recovery
@@ -304,11 +280,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.setCode {
 			return accounts.NilAddress, fmt.Errorf("setCode tx is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
@@ -342,7 +314,7 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
 		chainId := t.GetChainID()
-		if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
+		if !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V, err = decodeSignature(sig)
@@ -358,6 +330,10 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
 }
+
+// SetMalleable sets whether the signer accepts malleable (pre-EIP-2) signatures
+// where S > secp256k1n/2. Only relevant for legacy transactions.
+func (sg *Signer) SetMalleable(v bool) { sg.malleable = v }
 
 // Equal returns true if the given signer is the same as the receiver.
 func (sg Signer) Equal(other Signer) bool {

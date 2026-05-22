@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	length2 "github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -52,11 +53,6 @@ type HashBuilder struct {
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
 	topHashesCopy []byte
-
-	// proofElement is set when the next element computation should have its RLP
-	// encoding retained.  Additionally, the account root storage hash and storage
-	// values are stored into this field when set and in the relavent codepath.
-	proofElement *proofElement
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -77,13 +73,6 @@ func (hb *HashBuilder) Reset() {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
 	hb.topHashesCopy = hb.topHashesCopy[:0]
-	hb.proofElement = nil
-}
-
-// setProofElement sets the proofElement field in which the relevant methods
-// will check and additionally write the proof bytes to during trie computation.
-func (hb *HashBuilder) setProofElement(pe *proofElement) {
-	hb.proofElement = pe
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) error {
@@ -92,10 +81,6 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlp.RlpSerializable) 
 	}
 	if length < 0 {
 		return fmt.Errorf("length %d", length)
-	}
-	if hb.proofElement != nil {
-		hb.proofElement.storageKey = common.Copy(keyHex[:len(keyHex)-1])
-		hb.proofElement.storageValue = new(uint256.Int).SetBytes(val.RawBytes())
 	}
 	key := keyHex[len(keyHex)-length:]
 	s := &ShortNode{Key: common.Copy(key), Val: ValueNode(common.Copy(val.RawBytes()))}
@@ -123,7 +108,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) e
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -163,7 +148,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlp.RlpSerializable) e
 
 func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.EncodeListPrefixToBuf(totalLen, hb.lenPrefix[:])
 
 	var writer io.Writer
 	var reader io.Reader
@@ -176,10 +161,6 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		hb.sha.Reset()
 		writer = hb.sha
 		reader = hb.sha
-	}
-	// Collect a copy of the hash input if needed for an eth_getProof
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(writer, &hb.proofElement.proof)
 	}
 
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
@@ -229,7 +210,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
-	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
 	hb.acc.CodeHash = accounts.EmptyCodeHash
@@ -271,14 +251,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		popped++
 	}
 
-	if hb.proofElement != nil {
-		// The storageRoot is not stored with the account info, therefore
-		// we capture it with the account proof element.  Note, we also store the
-		// full key as this root could be for a different account in the negative
-		// case.
-		hb.proofElement.storageRootKey = common.Copy(fullKey)
-		hb.proofElement.storageRoot = hb.acc.Root
-	}
 	var accCopy accounts.Account
 	hb.acc.CodeHash = codeHash
 	accCopy.Copy(&hb.acc)
@@ -341,7 +313,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	var compactLen int
 	var ni int
 	var compact0 byte
-	if hasTerm(key) {
+	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -414,9 +386,6 @@ func (hb *HashBuilder) extension(key []byte) error {
 
 func (hb *HashBuilder) extensionHash(key []byte) error {
 	writer := io.Writer(hb.sha)
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(hb.sha, &hb.proofElement.proof)
-	}
 
 	if hb.trace {
 		fmt.Printf("EXTENSIONHASH %x\n", key)
@@ -429,7 +398,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	var ni int
 	var compact0 byte
 	// https://ethereum.org/en/developers/docs/data-structures-and-encoding/patricia-merkle-trie/#specification
-	if hasTerm(key) {
+	if nibbles.HasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
 			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble
@@ -452,7 +421,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalLen)
+	pt := rlp.EncodeListPrefixToBuf(totalLen, hb.lenPrefix[:])
 	hb.sha.Reset()
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -496,8 +465,6 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 func (hb *HashBuilder) branch(set uint16) error {
 	if hb.trace {
 		fmt.Printf("BRANCH (%b)\n", set)
-	}
-	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	f := &FullNode{}
@@ -534,9 +501,6 @@ func (hb *HashBuilder) branch(set uint16) error {
 
 func (hb *HashBuilder) branchHash(set uint16) error {
 	writer := io.Writer(hb.sha)
-	if hb.proofElement != nil {
-		writer = io.MultiWriter(hb.sha, &hb.proofElement.proof)
-	}
 
 	if hb.trace {
 		fmt.Printf("BRANCHHASH (%b)\n", set)
@@ -561,7 +525,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.sha.Reset()
-	pt := rlp.GenerateStructLen(hb.lenPrefix[:], totalSize)
+	pt := rlp.EncodeListPrefixToBuf(totalSize, hb.lenPrefix[:])
 	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}

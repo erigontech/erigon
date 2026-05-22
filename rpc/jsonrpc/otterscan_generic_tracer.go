@@ -18,8 +18,8 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -43,8 +43,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	if header == nil {
-		log.Warn("[rpc] header is nil", "blockNum", blockNum)
-		return nil
+		return fmt.Errorf("header not found for block %d", blockNum)
 	}
 	executor.ChangeBlock(header)
 
@@ -53,8 +52,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	if txn == nil {
-		log.Warn("[rpc genericTracer] txn is nil", "blockNum", blockNum, "txIndex", txIndex)
-		return nil
+		return fmt.Errorf("txn not found at block %d, index %d", blockNum, txIndex)
 	}
 	err = executor.ExecTxn(txnID, txIndex, txn, false)
 	if err != nil {

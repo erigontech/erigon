@@ -16,7 +16,9 @@
 
 package state
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+)
 
 func (b *CachingBeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
 	return b.publicKeyIndicies.Get(key[:])
@@ -27,4 +29,9 @@ func (b *CachingBeaconState) PreviousStateRoot() common.Hash {
 	ret := b.previousStateRoot
 	b.previousStateRoot = common.Hash{}
 	return ret
+}
+
+// PeekPreviousStateRoot returns the previously saved state root without consuming it.
+func (b *CachingBeaconState) PeekPreviousStateRoot() common.Hash {
+	return b.previousStateRoot
 }

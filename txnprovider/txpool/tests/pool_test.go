@@ -18,7 +18,6 @@ package tests
 
 import (
 	"fmt"
-	"math/big"
 	"testing"
 	"time"
 
@@ -79,12 +78,12 @@ func TestSimpleLocalTxThroughputBenchmark(t *testing.T) {
 						Nonce:    uint64(i),
 						GasLimit: 21000,
 						To:       &addr2,
-						Value:    uint256.NewInt(100),
+						Value:    *uint256.NewInt(100),
 						Data:     nil,
 					},
-					GasPrice: uint256.NewInt(1),
+					GasPrice: *uint256.NewInt(1),
 				},
-				*types.LatestSignerForChainID(big.NewInt(1337)),
+				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
 			require.NoError(t, err)
@@ -153,12 +152,12 @@ func TestSimpleLocalTxLatencyBenchmark(t *testing.T) {
 					Nonce:    uint64(i),
 					GasLimit: 21000,
 					To:       &addr2,
-					Value:    uint256.NewInt(100),
+					Value:    *uint256.NewInt(100),
 					Data:     nil,
 				},
-				GasPrice: uint256.NewInt(1),
+				GasPrice: *uint256.NewInt(1),
 			},
-			*types.LatestSignerForChainID(big.NewInt(1337)),
+			*types.LatestSignerForChainID(uint256.NewInt(1337)),
 			pkey1,
 		)
 		require.NoError(t, err)
@@ -222,12 +221,12 @@ func TestSimpleRemoteTxThroughputBenchmark(t *testing.T) {
 						Nonce:    uint64(nonce + i),
 						GasLimit: 21000,
 						To:       &addr2,
-						Value:    uint256.NewInt(100),
+						Value:    *uint256.NewInt(100),
 						Data:     nil,
 					},
-					GasPrice: uint256.NewInt(1),
+					GasPrice: *uint256.NewInt(1),
 				},
-				*types.LatestSignerForChainID(big.NewInt(1337)),
+				*types.LatestSignerForChainID(uint256.NewInt(1337)),
 				pkey1,
 			)
 			require.NoError(t, err)
@@ -305,12 +304,12 @@ func TestSimpleRemoteTxLatencyBenchmark(t *testing.T) {
 					Nonce:    uint64(i),
 					GasLimit: 21000,
 					To:       &addr2,
-					Value:    uint256.NewInt(100),
+					Value:    *uint256.NewInt(100),
 					Data:     nil,
 				},
-				GasPrice: uint256.NewInt(1),
+				GasPrice: *uint256.NewInt(1),
 			},
-			*types.LatestSignerForChainID(big.NewInt(1337)),
+			*types.LatestSignerForChainID(uint256.NewInt(1337)),
 			pkey1,
 		)
 		require.NoError(t, err)

@@ -24,6 +24,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -35,6 +37,8 @@ import (
 var ProtocolToString = map[uint]string{
 	direct.ETH68: "eth68",
 	direct.ETH69: "eth69",
+	direct.ETH70: "eth70",
+	direct.ETH71: "eth71",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -45,7 +49,7 @@ const ProtocolName = "eth"
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
-var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18}
+var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18, direct.ETH70: 18, direct.ETH71: 20}
 
 const (
 	// Protocol messages in eth/64
@@ -65,6 +69,10 @@ const (
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
 	BlockRangeUpdateMsg           = 0x11
+
+	// Protocol messages added in eth/71 (EIP-8159 Block Access List Exchange)
+	GetBlockAccessListsMsg = 0x12
+	BlockAccessListsMsg    = 0x13
 )
 
 var ToProto = map[uint]map[uint64]sentryproto.MessageId{
@@ -98,6 +106,41 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, // Modified in eth/69
 	},
+	direct.ETH70: {
+		StatusMsg:                     sentryproto.MessageId_STATUS_69,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_70, // Modified in eth/70
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_70,     // Modified in eth/70
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+	},
+	direct.ETH71: {
+		StatusMsg:                     sentryproto.MessageId_STATUS_69,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_70,
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_70,
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+		// Added in eth/71 (EIP-8159 Block Access List Exchange)
+		GetBlockAccessListsMsg: sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71,
+		BlockAccessListsMsg:    sentryproto.MessageId_BLOCK_ACCESS_LISTS_71,
+	},
 }
 
 var FromProto = map[uint]map[sentryproto.MessageId]uint64{
@@ -129,6 +172,39 @@ var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+	},
+	direct.ETH70: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_70:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_70:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+	},
+	direct.ETH71: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_70:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_70:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+		// Added in eth/71 (EIP-8159 Block Access List Exchange)
+		sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71: GetBlockAccessListsMsg,
+		sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:     BlockAccessListsMsg,
 	},
 }
 
@@ -226,7 +302,7 @@ type BlockHeadersPacket66 struct {
 // NewBlockPacket is the network packet for the block propagation message.
 type NewBlockPacket struct {
 	Block *types.Block
-	TD    *big.Int
+	TD    uint256.Int
 }
 
 func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
@@ -235,10 +311,10 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	blockLen := nbp.Block.EncodingSize()
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
-	encodingSize += rlp.BigIntLen(nbp.TD)
+	encodingSize += rlp.Uint256Len(nbp.TD)
 	// prefix
 	var b [32]byte
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Block
@@ -246,7 +322,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
-	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(nbp.TD, w, b[:]); err != nil {
 		return err
 	}
 	return nil
@@ -263,11 +339,9 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode TD
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&nbp.TD); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	nbp.TD = new(big.Int).SetBytes(b)
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
@@ -317,6 +391,48 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
+// GetBlockAccessListsPacket is the eth/71 request to retrieve Block Access
+// Lists (EIP-7928) for a list of block hashes (EIP-8159).
+type GetBlockAccessListsPacket []common.Hash
+
+// GetBlockAccessListsPacket66 wraps GetBlockAccessListsPacket in the eth/66
+// request-id envelope. Reused unchanged for eth/71.
+type GetBlockAccessListsPacket66 struct {
+	RequestId uint64
+	GetBlockAccessListsPacket
+}
+
+// BlockAccessListsPacket is the eth/71 response to a GetBlockAccessLists
+// request. Entries are positionally aligned with the request: element i is
+// the BAL for request hash i. The BAL payload is the canonical RLP encoding
+// of a types.BlockAccessList per EIP-7928, passed through as RawValue since
+// rawdb stores it in that exact form.
+//
+// EIP-8159 (post ethereum/EIPs#11553) defines three wire-distinguishable
+// entry shapes:
+//   - 0x80 (RLP empty string) — "peer does not have this BAL". The caller
+//     should treat the slot as missing and may retry from another peer.
+//   - 0xc0 (RLP empty list) — "block has a genuinely empty BAL". Valid only
+//     when the corresponding header's BlockAccessListHash equals the
+//     empty-BAL hash (see common/empty.BlockAccessListHash); otherwise the
+//     peer is misbehaving.
+//   - any other payload — actual BAL bytes whose keccak256 MUST match the
+//     header's BlockAccessListHash.
+type BlockAccessListsPacket []rlp.RawValue
+
+// BlockAccessListsPacket66 wraps BlockAccessListsPacket in the eth/66
+// request-id envelope. Reused unchanged for eth/71.
+type BlockAccessListsPacket66 struct {
+	RequestId uint64
+	BlockAccessListsPacket
+}
+
+func (p *GetBlockAccessListsPacket66) Name() string { return "GetBlockAccessLists" }
+func (p *GetBlockAccessListsPacket66) Kind() byte   { return GetBlockAccessListsMsg }
+
+func (p *BlockAccessListsPacket66) Name() string { return "BlockAccessLists" }
+func (p *BlockAccessListsPacket66) Kind() byte   { return BlockAccessListsMsg }
+
 // Unpack retrieves the transactions, uncles, withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
 func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
@@ -357,6 +473,23 @@ type ReceiptsRLPPacket66 struct {
 	RequestId uint64
 	ReceiptsRLPPacket
 }
+
+// GetReceiptsPacket70 represents a block receipts query over eth/70.
+// The server omits receipts before FirstBlockReceiptIndex for the first block.
+type GetReceiptsPacket70 struct {
+	RequestId              uint64
+	FirstBlockReceiptIndex uint64
+	GetReceiptsPacket
+}
+
+// ReceiptsRLPPacket70 is the eth/70 version of ReceiptsRLPPacket.
+// When LastBlockIncomplete is true, the final receipt list is incomplete.
+type ReceiptsRLPPacket70 struct {
+	RequestId           uint64
+	LastBlockIncomplete bool
+	ReceiptsRLPPacket
+}
+
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash

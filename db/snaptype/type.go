@@ -157,7 +157,7 @@ var CaplinIndexes = struct {
 	BlobSidecarSlot: Index{Name: "blocksidecars", Version: version.V1_1_standart},
 }
 
-func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
+func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bool {
 	dir := info.Dir()
 	// segment, err := seg.NewDecompressor(info.Path)
 
@@ -167,14 +167,13 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 
 	// defer segment.Close()
 
-	// Let's actually
-	if _, err := os.Stat(info.Path); err != nil {
-		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
+	if !slices.Contains(dirEntries, filepath.Base(info.Path)) {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir)
 		return false
 	}
 
 	fNameMask := IdxFileMask(info.From, info.To, i.Name)
-	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
+	fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
 	if err != nil {
 		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
 		return false
@@ -217,7 +216,7 @@ type Type interface {
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
-	HasIndexFiles(info FileInfo, logger log.Logger) bool
+	HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
 
@@ -332,9 +331,9 @@ func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder 
 	return indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-func (s SnapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+func (s SnapType) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
 	for _, index := range s.indexes {
-		if !index.HasFile(info, logger) {
+		if !index.HasFile(info, dirEntries, logger) {
 			return false
 		}
 	}
@@ -439,8 +438,8 @@ func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
-func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
-	return e.Type().HasIndexFiles(info, logger)
+func (e Enum) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	return e.Type().HasIndexFiles(info, dirEntries, logger)
 }
 
 func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
@@ -492,17 +491,12 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	}
 	defer d.Close()
 
-	if p != nil {
-		fname := info.Name()
-		p.Name.Store(&fname)
-		p.Total.Store(uint64(d.Count()))
-	}
 	cfg.KeyCount = d.Count()
 	idxVer := indexVersion.Current
 	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
-	versionOfRs := uint8(0)
+	versionOfRs := version.DataStructureVersion(0)
 	if !idxVer.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
-		versionOfRs = 1
+		versionOfRs = recsplit.ExistenceFilterVersion
 	}
 	cfg.Version = versionOfRs
 	rs, err := recsplit.NewRecSplit(cfg, logger)
@@ -515,6 +509,7 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
+		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)
@@ -560,11 +555,6 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	}
 	defer d.Close()
 
-	if p != nil {
-		fname := info.Name()
-		p.Name.Store(&fname)
-		p.Total.Store(uint64(d.Count()))
-	}
 	cfg.KeyCount = d.Count()
 	cfg.IndexFile = filepath.Join(info.Dir(), IdxFileName(info.Version, info.From, info.To, info.CaplinTypeString))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
@@ -577,6 +567,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
+		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)

@@ -1,5 +1,6 @@
 version: "2"
 run:
+  allow-parallel-runners: true
 linters:
   enable:
     - asasalint
@@ -141,7 +142,6 @@ linters:
       - builtin$
       - examples$
       - testdata
-      - execution-spec-tests
 formatters:
   enable:
     - gofmt
@@ -157,4 +157,3 @@ formatters:
       - builtin$
       - examples$
       - testdata
-      - execution-spec-tests

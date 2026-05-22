@@ -98,7 +98,11 @@ type receiptRLP struct {
 }
 
 // receiptRLP69 is the post-eth/69 consensus encoding of a receipt.
+// ETH69 changed receipt encoding so all receipts (including typed) use the same
+// flat list format: [tx-type, post-state-or-status, cumulative-gas, logs].
+// This removes the type-byte envelope used in ETH68 and drops the bloom filter.
 type receiptRLP69 struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*Log
@@ -152,28 +156,16 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 
 // EncodeRLP69 implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
+// ETH69 uses a uniform list encoding for all receipt types:
+//
+//	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
 func (r Receipt) EncodeRLP69(w io.Writer) error {
-	data := &receiptRLP69{r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
-	if r.Type == LegacyTxType {
-		return rlp.Encode(w, data)
-	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
-	if err := r.encodeTyped69(data, buf); err != nil {
-		return err
-	}
-	return rlp.Encode(w, buf.Bytes())
+	data := &receiptRLP69{r.Type, r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
+	return rlp.Encode(w, data)
 }
 
 // encodeTyped writes the canonical encoding of a typed receipt to w.
 func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
-	w.WriteByte(r.Type)
-	return rlp.Encode(w, data)
-}
-
-// encodeTyped writes the post-eth/69 canonical encoding of a typed receipt to w.
-func (r *Receipt) encodeTyped69(data *receiptRLP69, w *bytes.Buffer) error {
 	w.WriteByte(r.Type)
 	return rlp.Encode(w, data)
 }
@@ -240,7 +232,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
 	r.setStatus(b)
-	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
+	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
 	if err = s.ReadBytes(r.Bloom[:]); err != nil {
@@ -262,15 +254,12 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open Topics: %w", err)
 		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			log.Topics = append(log.Topics, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for Topic: %d", len(b))
+		for s.MoreDataInList() {
+			var topic common.Hash
+			if err = s.ReadBytes(topic[:]); err != nil {
+				return fmt.Errorf("read Topic: %w", err)
 			}
-			copy(log.Topics[len(log.Topics)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read Topic: %w", err)
+			log.Topics = append(log.Topics, topic)
 		}
 		// end of Topics list
 		if err = s.ListEnd(); err != nil {
@@ -499,7 +488,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		return
 	}
 	logIndex := 0
-	seen := make(map[uint]struct{}, 16)
+	seen := make(map[hexutil.Uint]struct{}, 16)
 	for _, r := range rs {
 		// ensure valid field
 		if logIndex != int(r.FirstLogIndexWithinBlock) {
@@ -576,11 +565,11 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
-		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockNumber = hexutil.Uint64(blockNum)
 		r.Logs[j].BlockHash = blockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = uint(txnIdx)
-		r.Logs[j].Index = uint(logIndex)
+		r.Logs[j].TxIndex = hexutil.Uint(txnIdx)
+		r.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 	return nil
@@ -597,11 +586,11 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 
 	// The derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(r.Logs); j++ {
-		r.Logs[j].BlockNumber = blockNum
+		r.Logs[j].BlockNumber = hexutil.Uint64(blockNum)
 		r.Logs[j].BlockHash = r.BlockHash
 		r.Logs[j].TxHash = r.TxHash
-		r.Logs[j].TxIndex = r.TransactionIndex
-		r.Logs[j].Index = uint(logIndex)
+		r.Logs[j].TxIndex = hexutil.Uint(r.TransactionIndex)
+		r.Logs[j].Index = hexutil.Uint(logIndex)
 		logIndex++
 	}
 	if calcBloom {

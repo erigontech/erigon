@@ -20,6 +20,8 @@
 package logger
 
 import (
+	"bytes"
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -27,7 +29,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -57,13 +62,13 @@ func TestStoreCapture(t *testing.T) {
 
 	var (
 		logger   = NewStructLogger(nil)
-		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
 	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	_, _, err := evm.Run(contract, 100000, []byte{}, false)
+	_, _, _, err := evm.Run(contract, mdgas.MdGas{Regular: 200_000, State: params.StateGasPerStorageSet}, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,11 +82,28 @@ func TestStoreCapture(t *testing.T) {
 	}
 }
 
+func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
+	var buf bytes.Buffer
+	logger := NewJSONLogger(nil, &buf)
+	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
+
+	scope := &mockOpContext{}
+	logger.OnOpcode(0, byte(vm.STOP), 100, 0, scope, nil, 0, nil)
+
+	var entry map[string]json.RawMessage
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
+		t.Fatalf("failed to decode json logger output: %v", err)
+	}
+	if _, ok := entry["refund"]; !ok {
+		t.Fatal("expected json logger to emit opcode output after system call start")
+	}
+}
+
 //func TestStoreCapture(t *testing.T) {
 //	c := vm.NewJumpDestCache()
 //	var (
 //		logger   = NewStructLogger(nil)
-//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
+//		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.AllProtocolChanges, vm.Config{Tracer: logger.Hooks()})
 //		mem      = vm.NewMemory()
 //		stack    = vm.New()
 //		contract = vm.NewContract(&dummyContractRef{}, accounts.ZeroAddress, new(uint256.Int), 0, c)

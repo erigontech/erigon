@@ -80,13 +80,13 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 			tx, err := m.DB.BeginTemporalRo(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()
-			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi), config, cache, gasprice.NewFeeHistoryCache(), log.New())
 
 			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 

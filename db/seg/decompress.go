@@ -509,8 +509,40 @@ func (d *Decompressor) DataHandle() unsafe.Pointer {
 }
 func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
 func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDictSize + d.lenDictSize }
 func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
+
+// DictMemSize returns the in-memory size of the decoded Huffman table structures
+// (arena-allocated codeword/table/slot slabs). Pattern bytes are subslices of the
+// mmap'd file data and are not included.
+func (d *Decompressor) DictMemSize() uint64 {
+	var total uint64
+	if d.patArena != nil {
+		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
+		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
+		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+	}
+	if d.posArena != nil {
+		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
+		total += uint64(cap(d.posArena.entriesArr)) * uint64(unsafe.Sizeof(posEntry{}))
+		total += uint64(cap(d.posArena.ptrsArr)) * uint64(unsafe.Sizeof((*posTable)(nil)))
+	}
+	return total
+}
+
+// Stats accumulates snapshot segment stats for summary logging.
+type Stats struct {
+	Words   uint64
+	Dict    uint64
+	DictMem uint64
+}
+
+func (s *Stats) Add(d *Decompressor) {
+	s.Words += uint64(d.Count())
+	s.Dict += d.SerializedTotalDictSize()
+	s.DictMem += d.DictMemSize()
+}
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
@@ -717,6 +749,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 	}
 	if v.d.posDict != nil {
 		g.posMask = v.d.posDict.mask
+		g.posEntries = v.d.posDict.entries
 	}
 	return g
 }
@@ -733,13 +766,14 @@ func (v *SequentialView) Close() {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	dataP   uint64    // current byte offset in data
-	dataLen uint64    // u64-typed len(data) to reduce amount of type-casting
-	dataBit int       // bit offset within current byte (0-7)
-	posMask uint16    // cached posDict.mask, avoids pointer chain
-	posDict *posTable // Huffman table for positions
-	data    []byte
+	dataP      uint64     // current byte offset in data
+	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
+	dataBit    int        // bit offset within current byte (0-7)
+	posMask    uint16     // cached posDict.mask, avoids pointer chain
+	posEntries []posEntry // cached posDict.entries, avoids pointer-chase through posDict
+	data       []byte
 	//less hot fields
+	posDict     *posTable // Huffman table for positions (only used for subtable path)
 	patternDict *patternTable
 	d           *Decompressor
 	fName       string
@@ -769,26 +803,26 @@ func (g *Getter) nextPosClean() uint64 {
 // It is structured to be inlinable: the subtable (deep-tree) case is pushed
 // into a separate //go:noinline helper so this function stays small.
 func (g *Getter) nextPos() uint64 {
-	if g.posDict.bitLen == 0 {
-		return uint64(g.posDict.entries[0].pos)
+	if g.posMask == 0 {
+		return uint64(g.posEntries[0].pos)
 	}
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7 // & 7 proves to compiler: 0 ≤ dataBit < 8, eliminating shift guards
 	data := g.data
 	code := uint16(data[dataP]) >> dataBit
 	if dataP+1 < g.dataLen {
 		code |= uint16(data[dataP+1]) << (8 - dataBit)
 	}
 	code &= g.posMask
-	entry := g.posDict.entries[code]
-	l := int(entry.bits)
+	entry := g.posEntries[code]
+	l := uint(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(g.posDict, code)
 	}
 	dataBit += l
 	dataP += uint64(dataBit >> 3)
 	g.dataP = dataP
-	g.dataBit = dataBit & 7
+	g.dataBit = int(dataBit & 7)
 	return uint64(entry.pos)
 }
 
@@ -799,23 +833,23 @@ func (g *Getter) nextPos() uint64 {
 func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 	for {
 		table = table.ptrs[code]
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		code = uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= table.mask
 		entry := table.entries[code]
 		if entry.bits != 0 {
-			dataBit += int(entry.bits)
+			dataBit += uint(entry.bits)
 			dataP += uint64(dataBit >> 3)
 			g.dataP = dataP
-			g.dataBit = dataBit & 7
+			g.dataBit = int(dataBit & 7)
 			return uint64(entry.pos)
 		}
 	}
@@ -829,11 +863,11 @@ func (g *Getter) nextPattern() []byte {
 
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
@@ -843,13 +877,13 @@ func (g *Getter) nextPattern() []byte {
 			table = cw.ptr
 			dataBit += 9
 		} else {
-			dataBit += int(cw.len)
+			dataBit += uint(cw.len)
 		}
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		if cw.len != 0 {
 			g.dataP = dataP
-			g.dataBit = dataBit
+			g.dataBit = int(dataBit)
 			return cw.pattern
 		}
 	}
@@ -877,6 +911,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
+		g.posEntries = d.posDict.entries
 	}
 	return g
 }
@@ -1123,64 +1158,124 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 
 // MatchCmp lexicographically compares given buf with the word at the current offset in the file.
 // returns 0 if buf == word, -1 if buf < word, 1 if buf > word
+// On match (0), advances file position past the word. On mismatch, resets position.
+// Compares left-to-right during decode with early exit — no allocation, no full decode on mismatch.
 func (g *Getter) MatchCmp(buf []byte) int {
 	savePos := g.dataP
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	lenBuf := len(buf)
-	if wordLen == 0 && lenBuf != 0 {
+	if wordLen == 0 {
+		if lenBuf == 0 {
+			// Both empty — consume the empty word
+			if g.dataBit > 0 {
+				g.dataP++
+				g.dataBit = 0
+			}
+			return 0
+		}
 		g.dataP, g.dataBit = savePos, 0
 		return 1
 	}
-	if wordLen == 0 && lenBuf == 0 {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
-		return 0
+	if lenBuf == 0 {
+		g.dataP, g.dataBit = savePos, 0
+		return -1
 	}
 
-	decoded := make([]byte, wordLen)
-	var bufPos int
-	// In the first pass, we only check patterns
+	// Pass 1: scan patterns to find postLoopPos (where uncovered data starts).
+	// We don't store pattern data — pass 2 re-decodes them via nextPattern().
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
-		bufPos += int(pos) - 1
-		pattern := g.nextPattern()
-		copy(decoded[bufPos:], pattern)
+		g.nextPattern()
 	}
 	if g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
+
+	// Reset decoder for pass 2
 	g.dataP, g.dataBit = savePos, 0
-	g.nextPosClean() // Reset the state of huffman decoder
-	// Second pass - we check spaces not covered by the patterns
+	g.nextPosClean()
+
+	// Pass 2: compare left-to-right with early exit.
+	// Uncovered regions: compare buf directly against g.data (zero-copy).
+	// Pattern regions: compare buf directly against dictionary slice from nextPattern().
 	var lastUncovered int
-	bufPos = 0
+	var bufPos int
+
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1
-		// fmt.Printf("BUF POS: %d, POS: %d, lastUncovered: %d\n", bufPos, pos, lastUncovered)
+
+		// Compare uncovered region [lastUncovered, bufPos)
 		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
-			copy(decoded[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
-			postLoopPos += dif
+			dif := bufPos - lastUncovered
+			cmpLen := dif
+			if lastUncovered+cmpLen > lenBuf {
+				cmpLen = lenBuf - lastUncovered
+			}
+			if cmpLen > 0 {
+				if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
+					g.dataP, g.dataBit = savePos, 0
+					return cmp
+				}
+			}
+			if lenBuf < bufPos {
+				g.dataP, g.dataBit = savePos, 0
+				return -1
+			}
+			postLoopPos += uint64(dif)
 		}
-		lastUncovered = bufPos + len(g.nextPattern())
+
+		// Compare pattern region [bufPos, bufPos+len(pattern))
+		pattern := g.nextPattern()
+		patEnd := bufPos + len(pattern)
+		cmpLen := len(pattern)
+		if bufPos+cmpLen > lenBuf {
+			cmpLen = lenBuf - bufPos
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[bufPos:bufPos+cmpLen], pattern[:cmpLen]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		if lenBuf < patEnd {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
+		}
+
+		lastUncovered = patEnd
 	}
 
+	// Remaining uncovered after last pattern
 	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(decoded[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
-		postLoopPos += dif
+		dif := int(wordLen) - lastUncovered
+		cmpLen := dif
+		if lastUncovered+cmpLen > lenBuf {
+			cmpLen = lenBuf - lastUncovered
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		postLoopPos += uint64(dif)
 	}
-	cmp := bytes.Compare(buf, decoded)
-	if cmp == 0 {
-		g.dataP, g.dataBit = postLoopPos, 0
-	} else {
+
+	// All compared bytes equal — result depends on lengths
+	if lenBuf < int(wordLen) {
 		g.dataP, g.dataBit = savePos, 0
+		return -1
 	}
-	return cmp
+	if lenBuf > int(wordLen) {
+		g.dataP, g.dataBit = savePos, 0
+		return 1
+	}
+
+	// Exact match — advance position past the word
+	g.dataP, g.dataBit = postLoopPos, 0
+	return 0
 }
 
 func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
@@ -1192,50 +1287,68 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
-	if wordLen == 0 && prefixLen != 0 {
-		return true
+	if wordLen == 0 {
+		return prefixLen == 0 // empty word only matches empty prefix
 	}
 	if prefixLen == 0 {
-		return false
+		return true // empty prefix matches any word
 	}
 
-	g.nextPosClean()
+	g.nextPos()
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 
 	return bytes.HasPrefix(g.data[g.dataP:g.dataP+wordLen], prefix)
 }
 
 func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 	savePos := g.dataP
-	defer func() {
-		g.dataP, g.dataBit = savePos, 0
-	}()
-
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	bufLen := len(buf)
 	if wordLen == 0 && bufLen != 0 {
+		g.dataP, g.dataBit = savePos, 0
 		return 1
 	}
+	if wordLen == 0 && bufLen == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
+		return 0
+	}
 	if bufLen == 0 {
+		g.dataP, g.dataBit = savePos, 0
 		return -1
 	}
 
-	g.nextPosClean()
+	g.nextPos()
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 
-	return bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
+	cmp := bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
+	if cmp == 0 {
+		g.dataP += wordLen // advance past the word on match
+		g.dataBit = 0
+	} else {
+		g.dataP, g.dataBit = savePos, 0
+	}
+	return cmp
 }
 
 // BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
 // use `.Next` to read found
 // at `ok = false` leaving `g` in unpredictible state
 func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
-	var key []byte
 	foundItem := sort.Search(count, func(i int) bool {
 		offset := getOffset(uint64(i))
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ = g.Next(key[:0])
-			return bytes.Compare(key, seek) >= 0
+			return g.MatchCmp(seek) <= 0 // MatchCmp returns Compare(seek, word); <=0 means word >= seek
 		}
 		return false
 	})

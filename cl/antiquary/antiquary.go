@@ -19,8 +19,7 @@ package antiquary
 import (
 	"context"
 	"math"
-	"os"
-	"strings"
+
 	"sync/atomic"
 	"time"
 
@@ -97,25 +96,6 @@ func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, gen
 	}
 }
 
-// Check if the snapshot directory has beacon blocks files aka "contains beaconblock" and has a ".seg" extension over its first layer
-func doesSnapshotDirHaveBeaconBlocksFiles(snapshotDir string) bool {
-	// Iterate over the files in the snapshot directory
-	files, err := os.ReadDir(snapshotDir)
-	if err != nil {
-		return false
-	}
-	for _, file := range files {
-		// Check if the file has a ".seg" extension
-		if file.IsDir() {
-			continue
-		}
-		if strings.Contains(file.Name(), "beaconblock") && strings.HasSuffix(file.Name(), ".seg") {
-			return true
-		}
-	}
-	return false
-}
-
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
 	if !a.blocks {
@@ -180,7 +160,7 @@ func (a *Antiquary) Loop() error {
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
-		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i)
+		header, elBlockNumber, elBlockHash, err := a.sn.ReadHeader(i, tx)
 		if err != nil {
 			return err
 		}
@@ -392,14 +372,18 @@ func (a *Antiquary) antiquateBlobs() error {
 	roTx.Rollback()
 	a.logger.Info("[Antiquary] Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	blobCountFn := func(slot uint64) (uint64, error) {
-		blindedBlock, err := a.snReader.ReadBlindedBlockBySlot(a.ctx, nil, slot)
+		block, err := a.snReader.ReadBeaconBlockBodyBySlot(a.ctx, nil, slot)
 		if err != nil {
 			return 0, err
 		}
-		if blindedBlock == nil {
+		if block == nil {
 			return 0, nil
 		}
-		return uint64(blindedBlock.Block.Body.BlobKzgCommitments.Len()), nil
+		commitments := block.Block.Body.GetBlobKzgCommitments()
+		if commitments == nil {
+			return 0, nil
+		}
+		return uint64(commitments.Len()), nil
 	}
 
 	// now, we need to retire the blobs

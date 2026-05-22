@@ -51,14 +51,19 @@ func init() {
 		With("participation_record_updates", participationRecordUpdatesTest).
 		With("pending_deposits", pendingDepositTest).
 		With("pending_consolidations", PendingConsolidationTest).
-		With("proposer_lookahead", ProposerLookaheadTest)
+		With("proposer_lookahead", ProposerLookaheadTest).
+		With("historical_summaries_update", historicalSummariesUpdateTest).
+		With("builder_pending_payments", builderPendingPaymentsTest).
+		With("ptc_window", ptcWindowTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
 		With("get_head", &ForkChoice{}).
 		With("on_block", &ForkChoice{}).
 		With("on_merge_block", &ForkChoice{}).
-		With("ex_ante", &ForkChoice{})
+		With("ex_ante", &ForkChoice{}).
+		With("on_execution_payload_envelope", &ForkChoice{}).
+		With("get_parent_payload_status", &ForkChoice{})
 	TestFormats.Add("fork").
 		With("fork", ForksFork)
 	TestFormats.Add("genesis").
@@ -82,13 +87,18 @@ func init() {
 		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
 		WithFn("consolidation_request", operationConsolidationRequestHandler).
 		WithFn("deposit_request", operationDepositRequstHandler).
-		WithFn("withdrawal_request", operationWithdrawalRequstHandler)
+		WithFn("withdrawal_request", operationWithdrawalRequstHandler).
+		WithFn("execution_payload", operationExecutionPayloadHandler).
+		WithFn("execution_payload_bid", operationExecutionPayloadBidHandler).
+		WithFn("payload_attestation", operationPayloadAttestationHandler).
+		WithFn("parent_execution_payload", operationParentExecutionPayloadHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
 		With("basic", &RewardsCore{}).
 		With("random", &RewardsCore{}).
-		With("leak", &RewardsCore{})
+		With("leak", &RewardsCore{}).
+		With("inactivity_scores", &RewardsCore{})
 	TestFormats.Add("sanity").
 		With("slots", SanitySlots).
 		With("blocks", SanityBlocks)
@@ -102,7 +112,9 @@ func init() {
 		With("core", &TransitionCore{})
 	TestFormats.Add("networking").
 		WithFn("compute_columns_for_custody_group", TestComputeColumnsForCustodyGroup).
-		WithFn("get_custody_groups", TestGetCustodyGroups)
+		WithFn("get_custody_groups", TestGetCustodyGroups).
+		WithFn("gossip_attester_slashing", gossipAttesterSlashingHandler).
+		WithFn("gossip_proposer_slashing", gossipProposerSlashingHandler)
 
 	addSszTests()
 }
@@ -141,7 +153,7 @@ func addSszTests() {
 		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
 		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})). Not needed.
-		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
+		With("SyncAggregate", getSSZStaticConsensusTest(cltypes.NewSyncAggregate())).
 		With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})).
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
@@ -158,7 +170,7 @@ func addSszTests() {
 			}, withTestJson())).
 		With("LightClientUpdate", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.LightClientUpdate {
-				return cltypes.NewLightClientUpdate(v)
+				return cltypes.NewLightClientUpdate(v, &clparams.MainnetBeaconConfig)
 			}, withTestJson())).
 		With("SignedBeaconBlock", sszStaticTestNewObjectByFunc(
 			func(v clparams.StateVersion) *cltypes.SignedBeaconBlock {
@@ -203,5 +215,65 @@ func addSszTests() {
 		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
 		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
 		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
-		With("DataColumnSidecar", sszStaticTestByEmptyObject(&cltypes.DataColumnSidecar{}, withTestJson(), runAfterVersion(clparams.FuluVersion)))
+		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
+				return cltypes.NewDataColumnSidecarWithVersion(v)
+			}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+		// [New in Fulu] Partial data column types
+		With("PartialDataColumnHeader", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnHeader {
+				return cltypes.NewPartialDataColumnHeader(v)
+			}, runAfterVersion(clparams.FuluVersion))).
+		With("PartialDataColumnSidecar", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnSidecar {
+				return cltypes.NewPartialDataColumnSidecar(v)
+			}, runAfterVersion(clparams.FuluVersion))).
+		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
+				return cltypes.NewPartialDataColumnPartsMetadata()
+			}, runAfterVersion(clparams.FuluVersion))).
+		// [New in Gloas:EIP7732] GLOAS SSZ types
+		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingPayment", sszStaticTestByEmptyObject(&cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingWithdrawal", sszStaticTestByEmptyObject(&cltypes.BuilderPendingWithdrawal{}, runAfterVersion(clparams.GloasVersion))).
+		With("ExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("ExecutionPayloadEnvelope", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.ExecutionPayloadEnvelope {
+				return cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("IndexedPayloadAttestation", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.IndexedPayloadAttestation {
+				return cltypes.NewIndexedPayloadAttestation()
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestation", sszStaticTestByEmptyObject(&cltypes.PayloadAttestation{}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestationData", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationData{}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationMessage{
+			Data: &cltypes.PayloadAttestationData{},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("ProposerPreferences", sszStaticTestByEmptyObject(&cltypes.ProposerPreferences{}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+			},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadEnvelope", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.SignedExecutionPayloadEnvelope {
+				return &cltypes.SignedExecutionPayloadEnvelope{
+					Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+				}
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
+			Message: &cltypes.ProposerPreferences{},
+		}, runAfterVersion(clparams.GloasVersion))).
+		// Types with fixtures but no Go SSZ implementation
+		With("DepositMessage", spectest.UnimplementedHandler).
+		With("ForkData", spectest.UnimplementedHandler).
+		With("HistoricalBatch", spectest.UnimplementedHandler).
+		With("PowBlock", spectest.UnimplementedHandler).
+		With("SigningData", spectest.UnimplementedHandler).
+		With("ForkChoiceNode", spectest.UnimplementedHandler)
 }

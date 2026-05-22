@@ -24,11 +24,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
@@ -63,9 +61,9 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
-	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
+	GetTipCap() *uint256.Int                             // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int // priority_fee_per_gas in EIP-1559
+	GetFeeCap() *uint256.Int                             // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []common.Hash
 	GetGasLimit() uint64
 	GetBlobGas() uint64
@@ -74,7 +72,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
-	SigningHash(chainID *big.Int) common.Hash
+	SigningHash(chainID *uint256.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
@@ -105,6 +103,25 @@ type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[common.Hash]
 	from accounts.Address
+}
+
+// CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
+// Shared logic used by all transaction types that implement GetEffectiveGasTip.
+func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {
+	if baseFee == nil {
+		return *getTipCap()
+	}
+	gasFeeCap := getFeeCap()
+	if gasFeeCap.Lt(baseFee) {
+		var zero uint256.Int
+		return zero
+	}
+	var effectiveFee uint256.Int
+	effectiveFee.Sub(gasFeeCap, baseFee)
+	if getTipCap().Lt(&effectiveFee) {
+		return *getTipCap()
+	}
+	return effectiveFee
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -349,33 +366,6 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 // TransactionsGroupedBySender - lists of transactions grouped by sender
 type TransactionsGroupedBySender []Transactions
 
-// TxDifference returns a new set which is the difference between a and b.
-func TxDifference(a, b Transactions) Transactions {
-	keep := make(Transactions, 0, len(a))
-
-	remove := make(map[common.Hash]struct{})
-	for _, txn := range b {
-		remove[txn.Hash()] = struct{}{}
-	}
-
-	for _, txn := range a {
-		if _, ok := remove[txn.Hash()]; !ok {
-			keep = append(keep, txn)
-		}
-	}
-
-	return keep
-}
-
-// TxByNonce implements the sort interface to allow sorting a list of transactions
-// by their nonces. This is usually only useful for sorting transactions from a
-// single account, otherwise a nonce comparison doesn't make much sense.
-type TxByNonce Transactions
-
-func (s TxByNonce) Len() int           { return len(s) }
-func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
-func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               accounts.Address
@@ -486,12 +476,3 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
-
-func DecodeSSZ(data []byte, dest codec.Deserializable) error {
-	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
-	return err
-}
-
-func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
-	return obj.Serialize(codec.NewEncodingWriter(w))
-}

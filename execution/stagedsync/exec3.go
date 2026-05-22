@@ -19,15 +19,14 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
-	"slices"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -43,11 +42,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -104,8 +103,6 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 
 	inputTxNum = min
 
-	//_max, _ := txNumsReader.Max(applyTx, blockNum)
-	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", currentTxNum, inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
@@ -115,7 +112,6 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
@@ -130,13 +126,9 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetNonChainTipConcurrency()
 		} else {
-			agg.SetCollateAndBuildWorkers(1)
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetChainTipConcurrency()
 		}
 	}
 
@@ -145,7 +137,16 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(initialTxNum)
+		// Cap collation to the max txNum covered by block files.
+		// Without this, collation creates domain files past the block
+		// file boundary, causing "behind commitment" errors.
+		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
+			agg.SetMaxCollationTxNum(maxTxNum)
+		}
+		// Background collation removed from exec code — collation is now managed
+		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
+		// This avoids background collation db.View() txs overlapping with
+		// commit+prune, which prevented MDBX GC page reclamation.
 	}
 
 	var (
@@ -160,13 +161,14 @@ func ExecV3(ctx context.Context,
 
 	if maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd
+		// TODO: route through block overlay once serial path initialises one
 		if execStage.BlockNumber < blockNum {
 			return execStage.Update(rwTx, blockNum)
 		}
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isBlockProduction && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -174,7 +176,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -203,25 +205,22 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(isChainTip)
-	//log.Debug("Warmup Cache", "enabled", isChainTip)
-	postValidator := newBlockPostExecutionValidator()
+	doms.EnableWarmupCache(!isApplyingBlocks)
 	doms.SetDeferCommitmentUpdates(false)
-	if isChainTip {
-		postValidator = newParallelBlockPostExecutionValidator()
-		// Only defer branch updates in fork validation mode (engine API flow)
-		// where MergeExtendingFork will flush the pending updates
-		if isForkValidation {
-			doms.SetDeferCommitmentUpdates(true)
-		}
+	// Enable deferred commitment updates for fork validation and parallel initial sync.
+	// Deferred updates batch commitment calculations to block boundaries rather than
+	// per-transaction, significantly reducing re-org validation overhead.
+	// For the parallel path during initial sync, Flush() now includes pending updates,
+	// so they are no longer silently discarded between StageLoopIteration cycles.
+	if isForkValidation || (parallel && isApplyingBlocks) {
+		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if !execStage.CurrentSyncCycle.IsInitialCycle && !isChainTip {
+	if !execStage.CurrentSyncCycle.IsInitialCycle && isApplyingBlocks {
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
@@ -234,7 +233,6 @@ func ExecV3(ctx context.Context,
 				rs:                rs,
 				doms:              doms,
 				agg:               agg,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
@@ -242,7 +240,6 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
-				postValidator:     postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
@@ -255,9 +252,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			if !isChainTip {
-				pe.LogComplete(stepsInDb)
-			}
+			pe.LogComplete(stepsInDb)
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
@@ -273,7 +268,6 @@ func ExecV3(ctx context.Context,
 				doms:              doms,
 				agg:               agg,
 				u:                 u,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				applyTx:           applyTx,
@@ -282,13 +276,12 @@ func ExecV3(ctx context.Context,
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
-				postValidator:     postValidator,
 			}}
 		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			if !isChainTip {
+			if isApplyingBlocks {
 				se.LogComplete(stepsInDb)
 			}
 		}()
@@ -300,14 +293,13 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, isBlockProduction)
+					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u)
 					if err != nil {
 						return err
 					}
 
-					if err := se.getPostValidator().Wait(); err != nil {
-						return err
-					}
+					// Per-block validation runs inline inside each block's apply loop iteration
+					// (see blockValidator). No aggregate post-loop Wait needed.
 
 					se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
 					// Get current txNum from the last executed block
@@ -318,11 +310,10 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
@@ -350,22 +341,46 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum.Load()
 	}
 
-	if false && !isForkValidation {
-		dumpPlainStateDebug(applyTx, doms)
+	// If execution already failed with ErrInvalidBlock, skip the step-frozen check
+	// and propagate the original error directly. The step-frozen check only makes
+	// sense when execution succeeded partially and we need to persist the commitment.
+	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+		// BAD_BLOCK_HALT (env var) gates the os.Exit path; cfg.badBlockHalt alone
+		// (set by NewInMemoryExecution for fork validation) must NOT exit — it
+		// expects the error to propagate so the caller can finish in-memory
+		// validation. Both flags must be true.
+		//
+		// Intentional os.Exit: BAD_BLOCK_HALT is a debug switch whose whole purpose
+		// is to freeze process state at the bad block. Returning would run deferred
+		// rollback/commit/flush paths and overwrite the very state we want to
+		// inspect. Mirrors the design documented in PR #19803. Applies to both
+		// serial and parallel paths uniformly — pe.exec / se.executeBlock already
+		// call ReportBadHeaderPoS internally before returning ErrInvalidBlock.
+		if cfg.badBlockHalt && dbg.BadBlockHalt {
+			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
+			os.Exit(1)
+		}
+		return execErr
 	}
 
-	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
-	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
+	lastCommittedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
+	// applyTx may be stale after parallel execution (the underlying mdbx tx
+	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
+	var lastFrozenStep kv.Step
+	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
+		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
+		stepCheckTx.Rollback()
+	}
 
-	if lastCommitedStep > 0 && lastCommitedStep <= lastFrozenStep && !dbg.DiscardCommitment() {
-		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
-			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
+	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !dbg.DiscardCommitment() {
+		logger.Warn("["+execStage.LogPrefix()+"] can't persist commitment: txn step frozen",
+			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommittedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
-		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
-			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
+		return fmt.Errorf("can't persist commitment for blockNum %d, txNum %d: step %d is frozen",
+			lastCommittedBlockNum, lastCommittedTxNum, lastCommittedStep)
 	}
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
@@ -376,60 +391,22 @@ func ExecV3(ctx context.Context,
 	return execErr
 }
 
-func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
-	maxTxIndex := len(txIO.Inputs()) - 1
-
-	for txIndex := -1; txIndex < maxTxIndex; txIndex++ {
-		txIncarnation := txIO.ReadSetIncarnation(txIndex)
-
-		fmt.Println(
-			fmt.Sprintf("%d (%d.%d) RD", blockNum, txIndex, txIncarnation), txIO.ReadSet(txIndex).Len(),
-			"WRT", len(txIO.WriteSet(txIndex)))
-
-		var reads []*state.VersionedRead
-		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
-			reads = append(reads, vr)
-			return true
-		})
-
-		slices.SortFunc(reads, func(a, b *state.VersionedRead) int { return a.Address.Cmp(b.Address) })
-
-		for _, vr := range reads {
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
-		}
-
-		writeSet := txIO.WriteSet(txIndex)
-		writes := make([]*state.VersionedWrite, 0, len(writeSet))
-
-		for _, vw := range writeSet {
-			writes = append(writes, vw)
-		}
-
-		slices.SortFunc(writes, func(a, b *state.VersionedWrite) int { return a.Address.Cmp(b.Address) })
-
-		for _, vw := range writes {
-			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "WRT", vw.String())
-		}
-	}
-}
-
 type txExecutor struct {
 	sync.RWMutex
-	cfg               ExecuteBlockCfg
-	agg               *dbstate.Aggregator
-	rs                *state.StateV3Buffered
-	doms              *execctx.SharedDomains
-	u                 Unwinder
-	isBlockProduction bool
-	isForkValidation  bool
-	isApplyingBlocks  bool
-	applyTx           kv.TemporalTx
-	logger            log.Logger
-	logPrefix         string
-	progress          *Progress
-	taskExecMetrics   *exec.WorkerMetrics
-	blockExecMetrics  *blockExecMetrics
-	hooks             *tracing.Hooks
+	cfg              ExecuteBlockCfg
+	agg              *dbstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *execctx.SharedDomains
+	u                Unwinder
+	isForkValidation bool
+	isApplyingBlocks bool
+	applyTx          kv.TemporalTx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
+	hooks            *tracing.Hooks
 
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
@@ -448,18 +425,10 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
-	postValidator     BlockPostExecutionValidator
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
-}
-
-func (te *txExecutor) getPostValidator() BlockPostExecutionValidator {
-	if te.postValidator == nil {
-		return newBlockPostExecutionValidator()
-	}
-	return te.postValidator
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {
@@ -518,7 +487,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	} else {
 		if te.hooks.OnBlockStart != nil {
 			var b *types.Block
-			var td *big.Int
+			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
@@ -527,7 +496,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				if err != nil {
 					return err
 				}
-				chainReader := NewChainReaderImpl(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
 				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
@@ -546,18 +515,16 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
-	inputTxNum, _, offsetFromBlockBeginning, _, err := restoreTxNum(ctx, &te.cfg, tx, initialTxNum, maxBlockNum)
-
-	if err != nil {
-		return err
-	}
-
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
 
 	te.execLoopGroup.Go(func() (err error) {
+		// Do NOT close channels here. The exec loop closes them
+		// after processing all blocks (via pe.commitResultsCh/applyResultsCh
+		// deferred close, or via the ctx.Done drain path).
+		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("exec blocks panic: %s", rec)
@@ -568,7 +535,36 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 		}()
 
-		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
+		// Channel close is handled by pe.execLoop's deferred close.
+		// Do NOT close channels here — execLoop owns the lifecycle.
+
+		// Open a thread-local roTx for block metadata and StepsInFiles.
+		// Must NOT use the stageloop's rwTx — it's thread-bound.
+		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return fmt.Errorf("executeBlocks: open roTx: %w", err)
+		}
+		defer execRoTx.Rollback()
+
+		var blockTx kv.Tx
+		if overlay := te.doms.BlockOverlay(); overlay != nil {
+			blockTx = overlay.NewReadView(execRoTx)
+		} else {
+			blockTx = execRoTx
+		}
+
+		// Use the max of all state domain steps (not just commitment) to
+		// determine which txNums need history reads.
+		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
+		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
+		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
+		codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
+		maxStateStep := max(acctStep, storStep, codeStep)
+		if maxStateStep > cmtStep {
+			return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+				acctStep, storStep, codeStep, cmtStep)
+		}
+		lastFrozenStep := cmtStep
 
 		var lastFrozenTxNum uint64
 		if lastFrozenStep > 0 {
@@ -581,16 +577,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			default:
 			}
 
-			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			var canonicalHash common.Hash
+			canonicalHash, err = rawdb.ReadCanonicalHash(blockTx, blockNum)
 			if err != nil {
 				return err
 			}
-			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 			if b == nil || !ok {
-				err = tx.Apply(ctx, func(tx kv.Tx) error {
-					b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
-					return err
-				})
+				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
 			}
 			if err != nil {
 				return err
@@ -600,12 +594,22 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			// Bug 2 fix from commit 43a64a0b66 (parallel executor: fix two cache bugs):
+			// validate stateCache entries against this block's parent hash so stale
+			// values from a prior fork-validation are cleared before reads.
+			if stateCache := te.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+			}
+
 			var dbBAL types.BlockAccessList
-			data, err := rawdb.ReadBlockAccessListBytes(tx, b.Hash(), blockNum)
+			// Read BAL through blockTx (overlay or execRoTx) — do NOT open
+			// a separate db.View() as it can deadlock with the stageloop's
+			// RW transaction when BlockOverlay is active.
+			data, err := rawdb.ReadBlockAccessListBytes(blockTx, b.Hash(), blockNum)
 			if err != nil {
 				return err
 			}
-			if len(data) > 0 {
+			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
 					return fmt.Errorf("decode block access list: %w", err)
@@ -617,24 +621,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
-			getHashFnMutex := sync.Mutex{}
 
+			// BlockContext: workers override GetHash with their own per-worker
+			// function (installWorkerGetHash) using their own roTx. The
+			// placeholder here uses execRoTx for the serial path fallback.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
-				getHashFnMutex.Lock()
-				defer getHashFnMutex.Unlock()
-				err = tx.Apply(ctx, func(tx kv.Tx) (err error) {
-					h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
-					return err
-				})
-
-				if err != nil {
-					return nil, err
+				h, err = te.cfg.blockReader.Header(ctx, blockTx, hash, number)
+				if h == nil && err == nil {
+					h = &types.Header{}
 				}
-
 				return h, err
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
+			// Per-block committed state cache for parallel workers' GetCommittedState.
+			blockStateCache := state.NewBlockStateCache()
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
@@ -658,6 +659,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 					Logger:           te.logger,
+					BlockStateCache:  blockStateCache,
 				}
 
 				txTasks = append(txTasks, txTask)
@@ -667,87 +669,34 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
-			// until we reach a transaction whose comittement which is writable to the db, otherwise the update will get lost
+			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
-			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-				}
+			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
-
-			te.execRequests <- &execRequest{
-				b.NumberU64(), b.Hash(),
+			var commitCh chan applyResult
+			if len(commitResults) > 0 {
+				commitCh = commitResults[0]
+			}
+			select {
+			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, false, exhausted,
+				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-
 			mxExecBlocks.Add(1)
 
-			if offsetFromBlockBeginning > 0 {
-				// after history execution no offset will be required
-				offsetFromBlockBeginning = 0
-			}
 			if exhausted != nil {
 				break
 			}
 		}
 
+		// Channels closed by deferred close above.
 		return nil
 	})
 
 	return nil
-}
-
-// nolint
-func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
-	if doms != nil {
-		doms.Flush(context.Background(), tx)
-	}
-
-	{
-		it, err := tx.Debug().RangeLatest(kv.AccountsDomain, nil, nil, -1)
-		if err != nil {
-			panic(err)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			a := accounts.NewAccount()
-			accounts.DeserialiseV3(&a, v)
-			fmt.Printf("%x, %d, %d, %d, %x\n", k, &a.Balance, a.Nonce, a.Incarnation, a.CodeHash)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.StorageDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-		}
-	}
-	{
-		it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, -1)
-		if err != nil {
-			panic(1)
-		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				panic(err)
-			}
-			fmt.Printf("%x, %x\n", k, v)
-			if bytes.Equal(k, []byte("state")) {
-				fmt.Printf("state: t=%d b=%d\n", binary.BigEndian.Uint64(v[:8]), binary.BigEndian.Uint64(v[8:]))
-			}
-		}
-	}
 }
 
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, parentHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
@@ -795,7 +744,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // computeAndCheckCommitmentV3 - does write state to db and then check commitment
-func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, isBlockProduction bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
@@ -803,6 +752,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
+	// TODO: route stage updates through block overlay once serial path initialises one
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
@@ -816,7 +766,12 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	// Get current txNum from the block being committed
+	// Use applyTx, not a fresh BeginTemporalRo: Headers wrote MaxTxNum for
+	// header.Number to applyTx in this batch and a fresh RO snapshot would
+	// miss it, silently falling back to the previous block's max txNum via
+	// c.Last(). Pairing that stale txNum with header.Number in
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
+	// see issue #21171.
 	txNumsReader := cfg.blockReader.TxnumReader()
 	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
@@ -829,10 +784,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if isBlockProduction {
-		header.Root = common.BytesToHash(computedRootHash)
-		return true, times, nil
-	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
@@ -842,16 +793,53 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+// shouldMarkExhaustedAtBlock decides whether the per-cycle block-limit
+// has been crossed at the current block — which causes executeBlocks to
+// stamp the dispatched blockResult with `Exhausted` and break out of
+// its loop. The exec loop sees the Exhausted flag, fires its
+// partial-batch flush, and the apply loop returns ErrLoopExhausted so
+// the stage loop resumes from the next block.
+//
+// Two gates protect the initial cycle:
+//  1. !initialCycle — later cycles enforce blockLimit unconditionally.
+//  2. On initialCycle, only enforce when we have at least one frozen
+//     step worth of work AND we're not in DiscardCommitment debug mode
+//     (otherwise the partial-batch flush would lose the commitment
+//     that's still pending in sd.mem). See exec3.go's call site for
+//     the historical reasoning.
+//
+// blockNum != maxBlockNum guards against marking the goal block as
+// exhausted — the goal block already triggers a clean reachedMaxBlock
+// exit and shouldn't be relabeled as "more work pending".
+//
+// Pure function so the precedence is unit-testable. See
+// TestShouldMarkExhaustedAtBlock.
+func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenStep kv.Step, discardCommitment bool, blockLimit, blockNum, startBlockNum, maxBlockNum uint64) bool {
+	if initialCycle {
+		if !(lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !discardCommitment) {
+			return false
+		}
+	}
+	if blockLimit == 0 {
+		return false
+	}
+	if blockNum-startBlockNum+1 < blockLimit {
+		return false
+	}
+	if blockNum == maxBlockNum {
+		return false
+	}
+	return true
+}
+
+func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
 	if blockNum < cfg.blockReader.FrozenBlocks() {
 		return false
 	}
-	if initialCycle {
-		return false
-	}
-	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
+	// Generate changesets for blocks within the reorg window of the batch end,
+	// so the node can handle reorgs at the tip.
 	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }

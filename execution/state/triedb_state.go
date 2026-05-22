@@ -128,7 +128,6 @@ type TrieDbState struct {
 	currentBuffer     *Buffer
 	resolveReads      bool
 	retainListBuilder *trie.RetainListBuilder
-	hashBuilder       *trie.HashBuilder
 	incarnationMap    map[accounts.Address]uint64 // Temporary map of incarnation for the cases when contracts are deleted and recreated within 1 block
 }
 
@@ -140,7 +139,6 @@ func NewTrieDbState(root common.Hash, blockNr uint64, stateReader StateReader) *
 		StateReader:       stateReader,
 		blockNr:           blockNr,
 		retainListBuilder: trie.NewRetainListBuilder(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	return tds
@@ -172,7 +170,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		t:              &tcopy,
 		tMu:            new(sync.Mutex),
 		blockNr:        n,
-		hashBuilder:    trie.NewHashBuilder(false),
 		incarnationMap: make(map[accounts.Address]uint64),
 	}
 	return &cpy
@@ -215,7 +212,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder,
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 	tds.tMu.Unlock()
@@ -240,7 +236,6 @@ func (tds *TrieDbState) WithLastBuffer() *TrieDbState {
 		currentBuffer:     currentBuffer,
 		resolveReads:      tds.resolveReads,
 		retainListBuilder: tds.retainListBuilder.Copy(),
-		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[accounts.Address]uint64),
 	}
 }
@@ -314,7 +309,7 @@ func (tds *TrieDbState) buildPlainStorageReads() ([][]byte, [][]byte) {
 // modifications of the contract's storage. In such case, all previously modified storage
 // item updates would be inclided.
 func (tds *TrieDbState) BuildStorageReads() common.StorageKeys {
-	storageTouches := common.StorageKeys{}
+	storageTouches := make(common.StorageKeys, 0, len(tds.aggregateBuffer.storageReads))
 	for storageKey := range tds.aggregateBuffer.storageReads {
 		storageTouches = append(storageTouches, storageKey)
 	}
@@ -373,7 +368,7 @@ func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
 // (or also just read, if tds.resolveReads flags is turned one) within the
 // period for which we are aggregating update
 func (tds *TrieDbState) BuildAccountReads() common.Hashes {
-	accountTouches := common.Hashes{}
+	accountTouches := make(common.Hashes, 0, len(tds.aggregateBuffer.accountReads))
 	for addrHash := range tds.aggregateBuffer.accountReads {
 		accountTouches = append(accountTouches, addrHash)
 	}
@@ -736,7 +731,7 @@ func (tds *TrieDbState) ReadAccountCode(address accounts.Address) (code []byte, 
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		codeHash := accounts.InternCodeHash(crypto.HashData(code))
 		tds.currentBuffer.codeReads[addrHash] = witnesstypes.CodeWithHash{Code: code, CodeHash: codeHash}
 		tds.retainListBuilder.ReadCode(codeHash, code)
 	}
@@ -761,7 +756,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash := crypto.HashData(code)
 
 		addrHash, err1 := common.HashData(addressValue[:])
 		if err1 != nil {
