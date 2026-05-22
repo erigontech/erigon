@@ -32,6 +32,8 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -106,6 +108,15 @@ func TestExecutionSpecWitness(t *testing.T) {
 		)
 		api := jsonrpc.NewPrivateDebugAPI(base, test.M.DB, nil, 0, false)
 		ctx := context.Background()
+
+		// debug_executionWitness now reads the commitment-history flag from the
+		// DB (set by node/eth/backend on real startups). The test framework
+		// builds its DB from scratch, so write the flag explicitly here.
+		if err := test.M.DB.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+		}); err != nil {
+			t.Fatalf("write commitment-history flag: %v", err)
+		}
 
 		// Compare witness for each block that has expected witness data.
 		// RPC infrastructure errors (endpoint failure, nil result) are fatal —
