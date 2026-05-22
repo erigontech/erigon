@@ -411,6 +411,11 @@ func (n *P2PNode) PublishV2Manifest() [20]byte {
 // share the rolling history.
 func (n *P2PNode) V2Publisher() *dl.RollingV2Publisher { return n.v2Publisher }
 
+// StorageProvider returns the real storage.Provider — non-nil only for
+// nodes built with NewP2PNodeWithStorageProvider. Scenarios use it to
+// drive Provider entry points (e.g. RunStagedAdoption) directly.
+func (n *P2PNode) StorageProvider() *storagecomp.Provider { return n.storageProvider }
+
 // ResumePublisherSeeding constructs the rolling V2 publisher if it does
 // not yet exist — its directory scan rediscovers on-disk generations —
 // and re-registers every retained generation's torrents with the
@@ -538,6 +543,11 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 		// The real Provider creates the bus + orchestrator + lifecycle
 		// driver + initial-validation watcher inside Initialize.
 		inv = snapshot.NewInventory()
+		// Production sets this once P2P is up; the harness skips discv5,
+		// so stamp the fixed fingerprint here — without it the
+		// downloader's PublishLocalChainTomlV2 (invoked e.g. by the
+		// adoption cutover) fails "ENR fingerprint not set".
+		d.SetSelfENRFingerprint(harnessENRFP)
 		storageProvider = &storagecomp.Provider{}
 		ethCfg := &ethconfig.Config{Dirs: dirs}
 		ethCfg.Snapshot.LifecycleDrivenByStorage = true
