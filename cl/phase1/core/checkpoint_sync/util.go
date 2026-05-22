@@ -2,12 +2,14 @@ package checkpoint_sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
@@ -19,13 +21,19 @@ import (
 // If remote checkpoint sync fails, it falls back to the local head state on disk.
 // If no local head state is available, it returns an error.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
-	remoteSync := !caplinConfig.DisabledCheckpointSync && !caplinConfig.IsDevnet()
+	var syncer CheckpointSyncer
+	// Allow remote checkpoint sync for devnets when the user explicitly provides a checkpoint sync URL.
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
 
 	if remoteSync {
 		syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId)
 		st, err := syncer.GetLatestBeaconState(ctx)
 		if err == nil {
 			return st, nil
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, err
 		}
 		log.Warn("[Checkpoint Sync] Remote checkpoint sync failed, attempting to read local head state", "err", err)
 
@@ -45,7 +53,7 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	if err != nil {
 		return nil, fmt.Errorf("could not read genesis state: %w", err)
 	}
-	syncer := NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
+	syncer = NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
 	return syncer.GetLatestBeaconState(ctx)
 }
 
@@ -70,4 +78,21 @@ func ReadLocalHeadState(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 		return nil, fmt.Errorf("could not decode local head state: %w", err)
 	}
 	return bs, nil
+}
+
+// FetchFinalizedEnvelope fetches the finalized execution payload envelope from the checkpoint sync endpoint.
+func FetchFinalizedEnvelope(ctx context.Context, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig) *cltypes.SignedExecutionPayloadEnvelope {
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
+	if !remoteSync {
+		return nil
+	}
+
+	syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId).(*RemoteCheckpointSync)
+	envelope, err := syncer.FetchFinalizedEnvelope(ctx)
+	if err != nil {
+		log.Warn("[Checkpoint Sync] Could not fetch finalized envelope (non-fatal)", "err", err)
+		return nil
+	}
+	return envelope
 }

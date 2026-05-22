@@ -74,7 +74,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				if rules.IsAmsterdam {
-					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: 32 * evm.Context.CostPerStateByte}, nil
+					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP8037, State: params.StateGasPerStorageSet}, nil
 				} else {
 					return mdgas.MdGas{Regular: cost + params.SstoreSetGasEIP2200}, nil
 				}
@@ -99,7 +99,12 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 				if rules.IsAmsterdam {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP8037 - params.WarmStorageReadCostEIP2929)
-					evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
+					// EIP-8037: credit the state-gas refund inline so the
+					// frame's reservoir refills and subsequent state-creation
+					// charges can consume the credit instead of spilling to
+					// gas_left. The unapplied remainder propagates to the
+					// caller on successful return.
+					callContext.creditStateGasRefund(params.StateGasPerStorageSet)
 				} else {
 					evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
 				}
@@ -291,7 +296,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
-				gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
+				gas.State = params.StateGasNewAccount
 			} else {
 				gas.Regular += params.CreateBySelfdestructGas
 			}
@@ -373,7 +378,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		callContext.gas -= regularBase // temporary
 
 		if statefulBaseGas.State > 0 {
-			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			ok := callContext.useMdGas(statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
 				callContext.gas += regularBase // restore before error
 				return mdgas.MdGas{}, ErrOutOfGas

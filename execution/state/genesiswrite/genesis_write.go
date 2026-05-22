@@ -303,7 +303,11 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return err
 	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty.ToBig()); err != nil {
+	var genesisTd uint256.Int
+	if g.Difficulty != nil {
+		genesisTd = *g.Difficulty
+	}
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), genesisTd); err != nil {
 		return err
 	}
 	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
@@ -334,12 +338,16 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	ctx := context.Background()
 
 	// some users creating > 1Gb custom genesis by `erigon init`.
-	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
-	// so a 2 TB reservation immediately exhausts the pagefile when parallel goroutines open
-	// multiple databases (e.g. during test runs). On Linux/macOS the reservation is backed by
-	// sparse files with copy-on-write, so 2 TB is harmless.
-	// 1 GB is plenty for any practical genesis block; the CI pagefile minimum is 8 GB.
-	genesisMapSize := 2 * datasize.TB
+	// On Windows, MDBX file-mappings are backed by the paging file for their
+	// full map size, so a large reservation immediately exhausts the pagefile
+	// when parallel goroutines open multiple databases. On Linux/macOS the
+	// reservation is sparse, but each open env still eats from the process's
+	// finite virtual address space (~128 TB on x86-64) — enough to matter
+	// when many EngineApiTester instances are alive in one process. 16 GB
+	// keeps headroom for outsized custom genesis allocations while letting
+	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
+	// 8 GB.
+	genesisMapSize := 16 * datasize.GB
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
 	}
@@ -421,11 +429,11 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetCode(address, account.Code)
+		err = statedb.SetCode(address, account.Code, tracing.CodeChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
-		err = statedb.SetNonce(address, account.Nonce)
+		err = statedb.SetNonce(address, account.Nonce, tracing.NonceChangeGenesis)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -533,10 +541,12 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 	}
 
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
-		if g.BlockAccessListHash != nil {
-			head.BlockAccessListHash = g.BlockAccessListHash
-		} else {
-			head.BlockAccessListHash = &empty.BlockAccessListHash
+		if !g.Config.IsEIPDisabled(7928) {
+			if g.BlockAccessListHash != nil {
+				head.BlockAccessListHash = g.BlockAccessListHash
+			} else {
+				head.BlockAccessListHash = &empty.BlockAccessListHash
+			}
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber

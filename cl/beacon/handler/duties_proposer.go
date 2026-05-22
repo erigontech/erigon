@@ -28,7 +28,9 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	shuffling2 "github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 )
 
 type proposerDuties struct {
@@ -61,7 +63,62 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	wg := sync.WaitGroup{}
 
 	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-		// Lets do proposer index computation
+		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
+		if a.isProposerDutyInLookaheadVector(s, epoch) {
+			lookaheadVector := s.GetProposerLookahead()
+			stateEpoch := state.Epoch(s)
+			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
+			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
+				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
+				var pk common.Bytes48
+				pk, err = s.ValidatorPublicKey(int(proposerIndex))
+				if err != nil {
+					panic(err)
+				}
+				duties[i] = proposerDuties{
+					Pubkey:         pk,
+					ValidatorIndex: proposerIndex,
+					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
+				}
+			}
+			return nil
+		}
+
+		// When the target epoch is beyond the lookahead range (e.g. head is far
+		// behind), we must advance a copy of the state to the target epoch so
+		// that RANDAO mixes and proposer lookahead are correct.
+		headEpoch := state.Epoch(s)
+		if s.Version() >= clparams.FuluVersion && epoch > headEpoch+a.beaconChainCfg.MinSeedLookahead {
+			advancedState, copyErr := s.Copy()
+			if copyErr != nil {
+				return copyErr
+			}
+			if processErr := transition.DefaultMachine.ProcessSlots(advancedState, expectedSlot); processErr != nil {
+				log.Warn("getDutiesProposer: failed to advance state for epoch beyond lookahead",
+					"epoch", epoch, "headEpoch", headEpoch, "err", processErr)
+				return processErr
+			}
+			// After ProcessSlots the proposer lookahead covers the current epoch
+			proposerIndices, indErr := advancedState.GetBeaconProposerIndices(epoch)
+			if indErr != nil {
+				return indErr
+			}
+			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
+				proposerIndex := proposerIndices[i]
+				pk, pkErr := advancedState.ValidatorPublicKey(int(proposerIndex))
+				if pkErr != nil {
+					return pkErr
+				}
+				duties[i] = proposerDuties{
+					Pubkey:         pk,
+					ValidatorIndex: proposerIndex,
+					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
+				}
+			}
+			return nil
+		}
+
+		// Lets do proposer index computation (pre-Fulu or when epoch is within range)
 		mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) %
 			a.beaconChainCfg.EpochsPerHistoricalVector
 
@@ -86,27 +143,6 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			if mix == (common.Hash{}) {
 				return beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("mix not found for slot %d and index %d. maybe block was not backfilled or range was pruned", expectedSlot, mixPosition))
 			}
-		}
-
-		// if the proposer duties are in the lookahead vector, we can use the lookahead vector to fetch the proposers
-		if a.isProposerDutyInLookaheadVector(s, epoch) {
-			lookaheadVector := s.GetProposerLookahead()
-			stateEpoch := state.Epoch(s)
-			startLookAheadIndex := (epoch - stateEpoch) * a.beaconChainCfg.SlotsPerEpoch
-			for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
-				proposerIndex := lookaheadVector.Get(int(startLookAheadIndex + i))
-				var pk common.Bytes48
-				pk, err = s.ValidatorPublicKey(int(proposerIndex))
-				if err != nil {
-					panic(err)
-				}
-				duties[i] = proposerDuties{
-					Pubkey:         pk,
-					ValidatorIndex: proposerIndex,
-					Slot:           (epoch * a.beaconChainCfg.SlotsPerEpoch) + i,
-				}
-			}
-			return nil
 		}
 
 		for slot := expectedSlot; slot < expectedSlot+a.beaconChainCfg.SlotsPerEpoch; slot++ {

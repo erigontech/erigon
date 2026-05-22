@@ -244,13 +244,18 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 		for {
 			select {
 			case <-ctx.Done():
+				log.Warn("[rpcdaemon subscribeToStateChanges] ctx done", "err", ctx.Err())
 				return
 			default:
 			}
 			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
 				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-					time.Sleep(3 * time.Second)
-					continue
+					// ctx-aware retry delay so callers cancelling ctx don't have to
+					// wait up to 3s for the next retry cycle.
+					err = common.Sleep(ctx, 3*time.Second)
+					if err == nil {
+						continue
+					}
 				}
 				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
@@ -961,11 +966,20 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
+		if jwtSecret != nil && AuthenticatedEngineRESTHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
+			AuthenticatedEngineRESTHandler.ServeHTTP(w, r)
+			return
+		}
+
 		httpHandler.ServeHTTP(w, r)
 	})
 
 	return handler, nil
 }
+
+// AuthenticatedEngineRESTHandler is installed by the in-process Engine API
+// server and is invoked only after the same JWT check as authenticated JSON-RPC.
+var AuthenticatedEngineRESTHandler http.Handler
 
 func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)

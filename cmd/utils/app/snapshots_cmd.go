@@ -189,6 +189,7 @@ var snapshotCommand = cli.Command{
 			Usage: "create snapshots from the specified block number",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
+				&utils.ErigondbDomainStepsInFrozenFileFlag,
 			}),
 		},
 		{
@@ -322,6 +323,7 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
+				&cli.BoolFlag{Name: "only-history", Aliases: []string{"history"}, Usage: "remove only history files (SnapHistory+SnapIdx), not domain data"},
 			},
 			),
 		},
@@ -465,6 +467,47 @@ var snapshotCommand = cli.Command{
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to latest block with state"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
+			}),
+		},
+		{
+			Name: "check-rcache-root-at-blk",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doCheckRCacheRootAtBlk(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-rcache-root-at-blk] failure", "err", err)
+					return err
+				}
+				log.Info("[check-rcache-root-at-blk] success")
+				return nil
+			},
+			Description: "verify the receipt root at a given block by reconstructing receipts from RCache and comparing against the block header",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "block", Usage: "block number to verify", Required: true},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop on first mismatch (otherwise log and continue)"},
+			}),
+		},
+		{
+			Name: "check-rcache-root-at-blk-range",
+			Action: func(cliCtx *cli.Context) error {
+				logger := log.Root()
+				err := doCheckRCacheRootAtBlkRange(cliCtx, logger)
+				if err != nil {
+					log.Error("[check-rcache-root-at-blk-range] failure", "err", err)
+					return err
+				}
+				log.Info("[check-rcache-root-at-blk-range] success")
+				return nil
+			},
+			Description: "verify receipt roots against RCache for a given [from,to) block range with optional sampling",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying (default: 0)"},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to RCache domain tip"},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop on first mismatch (otherwise log and continue)"},
 			}),
 		},
 		{
@@ -699,6 +742,7 @@ type DeleteStateSnapshotsArgs struct {
 	DryRun                 bool
 	StepRange              string
 	OnlyDomain             bool
+	OnlyHistory            bool
 	DomainNames            []string
 }
 
@@ -728,6 +772,8 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
 	if args.OnlyDomain {
 		scanDirs = []string{dirs.SnapDomain}
+	} else if args.OnlyHistory {
+		scanDirs = []string{dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors}
 	}
 	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
@@ -1034,6 +1080,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	stepRange := cliCtx.String("step")
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
+	onlyHistory := cliCtx.Bool("only-history")
 	promptUser := true // CLI should always prompt the user
 	return DeleteStateSnapshots(DeleteStateSnapshotsArgs{
 		Dirs:                   dirs,
@@ -1042,6 +1089,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 		DryRun:                 dryRun,
 		StepRange:              stepRange,
 		DomainNames:            domainNames,
+		OnlyHistory:            onlyHistory,
 	})
 }
 
@@ -1600,7 +1648,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		case integrity.RCacheNoDups:
 			return integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.ReceiptRootIntegrity:
-			return integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, chainConfig, failFast)
+			return integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, chainConfig, failFast, logger)
 		case integrity.CommitmentRoot:
 			return integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger)
 		case integrity.CommitmentKvi:
@@ -1787,6 +1835,89 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
+}
+
+func doCheckRCacheRootAtBlk(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+	blockNum := cliCtx.Uint64("block")
+	failFast := cliCtx.Bool("failFast")
+	if err := integrity.CheckRCacheRootAtBlk(ctx, db, blockReader, chainConfig, blockNum, failFast, logger); err != nil {
+		return fmt.Errorf("checkRCacheRootAtBlk: %d, %w", blockNum, err)
+	}
+	return nil
+}
+
+func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
+	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer clean()
+	blockRetire, agg := res.BlockRetire, res.Aggregator
+	defer blockRetire.MadvNormal().DisableReadAhead()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	blockReader, _ := blockRetire.IO()
+
+	from := cliCtx.Uint64("from")
+	to := cliCtx.Uint64("to")
+	if !cliCtx.IsSet("to") {
+		tx, err := db.BeginTemporalRo(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		rcacheTip, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, tx.Debug().DomainProgress(kv.RCacheDomain))
+		tx.Rollback()
+		if err != nil {
+			return err
+		}
+		to = rcacheTip + 1 // exclusive upper bound
+		logger.Info("[check-rcache-root-at-blk-range] auto-detected --to", "to", to)
+	}
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+	sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+	if err != nil {
+		return err
+	}
+	failFast := cliCtx.Bool("failFast")
+	logger.Info("[check-rcache-root-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
+	return integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, chainConfig, from, to, failFast, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -2134,6 +2265,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if info.IsDir() {
 			return nil
 		}
+		if filepath.Ext(info.Name()) == ".tmp" {
+			return nil
+		}
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
@@ -2237,6 +2371,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(info.Name()) == ".tmp" {
 			return nil
 		}
 
@@ -3186,6 +3323,27 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer br.MadvNormal().DisableReadAhead()
 	defer agg.MadvNormal().DisableReadAhead()
 
+	if cliCtx.IsSet(utils.ErigondbDomainStepsInFrozenFileFlag.Name) {
+		s := cliCtx.String(utils.ErigondbDomainStepsInFrozenFileFlag.Name)
+		var v uint64
+		if strings.EqualFold(s, "inf") {
+			v = config3.UnboundedDomainMerge
+		} else {
+			parsed, perr := strconv.ParseUint(s, 10, 64)
+			if perr != nil || parsed == 0 {
+				return fmt.Errorf("invalid --%s value %q: must be a positive integer or \"Inf\"",
+					utils.ErigondbDomainStepsInFrozenFileFlag.Name, s)
+			}
+			v = parsed
+		}
+		stepsStr := "Inf"
+		if v != config3.UnboundedDomainMerge {
+			stepsStr = fmt.Sprintf("%d", v)
+		}
+		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+		agg.SetErigondbDomainStepsInFrozenFile(v)
+	}
+
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
@@ -3279,6 +3437,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			return err
 		}
 	}
+
+	logger.Info("waiting for background build/merge to drain")
+	agg.WaitForFiles()
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
