@@ -721,7 +721,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		)
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, blockNum, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -973,7 +973,6 @@ func buildWitnessTrie(
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
-	blockNum uint64,
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
@@ -986,14 +985,6 @@ func buildWitnessTrie(
 	}
 
 	accessed.touchAll(sdCtx)
-
-	// Generate witness after primary touches only, to measure baseline node count.
-	primaryTrie, _, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_primary_only")
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate primary-only witness: %w", err)
-	}
-	primaryNodes, _ := primaryTrie.RLPEncode()
-	log.Info("[debug_executionWitness] primary nodes (before siblings)", "block", blockNum, "nodes", len(primaryNodes))
 
 	if len(siblingPaths) > 0 {
 		for _, siblingPath := range siblingPaths {
