@@ -813,6 +813,18 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// tipInsideBlock failing with gas exactly 4800 short under
 		// ERIGON_EXEC3_PARALLEL=true (matches EIP-2200's clear refund).
 		destructTxIndex := res.DepIdx()
+		if !commited {
+			if vw, ok := s.versionedWrite(addr, path, key); ok {
+				// The current tx has itself written this field — a same-tx
+				// value-transfer or recreate that revived the account. A tx
+				// always observes its own write, regardless of a prior tx's
+				// self-destruct, so return it directly as WriteSetRead (issue
+				// #21319). Falling through to the normal read path instead
+				// would route an own-write read through the cross-tx
+				// dependency check and spuriously abort.
+				return vw.Val.(T), WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
+			}
+		}
 		// Per-path revival resolution (issue #21319): the account was
 		// self-destructed at destructTxIndex. THIS field is revived iff the
 		// version map holds a write to THIS path at a strictly higher
@@ -1012,6 +1024,58 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 						fmt.Printf("%d (%d.%d) RM DEP FALLTHROUGH (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
 					// Fall through to storage read below
+				}
+			}
+		}
+
+		// Self-destructed account: a per-account field (Balance/Nonce/
+		// Incarnation/CodeHash/Code) with no dedicated versionMap cell reads as
+		// the post-SD zero value. Record the read as a dependency on the
+		// SelfDestructPath entry rather than a bare StorageRead/UnknownVersion
+		// read — the latter is rejected on sight by the validator's
+		// path==AddressPath cross-check (IncarnationPath is Done), producing a
+		// non-converging validator-invalid retry loop. The SelfDestructPath
+		// dependency validates cleanly via checkVersion. (Branch 794's SD
+		// short-circuit misses this when its revival check fires for a
+		// recreate-in-the-same-tx target.)
+		//
+		// Only when the account is actually destroyed (SelfDestructPath=true)
+		// AND not revived since: a SelfDestructPath=false entry marks a
+		// created/alive account whose fields are not zero, and a later
+		// Balance/Nonce/CodeHash write at a higher TxIndex re-creates it.
+		// revivalLimit excludes the current tx's own writes (versionMap.Read
+		// uses floor(txIdx-1); LatestTxIndex's bound is inclusive).
+		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
+			path == CodeHashPath || path == CodePath || path == CodeSizePath {
+			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
+				if destructed, ok := sd.Value().(bool); ok && destructed {
+					destructTxIndex := sd.DepIdx()
+					revivalLimit := s.txIndex - 1
+					revived := false
+					for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
+						if hi, ok := s.versionMap.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
+							revived = true
+							break
+						}
+					}
+					if !revived {
+						sdVer := Version{TxIndex: destructTxIndex, Incarnation: sd.Incarnation()}
+						if !commited {
+							if s.versionedReads == nil {
+								s.versionedReads = ReadSet{}
+							}
+							s.versionedReads.Set(VersionedRead{
+								Address: addr,
+								Path:    SelfDestructPath,
+								Key:     accounts.NilKey,
+								Source:  MapRead,
+								Version: sdVer,
+								Val:     true,
+							})
+						}
+						var zero T
+						return zero, MapRead, sdVer, nil
+					}
 				}
 			}
 		}
