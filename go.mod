@@ -90,9 +90,9 @@ require (
 	github.com/prometheus/client_model v0.6.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
-	github.com/puzpuzpuz/xsync/v4 v4.4.0
+	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.23
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/rs/cors v1.11.1
 	github.com/shirou/gopsutil/v4 v4.26.4
 	github.com/spaolacci/murmur3 v1.1.0
