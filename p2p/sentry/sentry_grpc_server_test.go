@@ -1119,6 +1119,26 @@ func TestGrpcServer_SetStatus_NilStatusReadyIsSafe(t *testing.T) {
 	})
 }
 
+// TestGrpcServer_SetStatus_RejectsNilForkData covers the gRPC-entrypoint
+// hardening: SetStatus is reachable over the wire from cmd/sentry, so a
+// malformed StatusData (nil or missing ForkData) must return an error
+// instead of nil-panicking on the ForkData dereference.
+func TestGrpcServer_SetStatus_RejectsNilForkData(t *testing.T) {
+	ss := &GrpcServer{statusReady: make(chan struct{})}
+
+	// Nil StatusData.
+	require.NotPanics(t, func() {
+		_, err := ss.SetStatus(context.Background(), nil)
+		require.Error(t, err)
+	})
+
+	// Non-nil StatusData but nil ForkData.
+	require.NotPanics(t, func() {
+		_, err := ss.SetStatus(context.Background(), &sentryproto.StatusData{NetworkId: 1})
+		require.Error(t, err)
+	})
+}
+
 // TestGrpcServer_SetP2PServer_RejectsNil guards the lifecycle invariant
 // flagged by review: a nil server flipping external=true would later
 // cause Close() to skip Stop() on whatever Server the lazy SetStatus path

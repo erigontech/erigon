@@ -1672,9 +1672,14 @@ func (ss *GrpcServer) GetP2PServer() *p2p.Server {
 }
 
 func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
-	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
-
 	reply := &sentryproto.SetStatusReply{}
+	// Defensive: SetStatus is a gRPC entrypoint (cmd/sentry exposes it over
+	// the wire), so a malformed StatusData with nil ForkData must not panic
+	// the sentry — return an error instead.
+	if statusData == nil || statusData.ForkData == nil {
+		return reply, errors.New("sentry.SetStatus: statusData and statusData.ForkData must be non-nil")
+	}
+	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.p2pServerLock.Lock()
 	defer ss.p2pServerLock.Unlock()
