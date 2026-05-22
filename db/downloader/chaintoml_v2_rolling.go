@@ -267,6 +267,13 @@ type RollingV2Publisher struct {
 	// secp256k1 key. nil means no Content UCAN is written (fine for
 	// tests; production wires this via SetContentUCANMinter).
 	contentMinter ContentUCANMinterFn
+
+	// chainIdentity{GenesisFork,Forks} are stamped into every published
+	// manifest's chain-identity fields. Set once at startup via
+	// SetChainIdentity; an empty GenesisFork leaves the fields absent
+	// (legacy behaviour). See fork-spec.md § Identification.
+	chainIdentityGenesisFork string
+	chainIdentityForks       []ForkActivation
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -342,6 +349,18 @@ func (r *RollingV2Publisher) SetENRFingerprint(fp string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.enrFP = fp
+}
+
+// SetChainIdentity installs the chain-identity fields stamped into every
+// published manifest (GenesisFork + Forks). Compute via
+// BuildChainIdentity. An empty genesisFork leaves the fields absent on
+// each generated manifest (legacy behaviour). See fork-spec.md
+// § Identification and docs/plans/20260522-fork-identification-impl.md.
+func (r *RollingV2Publisher) SetChainIdentity(genesisFork string, forks []ForkActivation) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.chainIdentityGenesisFork = genesisFork
+	r.chainIdentityForks = forks
 }
 
 // resolveENRFP returns the ENR fingerprint for filename construction:
@@ -500,6 +519,14 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
+
+	// Stamp chain identity (see fork-spec.md § Identification). The
+	// fields are absent — and consumers fall back to the legacy
+	// chain-by-association — until SetChainIdentity is wired. r.mu is
+	// already held by Publish (see top of this function), so read
+	// directly.
+	manifest.GenesisFork = r.chainIdentityGenesisFork
+	manifest.Forks = r.chainIdentityForks
 
 	// Producer self-check: fail loud if this manifest disagrees with
 	// canonical for any known-canonical name. The check happens BEFORE

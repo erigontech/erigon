@@ -183,6 +183,15 @@ type Downloader struct {
 	// paired UCAN sidecar and stamps the manifest's AuthorityUCANHash.
 	delegationSource DelegationSource
 
+	// chainIdentity{GenesisFork,Forks} hold this node's chain-identity
+	// fields, stamped into every chain.v2 manifest generation. Set once
+	// at startup via SetChainIdentity from the chain config + genesis
+	// hash; empty means the manifest carries no identity (legacy
+	// behaviour for callers that do not wire it). See fork-spec.md
+	// § Identification and docs/plans/20260522-fork-identification-impl.md.
+	chainIdentityGenesisFork string
+	chainIdentityForks       []ForkActivation
+
 	// v2PublishGate{Enabled,Open} implement the chain.v2 first-publish
 	// gate — see EnableV2PublishGate. Default: both false → ungated.
 	v2PublishGateEnabled atomic.Bool
@@ -579,6 +588,19 @@ func (d *Downloader) SetDelegationSource(src DelegationSource) {
 	d.delegationSource = src
 }
 
+// SetChainIdentity installs the chain-identity fields stamped into every
+// chain.v2 manifest generation. Compute via BuildChainIdentity from the
+// chain config + genesis hash + genesis time. Call once at node startup
+// after the chain config is available; passing an empty genesisFork
+// disables stamping (the manifest carries no identity, legacy
+// behaviour). See docs/plans/20260522-fork-identification-impl.md.
+func (d *Downloader) SetChainIdentity(genesisFork string, forks []ForkActivation) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.chainIdentityGenesisFork = genesisFork
+	d.chainIdentityForks = forks
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -836,6 +858,8 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	selfCheck := d.manifestSelfCheck
 	contentMinter := d.contentMinter
 	delegationSource := d.delegationSource
+	chainIdentityGenesisFork := d.chainIdentityGenesisFork
+	chainIdentityForks := d.chainIdentityForks
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
@@ -845,6 +869,9 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	}
 	if delegationSource != nil {
 		pub.SetDelegationSource(delegationSource)
+	}
+	if chainIdentityGenesisFork != "" {
+		pub.SetChainIdentity(chainIdentityGenesisFork, chainIdentityForks)
 	}
 	// Re-seed the generations a fresh publisher recovered from disk
 	// (see RollingV2Publisher.ResumeSeeding), once.

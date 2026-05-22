@@ -112,6 +112,13 @@ type Provider struct {
 	// without re-fetching every peer's manifest from scratch.
 	// Empty string disables the cache (default).
 	cacheDir string
+
+	// forkIDFilter, if set, is the cheapest reject gate applied to each
+	// received peer manifest: returning an error drops the manifest
+	// before any UCAN or canonical-validator work. Phase 1 of fork
+	// identification (docs/plans/20260522-fork-identification-impl.md);
+	// see fork-spec.md § Identification.
+	forkIDFilter ForkIDFilterFn
 }
 
 // CanonicalValidatorFn is invoked on each received peer manifest to
@@ -139,6 +146,28 @@ func (p *Provider) SetCanonicalValidator(fn CanonicalValidatorFn) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.canonicalValidator = fn
+}
+
+// ForkIDFilterFn validates whether a received peer manifest is on a
+// chain compatible with the local node's. Returning a non-nil error
+// rejects the manifest before any other validation (UCAN, canonical
+// quorum) runs — the cheapest early-reject. See fork-spec.md
+// § Identification (the consumer-stream-selection rule).
+type ForkIDFilterFn func(*downloader.ChainTomlV2) error
+
+// SetForkIDFilter installs the consumer-side fork-ID compatibility
+// gate. Wired at node startup from the chain config: a manifest whose
+// genesis-fork or derived EIP-2124 fork ID is incompatible with the
+// local node is dropped before quorum or trust work. Pass nil to
+// disable (default; Phase-1 back-compat for manifests published
+// before chain-identity fields were stamped).
+func (p *Provider) SetForkIDFilter(fn ForkIDFilterFn) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.forkIDFilter = fn
 }
 
 // SetCacheDir configures the on-disk cache directory for validated
@@ -422,6 +451,20 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash,
 	if err != nil {
 		logger.Warn("[manifest_exchange] parse peer manifest", "peer", peerID, "err", err)
 		return
+	}
+
+	// Fork-ID early-reject: drop the peer manifest before any other
+	// validation when its declared chain identity is incompatible with
+	// the local node's. Cheapest gate; see fork-spec.md § Identification.
+	p.mu.Lock()
+	forkIDFilter := p.forkIDFilter
+	p.mu.Unlock()
+	if forkIDFilter != nil {
+		if err := forkIDFilter(manifest); err != nil {
+			logger.Warn("[manifest_exchange] peer manifest dropped — fork-ID incompatible",
+				"peer", peerID, "err", err)
+			return
+		}
 	}
 
 	// Trust gate. Skipped entirely when trust is unconfigured. On
