@@ -923,12 +923,14 @@ func (p *Provider) Initialize(deps Deps) error {
 		// Startup pre-flight settle-watcher: gates the first chain.v2
 		// advertisement on the initial file set having settled through
 		// the validator chain (infohash check included). See
-		// docs/plans/20260522-publisher-startup-preflight.md.
+		// docs/plans/20260522-publisher-startup-preflight.md. Launched
+		// below, after the bootstrap chain/prune fields are recorded —
+		// the watcher needs them to scope itself to the fixed
+		// initial-download set.
 		revalPolicy, perr := snapshotsync.ParseRevalidationPolicy(config.Snapshot.RevalidationPolicy)
 		if perr != nil {
 			logger.Warn("[storage] invalid --snapshot.revalidation-policy; defaulting to redownload", "err", perr)
 		}
-		go p.watchInitialValidation(ctx, flow.InitialDownloadsCompleteChannel(p.eventBus), revalPolicy)
 
 		// Watch the inventory for the tip *-headers.seg reaching
 		// LifecycleIndexed. When it does, open EL header segments and
@@ -963,6 +965,24 @@ func (p *Provider) Initialize(deps Deps) error {
 			p.bootstrapChainName = config.Snapshot.ChainName
 			p.bootstrapPruneMode = config.Prune
 		}
+
+		// Scope the settle-watcher to the fixed initial-download set.
+		// bootstrap-from-preverified downloads a deterministic file set
+		// (the prune-filtered preverified registry); files a publisher
+		// builds locally at the tip afterwards are NOT part of it and
+		// must not gate the first publish — a tip-region partial-block
+		// commitment legitimately stays paused until the next step
+		// retires, which would otherwise wedge the gate indefinitely.
+		// Absent bootstrap (a pure peer-download consumer has no
+		// locally-built files) the watcher falls back to all local files.
+		var initialSet map[string]struct{}
+		if config.Snapshot.BootstrapFromPreverified {
+			if cfg, known := snapcfg.KnownCfg(config.Snapshot.ChainName); known {
+				initialSet = manifestFileNames(
+					buildBootstrapManifest(cfg.Preverified.Items, p.ChainConfig, config.Prune, nil))
+			}
+		}
+		go p.watchInitialValidation(ctx, flow.InitialDownloadsCompleteChannel(p.eventBus), revalPolicy, initialSet)
 	}
 
 	return nil
@@ -1259,6 +1279,28 @@ func buildBootstrapManifest(
 		}
 	}
 	return manifest
+}
+
+// manifestFileNames collects the file names from every bucket of a
+// flow.PeerManifestReceived into a set. Used to derive the fixed
+// initial-download file set the startup settle-watcher gates on.
+func manifestFileNames(m flow.PeerManifestReceived) map[string]struct{} {
+	set := make(map[string]struct{})
+	add := func(entries []*snapshot.FileEntry) {
+		for _, e := range entries {
+			if e != nil {
+				set[e.Name] = struct{}{}
+			}
+		}
+	}
+	add(m.Blocks)
+	add(m.Meta)
+	add(m.Salt)
+	add(m.Caplin)
+	for _, d := range m.Domains {
+		add(d)
+	}
+	return set
 }
 
 // entryFromPreverifiedItem translates a preverified.Item (name + hex

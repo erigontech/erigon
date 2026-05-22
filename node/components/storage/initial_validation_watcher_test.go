@@ -65,7 +65,7 @@ func TestWatchInitialValidation(t *testing.T) {
 	}))
 
 	downloadsComplete := make(chan struct{})
-	go p.watchInitialValidation(context.Background(), downloadsComplete, snapshotsync.RevalidationRedownload)
+	go p.watchInitialValidation(context.Background(), downloadsComplete, snapshotsync.RevalidationRedownload, nil)
 
 	// Not fired before the download set completes.
 	time.Sleep(40 * time.Millisecond)
@@ -81,4 +81,55 @@ func TestWatchInitialValidation(t *testing.T) {
 	inv.AdvanceTo(settling, snapshot.LifecycleAdvertisable)
 	require.Eventually(t, func() bool { return atomic.LoadInt32(&done) == 1 },
 		2*time.Second, 10*time.Millisecond, "InitialValidationComplete after all files settle")
+}
+
+// TestWatchInitialValidation_TipFileOutsideInitialSet pins the gate's
+// scope: a locally-built tip file that never reaches Advertisable must
+// NOT block flow.InitialValidationComplete when it is outside the fixed
+// initial-download set. A publisher at tip always has such a file (a
+// partial-block commitment paused until the next step retires); gating
+// on it would wedge the first publish indefinitely.
+func TestWatchInitialValidation_TipFileOutsideInitialSet(t *testing.T) {
+	old := initialValidationPollInterval
+	initialValidationPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { initialValidationPollInterval = old })
+
+	bus := event.NewEventBus(nil)
+	inv := snapshot.NewInventory()
+	initial := "v1-000000-000500-headers.seg"
+	tipFile := "v1-000500-001000-headers.seg" // built locally at the tip
+	for _, n := range []string{initial, tipFile} {
+		e := &snapshot.FileEntry{Name: n, Local: true}
+		snapshot.PopulateFromName(e)
+		require.NoError(t, inv.AddFile(e))
+	}
+	// The initial-download file settles; the tip file stays unsettled.
+	inv.AdvanceTo(initial, snapshot.LifecycleAdvertisable)
+
+	p := &Provider{
+		eventBus:        bus,
+		Inventory:       inv,
+		LifecycleDriver: &lifecycle.Driver{Inv: inv},
+		logger:          log.Root(),
+	}
+
+	var done int32
+	require.NoError(t, bus.Subscribe(func(flow.InitialValidationComplete) {
+		atomic.AddInt32(&done, 1)
+	}))
+
+	downloadsComplete := make(chan struct{})
+	initialSet := map[string]struct{}{initial: {}} // tipFile deliberately excluded
+	go p.watchInitialValidation(context.Background(), downloadsComplete, snapshotsync.RevalidationRedownload, initialSet)
+	close(downloadsComplete)
+
+	// Fires even though tipFile never reaches Advertisable — it is
+	// outside the initial set.
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&done) == 1 },
+		2*time.Second, 10*time.Millisecond,
+		"InitialValidationComplete must not wait on a tip file outside the initial set")
+	tipState, ok := inv.LifecycleState(tipFile)
+	require.True(t, ok)
+	require.Less(t, tipState, snapshot.LifecycleAdvertisable,
+		"tip file deliberately left unsettled")
 }

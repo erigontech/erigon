@@ -46,18 +46,26 @@ const (
 // watchInitialValidation is the storage Provider's startup pre-flight
 // settle-watcher (docs/plans/20260522-publisher-startup-preflight.md).
 // It waits for the initial download set to complete, then polls the
-// inventory until every Local file has settled out of the lifecycle's
-// pre-Advertisable states — each has either reached Advertisable
-// (passed the validator chain, infohash check included) or been
-// quarantined after repeated validation failure. It then publishes
-// flow.InitialValidationComplete which — together with
+// inventory until every file in that set has settled out of the
+// lifecycle's pre-Advertisable states — each has either reached
+// Advertisable (passed the validator chain, infohash check included)
+// or been quarantined after repeated validation failure. It then
+// publishes flow.InitialValidationComplete which — together with
 // InitialDownloadsComplete — gates the first chain.v2 advertisement.
+//
+// initialSet scopes the watcher to the fixed initial-download file set.
+// A publisher builds new files locally at the tip after the initial
+// download; those are NOT in initialSet and must not gate the first
+// publish (a tip-region partial-block commitment legitimately stays
+// paused until the next step retires). When initialSet is nil — a pure
+// peer-download consumer, which has no locally-built files — every
+// Local file is checked.
 //
 // A quarantined file is handled per the revalidation policy: redownload
 // re-fetches it (the torrent client re-verifies and heals the on-disk
 // bytes), warn excludes it from the first manifest, stop halts the
 // first publish entirely (the event is never published).
-func (p *Provider) watchInitialValidation(ctx context.Context, downloadsComplete <-chan struct{}, policy snapshotsync.RevalidationPolicy) {
+func (p *Provider) watchInitialValidation(ctx context.Context, downloadsComplete <-chan struct{}, policy snapshotsync.RevalidationPolicy, initialSet map[string]struct{}) {
 	select {
 	case <-ctx.Done():
 		return
@@ -95,6 +103,13 @@ func (p *Provider) watchInitialValidation(ctx context.Context, downloadsComplete
 		allSettled := true
 		for _, f := range p.Inventory.AllLocalFiles() {
 			name := f.Name
+			if initialSet != nil {
+				if _, inSet := initialSet[name]; !inSet {
+					// Locally-built tip file, not part of the fixed
+					// initial download — outside this gate's scope.
+					continue
+				}
+			}
 			switch status[name] {
 			case settleGood, settleFailed:
 				continue
