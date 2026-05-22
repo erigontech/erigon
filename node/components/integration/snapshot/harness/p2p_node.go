@@ -314,6 +314,30 @@ func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *s
 	return [20]byte(spec.InfoHash)
 }
 
+// ensureV2Publisher lazily constructs the rolling V2 publisher — its
+// directory scan rediscovers any on-disk generations — and returns it.
+func (n *P2PNode) ensureV2Publisher() *dl.RollingV2Publisher {
+	n.T.Helper()
+	if n.v2Publisher == nil {
+		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, dl.NewAtomicTorrentFS(n.Dirs.Snap), n.dCore)
+		require.NoError(n.T, err)
+		pub.SetENRFingerprint(harnessENRFP)
+		n.v2Publisher = pub
+	}
+	return n.v2Publisher
+}
+
+// SetPublisherDelegationSource wires a delegation source onto the rolling
+// V2 publisher so every PublishV2Manifest also writes the Authority UCAN
+// sidecar (chain.ucan.authority.<fp>.<rev>.bin) and stamps the manifest's
+// AuthorityUCANHash. Call it before the first PublishV2Manifest — and
+// again after Restart, mirroring production reloading the delegation at
+// startup.
+func (n *P2PNode) SetPublisherDelegationSource(src dl.DelegationSource) {
+	n.T.Helper()
+	n.ensureV2Publisher().SetDelegationSource(src)
+}
+
 // PublishV2Manifest writes the next chain.v2.<seq>.toml generation
 // from the node's inventory via a long-lived RollingV2Publisher, builds
 // + seeds its .torrent, and returns the new V2 infohash suitable for
@@ -325,14 +349,7 @@ func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *s
 // never publish don't pay for it.
 func (n *P2PNode) PublishV2Manifest() [20]byte {
 	n.T.Helper()
-	if n.v2Publisher == nil {
-		torrentFS := dl.NewAtomicTorrentFS(n.Dirs.Snap)
-		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, torrentFS, n.dCore)
-		require.NoError(n.T, err)
-		pub.SetENRFingerprint(harnessENRFP)
-		n.v2Publisher = pub
-	}
-	hash, err := n.v2Publisher.Publish(n.ctx, n.Inventory, 0, nil)
+	hash, err := n.ensureV2Publisher().Publish(n.ctx, n.Inventory, 0, nil)
 	require.NoError(n.T, err)
 	return [20]byte(hash)
 }
@@ -351,13 +368,7 @@ func (n *P2PNode) V2Publisher() *dl.RollingV2Publisher { return n.v2Publisher }
 // PublishV2Manifest so old generations stay fetchable.
 func (n *P2PNode) ResumePublisherSeeding() {
 	n.T.Helper()
-	if n.v2Publisher == nil {
-		pub, err := dl.NewRollingV2Publisher(n.Dirs.Snap, dl.NewAtomicTorrentFS(n.Dirs.Snap), n.dCore)
-		require.NoError(n.T, err)
-		pub.SetENRFingerprint(harnessENRFP)
-		n.v2Publisher = pub
-	}
-	require.NoError(n.T, n.v2Publisher.ResumeSeeding(n.ctx))
+	require.NoError(n.T, n.ensureV2Publisher().ResumeSeeding(n.ctx))
 }
 
 // convertGenesisDifficulty wraps gointerfaces.ConvertUint256IntToH256

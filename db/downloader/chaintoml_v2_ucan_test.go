@@ -199,6 +199,72 @@ func TestRollingV2Publisher_AuthorityUCANStableAcrossGenerations(t *testing.T) {
 		"AuthorityUCANHash must be stable across generations with an unchanged delegation")
 }
 
+// readAuthorityUCANHash parses the manifest for genID and returns its
+// AuthorityUCANHash field.
+func readAuthorityUCANHash(t *testing.T, snapDir, genID string) string {
+	t.Helper()
+	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, genID)))
+	require.NoError(t, err)
+	manifest, err := ParseV2(tomlBytes)
+	require.NoError(t, err)
+	return manifest.AuthorityUCANHash
+}
+
+// TestRollingV2Publisher_AuthorityUCANStableAcrossRestart confirms a
+// publisher restart does not churn the Authority UCAN: a fresh publisher
+// over the same snapDir, given the same delegation, reuses the existing
+// content-addressed sidecar — the <rev>, file, and AuthorityUCANHash all
+// survive the restart unchanged.
+func TestRollingV2Publisher_AuthorityUCANStableAcrossRestart(t *testing.T) {
+	snapDir := t.TempDir()
+	delegation := []byte("operator-delegation")
+
+	// Publisher A: publish gen 0 with a delegation source.
+	a, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	a.SetENRFingerprint(testENRFP)
+	a.SetDelegationSource(func() ([]byte, error) { return delegation, nil })
+	_, err = a.Publish(context.Background(), rollingTestInventory(t, 0x60), 0, nil)
+	require.NoError(t, err)
+	gen0 := a.History()[0]
+	beforeHash := readAuthorityUCANHash(t, snapDir, gen0)
+	require.NotEmpty(t, beforeHash)
+
+	// Restart: publisher B over the same snapDir, same delegation.
+	b, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	b.SetENRFingerprint(testENRFP)
+	b.SetDelegationSource(func() ([]byte, error) { return delegation, nil })
+	require.Len(t, b.History(), 1, "restart discovers gen 0")
+
+	// Publish gen 1 — a strict superset (gen 0 stays retained), same
+	// delegation.
+	inv1 := rollingTestInventory(t, 0x60)
+	inv1.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    1024,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.1024-2048.kv",
+		TorrentHash: [20]byte{0x60, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = b.Publish(context.Background(), inv1, 0, nil)
+	require.NoError(t, err)
+
+	// One Authority UCAN file, at the rev of the unchanged delegation.
+	require.ElementsMatch(t, []string{genIDFromContent(delegation)}, listAuthorityUCANRevs(t, snapDir),
+		"restart + republish with an unchanged delegation must not churn the Authority UCAN")
+
+	// Both generations carry the same AuthorityUCANHash as before restart.
+	gens := b.History()
+	require.Len(t, gens, 2)
+	for _, g := range gens {
+		require.Equal(t, beforeHash, readAuthorityUCANHash(t, snapDir, g),
+			"AuthorityUCANHash must be stable across a restart")
+	}
+}
+
 // TestRollingV2Publisher_AuthorityUCANSurvivesEviction confirms that
 // evicting an invalid generation does NOT delete its Authority UCAN
 // sidecar — Authority UCANs are content-addressed and not per-generation.

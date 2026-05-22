@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/components/integration/snapshot/harness"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
@@ -156,4 +157,95 @@ func TestP2P_PublisherRestartResumesGenerations(t *testing.T) {
 
 	waitForP2P(t, func() bool { return manifestCount >= 1 }, 30*time.Second,
 		"leecher fetches the restarted seeder's V2 manifest over BitTorrent")
+}
+
+// soleAuthorityUCAN asserts exactly one chain.ucan.authority.*.bin
+// sidecar exists in snapDir and returns its filename.
+func soleAuthorityUCAN(t *testing.T, snapDir string) string {
+	t.Helper()
+	entries, err := os.ReadDir(snapDir)
+	require.NoError(t, err)
+	var found []string
+	for _, e := range entries {
+		if _, _, ok := dl.ParseChainAuthorityUCANFileName(e.Name()); ok {
+			found = append(found, e.Name())
+		}
+	}
+	require.Len(t, found, 1, "expected exactly one Authority UCAN sidecar")
+	return found[0]
+}
+
+// authorityUCANInfoHash returns the torrent info-hash of the Authority
+// UCAN sidecar named ucanName under snapDir.
+func authorityUCANInfoHash(t *testing.T, snapDir, ucanName string) [20]byte {
+	t.Helper()
+	spec, err := dl.NewAtomicTorrentFS(snapDir).LoadByName(ucanName + ".torrent")
+	require.NoError(t, err)
+	return [20]byte(spec.InfoHash)
+}
+
+// TestP2P_PublisherRestartStableAuthorityUCAN is the end-to-end proof
+// that the Authority UCAN sidecar is stable across a process restart:
+//
+//  1. A seeder publishes a generation with a delegation source wired, so
+//     a content-addressed chain.ucan.authority.<fp>.<rev>.bin is written.
+//  2. The node restarts: the torrent client is torn down and rebuilt.
+//  3. ResumePublisherSeeding re-registers the Authority UCAN torrent —
+//     it is long-lived and shared, re-seeded unconditionally, not gated
+//     on the per-generation retained set.
+//  4. A post-restart publish with the same delegation reuses the exact
+//     same sidecar: no second file, identical info-hash — so the
+//     manifest's AuthorityUCANHash never churns across the restart.
+func TestP2P_PublisherRestartStableAuthorityUCAN(t *testing.T) {
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(os.Stderr, log.TerminalFormat()))
+
+	seeder := harness.NewP2PNode(t, logger)
+	delegation := func() ([]byte, error) { return []byte("harness-operator-delegation"), nil }
+	seeder.SetPublisherDelegationSource(delegation)
+
+	gen1Files := []restartStateFile{
+		{"v1.0-accounts.0-512.kv", snapshot.DomainAccounts, 0, 512},
+		{"v1.0-storage.0-512.kv", snapshot.DomainStorage, 0, 512},
+	}
+	for _, f := range gen1Files {
+		seeder.SeedFile(f.name, multiPieceFixtureBytes("uauth:"+f.name, 256<<10),
+			f.domain, f.fromStep, f.toStep)
+	}
+	seeder.PublishV2Manifest()
+
+	ucanName := soleAuthorityUCAN(t, seeder.Dirs.Snap)
+	authHash := authorityUCANInfoHash(t, seeder.Dirs.Snap, ucanName)
+
+	// --- Restart -----------------------------------------------------
+	seeder = seeder.Restart()
+	for _, f := range gen1Files {
+		seeder.SeedExistingFile(f.name, &snapshot.FileEntry{
+			Domain:   f.domain,
+			FromStep: f.fromStep,
+			ToStep:   f.toStep,
+		})
+	}
+	// Production reloads the delegation at startup; the harness mirrors
+	// that with an explicit re-wire after the restart.
+	seeder.SetPublisherDelegationSource(delegation)
+	seeder.ResumePublisherSeeding()
+
+	// The Authority UCAN torrent is re-seeded by ResumeSeeding — it is
+	// not a per-generation artefact, so it is re-registered regardless
+	// of the rolling history.
+	client := seeder.DownloaderCore().TorrentClient()
+	_, seeded := client.Torrent(metainfo.Hash(authHash))
+	require.True(t, seeded, "the Authority UCAN torrent must be re-seeded after restart")
+
+	// Post-restart publish of a superset generation. The delegation is
+	// unchanged, so the Authority UCAN must be reused as-is.
+	seeder.SeedFile("v1.0-code.0-512.kv", multiPieceFixtureBytes("uauth:code", 256<<10),
+		snapshot.DomainCode, 0, 512)
+	seeder.PublishV2Manifest()
+
+	require.Equal(t, ucanName, soleAuthorityUCAN(t, seeder.Dirs.Snap),
+		"an unchanged delegation must not produce a second Authority UCAN file across a restart")
+	require.Equal(t, authHash, authorityUCANInfoHash(t, seeder.Dirs.Snap, ucanName),
+		"the Authority UCAN info-hash must be stable across a restart")
 }
