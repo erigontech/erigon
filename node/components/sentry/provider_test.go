@@ -19,6 +19,7 @@ package sentry
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -129,10 +130,13 @@ func helperGrpcServerWithProtocols(protocols ...p2p.Protocol) *sentry.GrpcServer
 // config uses a single nodes/eth path regardless of how many protocol
 // versions are configured.
 func TestBuildSharedP2PConfig_NodeDatabaseUnified(t *testing.T) {
+	// t.TempDir() gives an OS-native path; build the expected suffix with
+	// filepath.Join so the assertion holds on Windows (\) as well as Unix.
+	dir := t.TempDir()
 	p := &Provider{
 		logger: log.Root(),
 		cfg: Config{
-			NodesDir: "/data/nodes",
+			NodesDir: dir,
 			P2P: p2p.Config{
 				ListenAddr: ":30303",
 			},
@@ -140,7 +144,7 @@ func TestBuildSharedP2PConfig_NodeDatabaseUnified(t *testing.T) {
 	}
 	cfg, err := p.buildSharedP2PConfig()
 	require.NoError(t, err)
-	require.Equal(t, "/data/nodes/eth", cfg.NodeDatabase)
+	require.Equal(t, filepath.Join(dir, "eth"), cfg.NodeDatabase)
 }
 
 // TestBuildSharedP2PConfig_NoAllowedPortsKeepsListenAddr verifies that an
