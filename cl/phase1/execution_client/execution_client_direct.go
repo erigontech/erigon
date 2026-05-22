@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const reorgTooDeepDepth = 3
@@ -134,8 +135,18 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if attr == nil {
 		return nil, nil
 	}
+	// Retry AssembleBlock if the EL is busy (semaphore contention with
+	// fork choice commits). This is common in single-process dev mode
+	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(head, attr)
+	var id uint64
+	for attempt := 0; attempt < 30; attempt++ {
+		id, err = cc.chainRW.AssembleBlock(head, attr)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -209,6 +220,9 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
+		if errors.Is(err, txpool.ErrPoolDisabled) {
+			return nil, nil, nil
+		}
 		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs

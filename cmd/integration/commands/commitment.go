@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -57,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -230,7 +232,7 @@ Examples:
 func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
 }) error {
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
 		return fmt.Errorf("failed to get branch for prefix %x: %w", prefix, err)
@@ -280,9 +282,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
-	if noHistory && resume {
-		return errors.New("--no-history and --resume are mutually exclusive")
-	}
 	if noHistory && clearCommitment {
 		return errors.New("--no-history and --clear-commitment are mutually exclusive")
 	}
@@ -316,9 +315,13 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if err != nil {
 		return err
 	}
+	if commitmentHistoryEnabled {
+		statecfg.EnableHistoricalCommitment()
+	}
 
-	if resume && !commitmentHistoryEnabled {
-		return errors.New("--resume requires commitment history to be enabled")
+	if resume && !commitmentHistoryEnabled && !noHistory {
+		logger.Info("[commitment_rebuild] commitment history not enabled in DB; resuming in --no-history mode")
+		noHistory = true
 	}
 
 	withHistory := false
@@ -386,6 +389,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetErigondbDomainStepsInFrozenFile(config3.UnboundedDomainMerge)
 	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
@@ -674,7 +678,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 
 	// Convert hex nibbles to compact bytes for commitment lookup
-	compactKey := commitment.HexNibblesToCompactBytes(prefix)
+	compactKey := nibbles.HexToCompact(prefix)
 
 	seed := benchHistorySeed
 	if seed == 0 {

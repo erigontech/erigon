@@ -23,17 +23,20 @@ var globalCaplinConfig *clparams.CaplinConfig
 
 func init() {
 	// Initialize global config once for all tests
+	// Set GloasForkEpoch high to ensure tests run in Fulu mode
+	// (tests create Fulu-style sidecars with SignedBlockHeader)
 	globalBeaconConfig = &clparams.BeaconChainConfig{
 		NumberOfColumns:             4,
 		SlotsPerEpoch:               32,
 		MaxBlobCommittmentsPerBlock: 6,
+		GloasForkEpoch:              18446744073709551615, // Max uint64 - Gloas not activated
 	}
 	globalCaplinConfig = &clparams.CaplinConfig{}
 	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
 }
 
 func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig, eth_clock.EthereumClock) {
-	fs := afero.NewMemMapFs()
+	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
 
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)

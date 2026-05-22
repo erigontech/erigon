@@ -121,10 +121,10 @@ func Main(ctx *cli.Context) error {
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
 		logConfig := &trace_logger.LogConfig{
-			DisableStack:      ctx.Bool(TraceDisableStackFlag.Name),
-			DisableMemory:     ctx.Bool(TraceDisableMemoryFlag.Name),
-			DisableReturnData: ctx.Bool(TraceDisableReturnDataFlag.Name),
-			Debug:             true,
+			DisableStack:     ctx.Bool(TraceDisableStackFlag.Name),
+			EnableMemory:     !ctx.Bool(TraceDisableMemoryFlag.Name),
+			EnableReturnData: !ctx.Bool(TraceDisableReturnDataFlag.Name),
+			Debug:            true,
 		}
 		var prevFile *os.File
 		// This one closes the last file
@@ -209,7 +209,7 @@ func Main(ctx *cli.Context) error {
 		vmConfig.ExtraEips = extraEips
 	}
 	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
+	chainConfig.ChainID = new(uint256.Int).SetUint64(ctx.Uint64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {

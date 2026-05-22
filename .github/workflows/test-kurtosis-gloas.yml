@@ -1,0 +1,137 @@
+name: Kurtosis GLOAS Tests
+
+env:
+  DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  APP_REPO: "erigontech/erigon"
+  LIGHTHOUSE_IMAGE: "sigp/lighthouse:v7.0.1"
+  ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+concurrency:
+  group: >-
+    ${{
+      github.event_name == 'pull_request' &&
+      format('{0}-{1}', github.workflow, github.head_ref) ||
+      format('{0}-{1}', github.workflow, github.run_id)
+    }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gloas_test:
+    name: gloas_${{ matrix.suite }}_test
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: gloas-caplin-mixed
+            package_args: .github/workflows/kurtosis/gloas-caplin-mixed.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+          - suite: gloas-three-cl-mixed
+            package_args: .github/workflows/kurtosis/gloas-three-cl-mixed.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v6
+
+      - name: Conditional Docker Login
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          !github.event.pull_request.head.repo.fork
+        continue-on-error: true
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_PULL_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Restore cached third-party containers
+        id: cache-cl-images
+        uses: actions/cache/restore@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
+
+      - name: Load cached containers into daemon
+        if: steps.cache-cl-images.outputs.cache-hit == 'true'
+        run: |
+          docker load -i /tmp/docker-cache/lighthouse.tar
+          docker load -i /tmp/docker-cache/assertoor.tar
+
+      - name: Pull third-party containers and save to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/docker-cache
+          docker pull ${{ env.LIGHTHOUSE_IMAGE }}
+          docker pull ${{ env.ASSERTOOR_IMAGE }}
+          docker save ${{ env.LIGHTHOUSE_IMAGE }} -o /tmp/docker-cache/lighthouse.tar
+          docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
+
+      - name: Save third-party containers to cache
+        if: steps.cache-cl-images.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+        uses: actions/cache/save@v5
+        with:
+          path: /tmp/docker-cache
+          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}
+
+      - name: Build erigon Docker image (with BuildKit layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
+        timeout-minutes: ${{ matrix.test_timeout_minutes }}
+        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        with:
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+            ethereum_package_url: "github.com/ethpandaops/ethereum-package"
+            ethereum_package_args: "${{ matrix.package_args }}"
+            ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
+            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
+            persistent_logs: "true"
+
+      - name: Dump Kurtosis enclave on failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          set -eu
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
+          kurtosis enclave dump "$enclave_name" "$dump_dir" || true
+
+      - name: Upload Kurtosis enclave dump
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
+          retention-days: 7
+          if-no-files-found: warn

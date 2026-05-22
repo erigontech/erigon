@@ -119,6 +119,17 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PendingConsolidationsDump:     getKvGetterForStateTable(db, kv.PendingConsolidationsDump),
 			kv.PendingPartialWithdrawalsDump: getKvGetterForStateTable(db, kv.PendingPartialWithdrawalsDump),
 			kv.PendingDepositsDump:           getKvGetterForStateTable(db, kv.PendingDepositsDump),
+			// GLOAS (EIP-7732)
+			kv.Builders:                          getKvGetterForStateTable(db, kv.Builders),
+			kv.BuildersDump:                      getKvGetterForStateTable(db, kv.BuildersDump),
+			kv.BuilderPendingWithdrawals:         getKvGetterForStateTable(db, kv.BuilderPendingWithdrawals),
+			kv.BuilderPendingWithdrawalsDump:     getKvGetterForStateTable(db, kv.BuilderPendingWithdrawalsDump),
+			kv.PayloadExpectedWithdrawals:        getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawals),
+			kv.PayloadExpectedWithdrawalsDump:    getKvGetterForStateTable(db, kv.PayloadExpectedWithdrawalsDump),
+			kv.ExecutionPayloadAvailabilityTable: getKvGetterForStateTable(db, kv.ExecutionPayloadAvailabilityTable),
+			kv.BuilderPendingPaymentsTable:       getKvGetterForStateTable(db, kv.BuilderPendingPaymentsTable),
+			kv.PtcWindowTable:                    getKvGetterForStateTable(db, kv.PtcWindowTable),
+			kv.LatestExecutionPayloadBidTable:    getKvGetterForStateTable(db, kv.LatestExecutionPayloadBidTable),
 		},
 		Compression: map[string]bool{},
 	}
@@ -215,13 +226,17 @@ func (s *CaplinStateSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
 
+	var stats seg.Stats
 	for _, roTx := range view.roTxs {
 		if roTx != nil {
-			for _, seg := range roTx.Segments {
-				s.logger.Info("[agg] ", "f", seg.src.filePath, "words", seg.src.Decompressor.Count())
+			for _, sn := range roTx.Segments {
+				d := sn.src.Decompressor
+				s.logger.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+				stats.Add(d)
 			}
 		}
 	}
+	s.logger.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {

@@ -755,6 +755,7 @@ func (c *memStoreCursor) DeleteCurrentDuplicates() error {
 }
 
 func (c *memStoreCursor) PutNoDupData(key, value []byte) error { panic("PutNoDupData not implemented") }
+func (c *memStoreCursor) PutCurrent(key, value []byte) error   { panic("PutCurrent not implemented") }
 
 func (c *memStoreCursor) Close() {}
 

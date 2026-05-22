@@ -362,12 +362,20 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return newRPCRawTransactionFromBlockIndex(b, uint64(index))
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNr.Uint64())
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645

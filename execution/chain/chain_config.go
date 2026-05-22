@@ -20,10 +20,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
@@ -40,10 +42,10 @@ import (
 //
 // Config must be copied only with jinzhu/copier since it contains a sync.Once.
 type Config struct {
-	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
-	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
+	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
+	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -67,10 +69,10 @@ type Config struct {
 	GrayGlacierBlock      *uint64 `json:"grayGlacierBlock,omitempty"`
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake (a.k.a. "Paris", "The Merge")
-	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
-	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
-	MergeNetsplitBlock            *uint64  `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
-	MergeHeight                   *uint64  `json:"mergeBlock,omitempty"`                    // The Merge block number
+	TerminalTotalDifficulty       *uint256.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
+	TerminalTotalDifficultyPassed bool         `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
+	MergeNetsplitBlock            *uint64      `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *uint64      `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
 	ShanghaiTime  *uint64 `json:"shanghaiTime,omitempty"`
@@ -104,23 +106,38 @@ type Config struct {
 	// See also EIP-6110: Supply validator deposits on chain
 	DepositContract common.Address `json:"depositContractAddress,omitempty"`
 
+	// (Optional) EIP-7002: Execution layer triggerable withdrawals
+	WithdrawalRequestContract *common.Address `json:"withdrawalRequestContractAddress,omitempty"`
+
+	// (Optional) EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
+	ConsolidationRequestContract *common.Address `json:"consolidationRequestContractAddress,omitempty"`
+
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
 	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
-	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// DisabledEIPs lists EIPs that are disabled for this chain, even when
+	// their parent fork is active. Used for devnets where the reference
+	// client doesn't yet implement certain EIPs (e.g. [7708, 7778, 7928]).
+	DisabledEIPs []int `json:"disabledEIPs,omitempty"`
+
 	// Account Abstraction
 	AllowAA bool
 }
 
+// IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.
+func (c *Config) IsEIPDisabled(eip int) bool {
+	return slices.Contains(c.DisabledEIPs, eip)
+}
+
 var (
 	TestChainAuraConfig = &Config{
-		ChainID:               big.NewInt(1),
+		ChainID:               uint256.NewInt(1),
 		Rules:                 AuRaRules,
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
@@ -136,7 +153,7 @@ var (
 	}
 
 	TestChainBerlinConfig = &Config{
-		ChainID:               big.NewInt(1337),
+		ChainID:               uint256.NewInt(1337),
 		Rules:                 EtHashRules,
 		HomesteadBlock:        common.NewUint64(0),
 		TangerineWhistleBlock: common.NewUint64(0),
@@ -150,11 +167,8 @@ var (
 		Ethash:                new(EthashConfig),
 	}
 
-	// TestChainConfig is an alias for TestChainBerlinConfig for backward compatibility.
-	TestChainConfig = TestChainBerlinConfig
-
 	TestChainOsakaConfig = &Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         EtHashRules,
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
@@ -168,7 +182,7 @@ var (
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -181,7 +195,7 @@ var (
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		Rules:                         EtHashRules,
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
@@ -195,7 +209,7 @@ var (
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -288,8 +302,6 @@ func (c *Config) getEngine() string {
 	switch {
 	case c.Ethash != nil:
 		return c.Ethash.String()
-	case c.Clique != nil:
-		return c.Clique.String()
 	case c.Bor != nil:
 		return c.Bor.String()
 	case c.Aura != nil:
@@ -529,12 +541,30 @@ func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
-		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
+		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = c.GetConsolidationRequestContract()
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
-		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
+		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = c.GetWithdrawalRequestContract()
 	}
 	return contracts
+}
+
+// GetWithdrawalRequestContract returns the configured EIP-7002 withdrawal request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetWithdrawalRequestContract() accounts.Address {
+	if c.WithdrawalRequestContract != nil {
+		return accounts.InternAddress(*c.WithdrawalRequestContract)
+	}
+	return params.WithdrawalRequestAddress
+}
+
+// GetConsolidationRequestContract returns the configured EIP-7251 consolidation request contract address,
+// falling back to the default if not set in the chain config.
+func (c *Config) GetConsolidationRequestContract() accounts.Address {
+	if c.ConsolidationRequestContract != nil {
+		return accounts.InternAddress(*c.ConsolidationRequestContract)
+	}
+	return params.ConsolidationRequestAddress
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -629,7 +659,7 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock, head) {
 		return newCompatError("Spurious Dragon fork block", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
-	if c.IsSpuriousDragon(head) && !bigEqual(c.ChainID, newcfg.ChainID) {
+	if c.IsSpuriousDragon(head) && !uint256Equal(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
@@ -680,7 +710,7 @@ func numEqual(x, y *uint64) bool {
 	return *x == *y
 }
 
-func bigEqual(x, y *big.Int) bool {
+func uint256Equal(x, y *uint256.Int) bool {
 	if x == nil {
 		return y == nil
 	}
@@ -736,17 +766,6 @@ func (c *EthashConfig) String() string {
 	return "ethash"
 }
 
-// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
-type CliqueConfig struct {
-	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
-}
-
-// String implements the stringer interface, returning the rules engine details.
-func (c *CliqueConfig) String() string {
-	return "clique"
-}
-
 // Looks up a config value as of a given block number (or time).
 // The assumption here is that config is a càdlàg map of starting_from_block -> value.
 // For example, config of {5: "A", 10: "B", 20: "C"}
@@ -772,13 +791,19 @@ func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                           *big.Int
+	ChainID                                           *uint256.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	DisabledEIPs                                      []int
 	IsAura                                            bool
+}
+
+// IsEIPDisabled returns true if the given EIP number has been disabled for this chain.
+func (r *Rules) IsEIPDisabled(eip int) bool {
+	return slices.Contains(r.DisabledEIPs, eip)
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

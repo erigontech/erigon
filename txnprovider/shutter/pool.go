@@ -295,11 +295,13 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			continue
 		}
 		gasLimit := txn.GetGasLimit()
-		if gasLimit > availableGas.Regular || gasLimit > availableGas.State {
+		blobGas := txn.GetBlobGas()
+		if gasLimit > availableGas.Regular || gasLimit > availableGas.State || blobGas > availableGas.Blob {
 			continue
 		}
 		availableGas.Regular -= gasLimit
 		availableGas.State -= gasLimit
+		availableGas.Blob -= blobGas
 		decryptedTxnsGas += gasLimit
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {

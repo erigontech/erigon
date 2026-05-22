@@ -22,7 +22,6 @@ package types
 import (
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -116,21 +115,8 @@ type LegacyTx struct {
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
 func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
-func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetTipCap()
-	}
-	gasFeeCap := tx.GetFeeCap()
-	// return 0 because effectiveFee cant be < 0
-	if gasFeeCap.Lt(baseFee) {
-		return uint256.NewInt(0)
-	}
-	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTipCap().Lt(effectiveFee) {
-		return tx.GetTipCap()
-	} else {
-		return effectiveFee
-	}
+func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
 }
 
 func (tx *LegacyTx) GetAccessList() AccessList {
@@ -367,7 +353,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]any{
+	hash := RlpHash([]any{
 		tx.Nonce,
 		&tx.GasPrice,
 		tx.GasLimit,
@@ -387,14 +373,14 @@ type legacyTxSigHash struct {
 	To       *common.Address `rlp:"nil"`
 	Value    *uint256.Int
 	Data     []byte
-	ChainID  *big.Int
+	ChainID  *uint256.Int
 	V        uint
 	R        uint
 }
 
-func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash(&legacyTxSigHash{
+		return RlpHash(&legacyTxSigHash{
 			Nonce:    tx.Nonce,
 			GasPrice: &tx.GasPrice,
 			Gas:      tx.GasLimit,
@@ -406,7 +392,7 @@ func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 			R:        uint(0),
 		})
 	}
-	return rlpHash([]any{
+	return RlpHash([]any{
 		tx.Nonce,
 		&tx.GasPrice,
 		tx.GasLimit,

@@ -439,15 +439,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | overlay_getLogs                            | Yes     |                                                       |
 | overlay_callConstructor                    | Yes     |                                                       |
 |                                            |         |                                                       |
-| clique_getSnapshot                         | Yes     | Clique only                                           |
-| clique_getSnapshotAtHash                   | Yes     | Clique only                                           |
-| clique_getSigners                          | Yes     | Clique only                                           |
-| clique_getSignersAtHash                    | Yes     | Clique only                                           |
-| clique_proposals                           | Yes     | Clique only                                           |
-| clique_propose                             | Yes     | Clique only                                           |
-| clique_discard                             | Yes     | Clique only                                           |
-| clique_status                              | Yes     | Clique only                                           |
-|                                            |         |                                                       |
 | internal_getTxNumInfo                      | Yes     | Erigon only                                           |
 | internal_getStepsInDB                      | Yes     | Erigon only                                           |
 | internal_getPruningProgress                | Yes     | Erigon only                                           |

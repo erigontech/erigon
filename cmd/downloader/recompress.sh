@@ -2,6 +2,7 @@
 set -e
 
 dir=$1
+# shellcheck disable=SC2010
 files=$(ls $dir/snapshots | grep -v old | grep -v tor | grep seg |  sort -n -t$'-' -k1)
 for file in $files
 do

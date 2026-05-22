@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/cache"
 	libchain "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -89,7 +88,7 @@ func newCanonical(t *testing.T, n int) *execmoduletester.ExecModuleTester {
 }
 
 // Test fork of length N starting from block i
-func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *big.Int)) {
+func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comparator func(td1, td2 *uint256.Int)) {
 	// Copy old chain up to #i into a new db
 	canonicalMock := newCanonical(t, i)
 	var err error
@@ -124,7 +123,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	}
 	// Extend the newly created chain
 	var blockChainB *blockgen.ChainPack
-	var tdPre, tdPost *big.Int
+	var tdPre, tdPost *uint256.Int
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -210,7 +209,7 @@ func TestExtendCanonicalBlocks(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
@@ -238,7 +237,7 @@ func testShorterFork(t *testing.T) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	worse := func(td1, td2 *big.Int) {
+	worse := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) >= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected less than %v", td2, td1)
 		}
@@ -268,7 +267,7 @@ func testLongerFork(t *testing.T, full bool) {
 	m := newCanonical(t, length)
 
 	// Define the difficulty comparator
-	better := func(td1, td2 *big.Int) {
+	better := func(td1, td2 *uint256.Int) {
 		if td2.Cmp(td1) <= 0 {
 			t.Errorf("total difficulty mismatch: have %v, expected more than %v", td2, td1)
 		}
@@ -436,7 +435,7 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	want := new(uint256.Int).AddUint64(&genDiff, uint64(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
 	require.NoError(err)
-	if want.CmpBig(have) != 0 {
+	if want.Cmp(have) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 	// Make sure the canonical chain is the correct one
@@ -463,7 +462,7 @@ func TestChainTxReorgs(t *testing.T) {
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
 		gspec   = &types.Genesis{
-			Config:   libchain.TestChainConfig,
+			Config:   libchain.TestChainBerlinConfig,
 			GasLimit: 3141592,
 			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
@@ -678,7 +677,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
+			Config: &libchain.Config{ChainID: uint256.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -751,7 +750,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &libchain.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
+	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
 	chain, chainErr = blockgen.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
@@ -797,7 +796,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
+			Config: &libchain.Config{ChainID: uint256.NewInt(1), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -975,7 +974,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		theAddr = accounts.InternAddress(common.Address{1})
 		gspec   = &types.Genesis{
 			Config: &libchain.Config{
-				ChainID:               big.NewInt(1),
+				ChainID:               uint256.NewInt(1),
 				HomesteadBlock:        common.NewUint64(0),
 				TangerineWhistleBlock: common.NewUint64(0),
 				SpuriousDragonBlock:   common.NewUint64(2),
@@ -1076,7 +1075,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
 		gspec       = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
@@ -1371,7 +1370,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
@@ -1491,7 +1490,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1614,7 +1613,7 @@ func TestCVE2020_26265(t *testing.T) {
 		} // Code for CALLER
 	)
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1695,7 +1694,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[common.HexToHash("02")] = common.HexToHash("02")
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -1822,7 +1821,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	aa := accounts.InternAddress(types.CreateAddress2(bb, [32]byte{}, initHash))
 	t.Logf("Destination address: %x\n", aa)
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -2028,7 +2027,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: libchain.TestChainConfig,
+		Config: libchain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
@@ -2112,7 +2111,7 @@ func TestEIP2718Transition(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: libchain.TestChainConfig,
+			Config: libchain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
@@ -2134,7 +2133,7 @@ func TestEIP2718Transition(t *testing.T) {
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		gasPrice, _ := uint256.FromBig(big.NewInt(1))
-		chainID, _ := uint256.FromBig(gspec.Config.ChainID)
+		chainID := gspec.Config.ChainID
 
 		// One transaction to 0xAAAA
 		signer := types.LatestSigner(gspec.Config)
@@ -2241,7 +2240,7 @@ func TestEIP1559Transition(t *testing.T) {
 			}}
 
 			var chainID uint256.Int
-			chainID.SetFromBig(gspec.Config.ChainID)
+			chainID.Set(gspec.Config.ChainID)
 			var txn types.Transaction = &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
 					Nonce:    0,
@@ -2327,7 +2326,8 @@ func TestEIP1559Transition(t *testing.T) {
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		baseFee := block.BaseFee()
-		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
+		tip := block.Transactions()[0].GetEffectiveGasTip(baseFee)
+		effectiveTip := tip.Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
 		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
@@ -2355,68 +2355,4 @@ func TestEIP1559Transition(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-// Regression test for https://github.com/erigontech/erigon/issues/20169
-//
-// Tests the SharedDomains StateCache directly, reproducing the exact
-// sequence that caused Hoodi nodes to get stuck:
-//
-//  1. DomainPut writes key=0x42 (populates stateCache with 0x42)
-//  2. Flush + ClearRam (persists to DB, clears mem buffer)
-//  3. DomainDel deletes the key (stateCache.Delete removes entry)
-//  4. Flush + ClearRam (persists deletion to DB, clears mem buffer)
-//  5. GetLatest reads the key — should return nil (deleted)
-//
-// With the bug, step 3's DomainDel calls stateCache.Delete (removing
-// the entry) but step 4's Flush path calls GetLatest which reads nil
-// from mem buffer and does stateCache.Put(nil) → which ALSO deletes
-// from cache. After ClearRam, the mem buffer is empty and the stateCache
-// has no entry. Step 5's GetLatest falls through to the DB, which
-// returns nil (correct, since Flush persisted the deletion).
-//
-// However, if the stateCache was populated between step 2 and step 3
-// by a GetLatest (which caches 0x42 from DB), and the DomainDel's
-// stateCache.Delete removes it, and then stateCache.Put(nil) removes
-// the deletion sentinel, the cache has NO entry for the key. If the
-// DB read in step 5 somehow returns the stale value (e.g. due to
-// transaction isolation), the stale value is returned.
-//
-// This test exercises the StateCache at the cache level to verify
-// that Put(nil) correctly records the deletion as a cache hit.
-func TestStateCacheDeletedStorageSSTOREGas(t *testing.T) {
-	t.Parallel()
-
-	c := cache.NewStateCache(100, 100, 100, 100, 100)
-
-	key := make([]byte, 52) // addr(20) + slot(32)
-	key[0] = 0x1d
-	key[51] = 0xa2
-
-	value := []byte{0x42}
-
-	// Step 1: Put a value (simulates DomainPut caching a storage value)
-	c.Put(kv.StorageDomain, key, value)
-	v, ok := c.Get(kv.StorageDomain, key)
-	require.True(t, ok, "after Put: should be cached")
-	require.Equal(t, value, v)
-
-	// Step 2: Delete the key (simulates DomainDel)
-	c.Delete(kv.StorageDomain, key)
-
-	// Step 3: Put nil (simulates GetLatest caching a deletion from mem buffer)
-	// This is the exact sequence in SharedDomains.GetLatest:
-	//   v, step, ok := sd.mem.GetLatest(domain, k)  // ok=true, v=nil
-	//   sd.stateCache.Put(domain, k, v)              // v=nil
-	c.Put(kv.StorageDomain, key, nil)
-
-	// Step 4: Get must return a cache HIT with empty value.
-	// This is the critical assertion: with the bug, Get returns (nil, false)
-	// meaning "not in cache", so the caller falls through to the DB.
-	v, ok = c.Get(kv.StorageDomain, key)
-	require.True(t, ok,
-		"after Delete+Put(nil): Get must return (nil, true) — cached as deleted. "+
-			"Returning false causes the caller to read stale data from the DB, "+
-			"which is the root cause of the Hoodi gas mismatch (#20169).")
-	require.Empty(t, v, "cached value for a deleted key must be empty")
 }

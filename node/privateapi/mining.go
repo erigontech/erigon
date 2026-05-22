@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"sync"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -161,136 +161,10 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 }
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
-type MinedBlockStreams struct {
-	chans map[uint]txpoolproto.Mining_OnMinedBlockServer
-	id    uint
-	mu    sync.Mutex
-}
-
-func (s *MinedBlockStreams) Add(stream txpoolproto.Mining_OnMinedBlockServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnMinedBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *MinedBlockStreams) Broadcast(reply *txpoolproto.OnMinedBlockReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *MinedBlockStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type MinedBlockStreams = grpcutil.StreamBroadcaster[txpoolproto.OnMinedBlockReply]
 
 // PendingBlockStreams - it's safe to use this class as non-pointer
-type PendingBlockStreams struct {
-	chans map[uint]txpoolproto.Mining_OnPendingBlockServer
-	mu    sync.Mutex
-	id    uint
-}
-
-func (s *PendingBlockStreams) Add(stream txpoolproto.Mining_OnPendingBlockServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnPendingBlockServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *PendingBlockStreams) Broadcast(reply *txpoolproto.OnPendingBlockReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *PendingBlockStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type PendingBlockStreams = grpcutil.StreamBroadcaster[txpoolproto.OnPendingBlockReply]
 
 // PendingLogsStreams - it's safe to use this class as non-pointer
-type PendingLogsStreams struct {
-	chans map[uint]txpoolproto.Mining_OnPendingLogsServer
-	mu    sync.Mutex
-	id    uint
-}
-
-func (s *PendingLogsStreams) Add(stream txpoolproto.Mining_OnPendingLogsServer) (remove func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.chans == nil {
-		s.chans = make(map[uint]txpoolproto.Mining_OnPendingLogsServer)
-	}
-	s.id++
-	id := s.id
-	s.chans[id] = stream
-	return func() { s.remove(id) }
-}
-
-func (s *PendingLogsStreams) Broadcast(reply *txpoolproto.OnPendingLogsReply, logger log.Logger) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, stream := range s.chans {
-		err := stream.Send(reply)
-		if err != nil {
-			logger.Trace("failed send to mined block stream", "err", err)
-			select {
-			case <-stream.Context().Done():
-				delete(s.chans, id)
-			default:
-			}
-		}
-	}
-}
-
-func (s *PendingLogsStreams) remove(id uint) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.chans[id]
-	if !ok { // double-unsubscribe support
-		return
-	}
-	delete(s.chans, id)
-}
+type PendingLogsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnPendingLogsReply]

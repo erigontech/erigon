@@ -39,8 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -127,7 +129,7 @@ func TestEIP2200(t *testing.T) {
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
-			s.SetCode(address, hexutil.MustDecode(tt.input))
+			s.SetCode(address, hexutil.MustDecode(tt.input), tracing.CodeChangeUnspecified)
 			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
 
 			vmctx := evmtypes.BlockContext{
@@ -136,19 +138,19 @@ func TestEIP2200(t *testing.T) {
 					return nil
 				},
 			}
-			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
-			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
+			_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{ExtraEips: []int{2200}})
 			mdGas := mdgas.MdGas{
 				Regular: tt.gaspool,
 			}
-			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
+			_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
 			if used := tt.gaspool - gas.Regular; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
-			if refund := vmenv.IntraBlockState().GetRefund(); refund.Regular != tt.refund {
+			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
 				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 			}
 		})
@@ -188,7 +190,7 @@ func TestCreateGas(t *testing.T) {
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)
-		s.SetCode(address, hexutil.MustDecode(tt.code))
+		s.SetCode(address, hexutil.MustDecode(tt.code), tracing.CodeChangeUnspecified)
 
 		vmctx := evmtypes.BlockContext{
 			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -199,17 +201,17 @@ func TestCreateGas(t *testing.T) {
 		//
 		// TODO revis BlockContext and add test for eip8037?
 		//
-		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
+		_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {
 			config.ExtraEips = []int{3860}
 		}
 
-		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
+		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, config)
 		startGas := mdgas.MdGas{
 			Regular: math.MaxUint64,
 		}
-		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
+		_, gas, _, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
@@ -219,4 +221,42 @@ func TestCreateGas(t *testing.T) {
 		domains.Close()
 	}
 	tx.Rollback()
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that zero-value system
+// calls do not invoke CanTransfer or Transfer.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	tx, sd := testTemporalTxSD(t)
+	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
+
+	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	s := state.New(r)
+
+	address := accounts.InternAddress(common.BytesToAddress([]byte("callee")))
+
+	canTransferCalled := false
+	transferCalled := false
+	canTransferErr := errors.New("can transfer should not be called")
+	transferErr := errors.New("transfer should not be called")
+
+	vmctx := evmtypes.BlockContext{
+		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) {
+			canTransferCalled = true
+			return false, canTransferErr
+		},
+		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
+			transferCalled = true
+			return transferErr
+		},
+	}
+	_ = s.CommitBlock(vmctx.Rules(chain.TestChainBerlinConfig), w)
+
+	vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainBerlinConfig, vm.Config{})
+	_, _, _, err = vmenv.Call(params.SystemAddress, address, nil, mdgas.MdGas{Regular: math.MaxUint64}, uint256.Int{}, false /* bailout */)
+	require.NoError(t, err)
+	require.False(t, canTransferCalled, "CanTransfer should be skipped for zero-value system calls")
+	require.False(t, transferCalled, "Transfer should be skipped for zero-value system calls")
 }

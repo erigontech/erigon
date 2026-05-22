@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -99,7 +98,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xF00D"))
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	// Simulate block N's finalize(): versionedWriteCollector writes to rs.accounts
 	// synchronously, before the async applyResults channel fires.
@@ -141,7 +140,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	ibsApply.SetTxContext(1, 0)
 	err = ibsApply.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
-	err = ibsApply.SetNonce(addr, 7)
+	err = ibsApply.SetNonce(addr, 7, tracing.NonceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -169,7 +168,7 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	_, domains := setup2CacheTest(t)
 	lgr := log.New()
 
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, lgr))
 
 	accumulator := shards.NewAccumulator()
 

@@ -339,6 +339,34 @@ func TestUDPv4_findnode(t *testing.T) {
 	waitNeighbors(want)
 }
 
+// TestUDPv4_findnodeLivenessCheck verifies that findnodeByID does not fall back
+// to non-live nodes when no live nodes are available.
+func TestUDPv4_findnodeLivenessCheck(t *testing.T) {
+	test := newUDPTestWithConfig(t, Config{PingInterval: time.Hour})
+	defer test.close()
+
+	// Add nodes that have NOT been validated live.
+	numCandidates := bucketSize
+	for i := 0; i < numCandidates; i++ {
+		key := newkey()
+		ip := net.IP{10, 13, 0, byte(i)}
+		n := enode.NewV4(&key.PublicKey, ip, 0, 2000)
+		test.table.addFoundNode(n, false) // not live
+	}
+
+	// findnodeByID with preferLive=true must return no nodes.
+	result := test.table.findnodeByID(testTarget.ID(), bucketSize, true)
+	if len(result.entries) != 0 {
+		t.Fatalf("expected 0 nodes, got %d", len(result.entries))
+	}
+
+	// findnodeByID with preferLive=false should still return nodes (used by lookup).
+	result = test.table.findnodeByID(testTarget.ID(), bucketSize, false)
+	if len(result.entries) == 0 {
+		t.Fatal("expected non-zero nodes with preferLive=false")
+	}
+}
+
 func TestUDPv4_findnodeMultiReply(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

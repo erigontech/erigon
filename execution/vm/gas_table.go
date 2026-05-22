@@ -361,8 +361,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 // gasCreateEip8037 is the dynamic gas function for CREATE under EIP-8037.
-// GAS_CREATE is a pre-state cost that must always be charged, so the initcode
-// size is capped (not rejected) here; the actual check happens in opCreate.
+// State gas is charged in execCreate after the static-context check (per execution-specs#2608).
 func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -372,17 +371,21 @@ func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	wordSize := min(size, params.MaxInitCodeSizeAmsterdam)
-	wordGas := params.InitCodeWordGas * ToWordSize(wordSize)
+	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+		return mdgas.MdGas{}, err
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeAmsterdam, this multiplication cannot overflow
+	wordGas := params.InitCodeWordGas * numWords
 	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	return gas, nil
 }
 
 // gasCreate2Eip8037 is the dynamic gas function for CREATE2 under EIP-8037.
+// State gas is charged in execCreate after the static-context check (per execution-specs#2608).
 func gasCreate2Eip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
 	gas.Regular, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -392,13 +395,16 @@ func gasCreate2Eip8037(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	wordSize := min(size, params.MaxInitCodeSizeAmsterdam)
-	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * ToWordSize(wordSize)
+	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+		return mdgas.MdGas{}, err
+	}
+	numWords := ToWordSize(size)
+	// Since size <= params.MaxInitCodeSizeAmsterdam, this multiplication cannot overflow
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	return gas, nil
 }
 
@@ -506,7 +512,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
-				stateGas = params.StateBytesNewAccount * evm.Context.CostPerStateByte
+				stateGas = params.StateGasNewAccount
 			} else {
 				accountGas = params.CallNewAccountGas
 			}
@@ -710,7 +716,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular = params.SelfdestructGasEIP150
-		var address = accounts.InternAddress(callContext.Stack.Back(0).Bytes20())
+		var address = callContext.peekAddress()
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

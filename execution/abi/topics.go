@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/math"
 )
 
 // MakeTopics converts a filter query argument list into a filter topic set.
@@ -45,8 +46,7 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 			case common.Address:
 				copy(topic[length.Hash-length.Addr:], rule[:])
 			case *big.Int:
-				blob := rule.Bytes()
-				copy(topic[length.Hash-len(blob):], blob)
+				copy(topic[:], math.U256Bytes(new(big.Int).Set(rule)))
 			case bool:
 				if rule {
 					topic[length.Hash-1] = 1
@@ -89,6 +89,9 @@ func MakeTopics(query ...[]any) ([][]common.Hash, error) {
 				switch {
 				// static byte array
 				case val.Kind() == reflect.Array && reflect.TypeOf(rule).Elem().Kind() == reflect.Uint8:
+					if val.Len() > len(topic) {
+						return nil, fmt.Errorf("indexed byte array too large: [%d]byte", val.Len())
+					}
 					reflect.Copy(reflect.ValueOf(topic[:val.Len()]), val)
 				default:
 					return nil, fmt.Errorf("unsupported indexed type: %T", rule)

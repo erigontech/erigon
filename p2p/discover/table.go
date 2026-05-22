@@ -289,9 +289,7 @@ func (tab *Table) refresh() <-chan struct{} {
 // This is used by the FINDNODE/v4 handler.
 //
 // The preferLive parameter says whether the caller wants liveness-checked results. If
-// preferLive is true and the table contains any verified nodes, the result will not
-// contain unverified nodes. However, if there are no verified nodes at all, the result
-// will contain unverified nodes.
+// preferLive is true, only nodes that have passed a liveness check are included.
 func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *nodesByDistance {
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
@@ -300,18 +298,13 @@ func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *
 	// buckets, so this solution should be fine. The worst-case complexity of this loop
 	// is O(tab.len() * nresults).
 	nodes := &nodesByDistance{target: target}
-	liveNodes := &nodesByDistance{target: target}
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
-			nodes.push(n.Node, nresults)
-			if preferLive && n.isValidatedLive {
-				liveNodes.push(n.Node, nresults)
+			if preferLive && !n.isValidatedLive {
+				continue
 			}
+			nodes.push(n.Node, nresults)
 		}
-	}
-
-	if preferLive && len(liveNodes.entries) > 0 {
-		return liveNodes
 	}
 	return nodes
 }
@@ -532,11 +525,11 @@ func (tab *Table) addIP(b *bucket, ip netip.Addr) bool {
 		return true
 	}
 	if !tab.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds table limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds table limit", "ip", ip)
 		return false
 	}
 	if !b.ips.AddAddr(ip) {
-		tab.log.Debug("[p2p] IP exceeds bucket limit", "ip", ip)
+		tab.log.Trace("[p2p] IP exceeds bucket limit", "ip", ip)
 		tab.ips.RemoveAddr(ip)
 		return false
 	}
@@ -648,7 +641,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 
 	// Add replacement.
 	if len(b.replacements) == 0 {
-		tab.log.Debug("[p2p] Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
+		tab.log.Trace("[p2p] Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
 		return nil
 	}
 	rindex := tab.rand.Intn(len(b.replacements))
@@ -656,7 +649,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 	b.replacements = slices.Delete(b.replacements, rindex, rindex+1)
 	b.entries = append(b.entries, rep)
 	tab.nodeAdded(b, rep)
-	tab.log.Debug("[p2p] Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
+	tab.log.Trace("[p2p] Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
 	return rep
 }
 
@@ -751,6 +744,41 @@ func (tab *Table) deleteNode(n *enode.Node) {
 
 // waitForNodes blocks until the table contains at least n nodes.
 func (tab *Table) waitForNodes(ctx context.Context, n int) error {
+	// Wrap ctx so the forwarder goroutine exits when waitForNodes returns,
+	// regardless of whether the caller's ctx is canceled.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Set up a notification channel that gets unblocked when there was any activity on
+	// the table. Ultimately this reads from the table's nodeFeed, but can't use the feed
+	// directly on the same goroutine that takes Table.mutex, it would deadlock.
+	var notify chan struct{}
+	var notifyErr error
+	initsub := func() event.Subscription {
+		notify = make(chan struct{}, 1)
+		newnode := make(chan *enode.Node, 1)
+		sub := tab.nodeFeed.Subscribe(newnode)
+		go func() {
+			defer close(notify)
+			for {
+				select {
+				case <-newnode:
+					select {
+					case notify <- struct{}{}:
+					default:
+					}
+				case <-ctx.Done():
+					notifyErr = ctx.Err()
+					return
+				case <-tab.closeReq:
+					notifyErr = errClosed
+					return
+				}
+			}
+		}()
+		return sub
+	}
+
 	getlength := func() (count int) {
 		for _, b := range &tab.buckets {
 			count += len(b.entries)
@@ -758,28 +786,24 @@ func (tab *Table) waitForNodes(ctx context.Context, n int) error {
 		return count
 	}
 
-	var ch chan *enode.Node
 	for {
 		tab.mutex.Lock()
 		if getlength() >= n {
 			tab.mutex.Unlock()
 			return nil
 		}
-		if ch == nil {
-			// Init subscription.
-			ch = make(chan *enode.Node)
-			sub := tab.nodeFeed.Subscribe(ch)
+		if notify == nil {
+			// Lazily init the subscription. Do this while holding the
+			// lock so we don't miss any events that change the node count.
+			sub := initsub()
 			defer sub.Unsubscribe()
 		}
 		tab.mutex.Unlock()
 
-		// Wait for a node add event.
-		select {
-		case <-ch:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-tab.closeReq:
-			return errClosed
+		// Wait for table event.
+		if _, ok := <-notify; !ok {
+			break
 		}
 	}
+	return notifyErr
 }

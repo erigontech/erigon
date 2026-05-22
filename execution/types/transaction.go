@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -62,9 +61,9 @@ type Transaction interface {
 	Type() byte
 	GetChainID() *uint256.Int
 	GetNonce() uint64
-	GetTipCap() *uint256.Int                              // max_priority_fee_per_gas in EIP-1559
-	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int // effective_gas_price in EIP-1559
-	GetFeeCap() *uint256.Int                              // max_fee_per_gas in EIP-1559
+	GetTipCap() *uint256.Int                             // max_priority_fee_per_gas in EIP-1559
+	GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int // priority_fee_per_gas in EIP-1559
+	GetFeeCap() *uint256.Int                             // max_fee_per_gas in EIP-1559
 	GetBlobHashes() []common.Hash
 	GetGasLimit() uint64
 	GetBlobGas() uint64
@@ -73,7 +72,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
-	SigningHash(chainID *big.Int) common.Hash
+	SigningHash(chainID *uint256.Int) common.Hash
 	GetData() []byte
 	GetAccessList() AccessList
 	GetAuthorizations() []Authorization // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
@@ -104,6 +103,25 @@ type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[common.Hash]
 	from accounts.Address
+}
+
+// CalcEffectiveGasTip computes the effective gas tip given a transaction's tip/fee caps and a base fee.
+// Shared logic used by all transaction types that implement GetEffectiveGasTip.
+func CalcEffectiveGasTip(baseFee *uint256.Int, getTipCap func() *uint256.Int, getFeeCap func() *uint256.Int) uint256.Int {
+	if baseFee == nil {
+		return *getTipCap()
+	}
+	gasFeeCap := getFeeCap()
+	if gasFeeCap.Lt(baseFee) {
+		var zero uint256.Int
+		return zero
+	}
+	var effectiveFee uint256.Int
+	effectiveFee.Sub(gasFeeCap, baseFee)
+	if getTipCap().Lt(&effectiveFee) {
+		return *getTipCap()
+	}
+	return effectiveFee
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions

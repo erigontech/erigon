@@ -40,7 +40,7 @@ func copyConfig(original *chain.Config) *chain.Config {
 }
 
 func config() *chain.Config {
-	config := copyConfig(chain.TestChainConfig)
+	config := copyConfig(chain.AllProtocolChanges)
 	config.LondonBlock = common.NewUint64(5)
 	return config
 }

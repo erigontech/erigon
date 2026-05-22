@@ -47,8 +47,8 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
-	if !amsterdam && !experimental {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string) error {
+	if !isEIP7928 && !experimental {
 		return nil
 	}
 	if h == nil {
@@ -61,15 +61,16 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
+	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
+	if !isEIP7928 {
+		return nil
+	}
+	// EIP-7928 size bound is only consensus-binding once Amsterdam activates.
 	if err := bal.ValidateMaxItems(h.GasLimit); err != nil {
 		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
-	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
-	if !amsterdam {
-		return nil
-	}
 	if h.BlockAccessListHash == nil {
-		return fmt.Errorf("block %d: missing block access list hash", blockNum)
+		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	headerBALHash := *h.BlockAccessListHash
 	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
@@ -100,27 +101,53 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
+		// Dump full BAL DebugStrings to stderr via the logger so container
+		// stdout captures (kurtosis/docker log collection) preserve the diff
+		// even when the on-disk dumpDir below is unreachable (e.g. ephemeral
+		// container, CI runner without artifact capture of /data).
+		// Each DebugString is one multi-line value tagged with block metadata
+		// so operators can diff computed vs stored without hunting for files.
+		computedDebug := bal.DebugString()
+		var storedDebug string
+		if dbBALBytes != nil {
+			dbBAL2, decErr := types.DecodeBlockAccessListBytes(dbBALBytes)
+			if decErr != nil {
+				log.Warn("failed to decode stored BAL for debug dump", "err", decErr)
+			} else if dbBAL2 != nil {
+				storedDebug = dbBAL2.DebugString()
+			}
+		}
+		log.Error("BAL mismatch: computed", "block", blockNum, "hash", bal.Hash(), "headerHash", headerBALHash, "bal", computedDebug)
+		if storedDebug != "" {
+			log.Error("BAL mismatch: stored (from sidecar)", "block", blockNum, "hash", headerBALHash, "bal", storedDebug)
+		}
+
+		dumpDir := ""
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
 			if err := os.MkdirAll(balDir, 0o755); err != nil {
 				log.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
 			} else {
 				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
-				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
+				if err := os.WriteFile(computedPath, []byte(computedDebug), 0o644); err != nil {
 					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
+				} else {
+					dumpDir = balDir
 				}
-				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-				if err != nil {
-					log.Warn("failed to decode stored BAL for debug dump", "err", err)
-				} else if dbBAL2 != nil {
+				if storedDebug != "" {
 					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
-					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
+					if err := os.WriteFile(storedPath, []byte(storedDebug), 0o644); err != nil {
 						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
 					}
 				}
 			}
 		}
-		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
+		if dumpDir != "" {
+			return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s; debug dumps in %s",
+				rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash, dumpDir)
+		}
+		return fmt.Errorf("%w, block=%d (hash=%s): block access list mismatch: got %s expected %s",
+			rules.ErrInvalidBlock, blockNum, blockHash, bal.Hash(), headerBALHash)
 	}
 	return nil
 }

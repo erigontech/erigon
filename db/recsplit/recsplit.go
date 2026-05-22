@@ -54,6 +54,22 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
+// ExistenceFilterVersion selects the existence-filter format written for new index files.
+//
+//	0 = byte-array of first-bytes (legacy, no FuseFilter)
+//	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
+//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
+const ExistenceFilterVersion version.DataStructureVersion = 1
+
+func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
+	if v == 2 {
+		v2, err = fusefilter.NewWriterSharded(filePath)
+		return
+	}
+	v1, err = fusefilter.NewWriterOffHeap(filePath)
+	return
+}
+
 /** David Stafford's (http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html)
  * 13th variant of the 64-bit finalizer function in Austin Appleby's
  * MurmurHash3 (https://github.com/aappleby/smhasher).
@@ -133,13 +149,16 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
+	//v2 fields
+	existenceFV2 *fusefilter.WriterSharded
+
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
 	offsetWriter *bufio.Writer // Buffered writer for offset file
 
 	indexW          *bufio.Writer
 	indexF          *os.File
-	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketCollector *etl.Collector         // Collector that sorts by buckets
+	offsetEf        *eliasfano32.OffHeapBuilder // Elias Fano instance for encoding the offsets
+	bucketCollector *etl.Collector              // Collector that sorts by buckets
 
 	fileName string
 	filePath string
@@ -187,7 +206,7 @@ type RecSplitArgs struct {
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
 	Enums              bool
 	LessFalsePositives bool
-	Version            uint8
+	Version            version.DataStructureVersion
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
@@ -260,7 +279,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.LargeSortableBuffers, logger)
 	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
@@ -282,7 +301,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -370,6 +389,10 @@ func (rs *RecSplit) Close() {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
 	}
+	if rs.existenceFV2 != nil {
+		rs.existenceFV2.Close()
+		rs.existenceFV2 = nil
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -381,6 +404,10 @@ func (rs *RecSplit) Close() {
 	if rs.offsetWriter != nil {
 		putBufioWriter(rs.offsetWriter)
 		rs.offsetWriter = nil
+	}
+	if rs.offsetEf != nil {
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
 	}
 }
 
@@ -531,9 +558,16 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		if err := rs.existenceFV1.AddHash(hi); err != nil {
-			return err
+	if rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if err := rs.existenceFV1.AddHash(hi); err != nil {
+				return err
+			}
+		case 2:
+			if err := rs.existenceFV2.AddHash(hi); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -826,8 +860,19 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 }
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
-func (rs *RecSplit) buildOffsetEf() error {
-	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+// Uses off-heap EF to keep multi-GB backing buffers out of the Go heap.
+func (rs *RecSplit) buildOffsetEf() (retErr error) {
+	var err error
+	rs.offsetEf, err = eliasfano32.NewEliasFanoOffHeap(rs.keysAdded, rs.maxOffset, filepath.Join(rs.tmpDir, rs.fileName))
+	if err != nil {
+		return fmt.Errorf("new offset ef: %w", err)
+	}
+	defer func() {
+		if retErr != nil {
+			rs.offsetEf.Close()
+			rs.offsetEf = nil
+		}
+	}()
 	if err := rs.offsetWriter.Flush(); err != nil {
 		return fmt.Errorf("flush offset writer: %w", err)
 	}
@@ -954,6 +999,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
+		defer func() {
+			if rs.offsetEf != nil {
+				rs.offsetEf.Close()
+				rs.offsetEf = nil
+			}
+		}()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
@@ -1004,6 +1055,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
+		rs.offsetEf.Close()
+		rs.offsetEf = nil
 	}
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
@@ -1066,10 +1119,16 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		}
 	}
 
-	if rs.dataStructureVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
-		_, err := rs.existenceFV1.BuildTo(rs.indexW)
-		if err != nil {
-			return err
+	if rs.keysAdded > 0 && rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if _, err := rs.existenceFV1.BuildTo(rs.indexW); err != nil {
+				return err
+			}
+		case 2:
+			if _, err := rs.existenceFV2.BuildTo(rs.indexW); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -98,7 +98,7 @@ func genTestChainOnce(t *testing.T) {
 	testChainOnce.Do(func() {
 		addresses := makeTestAddresses()
 		gspec := &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 				addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -129,7 +129,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 
 	addresses := makeTestAddresses()
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
 			addresses.address1: {Balance: big.NewInt(200000000000000000)},
@@ -165,7 +165,7 @@ func generateChain(
 		address1 = addresses.address1
 		address2 = addresses.address2
 		theAddr  = common.Address{1}
-		chainId  = big.NewInt(1337)
+		chainId  = uint256.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
@@ -472,7 +472,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -630,7 +630,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -652,7 +652,9 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 			},
 		},
 	}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	// This test uses intra-block SELFDESTRUCT + CREATE2 reincarnation which the
+	// parallel executor doesn't handle correctly yet. Use serial execution.
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithoutExperimentalBAL())
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it

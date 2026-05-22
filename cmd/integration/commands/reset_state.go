@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -71,7 +72,9 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = rawdbreset.ResetState(db, ctx); err != nil {
+		dirs := datadir.New(datadirCli)
+		br, _ := blocksIO(db, logger)
+		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -154,9 +157,9 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+	stepSize := tx.Debug().StepSize()
 
 	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
 	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)

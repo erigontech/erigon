@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -253,11 +254,11 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
 		lg.Topics = topics
 		lg.Data = eventLog.Data
-		lg.BlockNumber = eventLog.BlockNumber
+		lg.BlockNumber = hexutil.Uint64(eventLog.BlockNumber)
 		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
-		lg.TxIndex = uint(eventLog.TransactionIndex)
+		lg.TxIndex = hexutil.Uint(eventLog.TransactionIndex)
 		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
-		lg.Index = uint(eventLog.LogIndex)
+		lg.Index = hexutil.Uint(eventLog.LogIndex)
 		lg.Removed = eventLog.Removed
 
 		filter.sender.Send(&lg)
@@ -269,16 +270,6 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 // chooseTopics checks if the log topics match the filter's topics.
 // It returns true if the log topics match the filter's topics, otherwise false.
 func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []common.Hash) bool {
-	var found bool
-	for _, logTopic := range logTopics {
-		if _, ok := filter.topics.Get(logTopic); ok {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return false
-	}
 	if len(filter.topicsOriginal) > len(logTopics) {
 		return false
 	}

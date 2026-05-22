@@ -22,18 +22,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
-	fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
-	lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
-	if len(fst) > 0 && len(lst) > 0 {
-		fstTxNum := binary.BigEndian.Uint64(fst)
-		lstTxNum := binary.BigEndian.Uint64(lst)
-
-		return float64(lstTxNum-fstTxNum) / float64(stepSize)
-	}
-	return 0
-}
-
 // IdxStepsInDB computes the step-range present in a DupSort table whose key is a txNum (big-endian uint64 prefix).
 func IdxStepsInDB(tx kv.Tx, table string, stepSize uint64) float64 {
 	fst, _ := kv.FirstKey(tx, table)
@@ -44,4 +32,8 @@ func IdxStepsInDB(tx kv.Tx, table string, stepSize uint64) float64 {
 		return float64(lstTxNum-fstTxNum) / float64(stepSize)
 	}
 	return 0
+}
+
+func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
+	return IdxStepsInDB(tx, kv.TblAccountHistoryKeys, stepSize)
 }

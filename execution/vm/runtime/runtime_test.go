@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -121,7 +122,7 @@ func TestCall(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	})
+	}, tracing.CodeChangeUnspecified)
 
 	ret, _, err := Call(address, nil, &Config{State: state})
 	if err != nil {
@@ -188,7 +189,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	)
 
 	statedb.CreateAccount(sender, true)
-	statedb.SetCode(receiver, common.FromHex(code))
+	statedb.SetCode(receiver, common.FromHex(code), tracing.CodeChangeUnspecified)
 	runtimeConfig := Config{
 		Origin:      sender,
 		State:       statedb,
@@ -198,7 +199,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
-			ChainID:               big.NewInt(1),
+			ChainID:               uint256.NewInt(1),
 			HomesteadBlock:        common.NewUint64(0),
 			ByzantiumBlock:        common.NewUint64(0),
 			ConstantinopleBlock:   common.NewUint64(0),
@@ -256,7 +257,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			b.ReportAllocs()
 
 			contractCode := returnContract(n)
-			statedb.SetCode(contractAddr, contractCode)
+			statedb.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 			for b.Loop() {
 				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
@@ -312,10 +313,12 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
-func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool  { return false }
-func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *big.Int { return nil }
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64                           { return 0 }
-func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64                        { return 0 }
+func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
+func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
+	return nil
+}
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64    { return 0 }
+func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64 { return 0 }
 
 type dummyChain struct {
 	counter int
@@ -455,7 +458,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	eoa := accounts.InternAddress(common.HexToAddress("E0"))
 	{
 		cfg.State.CreateAccount(eoa, true)
-		cfg.State.SetNonce(eoa, 100)
+		cfg.State.SetNonce(eoa, 100, tracing.NonceChangeUnspecified)
 	}
 	reverting := accounts.InternAddress(common.HexToAddress("EE"))
 	{
@@ -464,12 +467,12 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 			byte(vm.PUSH1), 0x00,
 			byte(vm.PUSH1), 0x00,
 			byte(vm.REVERT),
-		})
+		}, tracing.CodeChangeUnspecified)
 	}
 
 	//cfg.State.CreateAccount(cfg.Origin)
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(destination, code)
+	cfg.State.SetCode(destination, code, tracing.CodeChangeUnspecified)
 	vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 
 	b.Run(name, func(b *testing.B) {
@@ -694,7 +697,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	b.Run("10k", func(b *testing.B) {
 		contractCode := swapContract(10_000)
-		state.SetCode(contractAddr, contractCode)
+		state.SetCode(contractAddr, contractCode, tracing.CodeChangeUnspecified)
 
 		for b.Loop() {
 			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
@@ -734,7 +737,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory contract that executes CREATE2 with the initcode and salt=0.
 	// The factory is placed at factoryAddr.
@@ -744,7 +747,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE)
 
 	statedb.CreateAccount(accounts.InternAddress(factoryAddr), true)
-	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes())
+	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -803,7 +806,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	delegationTarget := common.HexToAddress("0xdead")
 	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
 	statedb.CreateAccount(delegatedAddr, true)
-	statedb.SetCode(delegatedAddr, delegationCode)
+	statedb.SetCode(delegatedAddr, delegationCode, tracing.CodeChangeUnspecified)
 
 	// Build a factory that executes CREATE with the initcode.
 	factory := program.New()
@@ -815,7 +818,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	factory.Push(0).Op(vm.SSTORE) // store result in slot 0
 
 	statedb.CreateAccount(factoryAcct, true)
-	statedb.SetCode(factoryAcct, factory.Bytes())
+	statedb.SetCode(factoryAcct, factory.Bytes(), tracing.CodeChangeUnspecified)
 
 	cfg := &Config{
 		State:  statedb,
@@ -889,4 +892,100 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 		}
 	}
 	require.True(t, found, "expected at least one GasChangeCallOpCode event from SSTORE")
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
+// (caller = SystemAddress, value = 0) executes successfully without triggering
+// CanTransfer or Transfer balance-change hooks on the caller. It also asserts:
+//   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
+//     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
+//   - SYSTEM_ADDRESS remains an empty account after the call.
+//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's TxIO.
+//   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
+//     the zero-value transfer path.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+
+	systemAddr := params.SystemAddress
+	target := accounts.InternAddress(common.HexToAddress("0xbeef"))
+
+	// Deploy a trivial contract at the target that returns 0x42.
+	statedb.CreateAccount(target, true)
+	statedb.SetCode(target, []byte{
+		byte(vm.PUSH1), 0x42,
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	}, tracing.CodeChangeUnspecified)
+
+	// Track balance-change events on SYSTEM_ADDRESS.
+	type balChange struct {
+		addr   accounts.Address
+		oldBal uint256.Int
+		newBal uint256.Int
+		reason tracing.BalanceChangeReason
+	}
+	var balChanges []balChange
+
+	hooks := &tracing.Hooks{
+		OnBalanceChange: func(addr accounts.Address, prev, newBal uint256.Int, reason tracing.BalanceChangeReason) {
+			if addr == systemAddr {
+				balChanges = append(balChanges, balChange{addr, prev, newBal, reason})
+			}
+		},
+	}
+
+	cfg := &Config{
+		State:     statedb,
+		Origin:    systemAddr,
+		EVMConfig: vm.Config{Tracer: hooks},
+		GasLimit:  10_000_000,
+	}
+	setDefaults(cfg)
+
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil, nil)
+
+	ret, _, _, err := vmenv.Call(
+		systemAddr,
+		target,
+		nil,
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
+		uint256.Int{}, // value = 0
+		false,
+	)
+	require.NoError(t, err)
+
+	// The contract should have returned 0x42.
+	require.Equal(t, 32, len(ret))
+	require.Equal(t, byte(0x42), ret[31])
+
+	// Positive check: SYSTEM_ADDRESS must exist (Gnosis/AuRa invariant).
+	exists, err := statedb.Exist(systemAddr)
+	require.NoError(t, err)
+	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall")
+
+	// SYSTEM_ADDRESS must remain empty after the touch.
+	empty, err := statedb.Empty(systemAddr)
+	require.NoError(t, err)
+	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall")
+
+	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
+	// performs the sender-side touch and no actual account access.
+	bal := statedb.TxIO().AsBlockAccessList()
+	for _, accountChanges := range bal {
+		require.NotEqual(t, systemAddr, accountChanges.Address,
+			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
+	}
+
+	// No balance-change events should have fired for SYSTEM_ADDRESS
+	// from the zero-value call path.
+	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
 }

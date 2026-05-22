@@ -184,6 +184,10 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		}
 	}
 	if so.createdContract {
+		if dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle())) {
+			fmt.Printf("%d (%d.%d) GetCommittedState SKIP (createdContract) %x key=%x\n",
+				so.db.blockNum, so.db.txIndex, so.db.version, so.address, key)
+		}
 		return uint256.Int{}, nil
 	}
 	// Load from DB in case it is missing.
@@ -410,6 +414,18 @@ func (so *stateObject) Code() ([]byte, error) {
 		return nil, nil
 	}
 
+	// When a versionMap is present (parallel execution), check for CodePath
+	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
+	// synthetic code but the domain/stateReader does not.
+	if so.db.versionMap != nil {
+		rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex)
+		if rr.Status() == MVReadResultDone {
+			if code, ok := rr.Value().([]byte); ok {
+				so.code = code
+				return code, nil
+			}
+		}
+	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
@@ -431,7 +447,7 @@ func (so *stateObject) Code() ([]byte, error) {
 	return code, nil
 }
 
-func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool) (bool, error) {
+func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommited bool, reason tracing.CodeChangeReason) (bool, error) {
 	prevcode, err := so.Code()
 	if err != nil {
 		return false, err
@@ -447,7 +463,9 @@ func (so *stateObject) SetCode(codeHash accounts.CodeHash, code []byte, wasCommi
 		prevcode:    prevcode,
 		wasCommited: wasCommited,
 	})
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
+		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prevcode, codeHash, code, reason)
+	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
 		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
 	so.setCode(codeHash, code)
@@ -460,13 +478,15 @@ func (so *stateObject) setCode(codeHash accounts.CodeHash, code []byte) {
 	so.dirtyCode = true
 }
 
-func (so *stateObject) SetNonce(nonce uint64, wasCommited bool) {
+func (so *stateObject) SetNonce(nonce uint64, wasCommited bool, reason tracing.NonceChangeReason) {
 	so.db.journal.append(nonceChange{
 		account:     so.address,
 		prev:        so.data.Nonce,
 		wasCommited: wasCommited,
 	})
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
+	if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChangeV2 != nil {
+		so.db.tracingHooks.OnNonceChangeV2(so.address, so.data.Nonce, nonce, reason)
+	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnNonceChange != nil {
 		so.db.tracingHooks.OnNonceChange(so.address, so.data.Nonce, nonce)
 	}
 	so.setNonce(nonce)

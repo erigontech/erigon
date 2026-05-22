@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -20,11 +21,12 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	dirs              datadir.Dirs
-	logger            log.Logger
-	stepSize          uint64 // != 0 mean override erigondb.toml settings
-	stepsInFrozenFile uint64 // != 0 mean override erigondb.toml settings
-	reorgBlockDepth   uint64
+	dirs                            datadir.Dirs
+	logger                          log.Logger
+	stepSize                        uint64 // != 0 mean override erigondb.toml settings
+	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
+	erigondbDomainStepsInFrozenFile uint64
+	reorgBlockDepth                 uint64
 
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
@@ -67,6 +69,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	a.stepSize.Store(opts.stepSize)
 	a.stepsInFrozenFile.Store(opts.stepsInFrozenFile)
+	a.erigondbDomainStepsInFrozenFile = opts.erigondbDomainStepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync
@@ -95,6 +98,15 @@ func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
 	return opts
 }
+
+// ErigondbDomainStepsInFrozenFile sets the domain-only cap override (see
+// Aggregator.erigondbDomainStepsInFrozenFile). 0 clears the override;
+// config3.UnboundedDomainMerge disables the cap; any other value replaces stepsInFrozenFile
+// for domain merges only.
+func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
+	opts.erigondbDomainStepsInFrozenFile = steps
+	return opts
+}
 func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
 	opts.reorgBlockDepth = d
 	return opts
@@ -115,7 +127,61 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	return opts
 }
 
-// Getters
+type workersCfg struct {
+	mu              sync.Mutex
+	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
+	merge           int  // usually 1
+	collateAndBuild int
+}
+
+func (w *workersCfg) getMerge() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.merge
+}
+
+func (w *workersCfg) setMerge(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.merge = n
+	}
+}
+
+func (w *workersCfg) getCollateAndBuild() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.collateAndBuild
+}
+
+func (w *workersCfg) setCollateAndBuild(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.collateAndBuild = n
+	}
+}
+
+// trySet runs fn under mu only if allowEditing is true.
+func (w *workersCfg) trySet(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		fn()
+	}
+}
+
+func (w *workersCfg) lockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = false
+}
+
+func (w *workersCfg) unlockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = true
+}
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{
@@ -148,7 +214,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
 			if !ok {
-				//println("file type not supported", fileInfo.TypeString, name)
 				return nil
 			}
 			requiredVersion, ok := msVs[fileInfo.Ext]
