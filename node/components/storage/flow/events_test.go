@@ -62,6 +62,76 @@ func TestInitialStateReadyChannel(t *testing.T) {
 	require.True(t, true) // sanity
 }
 
+// TestInitialValidationCompleteChannel verifies the channel adapter
+// closes once flow.InitialValidationComplete is published.
+func TestInitialValidationCompleteChannel(t *testing.T) {
+	t.Parallel()
+	bus := newBusForTest()
+	ch := InitialValidationCompleteChannel(bus)
+
+	select {
+	case <-ch:
+		t.Fatal("channel closed before InitialValidationComplete was published")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	bus.Publish(InitialValidationComplete{})
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("channel did not close after InitialValidationComplete published")
+	}
+}
+
+// TestFirstPublishGateChannel pins the conjunction gate: the channel
+// closes only once BOTH InitialDownloadsComplete and
+// InitialValidationComplete have fired, and the close is order-
+// independent.
+func TestFirstPublishGateChannel(t *testing.T) {
+	t.Parallel()
+
+	t.Run("downloads then validation", func(t *testing.T) {
+		t.Parallel()
+		bus := newBusForTest()
+		ch := FirstPublishGateChannel(bus)
+
+		bus.Publish(InitialDownloadsComplete{})
+		select {
+		case <-ch:
+			t.Fatal("gate closed on InitialDownloadsComplete alone")
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		bus.Publish(InitialValidationComplete{})
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("gate did not close after both events published")
+		}
+	})
+
+	t.Run("validation then downloads", func(t *testing.T) {
+		t.Parallel()
+		bus := newBusForTest()
+		ch := FirstPublishGateChannel(bus)
+
+		bus.Publish(InitialValidationComplete{})
+		select {
+		case <-ch:
+			t.Fatal("gate closed on InitialValidationComplete alone")
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		bus.Publish(InitialDownloadsComplete{})
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("gate did not close after both events published")
+		}
+	})
+}
+
 // TestBlockHeadersReadyChannel verifies the bus-event-to-channel adapter
 // that backend.go uses to bridge flow.BlockHeadersReady into Caplin's
 // DownloadHistoricalBlocks gate. Contract:

@@ -88,6 +88,68 @@ func InitialDownloadsCompleteChannel(bus event.BusSubscriber) <-chan struct{} {
 	return ch
 }
 
+// InitialValidationCompleteChannel returns a channel that closes the
+// first time InitialValidationComplete is published on bus. Same
+// sync.Once + plain-Subscribe construction as InitialDownloadsCompleteChannel.
+//
+// The manifest auto-publisher gates its first chain.v2 generation on the
+// conjunction of this and InitialDownloadsComplete — the first manifest
+// is published only once every initial file has settled to Advertisable
+// (passed the validator chain, infohash check included) or quarantine.
+func InitialValidationCompleteChannel(bus event.BusSubscriber) <-chan struct{} {
+	ch := make(chan struct{})
+	var once sync.Once
+	closeOnce := func() { once.Do(func() { close(ch) }) }
+	if err := bus.Subscribe(func(InitialValidationComplete) {
+		closeOnce()
+	}); err != nil {
+		closeOnce()
+	}
+	return ch
+}
+
+// FirstPublishGateChannel returns a channel that closes once BOTH
+// InitialDownloadsComplete AND InitialValidationComplete have been
+// published on bus — the "known-good first manifest" gate
+// (docs/plans/20260522-publisher-startup-preflight.md): the initial
+// file set is fully downloaded AND has settled through the validator
+// chain. If either subscription fails, the channel closes immediately
+// so callers do not block forever.
+func FirstPublishGateChannel(bus event.BusSubscriber) <-chan struct{} {
+	ch := make(chan struct{})
+	var (
+		once           sync.Once
+		mu             sync.Mutex
+		downloadsDone  bool
+		validationDone bool
+	)
+	closeOnce := func() { once.Do(func() { close(ch) }) }
+	maybeClose := func() {
+		mu.Lock()
+		both := downloadsDone && validationDone
+		mu.Unlock()
+		if both {
+			closeOnce()
+		}
+	}
+	errDownloads := bus.Subscribe(func(InitialDownloadsComplete) {
+		mu.Lock()
+		downloadsDone = true
+		mu.Unlock()
+		maybeClose()
+	})
+	errValidation := bus.Subscribe(func(InitialValidationComplete) {
+		mu.Lock()
+		validationDone = true
+		mu.Unlock()
+		maybeClose()
+	})
+	if errDownloads != nil || errValidation != nil {
+		closeOnce()
+	}
+	return ch
+}
+
 // --- Inventory events ---
 
 // InventoryLoaded fires once per Storage lifecycle, after the initial scan.
@@ -250,6 +312,20 @@ type InitialStateReady struct {
 // gates the first chain.v2 advertisement (see
 // docs/plans/20260522-publisher-startup-preflight.md).
 type InitialDownloadsComplete struct{}
+
+// InitialValidationComplete signals that every file the initial sync
+// produced has settled out of the lifecycle's Indexed state — each has
+// either reached Advertisable (passed the validator chain, infohash
+// check included) or been quarantined after repeated validation
+// failure. Fires at most once per process lifetime; fires immediately
+// for a node whose initial set is already all settled.
+//
+// Observational only — like InitialDownloadsComplete it gates no
+// orchestrator or execution work, only the first chain.v2 advertisement.
+// The first publish waits on the conjunction of this and
+// InitialDownloadsComplete (see
+// docs/plans/20260522-publisher-startup-preflight.md).
+type InitialValidationComplete struct{}
 
 // BlockHeadersReady is the primary state transition that signals the
 // EL has opened its frozen block-header (and body) snapshot files —

@@ -1,7 +1,8 @@
 # Publisher startup pre-flight — design
 
-**Status**: design, 2026-05-22. Not yet implemented. Sequencing in
-"Implementation" below.
+**Status**: implemented, 2026-05-22. Guarantee 3 reshaped from the original
+"separate background re-validation task" into "an infohash validator in the
+lifecycle driver chain + a settle-watcher" — see the Guarantee 3 section.
 
 **Related**:
 - `docs/plans/20260520-chaintoml-ucan-flow-spec.md` — the chain.toml + UCAN
@@ -64,8 +65,6 @@ phase 2 — caplin — all downloaded and verified into the inventory).
   with `stateReadyFired` already true: the tail of `onDownloadComplete`, and
   the tail of `fireInitialStateReady` (covers the no-caplin / all-local
   case). A fire-once flag (`initialDownloadsCompleteFired`) guards it.
-- `BindAutoPublish` holds the **first** publish until it observes the event;
-  subsequent generations stay `TrustPromoted`-driven.
 - This subsumes both problem 1 and problem 2: with the first publish gated to
   after the initial sync completes, **no generation is published during
   initial sync at all** — no empty generation, no per-batch churn. After the
@@ -87,126 +86,107 @@ abort (not a warn-and-continue) on the first post-startup publish, and that
 it is wired even when no genesis is pinned falls back to the static
 preverified set as canonical.
 
-## Guarantee 3 — Matches disk: startup re-validation
+## Guarantee 3 — Matches disk: infohash validation
 
-The gap: inventory rows marked `Local`/`Verified` carried over from a prior
-session are *unverified in fact*. The file on disk may be truncated,
-corrupt, or stale.
+The gap: a file on disk — a bootstrap-local file carried over from a prior
+session, or any file since corrupted/truncated/bitrotten — may not match the
+info-hash the publisher is about to advertise it under.
 
-Re-validation is **two checks**, applied to different scopes (refinement
-2026-05-22):
+**Design (reshaped 2026-05-22).** An earlier draft built a standalone
+background re-validation task. That was collapsed: the lifecycle driver
+*already* runs the Stage 1 / Stage 2 validator chain on every file before it
+reaches `Advertisable`, and the driver already runs asynchronously off the
+foreground exec/serve path. So Guarantee 3 is two pieces, both reusing the
+driver rather than duplicating it:
 
-1. **Infohash verification — every file.** Every file the publisher will
-   advertise has its content hashed and checked against the infohash it is
-   advertised under — *not* a subset. An earlier draft skipped files
-   downloaded in the current session on the grounds the torrent client
-   already piece-verified them at download time; that exception is dropped.
-   The publisher is the authority for what it seeds, the check is
-   comparatively cheap, and a uniform pass needs no per-file provenance
-   tracking. `db/integrity.VerifyTorrentFiles` is the existing primitive.
-   No sampling.
-2. **Local validator set — the local files.** Infohash match proves the
-   bytes are intact; it does *not* prove the file is a *correct* snapshot.
-   The local files additionally run the full local validator chain — the
-   Stage 1 (per-file) + Stage 2 (cross-file) validators and their
-   `db/integrity` equivalents (`InvertedIndex`, `CommitmentKvi`,
-   commitment-chain, header-chain, trie-root-vs-header, receipt-root,
-   `no_gaps_in_canonical_headers`, …). These are the deep structural and
-   semantic catches — a file can hash to a valid infohash and still be a
-   wrong snapshot if the infohash itself was recorded from a bad prior run.
+### 1. The infohash check is a validator
 
-**Execution**: both checks run as a **low-priority background task**. They
-must not steal performance from foreground activity (execution, staged
-sync, serving peers) — bounded worker concurrency, throttled I/O, yields to
-foreground. Because the first publish may wait arbitrarily and later
-publishes have no timing constraint, re-validation has no deadline; it
-trades wall-clock for zero foreground impact.
+`InfoHashValidator` (`node/components/storage/infohash_validator.go`) is a
+`validation.StepValidator` in the lifecycle driver's `batchChain`, ordered
+ahead of the semantic validators (header-chain, commitment, receipt) so a
+byte-corrupt file is caught before the heavier structural checks run. It
+piece-hashes each `Local` file against its sibling `.torrent` via the new
+`integrity.VerifyFileAgainstTorrent` primitive (built on `db/integrity`'s
+existing `verifyFileFromTorrent`).
 
-**On failure — operator policy.** When re-validation finds a file with an
-incorrect infohash or that fails the validator set, the response is
-operator-configurable, mirroring the existing `snapshotsync.AdoptionPolicy`
-(auto/stage/warn) + `--snapshot.adoption-policy` model:
+A file whose content does not match its `.torrent` never reaches
+`Advertisable`, so the publisher never advertises bytes it does not hold.
 
-- **`redownload` (default)** — the minority-client behaviour. The bad file
-  is demoted (dropped from `Verified`, excluded from the manifest) and
-  re-queued for download; the re-download re-enters the orchestrator's
-  `pending` set, so the completeness gate (Guarantee 1) naturally waits for
-  it. A file that cannot be re-fetched (no peer offers it) is excluded from
-  the first manifest — the L3 advertisement is "what this node holds and can
-  vouch for", so advertising a strict subset is correct.
-- **`stop`** — halt on the first re-validation failure. For operators who
-  want a corrupt local archive surfaced loudly rather than silently healed.
-- **`warn`** — log the failure and continue without re-downloading; the
-  operator has accepted the risk. (Whether a `warn`-mode node still
-  advertises the suspect file is an open question — default to *excluding*
-  it, consistent with "only advertise what we can vouch for".)
+- **Meta / salt / caplin files** take the driver's meta dispatch path, not
+  `batchChain`. They are covered by an `OnMetaReady` handler that runs the
+  same `checkFileInfoHash` before advancing them to `Advertisable`.
+- **`.torrent` availability.** The seeder (`provider.scanAndSeed`) writes
+  `.torrent` files asynchronously, concurrent with validation. When the
+  `.torrent` is not on disk yet the validator returns
+  `validation.ErrPause` — the driver retries on the next sweep without
+  ticking the quarantine counter. `scanAndSeed` was extended to seed caplin
+  files too (it previously only seeded them on the `Advertisable`-triggered
+  ChangeSet path, which would have deadlocked caplin's infohash validation).
+- The torrent client piece-verifies a file at download time; the validator
+  re-runs the check uniformly on every file rather than tracking per-file
+  provenance.
 
-Surfaced via a new flag, e.g. `--snapshot.revalidation-policy`
-(`redownload` | `stop` | `warn`), parsed the same way as
-`ParseAdoptionPolicy`.
+### 2. The settle-watcher gates the first manifest
 
-**Open**: whether the Stage 1/2 validator set runs on the *entire* local
-set every startup, or only on files not vouched by a `DownloadComplete`
-this session, is a cost decision — the validator chain is far heavier than
-an infohash check. Default for now: run it on every local file (matches the
-"full check, no shortcuts" decision); revisit if startup wall-clock proves
-a problem even as a background task.
+The first publish must not happen before the pre-advertise validations have
+run. `Provider.watchInitialValidation`
+(`node/components/storage/initial_validation_watcher.go`) is a small
+background goroutine that:
+
+- waits for `flow.InitialDownloadsComplete`;
+- polls the inventory until every `Local` file has settled out of the
+  lifecycle's pre-`Advertisable` states — each is either `Advertisable`
+  (passed the chain, infohash check included) or quarantined by the driver
+  after repeated failure;
+- publishes the new one-shot event `flow.InitialValidationComplete`.
+
+**On a quarantined file — operator policy.** `--snapshot.revalidation-policy`
+(`snapshotsync.RevalidationPolicy`, parsed like `ParseAdoptionPolicy`):
+
+- **`redownload` (default)** — the watcher calls
+  `Orchestrator.RequeueForDownload(name)`; the downloader re-adds the
+  torrent and the torrent client piece-verifies the on-disk data and
+  re-fetches the corrupt pieces, healing the file in place. A file no peer
+  offers cannot be re-fetched and is excluded from the first manifest.
+- **`stop`** — the watcher logs an error and returns without publishing
+  `InitialValidationComplete`; the first-publish gate never opens. A corrupt
+  local archive is surfaced loudly rather than silently healed.
+- **`warn`** — the watcher logs and continues; the quarantined file is
+  simply not `Advertisable`, so it is naturally excluded from the manifest.
 
 ## How the guarantees compose
 
-The first publish must wait for **both**: all initial downloads complete
-(Guarantee 1) **and** startup re-validation has finished — every advertised
-file infohash-checked and the local validator set run on the local files
-(Guarantee 3). The completeness gate alone is insufficient — it could fire
-before re-validation has even looked at a stale file.
-
-Re-validation therefore emits its own one-shot signal,
-`StartupRevalidationComplete` (fires immediately for a fresh node with no
-startup-local files). `BindAutoPublish` gates the first publish on the
-conjunction of `InitialDownloadsComplete` AND `StartupRevalidationComplete`.
-A file re-validation fails and re-queues re-enters `pending`, so
-`InitialDownloadsComplete` then also waits for its re-download — the two
-signals interlock without extra coordination.
+The first publish waits on the conjunction of `InitialDownloadsComplete`
+**and** `InitialValidationComplete` — `flow.FirstPublishGateChannel` closes
+only when both have fired. `node/eth/backend.go` wires the production
+publisher's `Downloader` V2-publish gate to that channel;
+`downloader.BindAutoPublish` (harness) gates on the same channel when
+`AutoPublishOpts.GateFirstPublish` is set.
 
 Guarantee 2 (canonical self-check) runs inside `Publish` itself and needs no
 gate wiring — it is enforced on the first publish like any other.
 
-## Implementation sequencing
+## Implementation — as built
 
-1. `flow.InitialDownloadsComplete` event + `InitialDownloadsCompleteChannel`
-   helper; orchestrator fire-points + fire-once flag.
-2. `BindAutoPublish` first-publish gate — opt-in via `AutoPublishOpts`
-   (production-on; harness/tests default off, preserving current behaviour).
-3. Startup re-validation background task, low-priority worker: infohash
-   verification (`VerifyTorrentFiles`-equivalent) on every advertised file,
-   plus the Stage 1/2 + `db/integrity` validator set on the local files.
-   Demote + re-queue failures. Emit `StartupRevalidationComplete`.
-4. Compose: `BindAutoPublish` gates on both signals.
-5. Wire the gate on in `node/eth/backend.go` for the production publisher.
-6. Tests — orchestrator event, gate, re-validation demote/re-queue — then a
-   fresh two-publisher sepolia live run to confirm: no empty generation, one
-   generation after sync completes, a planted-corrupt file is caught and
-   re-fetched before the first publish.
+1. `flow.InitialDownloadsComplete` event + orchestrator fire-points.
+2. `flow.InitialValidationComplete` event; `InitialValidationCompleteChannel`
+   and `FirstPublishGateChannel` helpers.
+3. `integrity.VerifyFileAgainstTorrent` per-file primitive.
+4. `InfoHashValidator` + `checkFileInfoHash`; wired into `batchChain` and the
+   driver's `OnMetaReady`; `scanAndSeed` extended to seed caplin.
+5. `db/snapshotsync.RevalidationPolicy` + `ParseRevalidationPolicy`;
+   `--snapshot.revalidation-policy` flag.
+6. `lifecycle.Driver.IsQuarantined`; `Orchestrator.RequeueForDownload`.
+7. `Provider.watchInitialValidation` settle-watcher, spawned from
+   `Provider.Initialize` under `LifecycleDrivenByStorage`.
+8. Gate composition in `backend.go` and `auto_publish.go`.
 
-Steps 1–2 are contained and could land first; 3–4 are the larger piece.
+## Open questions / follow-ups
 
-## Open questions
-
-- **Where the re-validation task lives.** Candidate: the storage `Provider`
-  startup path (it owns the inventory + the disk scan). It must run after
-  the inventory is loaded and before — or concurrently with, gating only
-  publication — the orchestrator's initial work.
-- **Throttling mechanism.** Worker-pool size vs. I/O niceness vs. an
-  explicit rate limit. Whatever is chosen must demonstrably yield to
-  foreground exec/sync.
-- **Interaction with `--snap.bootstrap-from-preverified`.** A bootstrap
-  publisher's startup-local set may be large (a full prior archive); confirm
-  the background task handles that volume without unbounded memory.
-- **genID / convergence framing** — *resolved 2026-05-22.* The
-  `genIDFromContent` comment, the `Publish` comment, the spec's Layer 3
-  section and `TestV2SerializationIsCanonical` previously overstated
-  cross-publisher convergence. Corrected: the L3 advertisement is unique per
-  node by definition (it embeds the node's own Authority UCAN and
-  `<enr-fp>`); `<genID>` content-addressing is a *per-node* property
-  (no-op-republish dedup + restart stability); only the canonical chain.toml
+- **A `redownload` re-download that never completes or fails** leaves the
+  settle-watcher waiting and the first-publish gate shut. This mirrors the
+  orchestrator's own handling of a wedged download; not specially handled.
+- **genID / convergence framing** — *resolved 2026-05-22.* The L3
+  advertisement is unique per node by definition; `<genID>`
+  content-addressing is a per-node property; only the canonical chain.toml
   converges swarm-wide, via the consumer-computed quorum view.

@@ -527,6 +527,31 @@ func (inv *Inventory) SaltFiles() []*FileEntry {
 	return result
 }
 
+// AllLocalFiles returns every Local file across all buckets — domain,
+// block, caplin, meta and salt. The returned slice is a copy; entries
+// are shared pointers and MUST NOT be mutated.
+func (inv *Inventory) AllLocalFiles() []*FileEntry {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	var result []*FileEntry
+	add := func(entries []*FileEntry) {
+		for _, e := range entries {
+			if e.Local {
+				result = append(result, e)
+			}
+		}
+	}
+	for _, entries := range inv.domains {
+		add(entries)
+	}
+	add(inv.blocks)
+	add(inv.caplin)
+	add(inv.meta)
+	add(inv.salt)
+	return result
+}
+
 // CoverageOfKind returns the local step ranges covered by files of a
 // specific kind for a domain. Use for kind-aware gap detection — a
 // domain at [0, 128) with a .kv but no .v has full Coverage but a gap

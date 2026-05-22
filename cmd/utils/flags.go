@@ -371,6 +371,12 @@ var (
 		Value: "auto",
 	}
 
+	SnapshotRevalidationPolicyFlag = cli.StringFlag{
+		Name:  "snapshot.revalidation-policy",
+		Usage: "How a publisher reacts when startup re-validation finds a local snapshot file with a bad info-hash or that fails the local validator set: \"redownload\" (demote + re-fetch, the self-healing default), \"stop\" (halt on first failure), or \"warn\" (log and continue, suspect file excluded from the manifest).",
+		Value: "redownload",
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
@@ -2006,6 +2012,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.TrustRoots = ctx.String(SnapshotTrustRoots.Name)
 	cfg.Snapshot.QuorumFloor = ctx.Int(SnapshotQuorumFlag.Name)
 	cfg.Snapshot.AdoptionPolicy = ctx.String(SnapshotAdoptionPolicyFlag.Name)
+	cfg.Snapshot.RevalidationPolicy = ctx.String(SnapshotRevalidationPolicyFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot

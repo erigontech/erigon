@@ -115,6 +115,18 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 	return nil
 }
 
+// VerifyFileAgainstTorrent verifies that the data file at dataPath matches
+// the piece hashes in its sibling <dataPath>.torrent. Returns nil when the
+// content hashes correctly, an error otherwise (missing .torrent, short
+// read, or a piece-hash mismatch). ctx cancellation is honoured between
+// pieces, so a caller can bound or throttle the work.
+//
+// Per-file counterpart to VerifyTorrentFiles for callers that need a
+// per-file verdict rather than a directory-wide pass/fail.
+func VerifyFileAgainstTorrent(ctx context.Context, dataPath string) error {
+	return verifyFileFromTorrent(ctx, dataPath+".torrent", nil)
+}
+
 // verifyFileFromTorrent verifies a single data file against its .torrent piece hashes.
 func verifyFileFromTorrent(ctx context.Context, torrentPath string, completedBytes *atomic.Uint64) error {
 	mi, err := metainfo.LoadFromFile(torrentPath)

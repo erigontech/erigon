@@ -688,21 +688,23 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 			// First-publish gate
 			// (docs/plans/20260522-publisher-startup-preflight.md): hold
-			// the chain.v2 advertisement until the orchestrator signals
-			// the initial download set is complete. Until then
-			// PublishLocalChainTomlV2 is a no-op; on the signal the gate
-			// opens and the first complete generation is published. Only
-			// wired here, under the orchestrator-running branch — that is
-			// the only configuration where flow.InitialDownloadsComplete
-			// is ever fired.
+			// the chain.v2 advertisement until the initial file set is
+			// both fully downloaded (flow.InitialDownloadsComplete) AND
+			// has settled through the validator chain — infohash check
+			// included — to Advertisable or quarantine
+			// (flow.InitialValidationComplete). Until then
+			// PublishLocalChainTomlV2 is a no-op; on the conjunction the
+			// gate opens and the first known-good generation is
+			// published. Only wired here, under the orchestrator-running
+			// branch — the only configuration where those events fire.
 			if dl := backend.components.Downloader.Downloader; dl != nil {
 				dl.EnableV2PublishGate()
-				downloadsComplete := flow.InitialDownloadsCompleteChannel(bus)
+				firstPublishReady := flow.FirstPublishGateChannel(bus)
 				go func() {
 					select {
 					case <-ctx.Done():
 						return
-					case <-downloadsComplete:
+					case <-firstPublishReady:
 					}
 					dl.OpenV2PublishGate()
 					if err := dl.PublishLocalChainToml(); err != nil {

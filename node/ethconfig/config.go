@@ -223,6 +223,13 @@ type BlocksFreezing struct {
 	// "auto", "stage" or "warn". Parsed by snapshotsync.ParseAdoptionPolicy;
 	// empty defaults to "auto".
 	AdoptionPolicy string
+
+	// RevalidationPolicy governs how a publisher reacts when startup
+	// re-validation finds a bad local snapshot file
+	// (--snapshot.revalidation-policy): "redownload", "stop" or "warn".
+	// Parsed by snapshotsync.ParseRevalidationPolicy; empty defaults to
+	// "redownload".
+	RevalidationPolicy string
 }
 
 func (s BlocksFreezing) String() string {

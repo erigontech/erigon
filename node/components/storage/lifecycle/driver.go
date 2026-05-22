@@ -616,3 +616,12 @@ func (d *Driver) isQuarantined(name string) bool {
 	defer d.mu.Unlock()
 	return d.quarantined[name]
 }
+
+// IsQuarantined reports whether the named file is currently quarantined
+// — the driver has stopped retrying its lifecycle transition after
+// QuarantineThreshold consecutive handler failures. A ChangeSet for the
+// file clears the quarantine. Exported for the storage Provider's
+// startup pre-flight settle-watcher.
+func (d *Driver) IsQuarantined(name string) bool {
+	return d.isQuarantined(name)
+}

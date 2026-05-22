@@ -504,6 +504,16 @@ func (p *Provider) Initialize(deps Deps) error {
 				for _, e := range inv.SaltFiles() {
 					visit(e)
 				}
+				// Caplin .seg files are seeded here like every other
+				// Local file — not only via the Advertisable-triggered
+				// ChangeSet path below. The InfoHashValidator gates a
+				// file's promotion to Advertisable on its .torrent
+				// existing; deferring caplin seeding (and so .torrent
+				// creation) to Advertisable would deadlock caplin
+				// validation.
+				for _, e := range inv.CaplinFiles() {
+					visit(e)
+				}
 				if len(toSeed) == 0 {
 					return
 				}
@@ -744,6 +754,15 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.indexBuilder = builder
 		snapDir := config.Dirs.Snap
 		batchChain := validation.DefaultStepChain(snapDir)
+		// Startup pre-flight infohash check: re-verify every file's
+		// content against its .torrent before it reaches Advertisable
+		// (docs/plans/20260522-publisher-startup-preflight.md). Ordered
+		// ahead of the semantic validators so a byte-corrupt file is
+		// caught before the more expensive structural checks run. The
+		// same instance is reused for the meta path below so its
+		// piece-hash memo is shared.
+		infoHashValidator := &InfoHashValidator{SnapDir: snapDir}
+		batchChain = append(batchChain, infoHashValidator)
 		// Stage-2 commitment-domain validator: opens commitment.kv on
 		// commitment-step batches, asserts state is at end of block,
 		// registers (step, block) binding. No-op for non-commitment
@@ -810,12 +829,26 @@ func (p *Provider) Initialize(deps Deps) error {
 				},
 			)
 		}
+		metaInv := deps.Inventory
 		p.LifecycleDriver = &lifecycle.Driver{
 			Inv:          deps.Inventory,
 			Logger:       logger,
 			SnapDir:      snapDir,
 			OnIndexing:   lifecycle.BuildOnIndexing(builder, deps.Inventory, logger),
 			OnValidation: lifecycle.BuildOnBatchValidation(batchChain, deps.Inventory, logger),
+			// Meta / salt / caplin files skip the step-validation chain
+			// (they take the dispatch's meta path, not OnValidation), so
+			// the InfoHashValidator above never sees a meta/salt/caplin
+			// file that was downloaded this session. Run the same
+			// pre-flight infohash check on them here, then advance — the
+			// auto-advance the driver does for a nil OnMetaReady.
+			OnMetaReady: func(ctx context.Context, e *snapshot.FileEntry) error {
+				if err := infoHashValidator.checkFile(ctx, e.Name); err != nil {
+					return err
+				}
+				metaInv.AdvanceTo(e.Name, snapshot.LifecycleAdvertisable)
+				return nil
+			},
 		}
 		if err := p.LifecycleDriver.Start(ctx); err != nil {
 			return fmt.Errorf("storage: start lifecycle driver: %w", err)
@@ -886,6 +919,16 @@ func (p *Provider) Initialize(deps Deps) error {
 			p.LifecycleDriver.Stop() // unwind partial init
 			return fmt.Errorf("storage: start orchestrator: %w", err)
 		}
+
+		// Startup pre-flight settle-watcher: gates the first chain.v2
+		// advertisement on the initial file set having settled through
+		// the validator chain (infohash check included). See
+		// docs/plans/20260522-publisher-startup-preflight.md.
+		revalPolicy, perr := snapshotsync.ParseRevalidationPolicy(config.Snapshot.RevalidationPolicy)
+		if perr != nil {
+			logger.Warn("[storage] invalid --snapshot.revalidation-policy; defaulting to redownload", "err", perr)
+		}
+		go p.watchInitialValidation(ctx, flow.InitialDownloadsCompleteChannel(p.eventBus), revalPolicy)
 
 		// Watch the inventory for the tip *-headers.seg reaching
 		// LifecycleIndexed. When it does, open EL header segments and

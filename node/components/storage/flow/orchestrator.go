@@ -837,6 +837,53 @@ func (o *Orchestrator) onDownloadFailed(e DownloadFailed) {
 	o.maybeFireInitialDownloadsComplete()
 }
 
+// RequeueForDownload re-issues a DownloadRequested for a file the node
+// already holds locally but that failed startup re-validation (a bad
+// infohash drove the lifecycle to quarantine it). The downloader
+// re-adds the torrent; the torrent client piece-verifies the on-disk
+// data and re-fetches the corrupt pieces, healing the file in place.
+// Used by the storage Provider's settle-watcher under the `redownload`
+// revalidation policy (docs/plans/20260522-publisher-startup-preflight.md).
+//
+// Returns false when no peer (or bootstrap manifest) is on record as
+// offering the file — it cannot be re-fetched and the caller excludes
+// it from the first manifest. Re-fetching is keyed by the recorded
+// info-hash, so no trust re-check is needed: a peer cannot serve bytes
+// that hash to a different value.
+func (o *Orchestrator) RequeueForDownload(name string) bool {
+	if o == nil {
+		return false
+	}
+	o.peerMu.Lock()
+	if _, inFlight := o.pending[name]; inFlight {
+		o.peerMu.Unlock()
+		return true
+	}
+	claim, ok := o.peerFiles[name]
+	if !ok {
+		o.peerMu.Unlock()
+		return false
+	}
+	entry := claim.entry
+	peers := make([]string, 0, len(claim.peers))
+	for p := range claim.peers {
+		peers = append(peers, p)
+	}
+	o.pending[name] = entry
+	o.peerMu.Unlock()
+
+	o.log.Info("[flow] re-queueing file for download after re-validation failure",
+		"file", name, "peers", len(peers))
+	o.bus.Publish(DownloadRequested{
+		FileName:  name,
+		InfoHash:  entry.TorrentHash,
+		FromPeers: peers,
+		Domain:    entry.Domain,
+		Range:     entry.Range(),
+	})
+	return true
+}
+
 // fileRole extracts a role token that distinguishes non-interchangeable
 // files at the same (domain, range). Rules, by filename shape:
 //

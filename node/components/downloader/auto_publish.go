@@ -75,17 +75,19 @@ type AutoPublishOpts struct {
 	// peer.
 	DelegationSource dl.DelegationSource
 
-	// GateUntilInitialDownloadsComplete, when true, holds back the FIRST
-	// publish until flow.InitialDownloadsComplete is observed on Bus —
-	// so the first chain.v2 advertisement reflects a complete download
-	// set rather than the empty/partial inventory of a node still
-	// syncing. Subsequent generations are unaffected (TrustPromoted-
-	// driven, as before).
+	// GateFirstPublish, when true, holds back the FIRST publish until
+	// the initial file set is both fully downloaded
+	// (flow.InitialDownloadsComplete) AND has settled through the
+	// validator chain — infohash check included — to Advertisable or
+	// quarantine (flow.InitialValidationComplete). So the first chain.v2
+	// advertisement reflects a complete, validated set rather than the
+	// empty/partial inventory of a node still syncing. Subsequent
+	// generations are unaffected (TrustPromoted-driven, as before).
 	//
 	// Production sets this true; tests / the harness leave it false to
 	// publish eagerly. See
 	// docs/plans/20260522-publisher-startup-preflight.md.
-	GateUntilInitialDownloadsComplete bool
+	GateFirstPublish bool
 }
 
 // BindAutoPublish wires automatic re-publication of chain.v2.<seq>.toml
@@ -148,10 +150,10 @@ func (p *Provider) BindAutoPublish(ctx context.Context, opts AutoPublishOpts) er
 	}
 
 	// Build the first-publish gate channel before spawning the loop so
-	// the bus subscription is in place well ahead of the event firing.
+	// the bus subscriptions are in place well ahead of the events firing.
 	var gateCh <-chan struct{}
-	if opts.GateUntilInitialDownloadsComplete {
-		gateCh = flow.InitialDownloadsCompleteChannel(opts.Bus)
+	if opts.GateFirstPublish {
+		gateCh = flow.FirstPublishGateChannel(opts.Bus)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -217,8 +219,9 @@ func (p *Provider) autoPublishLoop(
 	defer close(done)
 
 	// First-publish gate: hold back the initial generation until the
-	// node has a complete download set (gateCh closes on
-	// flow.InitialDownloadsComplete). nil gateCh = ungated (tests).
+	// node has a complete, validated file set (gateCh closes once both
+	// flow.InitialDownloadsComplete and flow.InitialValidationComplete
+	// have fired). nil gateCh = ungated (tests).
 	if gateCh != nil {
 		select {
 		case <-ctx.Done():
