@@ -213,6 +213,7 @@ type Ethereum struct {
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
 	readAheader        *exec.BlockReadAheader
+	kzgWarmupDone      chan struct{}
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -262,8 +263,13 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	// warmup kzg init so first block doesn't suffer. kzgWarmupDone is closed
+	// when the goroutine finishes; Stop waits on it so the trailing log can
+	// never fire after the owning scope (e.g. a test) has torn down — a log
+	// from a goroutine after a test completes panics the test runner.
+	kzgWarmupDone := make(chan struct{})
 	go func() {
-		// warmup kzg init so first block doesn't suffer
+		defer close(kzgWarmupDone)
 		t := time.Now()
 		kzg.InitKZGCtx()
 		logger.Info("KZG crypto context ready", "took", time.Since(t))
@@ -341,6 +347,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
 		readAheader:               exec.NewBlockReadAheader(),
+		kzgWarmupDone:             kzgWarmupDone,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -1564,6 +1571,19 @@ func (s *Ethereum) Stop() error {
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		s.readAheader.WaitForWarmup(warmCtx)
 		warmCancel()
+	}
+
+	// Wait for the KZG warmup goroutine (spawned in New) to finish. It logs
+	// on completion; without this wait a slow warmup can log after the owning
+	// scope is gone — in tests that panics the runner ("Log in goroutine
+	// after <test> has completed"). InitKZGCtx is bounded (a one-time trusted
+	// setup load), so the timeout is a safety valve only.
+	if s.kzgWarmupDone != nil {
+		select {
+		case <-s.kzgWarmupDone:
+		case <-time.After(30 * time.Second):
+			s.logger.Warn("KZG warmup goroutine still running at shutdown")
+		}
 	}
 
 	s.chainDB.Close()

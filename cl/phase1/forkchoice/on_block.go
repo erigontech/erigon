@@ -412,24 +412,33 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	)
 	f.operationsPool.NotifyBlock(block.Block)
 
-	// Eagerly compute unrealized justification and finality
+	// Eagerly compute unrealized justification and finality (spec: compute_pulled_up_tip)
 	if err := statechange.ProcessJustificationBitsAndFinality(lastProcessedState, nil); err != nil {
 		return err
 	}
+	// Capture post-pull-up values BEFORE restoring lastProcessedState so the
+	// prior-epoch updateCheckpoints below can use them per spec
+	// (compute_pulled_up_tip uses state.current_justified_checkpoint AFTER
+	// process_justification_and_finalization, not before).
+	postPullupJustified := lastProcessedState.CurrentJustifiedCheckpoint()
+	postPullupFinalized := lastProcessedState.FinalizedCheckpoint()
 	// Store per-block unrealized checkpoints (spec: store.unrealized_justifications[block_root])
-	f.unrealizedJustifications.Store(common.Hash(blockRoot), lastProcessedState.CurrentJustifiedCheckpoint())
-	f.unrealizedFinalizations.Store(common.Hash(blockRoot), lastProcessedState.FinalizedCheckpoint())
-	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+	f.unrealizedJustifications.Store(common.Hash(blockRoot), postPullupJustified)
+	f.unrealizedFinalizations.Store(common.Hash(blockRoot), postPullupFinalized)
+	f.updateUnrealizedCheckpoints(postPullupJustified, postPullupFinalized)
 	// Set the changed value pre-simulation
 	lastProcessedState.SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint)
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(stateFinalized)
 	lastProcessedState.SetJustificationBits(justificationBits)
 
-	// If the block is from a prior epoch, apply the realized values
+	// Spec compute_pulled_up_tip: if the block is from a prior epoch, apply the
+	// post-pull-up checkpoints to the store. Previously this used the restored
+	// pre-pull-up values, which meant store.justified/finalized lagged what
+	// the spec would have for late-arriving prior-epoch blocks.
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+		f.updateCheckpoints(postPullupJustified, postPullupFinalized)
 	}
 	f.emitters.State().SendBlock(&beaconevents.BlockData{
 		Slot:                block.Block.Slot,
