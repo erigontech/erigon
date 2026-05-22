@@ -159,18 +159,15 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
 
-	var receiptsField, logsField CapabilityField
+	var receiptsField CapabilityField
 	if persistReceipts {
-		// DefaultBlocksPruneMode means pre-merge blocks were never downloaded on merge chains,
-		// so their receipts were never persisted. All other modes downloaded every block first;
-		// receipts survive block-body pruning in a separate table and are available from genesis.
-		var oldest uint64
-		if pruneMode.Blocks == prune.DefaultBlocksPruneMode {
-			oldest = blocksOldest // = MergeHeight on merge chains, 0 otherwise
-		}
-		o := hexutil.Uint64(oldest)
-		receiptsField = CapabilityField{OldestBlock: &o}
-		logsField = receiptsField
+		// --persist.receipts widens past state-history pruning (receipts are written to
+		// RCacheDomain at execution time, not re-derived from state). The remaining bound
+		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
+		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
+		// isReceiptsSegmentPruned in db/snapshotsync). So receipts/logs fall back to
+		// blocksOldest with the same DeleteStrategy as blocks.
+		receiptsField = avail(blocksOldest, pruneMode.Blocks)
 	} else {
 		// Without --persist.receipts, receipts are re-executed on demand, requiring both state
 		// history and the block body. Use the more restrictive of the two oldest-block bounds.
@@ -179,11 +176,10 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		} else {
 			receiptsField = stateField
 		}
-		// getLogsV3 uses TxnByIdxInBlock to reconstruct receipts for log filtering; that
-		// call returns nil when block bodies are absent. Matches in [stateOldest, blocksOldest)
-		// are silently dropped, so the effective oldest for logs equals receipts.
-		logsField = receiptsField
 	}
+	// getLogsV3 uses log indexes scoped to prune.Blocks; matches in pruned blocks are silently
+	// dropped, so the effective oldest for logs equals receipts in both branches.
+	logsField := receiptsField
 
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},

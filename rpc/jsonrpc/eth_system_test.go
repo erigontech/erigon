@@ -59,6 +59,14 @@ func TestCapabilities(t *testing.T) {
 		History:     prune.Distance(testPruneDistance),
 		Blocks:      prune.DefaultBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
 	}
+	// Mirrors the post-#21342 production FullMode shape: both History and Blocks are finite
+	// distances. Exercises the EIP-8252 retention window where block bodies and log indexes
+	// follow the same finite cutoff as state history.
+	testFullModeEIP8252 := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(testPruneDistance),
+		Blocks:      prune.Distance(testPruneDistance),
+	}
 	testMinimalMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
@@ -266,18 +274,59 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
+	// Post-#21342 production FullMode: Blocks is a finite Distance (EIP-8252 retention window),
+	// not the DefaultBlocksPruneMode sentinel. Without --persist.receipts, receipts/logs are
+	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
+	t.Run("full_eip8252_no_persist", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testFullModeEIP8252, false, false)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.State))
+		require.Equal(t, testPruneDistance, window(t, result.Tx))
+		require.Equal(t, testPruneDistance, window(t, result.Blocks))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+	})
+
+	// full (EIP-8252) + --persist.receipts: persist.receipts widens past state history, but
+	// block bodies and log indexes are still pruned at prune.Blocks, so receipts/logs are
+	// bounded by blocksOldest, NOT genesis. This is the common pruned-archive config and the
+	// case a routing layer would misroute if oldestBlock were reported as 0.
+	t.Run("full_eip8252_persist_receipts", func(t *testing.T) {
+		t.Parallel()
+		api, head := setupAPI(t, testFullModeEIP8252, false, true)
+		result, err := api.Capabilities(t.Context())
+		require.NoError(t, err)
+		pruned := head - testPruneDistance
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
+		require.Equal(t, pruned, oldest(t, result.State))
+		require.Equal(t, pruned, oldest(t, result.Tx))
+		require.Equal(t, pruned, oldest(t, result.Blocks))
+	})
+
+	// minimal + --persist.receipts: block bodies and log indexes are still pruned at the same
+	// distance as state, so persist.receipts cannot widen receipts/logs past blocksOldest —
+	// eth_getBlockReceipts needs the body and getLogsV3 needs the log indexes.
 	t.Run("minimal_persist_receipts", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, true)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --persist.receipts overrides the prune window: receipts and logs available from genesis.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
-		// state, tx, and blocks still respect the minimal prune window.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		require.Equal(t, pruned, oldest(t, result.State))
 		require.Equal(t, pruned, oldest(t, result.Tx))
 		require.Equal(t, pruned, oldest(t, result.Blocks))
