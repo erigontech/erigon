@@ -377,6 +377,12 @@ var (
 		Value: "redownload",
 	}
 
+	SnapshotAdoptionGraceFlag = cli.DurationFlag{
+		Name:  "snapshot.adoption-grace",
+		Usage: "How long a minority verdict must persist before a publisher triggers staged canonical adoption — a grace window that lets a transient swarm disagreement settle instead of kicking off a fetch + cutover (e.g. 10m, 2m30s; 0 adopts on first detection).",
+		Value: 10 * time.Minute,
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
@@ -2013,6 +2019,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.QuorumFloor = ctx.Int(SnapshotQuorumFlag.Name)
 	cfg.Snapshot.AdoptionPolicy = ctx.String(SnapshotAdoptionPolicyFlag.Name)
 	cfg.Snapshot.RevalidationPolicy = ctx.String(SnapshotRevalidationPolicyFlag.Name)
+	cfg.Snapshot.AdoptionGrace = ctx.Duration(SnapshotAdoptionGraceFlag.Name)
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot

@@ -567,6 +567,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}()
 		}
 
+		// Adoption grace window. A minority verdict must persist for
+		// config.Snapshot.AdoptionGrace before staging is triggered, so a
+		// transient swarm disagreement — a brief quorum flap, or this
+		// node's own fresh publish not yet observed by peers — settles
+		// instead of kicking off a network fetch + cutover. A self-check
+		// that comes back clean within the window cancels the pending
+		// trigger. Grace 0 → triggerAdoption fires on first detection.
+		adoptionGate := snapshotsync.NewAdoptionGraceGate(config.Snapshot.AdoptionGrace, triggerAdoption)
+
 		backend.components.Downloader.Downloader.SetManifestSelfCheck(func(m *downloader.ChainTomlV2) error {
 			// Check against the live canonical quorum view when a
 			// genesis is pinned; otherwise fall back to the static
@@ -590,9 +599,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return err
 			}
 			if verdict != nil {
-				logger.Warn("publisher self-check: minority entries detected — triggering staged adoption",
+				logger.Warn("publisher self-check: minority entries detected",
 					"count", len(verdict.Adopt), "policy", adoptionPolicy)
-				triggerAdoption(verdict)
+				if adoptionGate.Arm(verdict) {
+					logger.Info("publisher self-check: deferring adoption for grace window",
+						"grace", config.Snapshot.AdoptionGrace)
+				}
+			} else if adoptionGate.Clear() {
+				logger.Info("publisher self-check: minority cleared within grace window — adoption cancelled")
 			}
 			return nil
 		})

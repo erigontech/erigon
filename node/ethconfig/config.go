@@ -230,6 +230,13 @@ type BlocksFreezing struct {
 	// Parsed by snapshotsync.ParseRevalidationPolicy; empty defaults to
 	// "redownload".
 	RevalidationPolicy string
+
+	// AdoptionGrace is how long a minority verdict must persist before
+	// the publisher triggers staged canonical adoption
+	// (--snapshot.adoption-grace). A grace window so a transient swarm
+	// disagreement settles instead of kicking off a fetch + cutover.
+	// 0 → adopt on first minority detection.
+	AdoptionGrace time.Duration
 }
 
 func (s BlocksFreezing) String() string {
