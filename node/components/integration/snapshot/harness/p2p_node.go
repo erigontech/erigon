@@ -205,6 +205,27 @@ func (n *P2PNode) EnableAutoPublishV2(debounce time.Duration) {
 	}))
 }
 
+// EnableGatedAutoPublishV2 binds the auto-publisher with the first-
+// publish gate ON: the first chain.v2 generation is held back until
+// BOTH flow.InitialDownloadsComplete and flow.InitialValidationComplete
+// have fired on the bus. Exercises the publisher startup pre-flight gate
+// (docs/plans/20260522-publisher-startup-preflight.md). The publisher is
+// constructed up front so V2Publisher().History() observes the gated
+// publish.
+func (n *P2PNode) EnableGatedAutoPublishV2(debounce time.Duration) {
+	n.T.Helper()
+	require.NoError(n.T, n.Downloader.BindAutoPublish(n.ctx, downloader.AutoPublishOpts{
+		Bus:              n.Bus,
+		Inventory:        n.Inventory,
+		Debounce:         debounce,
+		Publisher:        n.ensureV2Publisher(),
+		GateFirstPublish: true,
+		ENRUpdater: func(ct enr.ChainToml) {
+			n.SetDevP2PENREntry(ct)
+		},
+	}))
+}
+
 // Close tears down every subcomponent. Cancels the context up front so
 // sentry / downloader background goroutines can exit, then waits for
 // them via their respective Close methods. Idempotent — Restart calls
