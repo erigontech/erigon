@@ -24,10 +24,8 @@ import (
 	"math"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // GasPool tracks block-level gas availability across the two EIP-8037 dimensions.
@@ -173,9 +171,8 @@ func (gp *GasPool) SubBlobGas(amount uint64) error {
 }
 
 // CheckBlockGasInclusion verifies that the supplied per-dimension gas
-// values fit in the remaining EIP-8037 reservoirs. Callers compute the
-// dimension contributions via InclusionContributions for pre-execution
-// inclusion checks.
+// values fit in the remaining EIP-8037 reservoirs. Callers obtain the
+// dimension contributions from InclusionContributions.
 func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
 	if gp == nil {
 		return nil
@@ -190,57 +187,24 @@ func CheckBlockGasInclusion(gp *GasPool, regularGas, stateGas uint64) error {
 }
 
 // InclusionContributions returns the per-dimension gas contributions for
-// the EIP-8037 block-pool inclusion check. Use this from call sites that
-// don't already have the intrinsic gas computed; otherwise prefer
-// InclusionContributionsWithIgas to avoid the second IntrinsicGas pass.
-// Returns ErrGasUintOverflow if intrinsic gas computation overflows uint64.
-func InclusionContributions(txn types.Transaction, rules *chain.Rules) (uint64, uint64, error) {
-	if txn == nil {
-		return 0, 0, nil
-	}
-	gas := txn.GetGasLimit()
-	if !rules.IsAmsterdam {
-		return gas, 0, nil
-	}
-
-	accessList := txn.GetAccessList()
-	intrinsic, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               txn.GetData(),
-		AuthorizationsLen:  uint64(len(txn.GetAuthorizations())),
-		AccessListLen:      uint64(len(accessList)),
-		StorageKeysLen:     uint64(accessList.StorageKeys()),
-		IsContractCreation: txn.GetTo() == nil,
-		IsEIP2:             rules.IsHomestead,
-		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          rules.IsShanghai,
-		IsEIP7623:          rules.IsPrague,
-		IsEIP7976:          rules.IsAmsterdam,
-		IsEIP7981:          rules.IsAmsterdam,
-		IsEIP8037:          rules.IsAmsterdam,
-	})
-	if overflow {
-		return 0, 0, ErrGasUintOverflow
-	}
-	regular, state := InclusionContributionsWithIgas(gas, intrinsic, rules.IsAmsterdam)
-	return regular, state, nil
-}
-
-// InclusionContributionsWithIgas returns the per-dimension gas contributions
-// for the EIP-8037 block-pool inclusion check, given the tx's declared
-// gas_limit and the precomputed intrinsic gas result.
+// the EIP-8037 block-pool inclusion check, given the tx's declared gas_limit
+// and the precomputed intrinsic gas result.
 //
 // Pre-Amsterdam: only the regular dimension is exercised; state is 0.
-// Amsterdam onwards (EIP-8037), per the spec the inclusion check is:
+// Amsterdam onwards, derived from the EIP-8037 reservoir model:
 //
-//	regular_contribution = min(MaxTxnGasLimit, tx.gas - intrinsic.state)
+//	regular_contribution = max(min(TX_MAX, tx.gas - intrinsic.state), intrinsic.FloorGasCost)
 //	state_contribution   = tx.gas - intrinsic.regular
 //
-// Subtracting the matching intrinsic dimension from tx.gas before checking
-// against the opposite reservoir is what lets a tx with a high gas_limit
-// (e.g. a creation paying intrinsic.state up front, or an EIP-7702 tx
-// paying per-auth state cost) still be includable when the un-subtracted
-// gas_limit would over-budget the opposite dimension.
-func InclusionContributionsWithIgas(gas uint64, intrinsic mdgas.IntrinsicGasCalcResult, isAmsterdam bool) (uint64, uint64) {
+// Subtracting the other dimension's intrinsic from tx.gas before checking
+// against this dimension's reservoir is what lets a tx with a high gas_limit
+// (e.g. a creation paying intrinsic.state up front, or an EIP-7702 tx paying
+// per-auth state cost) still be includable when the un-subtracted gas_limit
+// would over-budget this dimension. The max-with-FloorGasCost on the regular
+// side mirrors block accounting's `max(combined.Regular, FloorGasCost)`:
+// realized regular consumption can't go below the floor, so the inclusion
+// check shouldn't either.
+func InclusionContributions(gas uint64, intrinsic mdgas.IntrinsicGasCalcResult, isAmsterdam bool) (uint64, uint64) {
 	if !isAmsterdam {
 		return gas, 0
 	}
@@ -250,6 +214,9 @@ func InclusionContributionsWithIgas(gas uint64, intrinsic mdgas.IntrinsicGasCalc
 	}
 	if regularContribution > params.MaxTxnGasLimit {
 		regularContribution = params.MaxTxnGasLimit
+	}
+	if regularContribution < intrinsic.FloorGasCost {
+		regularContribution = intrinsic.FloorGasCost
 	}
 	if gas >= intrinsic.RegularGas {
 		stateContribution = gas - intrinsic.RegularGas

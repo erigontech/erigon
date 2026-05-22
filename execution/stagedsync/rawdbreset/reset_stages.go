@@ -285,9 +285,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
+			h2n := etl.NewCollectorWithAllocator(logPrefix, dirs.Tmp, etl.SmallSortableBuffers, logger)
 			defer h2n.Close()
-			h2n.SortAndFlushInBackground(false)
+			h2n.SortAndFlushInBackground(true)
 			h2n.LogLvl(log.LvlDebug)
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
@@ -345,7 +345,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}); err != nil {
 				return err
 			}
-			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 				return err
 			}
 			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)

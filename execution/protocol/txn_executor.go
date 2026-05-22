@@ -73,6 +73,17 @@ func (e ErrExecAbortError) Error() string {
 	}
 }
 
+// IsError reports whether the abort carries a genuine, non-dependency
+// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
+// ErrDependency panic when a versioned read observes an unsettled predecessor)
+// carries no OriginError and is resolved by re-execution. An IsError abort, by
+// contrast, must be validated before it can be attributed to genuinely invalid
+// block data rather than stale speculative input — the two are mutually
+// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
+func (e ErrExecAbortError) IsError() bool {
+	return e.OriginError != nil
+}
+
 type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
@@ -303,7 +314,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	regularContribution, stateContribution := InclusionContributionsWithIgas(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
+	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
 	}
@@ -422,6 +433,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
+		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -687,6 +699,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
 		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
