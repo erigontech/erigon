@@ -176,6 +176,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 					if ff.pendingLogsUpdate.CompareAndSwap(true, false) {
 						if err := ff.sendLogsFilterUpdate(); err != nil {
 							logger.Warn("rpc filters: error sending pending logs filter update", "err", err)
+							ff.pendingLogsUpdate.Store(true)
 						}
 					}
 				})
@@ -217,6 +218,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
 					if err := ff.sendReceiptsFilterUpdate(); err != nil {
 						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+						ff.pendingReceiptsUpdate.Store(true)
 					}
 				}
 			}); err != nil {
@@ -534,7 +536,6 @@ func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCr
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
 		ff.logger.Warn("Could not update remote receipts filter", "err", err)
-		ff.receiptsSubs.removeReceiptsFilter(id)
 	}
 	return sub.ch, id
 }
@@ -630,7 +631,6 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 
 	if err := ff.sendLogsFilterUpdate(); err != nil {
 		ff.logger.Warn("Could not update remote logs filter", "err", err)
-		ff.logsSubs.removeLogsFilter(id)
 	}
 
 	return sub.ch, id
