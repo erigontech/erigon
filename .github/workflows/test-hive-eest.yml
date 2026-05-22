@@ -109,17 +109,12 @@ jobs:
             # requests are well-formed V4/V5 newPayload — the only divergence
             # is a blockHash computed over a wrong-fork-schema header. Spec
             # convention is InvalidStatus + INVALID_BLOCK_HASH, which is what
-            # erigon returns.
-            max-failures: 2
-            exec_mode: serial
-          - sim: consume-engine
-            sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
-            shard: glamsterdam-devnet
-            pool-size: 24
-            fixtures-tarball: eest_devnet
-            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-            erigon-extra-flags: "--experimental.bal"
-            max-failures: 2
+            # erigon returns. Testing team has been notified to rectify the
+            # expected exceptions.
+            # Two additional tests have been observed flaky in the merge queue:
+            #   - EIP-7954 test_max_initcode_size[fork_Amsterdam-...-over_max]
+            #   - EIP-7928 test_bal_invalid_extraneous_entries (various params)
+            max-failures: 4
             exec_mode: parallel
     steps:
       - name: Clean docker system

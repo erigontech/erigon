@@ -260,12 +260,6 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().AddAddressToAccessList(address)
 		}
 
-		// Snapshot the beneficiary's existing reads before Empty() — so we can
-		// later mark only the reads newly recorded by the gas calc as internal,
-		// preserving any pre-existing legitimate reads (e.g. the tx sender's
-		// fee-deduction balance read when the sender is the SELFDESTRUCT
-		// beneficiary).
-		beneficiaryReadsBefore := evm.IntraBlockState().SnapshotVersionedReadKeys(address)
 		// if empty and transfers value
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -275,25 +269,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
-		// Record the beneficiary address access for BAL tracking when the
-		// contract has non-zero balance. A zero-balance SELFDESTRUCT does
-		// not transfer value, so the beneficiary should not appear in the
-		// block access list on that basis alone.
-		// (The read-only path is unreachable here — see the early-return
-		// above.)
-		if !balance.IsZero() {
-			evm.IntraBlockState().MarkAddressAccess(address, false)
-		}
-		// When the destructed contract has zero balance, no value is
-		// transferred to the beneficiary. Mark the reads the Empty() gas-calc
-		// call above added for this beneficiary as internal so the
-		// beneficiary does not appear in the BAL purely because of that
-		// gas-calc access. Pre-existing reads are preserved. Skip when
-		// beneficiary == self so the contract's own legitimate reads are
-		// not affected.
-		if balance.IsZero() && address != callContext.Address() {
-			evm.IntraBlockState().MarkNewReadsInternal(address, beneficiaryReadsBefore)
-		}
+		// Per EIP-7928, SELFDESTRUCT is a state access on the beneficiary
+		// independently of any value transfer, so record it unconditionally.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
 				gas.State = params.StateGasNewAccount
