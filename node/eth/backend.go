@@ -273,6 +273,22 @@ const sentryMcDisableBlockDownload = true
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
 	dirs := stack.Config().Dirs
 
+	// Startup auto-recovery of staged adoption. A policy=auto node that
+	// crashed between writing a batch's ready-marker and finishing the
+	// cutover left a marked, validated batch under <datadir>/temp.
+	// Complete the cutover here — before RemoveContents wipes temp and
+	// before any snapshot file is opened. policy=stage/warn deliberately
+	// leave marked batches for the operator's `erigon snapshots adopt`.
+	if pol, perr := snapshotsync.ParseAdoptionPolicy(config.Snapshot.AdoptionPolicy); perr == nil && pol == snapshotsync.AdoptionAuto {
+		recovered, rerr := snapshotinv.RecoverStagedAdoptions(dirs.Snap, dirs.Tmp, false, logger)
+		if rerr != nil {
+			logger.Warn("staged-adoption startup recovery failed", "err", rerr)
+		}
+		for _, b := range recovered {
+			logger.Info("staged-adoption startup recovery: cut over", "batch", b.Name, "files", len(b.Files))
+		}
+	}
+
 	tmpdir := dirs.Tmp
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)

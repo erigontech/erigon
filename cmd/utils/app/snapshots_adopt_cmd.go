@@ -2,9 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/urfave/cli/v2"
 
@@ -25,45 +22,22 @@ func adoptCliAction(cliCtx *cli.Context) error {
 	dryRun := dryRunFlag.Get(cliCtx)
 	dirs := datadir.Open(cliCtx.String(utils.DataDirFlag.Name))
 
-	entries, err := os.ReadDir(dirs.Tmp)
+	recovered, err := storagesnapshot.RecoverStagedAdoptions(dirs.Snap, dirs.Tmp, dryRun, logger)
 	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Info("adopt: no staged batches found")
-			return nil
-		}
 		return err
 	}
-	var batches []string
-	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "adoption-") {
-			batches = append(batches, filepath.Join(dirs.Tmp, e.Name()))
-		}
-	}
-	if len(batches) == 0 {
+	if len(recovered) == 0 {
 		logger.Info("adopt: no staged batches found")
 		return nil
 	}
-
-	for _, batch := range batches {
-		// Only promote a batch the adoption handler marked as validated.
-		// An unmarked directory is an interrupted or in-progress fetch
-		// whose files were never checked — cutting it over would publish
-		// unverified content.
-		if _, err := os.Stat(filepath.Join(batch, storagesnapshot.AdoptionReadyMarker)); err != nil {
-			logger.Warn("adopt: skipping unvalidated batch (no ready marker)", "batch", filepath.Base(batch))
-			continue
-		}
-		files, err := storagesnapshot.CutoverStagedDir(dirs.Snap, batch, dryRun, logger)
-		if err != nil {
-			return fmt.Errorf("adopt %s: %w", filepath.Base(batch), err)
-		}
+	for _, b := range recovered {
 		if dryRun {
-			logger.Info("adopt (dry-run): would cut over", "batch", filepath.Base(batch), "files", len(files))
-			for _, f := range files {
+			logger.Info("adopt (dry-run): would cut over", "batch", b.Name, "files", len(b.Files))
+			for _, f := range b.Files {
 				fmt.Printf("  %s\n", f)
 			}
 		} else {
-			logger.Info("adopt: cut over", "batch", filepath.Base(batch), "files", len(files))
+			logger.Info("adopt: cut over", "batch", b.Name, "files", len(b.Files))
 		}
 	}
 	if !dryRun {

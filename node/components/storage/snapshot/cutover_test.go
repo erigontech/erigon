@@ -92,3 +92,57 @@ func TestCutoverStagedDir(t *testing.T) {
 	_, statErr = os.Stat(stagingDir)
 	require.True(t, os.IsNotExist(statErr), "staging dir must be removed after a real cutover")
 }
+
+// TestRecoverStagedAdoptions covers the startup auto-recovery scan: a
+// marked batch is cut over, an unmarked (interrupted) batch is left
+// alone, a non-adoption temp directory is ignored, and a missing temp
+// directory is not an error.
+func TestRecoverStagedAdoptions(t *testing.T) {
+	t.Parallel()
+
+	// Missing temp dir → nothing staged, no error.
+	got, err := RecoverStagedAdoptions(t.TempDir(), filepath.Join(t.TempDir(), "absent"), false, nil)
+	require.NoError(t, err)
+	require.Empty(t, got)
+
+	liveDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	// A marked, validated batch — must be cut over.
+	marked := filepath.Join(tmpDir, "adoption-7")
+	require.NoError(t, os.MkdirAll(marked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(marked, "v1.0-accounts.0-2048.kv"), []byte("canon"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(marked, AdoptionReadyMarker), nil, 0o644))
+
+	// An unmarked batch — an interrupted fetch, must be left alone.
+	unmarked := filepath.Join(tmpDir, "adoption-8")
+	require.NoError(t, os.MkdirAll(unmarked, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(unmarked, "v1.0-storage.0-2048.kv"), []byte("partial"), 0o644))
+
+	// A non-adoption temp directory — must be ignored.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "something-else"), 0o755))
+
+	recovered, err := RecoverStagedAdoptions(liveDir, tmpDir, false, nil)
+	require.NoError(t, err)
+	require.Len(t, recovered, 1, "only the marked batch is recovered")
+	require.Equal(t, "adoption-7", recovered[0].Name)
+	require.ElementsMatch(t, []string{"v1.0-accounts.0-2048.kv"}, recovered[0].Files)
+
+	// The marked batch's file landed live; its staging dir is gone.
+	gotFile, err := os.ReadFile(PathForName(liveDir, "v1.0-accounts.0-2048.kv"))
+	require.NoError(t, err)
+	require.Equal(t, "canon", string(gotFile))
+	_, statErr := os.Stat(marked)
+	require.True(t, os.IsNotExist(statErr), "recovered staging dir must be removed")
+
+	// The unmarked batch is untouched — file still staged, dir present.
+	require.FileExists(t, filepath.Join(unmarked, "v1.0-storage.0-2048.kv"))
+
+	// A dry run reports the unmarked-skip-aside set without moving it.
+	require.NoError(t, os.WriteFile(filepath.Join(unmarked, AdoptionReadyMarker), nil, 0o644))
+	dry, err := RecoverStagedAdoptions(liveDir, tmpDir, true /* dryRun */, nil)
+	require.NoError(t, err)
+	require.Len(t, dry, 1)
+	require.Equal(t, "adoption-8", dry[0].Name)
+	require.FileExists(t, filepath.Join(unmarked, "v1.0-storage.0-2048.kv"), "dry run must not move anything")
+}

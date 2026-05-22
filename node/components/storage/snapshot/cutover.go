@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -101,4 +102,56 @@ func CutoverStagedDir(liveSnapDir, stagingDir string, dryRun bool, logger log.Lo
 		}
 	}
 	return swapped, nil
+}
+
+// RecoveredBatch records one adoption batch acted on by
+// RecoverStagedAdoptions.
+type RecoveredBatch struct {
+	Name  string   // the adoption-<gen> staging directory's basename
+	Files []string // snapshot files cut over (on dryRun: that would be)
+}
+
+// RecoverStagedAdoptions promotes every marked, validated adoption batch
+// under tmpDir to liveSnapDir. A batch directory (adoption-<gen>) is cut
+// over only if it carries the AdoptionReadyMarker; an unmarked batch is
+// an interrupted or unvalidated fetch and is logged and skipped. It is
+// both the node's startup auto-recovery of a policy=auto cutover that
+// crashed between the marker write and the file swap, and the body of
+// the `erigon snapshots adopt` command. With dryRun nothing is moved;
+// the result still lists what would be swapped. A missing tmpDir is not
+// an error — there is simply nothing staged.
+//
+// Startup callers must run this before any snapshot file is opened: the
+// cutover renames live files in place.
+func RecoverStagedAdoptions(liveSnapDir, tmpDir string, dryRun bool, logger log.Logger) ([]RecoveredBatch, error) {
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read temp dir: %w", err)
+	}
+	var recovered []RecoveredBatch
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "adoption-") {
+			continue
+		}
+		batch := filepath.Join(tmpDir, e.Name())
+		// Only promote a batch the adoption handler marked as validated.
+		// An unmarked directory is an interrupted or in-progress fetch
+		// whose files were never checked — cutting it over would publish
+		// unverified content.
+		if _, err := os.Stat(filepath.Join(batch, AdoptionReadyMarker)); err != nil {
+			if logger != nil {
+				logger.Warn("[storage] adoption recovery: skipping unvalidated batch (no ready marker)", "batch", e.Name())
+			}
+			continue
+		}
+		files, err := CutoverStagedDir(liveSnapDir, batch, dryRun, logger)
+		if err != nil {
+			return recovered, fmt.Errorf("recover %s: %w", e.Name(), err)
+		}
+		recovered = append(recovered, RecoveredBatch{Name: e.Name(), Files: files})
+	}
+	return recovered, nil
 }
