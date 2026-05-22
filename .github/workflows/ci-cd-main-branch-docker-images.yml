@@ -28,6 +28,7 @@ jobs:
   Build:
     # runs-on: ubuntu-latest
     runs-on: [devops-01-self-hosted]
+    environment: dockerhub-publish
     timeout-minutes: 45
     outputs:
       docker_build_tag: ${{ steps.built_tag_export.outputs.docker_build_tag }}
@@ -92,15 +93,15 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
         with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_PUSH_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         id: docker-buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
         id: built_tag_export
@@ -149,8 +150,8 @@ jobs:
           HTTP_RESP=$(curl -s -o ./resp1 -w "%{http_code}" \
             -X POST -H "Content-Type: application/json" \
             -d '{
-                  "identifier": "'"${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}"'",
-                  "secret": "'"${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}"'"
+                  "identifier": "'"${{ secrets.DOCKERHUB_PUSH_USERNAME }}"'",
+                  "secret": "'"${{ secrets.DOCKERHUB_PUSH_TOKEN }}"'"
                 }' \
             https://hub.docker.com/v2/auth/token/)
 

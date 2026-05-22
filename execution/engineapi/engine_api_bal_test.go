@@ -44,13 +44,15 @@ import (
 // TestEngineApiBALMultiSenderBlock packs transfers from many independent senders
 // into a single block. Because the senders are independent the parallel executor
 // speculatively executes them concurrently, exercising the coinbase-balance
-// strip→rebase→merge path in finalizeWithIBS. Any divergence between the
+// fee-aggregation path in finalizeTxSimple. Any divergence between the
 // assembler's BAL (sequential) and the parallel executor's BAL surfaces as a
 // BAL hash mismatch returned by ProcessBAL.
 func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
 	const numSenders = 10
 	senderKeys := make([]*ecdsa.PrivateKey, numSenders)
 	for i := range senderKeys {
@@ -59,7 +61,8 @@ func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 		senderKeys[i] = key
 	}
 
-	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	for _, key := range senderKeys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		genesis.Alloc[addr] = types.GenesisAccount{
@@ -67,11 +70,16 @@ func TestEngineApiBALMultiSenderBlock(t *testing.T) {
 		}
 	}
 
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, log.LvlDebug),
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 
 	receiver := common.HexToAddress("0xaaaa")
@@ -109,7 +117,14 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	receiver := common.HexToAddress("0x333")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
@@ -178,7 +193,14 @@ func TestEngineApiBALContractCreation(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 
@@ -226,7 +248,14 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		mintReceiver := common.HexToAddress("0x444")
@@ -285,7 +314,14 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	transferReceiver := common.HexToAddress("0x555")
 	mintReceiver := common.HexToAddress("0x666")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
@@ -390,7 +426,14 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 //   - Block 1: deploy Changer contract
 //   - Block 2: ETH transfer + Token deploy + Changer.Change() + withdrawals
 func TestEngineApiBALMixedBlock(t *testing.T) {
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	transferReceiver := common.HexToAddress("0x777")
 	withdrawalReceiver := common.HexToAddress("0x888")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
@@ -531,6 +574,8 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlInfo)
 	const (
 		numSenders = 20
 		numBlocks  = 3
@@ -542,7 +587,8 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		senderKeys[i] = key
 	}
 
-	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
+	genesis, coinbaseKey, err := engineapitester.DefaultEngineApiTesterGenesis()
+	require.NoError(t, err)
 	for _, key := range senderKeys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		genesis.Alloc[addr] = types.GenesisAccount{
@@ -550,11 +596,16 @@ func TestEngineApiBALParallelConsistencyStress(t *testing.T) {
 		}
 	}
 
-	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
-		Logger:      testlog.Logger(t, log.LvlInfo),
+	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
+		Logger:      logger,
 		DataDir:     t.TempDir(),
 		Genesis:     genesis,
 		CoinbaseKey: coinbaseKey,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
 	})
 
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
@@ -650,7 +701,14 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
 		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
@@ -706,7 +764,14 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := engineapitester.DefaultEngineApiTester(t)
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+	eat, err := engineapitester.DefaultEngineApiTester(ctx, logger, t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		err := eat.Close()
+		require.NoError(t, err)
+	})
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		chainId := eat.ChainConfig.ChainID
 

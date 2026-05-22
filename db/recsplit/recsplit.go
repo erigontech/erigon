@@ -54,6 +54,22 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
+// ExistenceFilterVersion selects the existence-filter format written for new index files.
+//
+//	0 = byte-array of first-bytes (legacy, no FuseFilter)
+//	1 = BinaryFuse[uint8] — monolithic FuseFilter (current default)
+//	2 = BinaryFuse[uint8] sharded by keyHash>>56 (256 shards; reduces build-time RAM 256×)
+const ExistenceFilterVersion version.DataStructureVersion = 1
+
+func newExistenceFilterWriter(filePath string, v version.DataStructureVersion) (v1 *fusefilter.WriterOffHeap, v2 *fusefilter.WriterSharded, err error) {
+	if v == 2 {
+		v2, err = fusefilter.NewWriterSharded(filePath)
+		return
+	}
+	v1, err = fusefilter.NewWriterOffHeap(filePath)
+	return
+}
+
 /** David Stafford's (http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html)
  * 13th variant of the 64-bit finalizer function in Austin Appleby's
  * MurmurHash3 (https://github.com/aappleby/smhasher).
@@ -133,6 +149,9 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
+	//v2 fields
+	existenceFV2 *fusefilter.WriterSharded
+
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
 	offsetWriter *bufio.Writer // Buffered writer for offset file
 
@@ -187,7 +206,7 @@ type RecSplitArgs struct {
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
 	Enums              bool
 	LessFalsePositives bool
-	Version            uint8
+	Version            version.DataStructureVersion
 
 	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir     string
@@ -282,7 +301,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
+		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -369,6 +388,10 @@ func (rs *RecSplit) Close() {
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
+	}
+	if rs.existenceFV2 != nil {
+		rs.existenceFV2.Close()
+		rs.existenceFV2 = nil
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -535,9 +558,16 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
-		if err := rs.existenceFV1.AddHash(hi); err != nil {
-			return err
+	if rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if err := rs.existenceFV1.AddHash(hi); err != nil {
+				return err
+			}
+		case 2:
+			if err := rs.existenceFV2.AddHash(hi); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1089,10 +1119,16 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		}
 	}
 
-	if rs.dataStructureVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
-		_, err := rs.existenceFV1.BuildTo(rs.indexW)
-		if err != nil {
-			return err
+	if rs.keysAdded > 0 && rs.lessFalsePositives {
+		switch rs.dataStructureVersion {
+		case 1:
+			if _, err := rs.existenceFV1.BuildTo(rs.indexW); err != nil {
+				return err
+			}
+		case 2:
+			if _, err := rs.existenceFV2.BuildTo(rs.indexW); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

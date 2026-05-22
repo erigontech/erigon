@@ -86,18 +86,6 @@ func (r *ForkableAgg) RegisterUnmarkedForkable(ap *Forkable[UnmarkedTxI]) {
 	}
 }
 
-func (r *ForkableAgg) SetCollateAndBuildWorkers(n int) {
-	r.collateAndBuildWorkers = n
-}
-
-func (r *ForkableAgg) SetMergeWorkers(n int) {
-	r.mergeWorkers = n
-}
-
-func (r *ForkableAgg) SetCompressWorkers(n int) {
-	r.compressWorkers = n
-}
-
 func (r *ForkableAgg) SetMergeDisabled(disabled bool) {
 	r.mergeDisabled.Store(disabled)
 }
@@ -155,6 +143,15 @@ Loop:
 func (r *ForkableAgg) BuildFilesInBackground(num RootNum) chan struct{} {
 	// build in background
 	fin := make(chan struct{})
+
+	// Mirror the gate in Aggregator.buildFilesInBackground / Eth.startBackgroundMergeLoop
+	// so --exec.no-background-maintenance also suppresses forkable (BlockAccessLists,
+	// receipts, etc.) build+merge — otherwise focused-perf-test runs still see noise
+	// from this goroutine.
+	if dbg.NoBackgroundMaintenance() {
+		close(fin)
+		return fin
+	}
 
 	if ok := r.buildingFiles.CompareAndSwap(false, true); !ok {
 		r.logger.Debug("[fork_agg] BuildFilesInBackground disabled or already in progress. Skipping...")

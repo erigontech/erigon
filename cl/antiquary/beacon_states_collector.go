@@ -70,6 +70,21 @@ type beaconStatesCollector struct {
 	pendingDepositsWriter       *base_encoding.SSZQueueEncoder[*solid.PendingDeposit]
 	pendingConsolidationsWriter *base_encoding.SSZQueueEncoder[*solid.PendingConsolidation]
 	pendingWithdrawalsWriter    *base_encoding.SSZQueueEncoder[*solid.PendingPartialWithdrawal]
+	// gloas -- collectors
+	buildersCollector                       *etl.Collector
+	buildersCollectorDump                   *etl.Collector
+	builderPendingWithdrawalsCollector      *etl.Collector
+	builderPendingWithdrawalsCollectorDump  *etl.Collector
+	payloadExpectedWithdrawalsCollector     *etl.Collector
+	payloadExpectedWithdrawalsCollectorDump *etl.Collector
+	executionPayloadAvailabilityCollector   *etl.Collector
+	builderPendingPaymentsCollector         *etl.Collector
+	ptcWindowCollector                      *etl.Collector
+	latestExecutionPayloadBidCollector      *etl.Collector
+	// gloas -- diffs data structures
+	buildersWriter                   *base_encoding.SSZQueueEncoder[*cltypes.Builder]
+	builderPendingWithdrawalsWriter  *base_encoding.SSZQueueEncoder[*cltypes.BuilderPendingWithdrawal]
+	payloadExpectedWithdrawalsWriter *base_encoding.SSZQueueEncoder[*cltypes.Withdrawal]
 
 	buf        *bytes.Buffer
 	compressor *zstd.Encoder
@@ -115,6 +130,21 @@ func newBeaconStatesCollector(beaconCfg *clparams.BeaconChainConfig, tmpdir stri
 		pendingDepositsWriter:       base_encoding.NewSSZQueueEncoder[*solid.PendingDeposit](func(a, b *solid.PendingDeposit) bool { return *a == *b }),
 		pendingConsolidationsWriter: base_encoding.NewSSZQueueEncoder[*solid.PendingConsolidation](func(a, b *solid.PendingConsolidation) bool { return *a == *b }),
 		pendingWithdrawalsWriter:    base_encoding.NewSSZQueueEncoder[*solid.PendingPartialWithdrawal](func(a, b *solid.PendingPartialWithdrawal) bool { return *a == *b }),
+		// gloas
+		buildersCollector:                       etl.NewCollectorWithAllocator(kv.Builders, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		buildersCollectorDump:                   etl.NewCollectorWithAllocator(kv.BuildersDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		builderPendingWithdrawalsCollector:      etl.NewCollectorWithAllocator(kv.BuilderPendingWithdrawals, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		builderPendingWithdrawalsCollectorDump:  etl.NewCollectorWithAllocator(kv.BuilderPendingWithdrawalsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		payloadExpectedWithdrawalsCollector:     etl.NewCollectorWithAllocator(kv.PayloadExpectedWithdrawals, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		payloadExpectedWithdrawalsCollectorDump: etl.NewCollectorWithAllocator(kv.PayloadExpectedWithdrawalsDump, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		executionPayloadAvailabilityCollector:   etl.NewCollectorWithAllocator(kv.ExecutionPayloadAvailabilityTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		builderPendingPaymentsCollector:         etl.NewCollectorWithAllocator(kv.BuilderPendingPaymentsTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		ptcWindowCollector:                      etl.NewCollectorWithAllocator(kv.PtcWindowTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+		latestExecutionPayloadBidCollector:      etl.NewCollectorWithAllocator(kv.LatestExecutionPayloadBidTable, tmpdir, etl.SmallSortableBuffers, logger).LogLvl(log.LvlInfo),
+
+		buildersWriter:                   base_encoding.NewSSZQueueEncoder[*cltypes.Builder](func(a, b *cltypes.Builder) bool { return *a == *b }),
+		builderPendingWithdrawalsWriter:  base_encoding.NewSSZQueueEncoder[*cltypes.BuilderPendingWithdrawal](func(a, b *cltypes.BuilderPendingWithdrawal) bool { return *a == *b }),
+		payloadExpectedWithdrawalsWriter: base_encoding.NewSSZQueueEncoder[*cltypes.Withdrawal](func(a, b *cltypes.Withdrawal) bool { return *a == *b }),
 
 		logger:    logger,
 		beaconCfg: beaconCfg,
@@ -177,6 +207,29 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 			return err
 		}
 		if err := antiquateListSSZ(ctx, slot, state.PendingPartialWithdrawals(), i.buf, i.compressor, i.pendingWithdrawalsCollectorDump); err != nil {
+			return err
+		}
+	}
+	if state.Version() >= clparams.GloasVersion {
+		if err := antiquateListSSZ(ctx, slot, state.GetBuilders(), i.buf, i.compressor, i.buildersCollectorDump); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.GetBuilderPendingWithdrawals(), i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump); err != nil {
+			return err
+		}
+		if err := antiquateListSSZ(ctx, slot, state.GetPayloadExpectedWithdrawals(), i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump); err != nil {
+			return err
+		}
+		if err := i.collectExecutionPayloadAvailability(slot, state.GetExecutionPayloadAvailability()); err != nil {
+			return err
+		}
+		if err := i.collectBuilderPendingPayments(slot, state.GetBuilderPendingPayments()); err != nil {
+			return err
+		}
+		if err := i.collectPtcWindow(slot, state.GetPtcWindow()); err != nil {
+			return err
+		}
+		if err := i.collectLatestExecutionPayloadBid(slot, state.GetLatestExecutionPayloadBid()); err != nil {
 			return err
 		}
 	}
@@ -251,6 +304,11 @@ func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBe
 		i.pendingConsolidationsWriter.Initialize(preState.PendingConsolidations())
 		i.pendingWithdrawalsWriter.Initialize(preState.PendingPartialWithdrawals())
 	}
+	if preState.Version() >= clparams.GloasVersion {
+		i.buildersWriter.Initialize(preState.GetBuilders())
+		i.builderPendingWithdrawalsWriter.Initialize(preState.GetBuilderPendingWithdrawals())
+		i.payloadExpectedWithdrawalsWriter.Initialize(preState.GetPayloadExpectedWithdrawals())
+	}
 }
 
 func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit], pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation], pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
@@ -287,6 +345,123 @@ func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendi
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
 	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
+}
+
+// -- gloas queue diffs --
+
+func (i *beaconStatesCollector) collectGloasQueuesDiffs(
+	slot uint64,
+	builders *solid.ListSSZ[*cltypes.Builder],
+	builderPendingWithdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal],
+	payloadExpectedWithdrawals *solid.ListSSZ[*cltypes.Withdrawal],
+) error {
+	i.buf.Reset()
+	if err := i.buildersWriter.WriteDiff(i.buf, builders); err != nil {
+		return err
+	}
+	if err := i.buildersCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+		return err
+	}
+	i.buf.Reset()
+
+	if err := i.builderPendingWithdrawalsWriter.WriteDiff(i.buf, builderPendingWithdrawals); err != nil {
+		return err
+	}
+	if err := i.builderPendingWithdrawalsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes()); err != nil {
+		return err
+	}
+	i.buf.Reset()
+
+	if err := i.payloadExpectedWithdrawalsWriter.WriteDiff(i.buf, payloadExpectedWithdrawals); err != nil {
+		return err
+	}
+	return i.payloadExpectedWithdrawalsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+}
+
+// -- gloas dumps (SlotsPerDump boundary) --
+
+func (i *beaconStatesCollector) collectBuildersDump(slot uint64, builders *solid.ListSSZ[*cltypes.Builder]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
+}
+
+func (i *beaconStatesCollector) collectBuilderPendingWithdrawalsDump(slot uint64, bpw *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
+}
+
+func (i *beaconStatesCollector) collectPayloadExpectedWithdrawalsDump(slot uint64, pew *solid.ListSSZ[*cltypes.Withdrawal]) error {
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	return antiquateListSSZ(context.Background(), slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
+}
+
+// -- gloas per-slot fields --
+
+func (i *beaconStatesCollector) collectExecutionPayloadAvailability(slot uint64, bv *solid.BitVector) error {
+	encoded, err := bv.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	if _, err := i.compressor.Write(encoded); err != nil {
+		return err
+	}
+	if err := i.compressor.Close(); err != nil {
+		return err
+	}
+	return i.executionPayloadAvailabilityCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+}
+
+func (i *beaconStatesCollector) collectBuilderPendingPayments(slot uint64, bpp *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) error {
+	encoded, err := bpp.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	if _, err := i.compressor.Write(encoded); err != nil {
+		return err
+	}
+	if err := i.compressor.Close(); err != nil {
+		return err
+	}
+	return i.builderPendingPaymentsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+}
+
+func (i *beaconStatesCollector) collectPtcWindow(slot uint64, ptcWindow *solid.VectorSSZ[solid.Uint64VectorSSZ]) error {
+	encoded, err := ptcWindow.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	if _, err := i.compressor.Write(encoded); err != nil {
+		return err
+	}
+	if err := i.compressor.Close(); err != nil {
+		return err
+	}
+	return i.ptcWindowCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
+}
+
+func (i *beaconStatesCollector) collectLatestExecutionPayloadBid(slot uint64, bid *cltypes.ExecutionPayloadBid) error {
+	encoded, err := bid.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	i.buf.Reset()
+	i.compressor.Reset(i.buf)
+	if _, err := i.compressor.Write(encoded); err != nil {
+		return err
+	}
+	if err := i.compressor.Close(); err != nil {
+		return err
+	}
+	return i.latestExecutionPayloadBidCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
 func (i *beaconStatesCollector) collectIntraEpochRandaoMix(slot uint64, randao common.Hash) error {
@@ -425,6 +600,37 @@ func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := i.pendingWithdrawalsCollectorDump.Load(tx, kv.PendingPartialWithdrawalsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	// gloas
+	if err := i.buildersCollector.Load(tx, kv.Builders, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.buildersCollectorDump.Load(tx, kv.BuildersDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.builderPendingWithdrawalsCollector.Load(tx, kv.BuilderPendingWithdrawals, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.builderPendingWithdrawalsCollectorDump.Load(tx, kv.BuilderPendingWithdrawalsDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.payloadExpectedWithdrawalsCollector.Load(tx, kv.PayloadExpectedWithdrawals, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.payloadExpectedWithdrawalsCollectorDump.Load(tx, kv.PayloadExpectedWithdrawalsDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.executionPayloadAvailabilityCollector.Load(tx, kv.ExecutionPayloadAvailabilityTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.builderPendingPaymentsCollector.Load(tx, kv.BuilderPendingPaymentsTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.ptcWindowCollector.Load(tx, kv.PtcWindowTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := i.latestExecutionPayloadBidCollector.Load(tx, kv.LatestExecutionPayloadBidTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 
 	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()})
 }
@@ -453,6 +659,17 @@ func (i *beaconStatesCollector) close() {
 	i.pendingConsolidationsCollectorDump.Close()
 	i.pendingDepositsCollectorDump.Close()
 	i.pendingWithdrawalsCollectorDump.Close()
+	// gloas
+	i.buildersCollector.Close()
+	i.buildersCollectorDump.Close()
+	i.builderPendingWithdrawalsCollector.Close()
+	i.builderPendingWithdrawalsCollectorDump.Close()
+	i.payloadExpectedWithdrawalsCollector.Close()
+	i.payloadExpectedWithdrawalsCollectorDump.Close()
+	i.executionPayloadAvailabilityCollector.Close()
+	i.builderPendingPaymentsCollector.Close()
+	i.ptcWindowCollector.Close()
+	i.latestExecutionPayloadBidCollector.Close()
 }
 
 // antiquateFullUint64List goes on mdbx as it is full of common repeated patter always and thus fits with 16KB pages.
