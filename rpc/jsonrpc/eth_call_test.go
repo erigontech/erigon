@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -243,7 +244,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 		To:   &contractAddress,
 		Data: &callDataBytes,
 	}, blockNumberOrHashRef, nil, nil)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, state.PrunedError)
 }
 
 func TestGetProof(t *testing.T) {
@@ -803,21 +804,21 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 
 func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
-	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	logEvery := time.NewTicker(20 * time.Second)
-
-	err = rawdb.PruneTableDupSort(tx, kv.TblAccountVals, "", pruneTo, logEvery, ctx)
+	latest, err := rpchelper.GetLatestBlockNumber(tx)
 	require.NoError(t, err)
+	require.Greater(t, latest, pruneTo)
 
-	err = rawdb.PruneTableDupSort(tx, kv.StorageChangeSetDeprecated, "", pruneTo, logEvery, ctx)
+	// Write prune mode so checkPruneHistory detects blocks in the pruned range.
+	// Distance(latest-pruneTo) means: keep the last (latest-pruneTo) blocks; anything
+	// older than block pruneTo is considered pruned.
+	mode := prune.ArchiveMode
+	mode.History = prune.Distance(latest - pruneTo)
+	_, err = prune.EnsureNotChanged(tx, mode)
 	require.NoError(t, err)
-
-	//err = rawdb.PruneTable(tx, kv.RCacheDomain, pruneTo, ctx, math.MaxInt32, time.Hour, logger, "")
-	//require.NoError(t, err)
 
 	err = tx.Commit()
 	require.NoError(t, err)
