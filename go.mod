@@ -21,7 +21,7 @@ require (
 	github.com/99designs/gqlgen v0.17.89
 	github.com/FastFilter/xorfilter v0.5.1
 	github.com/Masterminds/sprig/v3 v3.2.3
-	github.com/RoaringBitmap/roaring/v2 v2.16.0
+	github.com/RoaringBitmap/roaring/v2 v2.18.0
 	github.com/alecthomas/kong v1.15.0
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
