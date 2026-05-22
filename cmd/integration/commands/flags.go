@@ -20,10 +20,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
+
+// The integration tool defaults parallel exec on (the integration tool's
+// preferred mode for stage_exec), overriding the dbg package's default-off.
+// dbg.EnvBool honours both EXEC3_PARALLEL and ERIGON_EXEC3_PARALLEL — the
+// latter is what envLookup auto-prepends, so CI workflows that set
+// ERIGON_EXEC3_PARALLEL=false actually take effect.
+func init() {
+	dbg.Exec3Parallel = dbg.EnvBool("EXEC3_PARALLEL", true)
+}
 
 var (
 	chaindata                     string
@@ -48,11 +58,12 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode    bool
-	clearCommitment bool
-	resume          bool
-	noHistory       bool
-	syncCfg         = ethconfig.Defaults.Sync
+	chainTipMode                    bool
+	clearCommitment                 bool
+	resume                          bool
+	noHistory                       bool
+	erigondbDomainStepsInFrozenFile string
+	syncCfg                         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -201,6 +212,12 @@ func withOutputCsvFile(cmd *cobra.Command) {
 
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
+}
+
+func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&erigondbDomainStepsInFrozenFile,
+		utils.ErigondbDomainStepsInFrozenFileFlag.Name, "",
+		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
 // withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.

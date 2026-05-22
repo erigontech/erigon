@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -218,10 +217,7 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
-	if overflow {
-		return nil, errors.New("chainID overflow")
-	}
+	configChainID := chainConfig.ChainID
 
 	lock := &sync.Mutex{}
 
@@ -690,7 +686,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		default:
 			// continue
 		}
-		p.logger.Debug("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+		p.logger.Trace("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
 	// Important: poolDB.BeginRo has a RoTxsLimiter which is implemented using a weighted semaphore object. This means
@@ -788,7 +784,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			AuthorizationsLen:  authorizationLen,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
-			CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
@@ -983,7 +978,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AuthorizationsLen:  uint64(authorizationLen),
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
-		CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 		IsContractCreation: txn.IsCreation(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
@@ -1567,9 +1561,35 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
+	// Senders with queued txns that didn't appear in stateChanges still need
+	// re-evaluation: a tx misclassified into queued at AddLocalTxns time —
+	// e.g. because senders.info returned a stale sender nonce due to the
+	// pre-commit dispatch race introduced in #20195 — would otherwise stay
+	// queued forever, since the only re-evaluation trigger is the sender
+	// appearing in a block's stateChanges, which doesn't happen if the
+	// queued tx is the sender's only outstanding tx.
+	queuedSenders := map[uint64]struct{}{}
+	for _, mt := range p.queued.best.ms {
+		senderID := mt.TxnSlot.SenderID
+		if _, alreadyCovered := sendersWithChangedState[senderID]; alreadyCovered {
+			continue
+		}
+		queuedSenders[senderID] = struct{}{}
+	}
+
 	for senderID := range sendersWithChangedState {
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
+		nonce, balance, err := senders.info(cacheView, senderID)
+		if err != nil {
+			return announcements, err
+		}
+		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
+	}
+
+	// Don't touch senderLastActivity for queuedSenders — these senders did not
+	// change state on-chain, so the dormancy timer should not be reset.
+	for senderID := range queuedSenders {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err

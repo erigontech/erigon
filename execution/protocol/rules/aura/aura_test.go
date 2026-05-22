@@ -186,7 +186,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
 	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
-	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)

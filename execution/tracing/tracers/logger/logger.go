@@ -149,11 +149,12 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 
 func (l *StructLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: l.OnTxStart,
-		OnTxEnd:   l.OnTxEnd,
-		OnExit:    l.OnExit,
-		OnOpcode:  l.OnOpcode,
-		Flush:     l.Flush,
+		OnTxStart:           l.OnTxStart,
+		OnSystemCallStartV2: l.OnSystemCallStartV2,
+		OnTxEnd:             l.OnTxEnd,
+		OnExit:              l.OnExit,
+		OnOpcode:            l.OnOpcode,
+		Flush:               l.Flush,
 	}
 }
 
@@ -166,6 +167,10 @@ func (l *StructLogger) Tracer() *tracers.Tracer {
 }
 
 func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *StructLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -241,7 +246,7 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund().Total(), err}
+	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund(), err}
 	l.logs = append(l.logs, log)
 }
 
@@ -395,15 +400,20 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 
 func (t *mdLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnTxStart: t.OnTxStart,
-		OnEnter:   t.OnEnter,
-		OnExit:    t.OnExit,
-		OnOpcode:  t.OnOpcode,
-		OnFault:   t.OnFault,
+		OnTxStart:           t.OnTxStart,
+		OnSystemCallStartV2: t.OnSystemCallStartV2,
+		OnEnter:             t.OnEnter,
+		OnExit:              t.OnExit,
+		OnOpcode:            t.OnOpcode,
+		OnFault:             t.OnFault,
 	}
 }
 
 func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	t.env = env
+}
+
+func (t *mdLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.env = env
 }
 
