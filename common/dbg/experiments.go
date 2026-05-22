@@ -240,10 +240,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		opt(&options)
 	}
 
-	var logger log.Logger
-	if options.logger != nil {
-		logger = *options.logger
-	}
+	logger := common.Deref(options.logger)
 
 	var memStats runtime.MemStats
 	if options.memStats != nil {

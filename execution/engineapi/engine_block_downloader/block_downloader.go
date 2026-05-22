@@ -46,6 +46,11 @@ const (
 	Synced
 )
 
+type BadHeaderEntry struct {
+	LastValidAncestor common.Hash
+	ValidationErr     string
+}
+
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
 	backgroundCtx context.Context
@@ -57,7 +62,7 @@ type EngineBlockDownloader struct {
 	lock          sync.Mutex
 	logger        log.Logger
 	bbd           *p2p.BackwardBlockDownloader
-	badHeaders    *lru.Cache[common.Hash, common.Hash]
+	badHeaders    *lru.Cache[common.Hash, BadHeaderEntry]
 }
 
 func NewEngineBlockDownloader(
@@ -72,7 +77,7 @@ func NewEngineBlockDownloader(
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	badHeaders, err := lru.New[common.Hash, common.Hash](10_000) // 640kb
+	badHeaders, err := lru.New[common.Hash, BadHeaderEntry](96)
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
@@ -91,13 +96,16 @@ func NewEngineBlockDownloader(
 	}
 }
 
-func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
-	e.badHeaders.Add(badHeader, lastValidAncestor)
+func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash, validationErr string) {
+	e.badHeaders.Add(badHeader, BadHeaderEntry{LastValidAncestor: lastValidAncestor, ValidationErr: validationErr})
 }
 
-func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
-	lastValidAncestor, bad = e.badHeaders.Get(h)
-	return bad, lastValidAncestor
+func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash, validationErr string) {
+	entry, ok := e.badHeaders.Get(h)
+	if !ok {
+		return false, common.Hash{}, ""
+	}
+	return true, entry.LastValidAncestor, entry.ValidationErr
 }
 
 func (e *EngineBlockDownloader) Status() Status {
@@ -149,7 +157,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 	if err != nil {
 		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
 	}
-	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	status, validationErr, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
 	if err != nil {
 		return fmt.Errorf("request chain tip validation failed: %w", err)
 	}
@@ -158,7 +166,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		e.ReportBadHeader(tip.Hash(), latestValidHash)
+		e.ReportBadHeader(tip.Hash(), latestValidHash, common.Deref(validationErr))
 		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
@@ -229,14 +237,15 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
-	status, _, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	status, validationErr, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
 	if err != nil {
 		return err
 	}
 	switch status {
 	case execmodule.ExecutionStatusBadBlock:
-		e.ReportBadHeader(block.Hash(), lastValidHash)
-		e.ReportBadHeader(requested, lastValidHash)
+		ve := common.Deref(validationErr)
+		e.ReportBadHeader(block.Hash(), lastValidHash, ve)
+		e.ReportBadHeader(requested, lastValidHash, ve)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
 	case execmodule.ExecutionStatusTooFarAway:
 		e.logger.Debug(

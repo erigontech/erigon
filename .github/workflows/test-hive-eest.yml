@@ -63,17 +63,17 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            # EIP-7928 test_invalid_{pre,post}_fork_block_*_bal_hash_field
-            # expect -32602 InvalidParams (wrong test expectations), but the
-            # requests are well-formed V4/V5 newPayload — the only divergence
-            # is a blockHash computed over a wrong-fork-schema header. Spec
-            # convention is InvalidStatus + INVALID_BLOCK_HASH, which is what
-            # erigon returns. Testing team has been notified to rectify the
-            # expected exceptions.
-            # Two additional tests have been observed flaky in the merge queue:
-            #   - EIP-7954 test_max_initcode_size[fork_Amsterdam-...-over_max]
-            #   - EIP-7928 test_bal_invalid_extraneous_entries (various params)
-            max-failures: 4
+            # Budget breakdown:
+            #   - 2 wrong-test-expectation deterministic failures:
+            #     EIP-7928 test_invalid_{pre,post}_fork_block_*_bal_hash_field
+            #     expect -32602 InvalidParams but the requests are
+            #     well-formed V4/V5 newPayload — the only divergence is a
+            #     blockHash computed over a wrong-fork-schema header. Spec
+            #     convention is InvalidStatus + INVALID_BLOCK_HASH, which
+            #     is what erigon returns. Testing team has been notified.
+            #   - 1 flake slot for the EIP-7928
+            #     test_bal_invalid_extraneous_entries flake (#21364).
+            max-failures: 3
     steps:
       - name: Clean docker system
         run: |
