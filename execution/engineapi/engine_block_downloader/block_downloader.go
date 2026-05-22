@@ -46,14 +46,6 @@ const (
 	Synced
 )
 
-// BadHeaderEntry is the cached result of a prior bad-block determination.
-// ValidationErr is the original error string returned by ValidateChain when
-// the header was first rejected; it is replayed on subsequent newPayload calls
-// for the same hash so that retries see the actionable reason instead of a
-// generic "previously known bad block" short-circuit. May be empty when the
-// cache entry was produced by a path that didn't surface a validation string
-// (sync-time downloader, "invalid block number" header check), in which case
-// the caller falls back to the generic message.
 type BadHeaderEntry struct {
 	LastValidAncestor common.Hash
 	ValidationErr     string
@@ -85,7 +77,7 @@ func NewEngineBlockDownloader(
 ) *EngineBlockDownloader {
 	var s atomic.Value
 	s.Store(Idle)
-	badHeaders, err := lru.New[common.Hash, BadHeaderEntry](10_000)
+	badHeaders, err := lru.New[common.Hash, BadHeaderEntry](96)
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}

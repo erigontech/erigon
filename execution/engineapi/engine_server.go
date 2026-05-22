@@ -552,10 +552,6 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	// Replay the cached validation error so retries see the actionable reason
-	// (e.g. "max initcode size exceeded") rather than a generic short-circuit
-	// message. When the block is bad only via parent inheritance, wrap the
-	// parent's cached reason so the cause is still traceable.
 	bad, lastValidHash, cachedErr := s.blockDownloader.IsBadHeader(blockHash)
 	if bad {
 		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
