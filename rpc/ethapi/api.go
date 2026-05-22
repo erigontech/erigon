@@ -20,21 +20,22 @@
 package ethapi
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/abi"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // CallArgs represents the arguments for a call.
@@ -56,12 +57,16 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
+func (args *CallArgs) FromOrEmpty() accounts.Address {
+	return args.from()
+}
+
 // from retrieves the transaction sender address.
-func (args *CallArgs) from() common.Address {
+func (args *CallArgs) from() accounts.Address {
 	if args.From == nil {
-		return common.Address{}
+		return accounts.ZeroAddress
 	}
-	return *args.From
+	return accounts.InternAddress(*args.From)
 }
 
 // ToMessage converts CallArgs to the Message type used by the core evm
@@ -131,7 +136,8 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
+				min := u256.Min(*new(uint256.Int).Add(gasTipCap, baseFee), *gasFeeCap)
+				gasPrice = &min
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -160,8 +166,17 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
+	var nonce uint64
+	if args.Nonce != nil {
+		nonce = args.Nonce.Uint64()
+	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerBlobGas)
+	var to = accounts.NilAddress
+	if args.To != nil {
+		to = accounts.InternAddress(*args.To)
+	}
+
+	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
 
 	if args.BlobVersionedHashes != nil {
 		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
@@ -184,9 +199,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
-	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
-	if overflow {
-		return nil, errors.New("chainId field caused an overflow (uint256)")
+	var chainID uint256.Int
+	if args.ChainID != nil {
+		cid, overflow := uint256.FromBig((*big.Int)(args.ChainID))
+		if overflow {
+			return nil, errors.New("chainId field caused an overflow (uint256)")
+		}
+		chainID = *cid
 	}
 
 	msg, err := args.ToMessage(globalGasCap, baseFee)
@@ -196,6 +215,59 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 
 	var tx types.Transaction
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		authorizations := make([]types.Authorization, 0)
+		if args.AuthorizationList != nil {
+			authorizations = make([]types.Authorization, len(args.AuthorizationList))
+			for i, auth := range args.AuthorizationList {
+				authorizations[i], err = auth.ToAuthorization()
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		tx = &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			Authorizations: authorizations,
+		}
+	case args.BlobVersionedHashes != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			MaxFeePerBlobGas:    *uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
+			BlobVersionedHashes: args.BlobVersionedHashes,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -206,12 +278,12 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
 			ChainID:    chainID,
-			FeeCap:     msg.FeeCap(),
-			TipCap:     msg.TipCap(),
+			FeeCap:     *msg.FeeCap(),
+			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
 	case args.AccessList != nil:
@@ -225,10 +297,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Nonce:    msg.Nonce(),
 					GasLimit: msg.Gas(),
 					To:       args.To,
-					Value:    msg.Value(),
+					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
-				GasPrice: msg.GasPrice(),
+				GasPrice: *msg.GasPrice(),
 			},
 			ChainID:    chainID,
 			AccessList: al,
@@ -239,10 +311,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
-			GasPrice: msg.GasPrice(),
+			GasPrice: *msg.GasPrice(),
 		}
 	}
 	return tx, nil
@@ -255,11 +327,12 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64              `json:"nonce"`
-	Code      *hexutil.Bytes               `json:"code"`
-	Balance   **hexutil.Big                `json:"balance"`
-	State     *map[common.Hash]common.Hash `json:"state"`
-	StateDiff *map[common.Hash]common.Hash `json:"stateDiff"`
+	Nonce            *hexutil.Uint64              `json:"nonce"`
+	Code             *hexutil.Bytes               `json:"code"`
+	Balance          **hexutil.Big                `json:"balance"`
+	State            *map[common.Hash]common.Hash `json:"state"`
+	StateDiff        *map[common.Hash]common.Hash `json:"stateDiff"`
+	MovePrecompileTo *common.Address              `json:"movePrecompileToAddress"`
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
@@ -288,7 +361,7 @@ func (e *RevertError) ErrorCode() int {
 }
 
 // ErrorData returns the hex encoded revert reason.
-func (e *RevertError) ErrorData() interface{} {
+func (e *RevertError) ErrorData() any {
 	return e.reason
 }
 
@@ -304,59 +377,17 @@ type ExecutionResult struct {
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
-type StructLogRes struct {
-	Pc      uint64             `json:"pc"`
-	Op      string             `json:"op"`
-	Gas     uint64             `json:"gas"`
-	GasCost uint64             `json:"gasCost"`
-	Depth   int                `json:"depth"`
-	Error   error              `json:"error,omitempty"`
-	Stack   *[]string          `json:"stack,omitempty"`
-	Memory  *[]string          `json:"memory,omitempty"`
-	Storage *map[string]string `json:"storage,omitempty"`
-}
+type StructLogRes = logger.StructLogRes
 
 // FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []logger.StructLog) []StructLogRes {
-	formatted := make([]StructLogRes, len(logs))
-	for index, trace := range logs {
-		formatted[index] = StructLogRes{
-			Pc:      trace.Pc,
-			Op:      trace.Op.String(),
-			Gas:     trace.Gas,
-			GasCost: trace.GasCost,
-			Depth:   trace.Depth,
-			Error:   trace.Err,
-		}
-		if trace.Stack != nil {
-			stack := make([]string, len(trace.Stack))
-			for i, stackValue := range trace.Stack {
-				stack[i] = hex.EncodeToString(math.PaddedBigBytes(stackValue, 32))
-			}
-			formatted[index].Stack = &stack
-		}
-		if trace.Memory != nil {
-			memory := make([]string, 0, (len(trace.Memory)+31)/32)
-			for i := 0; i+32 <= len(trace.Memory); i += 32 {
-				memory = append(memory, hex.EncodeToString(trace.Memory[i:i+32]))
-			}
-			formatted[index].Memory = &memory
-		}
-		if trace.Storage != nil {
-			storage := make(map[string]string)
-			for i, storageValue := range trace.Storage {
-				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
-			}
-			formatted[index].Storage = &storage
-		}
-	}
-	return formatted
+	return logger.FormatLogs(logs)
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
-func RPCMarshalHeader(head *types.Header) map[string]interface{} {
-	result := map[string]interface{}{
-		"number":           (*hexutil.Big)(head.Number),
+func RPCMarshalHeader(head *types.Header) map[string]any {
+	result := map[string]any{
+		"number":           (*hexutil.Big)(head.Number.ToBig()),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
 		"nonce":            head.Nonce,
@@ -365,7 +396,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.Big)(head.Difficulty),
+		"difficulty":       (*hexutil.Big)(head.Difficulty.ToBig()),
 		"extraData":        hexutil.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
@@ -375,7 +406,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"receiptsRoot":     head.ReceiptHash,
 	}
 	if head.BaseFee != nil {
-		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee)
+		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee.ToBig())
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
@@ -392,6 +423,12 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.RequestsHash != nil {
 		result["requestsHash"] = head.RequestsHash
 	}
+	if head.BlockAccessListHash != nil {
+		result["blockAccessListHash"] = head.BlockAccessListHash
+	}
+	if head.SlotNumber != nil {
+		result["slotNumber"] = (*hexutil.Uint64)(head.SlotNumber)
+	}
 
 	// For Gnosis only
 	if head.AuRaSeal != nil {
@@ -405,28 +442,28 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
 	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{})
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]any, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
-		fields["transactions"] = make([]interface{}, 0)
+		fields["transactions"] = make([]any, 0)
 	}
 
 	if inclTx {
-		formatTx := func(tx types.Transaction, index int) (interface{}, error) {
+		formatTx := func(tx types.Transaction, index int) (any, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx types.Transaction, index int) (interface{}, error) {
+			formatTx = func(tx types.Transaction, index int) (any, error) {
 				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]interface{}, len(txs), len(txs)+1)
+		transactions := make([]any, len(txs), len(txs)+1)
 		var err error
 		for i, txn := range txs {
 			if transactions[i], err = formatTx(txn, i); err != nil {
@@ -462,6 +499,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.Big               `json:"blockNumber"`
+	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
 	GasPrice             *hexutil.Big               `json:"gasPrice,omitempty"`
@@ -487,7 +525,7 @@ type RPCTransaction struct {
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -512,10 +550,12 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	result.S = (*hexutil.Big)(s.ToBig())
 
 	if txn.Type() == types.LegacyTxType {
-		chainId = types.DeriveChainId(v)
-		// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
-		if !chainId.IsZero() {
-			result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		if !v.IsZero() { // skip chain id derivation in case of call simulation (where v,r,s are zero)
+			chainId = types.DeriveChainId(v)
+			// if a legacy transaction has an EIP-155 chain id, include it explicitly, otherwise chain id is not included
+			if !chainId.IsZero() {
+				result.ChainID = (*hexutil.Big)(chainId.ToBig())
+			}
 		}
 		result.GasPrice = (*hexutil.Big)(txn.GetTipCap().ToBig())
 	} else {
@@ -534,7 +574,6 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 		}
 
 		if txn.Type() == types.BlobTxType {
-			txn.GetBlobGas()
 			blobTx := txn.(*types.BlobTx)
 			result.MaxFeePerBlobGas = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
 			result.BlobVersionedHashes = blobTx.BlobVersionedHashes
@@ -548,25 +587,27 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId.ToBig())
-	var err error
-	result.From, err = txn.Sender(*signer)
+	signer := types.LatestSignerForChainID(chainId)
+	from, err := txn.Sender(*signer)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
+	} else {
+		result.From = from.Value()
 	}
+
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.Int) *hexutil.Big {
-	fee, overflow := uint256.FromBig(baseFee)
-	if fee != nil && !overflow && blockHash != (common.Hash{}) {
+func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.Big {
+	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := math.U256Min(new(uint256.Int).Add(txn.GetTipCap(), fee), txn.GetFeeCap())
+		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil
@@ -574,7 +615,7 @@ func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.
 
 // NewRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *big.Int) *RPCTransaction {
+func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, chainId *uint256.Int) *RPCTransaction {
 	txn := opaqueTxn.(*types.LegacyTx)
 	result := &RPCTransaction{
 		Type:     hexutil.Uint64(txn.Type()),
@@ -592,7 +633,7 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
 	if blockHash != (common.Hash{}) {
-		result.ChainID = (*hexutil.Big)(chainId)
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
@@ -602,5 +643,5 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
+	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
 }

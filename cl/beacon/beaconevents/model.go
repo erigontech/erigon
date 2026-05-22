@@ -1,41 +1,74 @@
 package beaconevents
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
 type EventStream struct {
-	Event EventTopic  `json:"event"`
-	Data  interface{} `json:"data"`
+	Event EventTopic `json:"event"`
+	Data  any        `json:"data"`
 }
 
 type EventTopic string
 
 // Operation event topics
 const (
-	OpAttestation       EventTopic = "attestation"
-	OpVoluntaryExit     EventTopic = "voluntary_exit"
-	OpProposerSlashing  EventTopic = "proposer_slashing"
-	OpAttesterSlashing  EventTopic = "attester_slashing"
-	OpBlsToExecution    EventTopic = "bls_to_execution_change"
-	OpContributionProof EventTopic = "contribution_and_proof"
-	OpBlobSidecar       EventTopic = "blob_sidecar"
+	OpAttestation               EventTopic = "attestation"
+	OpSingleAttestation         EventTopic = "single_attestation"
+	OpVoluntaryExit             EventTopic = "voluntary_exit"
+	OpProposerSlashing          EventTopic = "proposer_slashing"
+	OpAttesterSlashing          EventTopic = "attester_slashing"
+	OpBlsToExecution            EventTopic = "bls_to_execution_change"
+	OpContributionProof         EventTopic = "contribution_and_proof"
+	OpBlobSidecar               EventTopic = "blob_sidecar"
+	OpDataColumnSidecar         EventTopic = "data_column_sidecar"
+	OpPayloadAttestationMessage EventTopic = "payload_attestation_message" // [New in Gloas:EIP7732]
+	OpExecutionPayloadBid       EventTopic = "execution_payload_bid"       // [New in Gloas:EIP7732]
+	OpExecutionPayloadAvailable EventTopic = "execution_payload_available" // [New in Gloas:EIP7732]
 )
 
 type (
 	// Operation event data types
-	AttestationData           = solid.Attestation
-	SingleAttestationData     = solid.SingleAttestation
-	VoluntaryExitData         = cltypes.SignedVoluntaryExit
-	ProposerSlashingData      = cltypes.ProposerSlashing
-	AttesterSlashingData      = cltypes.AttesterSlashing
-	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
-	ContributionAndProofData  = cltypes.SignedContributionAndProof
-	BlobSidecarData           = cltypes.BlobSidecar
+	AttestationData               = solid.Attestation
+	SingleAttestationData         = solid.SingleAttestation
+	VoluntaryExitData             = cltypes.SignedVoluntaryExit
+	ProposerSlashingData          = cltypes.ProposerSlashing
+	AttesterSlashingData          = cltypes.AttesterSlashing
+	BlsToExecutionChangesData     = cltypes.SignedBLSToExecutionChange
+	ContributionAndProofData      = cltypes.SignedContributionAndProof
+	BlobSidecarData               = cltypes.BlobSidecar
+	PayloadAttestationMessageData = cltypes.PayloadAttestationMessage
+	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
+
+// DataColumnSidecarData includes block_root and slot for SSE events
+type DataColumnSidecarData struct {
+	BlockRoot                    common.Hash                            `json:"block_root"`
+	Index                        uint64                                 `json:"index,string"`
+	Slot                         uint64                                 `json:"slot,string"`
+	Column                       *solid.ListSSZ[*cltypes.Cell]          `json:"column"`
+	KzgCommitments               *solid.ListSSZ[*cltypes.KZGCommitment] `json:"kzg_commitments"`
+	KzgProofs                    *solid.ListSSZ[*cltypes.KZGProof]      `json:"kzg_proofs"`
+	SignedBlockHeader            *cltypes.SignedBeaconBlockHeader       `json:"signed_block_header"`
+	KzgCommitmentsInclusionProof solid.HashVectorSSZ                    `json:"kzg_commitments_inclusion_proof"`
+}
+
+// NewDataColumnSidecarData creates a DataColumnSidecarData from a DataColumnSidecar
+func NewDataColumnSidecarData(sidecar *cltypes.DataColumnSidecar) *DataColumnSidecarData {
+	return &DataColumnSidecarData{
+		BlockRoot:                    sidecar.BlockRoot,
+		Index:                        sidecar.Index,
+		Slot:                         sidecar.Slot,
+		Column:                       sidecar.Column,
+		KzgCommitments:               sidecar.KzgCommitments,
+		KzgProofs:                    sidecar.KzgProofs,
+		SignedBlockHeader:            sidecar.SignedBlockHeader,
+		KzgCommitmentsInclusionProof: sidecar.KzgCommitmentsInclusionProof,
+	}
+}
 
 // State event topics
 const (
@@ -97,6 +130,11 @@ type LightClientFinalityUpdateData struct {
 type LightClientOptimisticUpdateData struct {
 	Version string                              `json:"version"`
 	Data    cltypes.LightClientOptimisticUpdate `json:"data"`
+}
+
+type ExecutionPayloadAvailableData struct {
+	Slot      uint64      `json:"slot,string"`
+	BlockRoot common.Hash `json:"block_root"`
 }
 
 type PayloadAttributesData struct {

@@ -19,11 +19,11 @@ package cltypes
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type Withdrawal struct {
@@ -85,4 +85,13 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 		ret[i] = convertExecutionWithdrawalToConsensusWithdrawal(w)
 	}
 	return ret
+}
+
+// ExpectedWithdrawals represents the expected withdrawals for a beacon state
+type ExpectedWithdrawals struct {
+	Withdrawals                      []*Withdrawal `json:"withdrawals"`
+	ProcessedBuilderWithdrawalsCount uint64        `json:"processed_builder_withdrawals_count,string"` // [New in Gloas:EIP7732]
+	ProcessedPartialWithdrawalsCount uint64        `json:"processed_partial_withdrawals_count,string"`
+	ProcessedBuildersSweepCount      uint64        `json:"processed_builders_sweep_count,string"` // [New in Gloas:EIP7732]
+	ProcessedSweepWithdrawalsCount   uint64        `json:"processed_sweep_withdrawals_count,string"`
 }

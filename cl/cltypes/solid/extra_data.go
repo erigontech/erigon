@@ -20,11 +20,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ExtraData type stores data as a byte slice and its length.
@@ -64,16 +64,26 @@ func (*ExtraData) Static() bool {
 
 // EncodeSSZ appends ExtraData bytes to the provided buffer.
 func (e *ExtraData) EncodeSSZ(buf []byte) ([]byte, error) {
+	if e == nil {
+		return buf, nil
+	}
 	return append(buf, e.Bytes()...), nil
 }
 
 // EncodingSizeSSZ returns the length of ExtraData.
 func (e *ExtraData) EncodingSizeSSZ() int {
+	if e == nil {
+		return 0
+	}
 	return e.l
 }
 
 // HashSSZ returns the Merkle Root of the ExtraData byte slice.
 func (e *ExtraData) HashSSZ() ([32]byte, error) {
+	if e == nil {
+		// Nil ExtraData is equivalent to empty (length 0).
+		e = NewExtraData()
+	}
 	leaves := make([]byte, length.Hash*2)
 	copy(leaves, e.data[:e.l])
 	binary.LittleEndian.PutUint64(leaves[length.Hash:], uint64(e.l))

@@ -20,7 +20,6 @@
 package rpc
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,12 +30,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var (
 	ErrClientQuit                = errors.New("client is closed")
 	ErrNoResult                  = errors.New("no result in JSON-RPC response")
+	ErrMissingBatchResponse      = errors.New("response batch did not contain a response to this call")
 	ErrSubscriptionQueueOverflow = errors.New("subscription queue overflow")
 	errClientReconnected         = errors.New("client reconnected")
 	errDead                      = errors.New("connection lost")
@@ -65,11 +65,11 @@ const (
 // BatchElem is an element in a batch request.
 type BatchElem struct {
 	Method string
-	Args   []interface{}
+	Args   []any
 	// The result is unmarshaled into this field. Result must be set to a
 	// non-nil pointer value of the desired type, otherwise the response will be
 	// discarded.
-	Result interface{}
+	Result any
 	// Error is set if the server returns an error for this request, or if
 	// unmarshaling into Result fails. It is not set for I/O errors.
 	Error error
@@ -82,6 +82,7 @@ type Client struct {
 	isHTTP          bool
 	services        *serviceRegistry
 	methodAllowList AllowList
+	batchLimit      int // batch size limit
 
 	idCounter uint32
 
@@ -115,10 +116,10 @@ type clientConn struct {
 	handler *handler
 }
 
-func (c *Client) newClientConn(conn ServerCodec) *clientConn {
-	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
+func (c *Client) newClientConn(conn ServerCodec, connCtx context.Context) *clientConn {
+	ctx := context.WithValue(connCtx, clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0, c.New)
+	handler := newHandler(ctx, conn, c.idgen, c.services, c.batchLimit, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0, c.New)
 	return &clientConn{conn, handler}
 }
 
@@ -133,13 +134,14 @@ type readOp struct {
 }
 
 type requestOp struct {
-	ids  []json.RawMessage
-	err  error
-	resp chan *jsonrpcMessage // receives up to len(ids) responses
-	sub  *ClientSubscription  // only set for EthSubscribe requests
+	ids         []json.RawMessage
+	err         error
+	resp        chan []*jsonrpcMessage // batch response channel
+	sub         *ClientSubscription    // only set for EthSubscribe requests
+	hadResponse bool                   // true when the request was responded to
 }
 
-func (op *requestOp) wait(ctx context.Context, c *Client) (*jsonrpcMessage, error) {
+func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, error) {
 	select {
 	case <-ctx.Done():
 		// Send the timeout to dispatch so it can remove the request IDs.
@@ -194,7 +196,9 @@ func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client
 // 'reverse calls' in a handler method.
 func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
 	client, ok := ctx.Value(clientContextKey{}).(*Client)
-	client.logger = logger
+	if ok {
+		client.logger = logger
+	}
 	return client, ok
 }
 
@@ -203,17 +207,22 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, logger)
+	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, 0, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, logger log.Logger) *Client {
+func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
+	return initClientWithBaseCtx(context.Background(), conn, idgen, services, batchLimit, logger)
+}
+
+func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		idgen:       idgen,
 		isHTTP:      isHTTP,
 		services:    services,
+		batchLimit:  batchLimit,
 		writeConn:   conn,
 		close:       make(chan struct{}),
 		closing:     make(chan struct{}),
@@ -227,7 +236,7 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, lo
 		logger:      logger,
 	}
 	if !isHTTP {
-		go c.dispatch(conn)
+		go c.dispatch(conn, baseCtx)
 	}
 	return c
 }
@@ -236,7 +245,7 @@ func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, lo
 // methods on the given receiver match the criteria to be either a RPC method or a
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this client provides to the server.
-func (c *Client) RegisterName(name string, receiver interface{}) error {
+func (c *Client) RegisterName(name string, receiver any) error {
 	return c.services.registerName(name, receiver)
 }
 
@@ -285,7 +294,7 @@ func (c *Client) SetHeader(key, value string) {
 //
 // The result must be a pointer so that package json can unmarshal into it. You
 // can also pass nil, in which case the result is ignored.
-func (c *Client) Call(result interface{}, method string, args ...interface{}) error {
+func (c *Client) Call(result any, method string, args ...any) error {
 	ctx := context.Background()
 	return c.CallContext(ctx, result, method, args...)
 }
@@ -295,15 +304,15 @@ func (c *Client) Call(result interface{}, method string, args ...interface{}) er
 //
 // The result must be a pointer so that package json can unmarshal into it. You
 // can also pass nil, in which case the result is ignored.
-func (c *Client) CallContext(ctx context.Context, result interface{}, method string, args ...interface{}) error {
-	if result != nil && reflect.TypeOf(result).Kind() != reflect.Ptr {
+func (c *Client) CallContext(ctx context.Context, result any, method string, args ...any) error {
+	if result != nil && reflect.TypeOf(result).Kind() != reflect.Pointer {
 		return fmt.Errorf("call result parameter must be pointer or nil interface: %v", result)
 	}
 	msg, err := c.newMessage(method, args...)
 	if err != nil {
 		return err
 	}
-	op := &requestOp{ids: []json.RawMessage{msg.ID}, resp: make(chan *jsonrpcMessage, 1)}
+	op := &requestOp{ids: []json.RawMessage{msg.ID}, resp: make(chan []*jsonrpcMessage, 1)}
 
 	if c.isHTTP {
 		err = c.sendHTTP(ctx, op, msg)
@@ -315,23 +324,34 @@ func (c *Client) CallContext(ctx context.Context, result interface{}, method str
 	}
 
 	// dispatch has accepted the request and will close the channel when it quits.
-	switch resp, err := op.wait(ctx, c); {
-	case err != nil:
+	batchResp, err := op.wait(ctx, c)
+	if err != nil {
 		return err
+	}
+	if len(batchResp) == 0 {
+		return fmt.Errorf("no response received for call")
+	}
+	resp := batchResp[0]
+	switch {
 	case resp.Error != nil:
 		return resp.Error
 	case len(resp.Result) == 0:
 		return ErrNoResult
 	default:
-		return json.Unmarshal(resp.Result, &result)
+		if result == nil {
+			return nil
+		}
+		return json.Unmarshal(resp.Result, result)
 	}
 }
 
 // BatchCall sends all given requests as a single batch and waits for the server
 // to return a response for all of them.
 //
-// In contrast to Call, BatchCall only returns I/O errors. Any error specific to
-// a request is reported through the Error field of the corresponding BatchElem.
+// In contrast to Call, BatchCall only returns I/O errors, with one exception:
+// an empty batch is rejected with an invalid-request error (-32600) before any
+// send. Any error specific to a request is reported through the Error field of
+// the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCall(b []BatchElem) error {
@@ -344,15 +364,23 @@ func (c *Client) BatchCall(b []BatchElem) error {
 // context's deadline.
 //
 // In contrast to CallContext, BatchCallContext only returns errors that have occurred
-// while sending the request. Any error specific to a request is reported through the
-// Error field of the corresponding BatchElem.
+// while sending the request, with one exception: an empty batch is rejected with
+// an invalid-request error (-32600) before any send. Any error specific to a
+// request is reported through the Error field of the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
-	msgs := make([]*jsonrpcMessage, len(b))
+	if len(b) == 0 {
+		return &invalidRequestError{"empty batch"}
+	}
+
+	var (
+		msgs = make([]*jsonrpcMessage, len(b))
+		byID = make(map[string]int, len(b))
+	)
 	op := &requestOp{
 		ids:  make([]json.RawMessage, len(b)),
-		resp: make(chan *jsonrpcMessage, len(b)),
+		resp: make(chan []*jsonrpcMessage, 1),
 	}
 	for i, elem := range b {
 		msg, err := c.newMessage(elem.Method, elem.Args...)
@@ -361,6 +389,7 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 		}
 		msgs[i] = msg
 		op.ids[i] = msg.ID
+		byID[string(msg.ID)] = i
 	}
 
 	var err error
@@ -369,39 +398,53 @@ func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
 	} else {
 		err = c.send(ctx, op, msgs)
 	}
+	if err != nil {
+		return err
+	}
+
+	batchResp, err := op.wait(ctx, c)
+	if err != nil {
+		return err
+	}
 
 	// Wait for all responses to come back.
-	for n := 0; n < len(b) && err == nil; n++ {
-		var resp *jsonrpcMessage
-		resp, err = op.wait(ctx, c)
-		if err != nil {
-			break
+	for n := 0; n < len(batchResp); n++ {
+		resp := batchResp[n]
+		if resp == nil {
+			// Ignore null responses. These can happen for batches sent via HTTP.
+			continue
 		}
+
 		// Find the element corresponding to this response.
-		// The element is guaranteed to be present because dispatch
-		// only sends valid IDs to our channel.
-		var elem *BatchElem
-		for i := range msgs {
-			if bytes.Equal(msgs[i].ID, resp.ID) {
-				elem = &b[i]
-				break
-			}
+		index, ok := byID[string(resp.ID)]
+		if !ok {
+			continue
 		}
-		if resp.Error != nil {
+		delete(byID, string(resp.ID))
+
+		// Assign result and error.
+		elem := &b[index]
+		switch {
+		case resp.Error != nil:
 			elem.Error = resp.Error
-			continue
-		}
-		if len(resp.Result) == 0 {
+		case resp.Result == nil:
 			elem.Error = ErrNoResult
-			continue
+		default:
+			elem.Error = json.Unmarshal(resp.Result, elem.Result)
 		}
-		elem.Error = json.Unmarshal(resp.Result, elem.Result)
 	}
+
+	// Check that all expected responses have been received.
+	for _, index := range byID {
+		elem := &b[index]
+		elem.Error = ErrMissingBatchResponse
+	}
+
 	return err
 }
 
 // Notify sends a notification, i.e. a method call that doesn't expect a response.
-func (c *Client) Notify(ctx context.Context, method string, args ...interface{}) error {
+func (c *Client) Notify(ctx context.Context, method string, args ...any) error {
 	op := new(requestOp)
 	msg, err := c.newMessage(method, args...)
 	if err != nil {
@@ -416,7 +459,7 @@ func (c *Client) Notify(ctx context.Context, method string, args ...interface{})
 }
 
 // EthSubscribe registers a subscripion under the "eth" namespace.
-func (c *Client) EthSubscribe(ctx context.Context, channel interface{}, args ...interface{}) (*ClientSubscription, error) {
+func (c *Client) EthSubscribe(ctx context.Context, channel any, args ...any) (*ClientSubscription, error) {
 	return c.Subscribe(ctx, "eth", channel, args...)
 }
 
@@ -432,7 +475,7 @@ func (c *Client) EthSubscribe(ctx context.Context, channel interface{}, args ...
 // before considering the subscriber dead. The subscription Err channel will receive
 // ErrSubscriptionQueueOverflow. Use a sufficiently large buffer on the channel or ensure
 // that the channel usually has at least one reader to prevent this issue.
-func (c *Client) Subscribe(ctx context.Context, namespace string, channel interface{}, args ...interface{}) (*ClientSubscription, error) {
+func (c *Client) Subscribe(ctx context.Context, namespace string, channel any, args ...any) (*ClientSubscription, error) {
 	// Check type of channel first.
 	chanVal := reflect.ValueOf(channel)
 	if chanVal.Kind() != reflect.Chan || chanVal.Type().ChanDir()&reflect.SendDir == 0 {
@@ -451,7 +494,7 @@ func (c *Client) Subscribe(ctx context.Context, namespace string, channel interf
 	}
 	op := &requestOp{
 		ids:  []json.RawMessage{msg.ID},
-		resp: make(chan *jsonrpcMessage),
+		resp: make(chan []*jsonrpcMessage),
 		sub:  newClientSubscription(c, namespace, chanVal),
 	}
 
@@ -466,7 +509,7 @@ func (c *Client) Subscribe(ctx context.Context, namespace string, channel interf
 	return op.sub, nil
 }
 
-func (c *Client) newMessage(method string, paramsIn ...interface{}) (*jsonrpcMessage, error) {
+func (c *Client) newMessage(method string, paramsIn ...any) (*jsonrpcMessage, error) {
 	msg := &jsonrpcMessage{Version: vsn, ID: c.nextID(), Method: method}
 	if paramsIn != nil { // prevent sending "params":null
 		var err error
@@ -479,7 +522,7 @@ func (c *Client) newMessage(method string, paramsIn ...interface{}) (*jsonrpcMes
 
 // send registers op with the dispatch loop, then sends msg on the connection.
 // if sending fails, op is deregistered.
-func (c *Client) send(ctx context.Context, op *requestOp, msg interface{}) error {
+func (c *Client) send(ctx context.Context, op *requestOp, msg any) error {
 	select {
 	case c.reqInit <- op:
 		err := c.write(ctx, msg, false)
@@ -494,7 +537,7 @@ func (c *Client) send(ctx context.Context, op *requestOp, msg interface{}) error
 	}
 }
 
-func (c *Client) write(ctx context.Context, msg interface{}, retry bool) error {
+func (c *Client) write(ctx context.Context, msg any, retry bool) error {
 	if c.writeConn == nil {
 		// The previous write failed. Try to establish a new connection.
 		if err := c.reconnect(ctx); err != nil {
@@ -539,11 +582,11 @@ func (c *Client) reconnect(ctx context.Context) error {
 // dispatch is the main loop of the client.
 // It sends read messages to waiting calls to Call and BatchCall
 // and subscription notifications to registered subscriptions.
-func (c *Client) dispatch(codec ServerCodec) {
+func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 	var (
 		lastOp      *requestOp  // tracks last send operation
 		reqInitLock = c.reqInit // nil while the send lock is held
-		conn        = c.newClientConn(codec)
+		conn        = c.newClientConn(codec, connCtx)
 		reading     = true
 	)
 	defer func() {
@@ -573,7 +616,12 @@ func (c *Client) dispatch(codec ServerCodec) {
 
 		case err := <-c.readErr:
 			conn.handler.logger.Trace("RPC connection read error", "err", err)
-			conn.close(err, lastOp)
+			// A read error is fatal for the connection, and all pending requests must be cancelled,
+			// including any that might still be considered in-flight. Once the resp channel is closed
+			// here, a later reconnect must not re-register this op (sending on a closed channel would
+			// panic), so clear lastOp too.
+			conn.close(err, nil)
+			lastOp = nil
 			reading = false
 
 		// Reconnect:
@@ -590,10 +638,12 @@ func (c *Client) dispatch(codec ServerCodec) {
 			}
 			go c.read(newcodec)
 			reading = true
-			conn = c.newClientConn(newcodec)
-			// Re-register the in-flight request on the new handler
-			// because that's where it will be sent.
-			conn.handler.addRequestOp(lastOp)
+			conn = c.newClientConn(newcodec, connCtx)
+			// Re-register the in-flight request on the new handler because that's where it will be sent.
+			// lastOp is nil if a fatal read error already cancelled the op — nothing to transfer then.
+			if lastOp != nil {
+				conn.handler.addRequestOp(lastOp)
+			}
 
 		// Send path:
 		case op := <-reqInitLock:
@@ -603,9 +653,11 @@ func (c *Client) dispatch(codec ServerCodec) {
 			conn.handler.addRequestOp(op)
 
 		case err := <-c.reqSent:
-			if err != nil {
+			if err != nil && lastOp != nil {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
+				// lastOp can be nil if a fatal read error fired first and already
+				// cancelled the in-flight op.
 				conn.handler.removeRequestOp(lastOp)
 			}
 			// Let the next request in.

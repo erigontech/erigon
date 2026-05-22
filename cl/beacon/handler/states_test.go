@@ -27,11 +27,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -81,10 +81,10 @@ func TestGetStateFork(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				return
 			}
-			jsonVal := make(map[string]interface{})
+			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
-			data := jsonVal["data"].(map[string]interface{})
+			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, "0x00000000", data["current_version"])
 			require.Equal(t, "0x00000000", data["previous_version"])
 			require.Equal(t, "0", data["epoch"])
@@ -146,10 +146,10 @@ func TestGetStateRoot(t *testing.T) {
 			if resp.StatusCode != http.StatusOK {
 				return
 			}
-			jsonVal := make(map[string]interface{})
+			jsonVal := make(map[string]any)
 			// unmarshal the json
 			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonVal))
-			data := jsonVal["data"].(map[string]interface{})
+			data := jsonVal["data"].(map[string]any)
 			require.Equal(t, data["root"], "0x"+common.Bytes2Hex(postRoot[:]))
 		})
 	}

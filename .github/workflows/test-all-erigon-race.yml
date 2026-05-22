@@ -1,0 +1,82 @@
+name: All tests (with -race)
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # Workflow files can't read local files directly — they must be loaded via a
+  # job step. We do this so the matrix group names come from the same source as
+  # the test code (tools/test-groups), keeping CI and local runs in sync.
+  load-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      test-groups: ${{ steps.load.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - id: load
+        run: echo "groups=$(./tools/test-groups names)" >> $GITHUB_OUTPUT
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true
+
+  tests-linux:
+    needs: load-matrix
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+        test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Declare runners
+        run: |
+          set +x
+          echo "This workflow is being executed by this runner: $RUNNER_NAME"
+
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          submodules: true
+          lfs: tests
+          cleanup-space: true
+          build-cache-extra-key: ${{ matrix.test-group }}
+          ramdisk: true
+
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
+        env:
+          SKIP_FLAKY_TESTS: 'true'
+          CGO_CFLAGS: -D__BLST_PORTABLE__
+        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

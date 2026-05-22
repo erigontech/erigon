@@ -28,10 +28,71 @@ import (
 
 	"github.com/valyala/fastjson"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/state"
 )
+
+// openWriters creates buffered writers for record and error files.
+// Returns a cleanup function that flushes and closes all opened files.
+func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer, cleanup func(), err error) {
+	var closers []func()
+	cleanup = func() {
+		for i := len(closers) - 1; i >= 0; i-- {
+			closers[i]()
+		}
+	}
+	if errorFileName != "" {
+		f, err := os.Create(errorFileName)
+		if err != nil {
+			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %v", errorFileName, err)
+		}
+		errs = bufio.NewWriter(f)
+		closers = append(closers, func() { errs.Flush(); f.Close() })
+	}
+	if recordFileName != "" {
+		f, err := os.Create(recordFileName)
+		if err != nil {
+			cleanup() // close any files already opened above
+			return nil, nil, nil, fmt.Errorf("cannot create file %s: %v", recordFileName, err)
+		}
+		rec = bufio.NewWriter(f)
+		closers = append(closers, func() { rec.Flush(); f.Close() })
+	}
+	return rec, errs, cleanup, nil
+}
+
+// fetchBlock fetches a block by number from Erigon and optionally compares it with Geth.
+// Returns skip=true when blocks differ and rec is non-nil (the difference is logged to rec).
+func fetchBlock(reqGen *RequestGenerator, bn uint64, needCompare bool, rec *bufio.Writer) (b *EthBlockByNumber, skip bool, err error) {
+	b = new(EthBlockByNumber)
+	res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), b)
+	if res.Err != nil {
+		return nil, false, fmt.Errorf("could not retrieve block (Erigon) %d: %v", bn, res.Err)
+	}
+	if b.Error != nil {
+		return nil, false, fmt.Errorf("error retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
+	}
+	if needCompare {
+		var bg EthBlockByNumber
+		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), &bg)
+		if res.Err != nil {
+			return nil, false, fmt.Errorf("could not retrieve block (geth) %d: %v", bn, res.Err)
+		}
+		if bg.Error != nil {
+			return nil, false, fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
+		}
+		if !compareBlocks(b, &bg) {
+			if rec != nil {
+				fmt.Fprintf(rec, "Block difference for block=%d\n", bn)
+				rec.Flush()
+				return b, true, nil
+			}
+			return nil, false, fmt.Errorf("block %d has different fields", bn)
+		}
+	}
+	return b, false, nil
+}
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
 	r := b.Result
@@ -649,7 +710,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	return equal
 }
 
-func post(client *http.Client, url, request string, response interface{}) error {
+func post(client *http.Client, url, request string, response any) error {
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
@@ -667,8 +728,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 	err = json.Unmarshal(b, response)
 	if err != nil {
-		fmt.Printf("json: %s\n", string(b))
-		panic(err)
+		return fmt.Errorf("json unmarshal error: %w, body: %s", err, string(b))
 	}
 	//log.Info("Got in", "time", time.Since(start).Seconds())
 	return err

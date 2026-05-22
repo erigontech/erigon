@@ -21,6 +21,7 @@ package nodecfg
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,12 +30,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -171,6 +171,9 @@ type Config struct {
 	HealthCheck bool
 
 	Http httpcfg.HttpCfg
+
+	DebugMux      *http.ServeMux
+	DisableSentry bool
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
@@ -203,18 +206,6 @@ func (c *Config) NodeDB() string {
 	return c.ResolvePath(datadirNodeDatabase)
 }
 
-// DefaultIPCEndpoint returns the IPC path used by default.
-func DefaultIPCEndpoint(clientIdentifier string) string {
-	if clientIdentifier == "" {
-		clientIdentifier = strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
-		if clientIdentifier == "" {
-			panic("empty executable name")
-		}
-	}
-	config := &Config{Dirs: datadir.New(paths.DefaultDataDir()), IPCPath: clientIdentifier + ".ipc"}
-	return config.IPCEndpoint()
-}
-
 // HTTPEndpoint resolves an HTTP endpoint based on the configured host interface
 // and port parameters.
 func (c *Config) HTTPEndpoint() string {
@@ -224,12 +215,6 @@ func (c *Config) HTTPEndpoint() string {
 	return fmt.Sprintf("%s:%d", c.HTTPHost, c.HTTPPort)
 }
 
-// DefaultHTTPEndpoint returns the HTTP endpoint used by default.
-func DefaultHTTPEndpoint() string {
-	config := &Config{HTTPHost: DefaultHTTPHost, HTTPPort: DefaultHTTPPort}
-	return config.HTTPEndpoint()
-}
-
 // WSEndpoint resolves a websocket endpoint based on the configured host interface
 // and port parameters.
 func (c *Config) WSEndpoint() string {
@@ -237,12 +222,6 @@ func (c *Config) WSEndpoint() string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", c.WSHost, c.WSPort)
-}
-
-// DefaultWSEndpoint returns the websocket endpoint used by default.
-func DefaultWSEndpoint() string {
-	config := &Config{WSHost: DefaultWSHost, WSPort: DefaultWSPort}
-	return config.WSEndpoint()
 }
 
 // ExtRPCEnabled returns the indicator whether node enables the external
@@ -335,7 +314,7 @@ func (c *Config) parsePersistentNodes(w *bool, path string, logger log.Logger) [
 
 var warnLock sync.Mutex
 
-func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...interface{}) {
+func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...any) {
 	warnLock.Lock()
 	defer warnLock.Unlock()
 

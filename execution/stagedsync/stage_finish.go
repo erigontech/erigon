@@ -19,50 +19,35 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"time"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/version"
 )
 
 type FinishCfg struct {
-	db            kv.RwDB
-	tmpDir        string
-	forkValidator *engine_helpers.ForkValidator
+	initialCycleStart *time.Time
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
+func StageFinishCfg() FinishCfg {
+	initialCycleStart := time.Now()
 	return FinishCfg{
-		db:            db,
-		tmpDir:        tmpDir,
-		forkValidator: forkValidator,
+		initialCycleStart: &initialCycleStart,
 	}
 }
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
+	defer updateInitialCycleDuration(s, cfg)
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
-	if s.BlockNumber > executionAt { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
-	if executionAt <= s.BlockNumber {
+	if s.BlockNumber >= executionAt { // Erigon will self-heal (download missed blocks) eventually
 		return nil
 	}
 
@@ -71,18 +56,8 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if err != nil {
 		return err
 	}
-	if cfg.forkValidator != nil {
-		cfg.forkValidator.NotifyCurrentHeight(executionAt)
-	}
-
 	if s.CurrentSyncCycle.IsInitialCycle {
-		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
-			return err
-		}
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
+		if err := rawdb.SetErigonVersion(tx, version.VersionKeyFinished); err != nil {
 			return err
 		}
 	}
@@ -90,43 +65,17 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	return nil
 }
 
-func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	return u.Done(tx)
 }
 
-func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
+func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
+	if s.CurrentSyncCycle.IsInitialCycle {
+		initialCycleDurationSecs.Set(time.Since(*cfg.initialCycleStart).Seconds())
+	} else {
+		*cfg.initialCycleStart = time.Now()
+		initialCycleDurationSecs.Set(0)
 	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // [from,to)
@@ -147,7 +96,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
 		if headerRLP != nil {
-			headersRlp = append(headersRlp, common.CopyBytes(headerRLP))
+			headersRlp = append(headersRlp, common.Copy(headerRLP))
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {

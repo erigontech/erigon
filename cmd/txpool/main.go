@@ -26,24 +26,23 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/turbo/privateapi"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/paths"
-	"github.com/erigontech/erigon-lib/direct"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	proto_sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/remotedb"
-	"github.com/erigontech/erigon-lib/kv/remotedbserver"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/remotedb"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/logging"
+	"github.com/erigontech/erigon/node/paths"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -74,7 +73,8 @@ var (
 
 	mdbxWriteMap bool
 
-	commitEvery time.Duration
+	commitEvery         time.Duration
+	queuedDormancyEvery time.Duration
 )
 
 func init() {
@@ -100,6 +100,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&queuedDormancyEvery, utils.TxPoolQueuedDormancyFlag.Name, utils.TxPoolQueuedDormancyFlag.Value, utils.TxPoolQueuedDormancyFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&mdbxWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
@@ -132,8 +133,8 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
-	ethBackendClient := remote.NewETHBACKENDClient(coreConn)
-	kvClient := remote.NewKVClient(coreConn)
+	ethBackendClient := remoteproto.NewETHBACKENDClient(coreConn)
+	kvClient := remoteproto.NewKVClient(coreConn)
 	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
 	if err != nil {
 		return fmt.Errorf("could not connect to remoteKv: %w", err)
@@ -141,7 +142,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 
 	log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
 
-	sentryClients := make([]proto_sentry.SentryClient, len(sentryAddr))
+	sentryClients := make([]sentryproto.SentryClient, len(sentryAddr))
 	for i := range sentryAddr {
 		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {
@@ -152,7 +153,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("could not connect to sentry: %w", err)
 		}
 
-		sentryClients[i] = direct.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
+		sentryClients[i] = direct.NewSentryClientRemote(sentryproto.NewSentryClient(sentryConn))
 	}
 
 	cfg := txpoolcfg.DefaultConfig
@@ -172,6 +173,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip
 	cfg.MdbxWriteMap = mdbxWriteMap
+	cfg.QueuedDormancyDuration = queuedDormancyEvery
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"

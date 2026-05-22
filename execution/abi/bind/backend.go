@@ -24,9 +24,11 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
@@ -49,10 +51,10 @@ var (
 type ContractCaller interface {
 	// CodeAt returns the code of the given account. This is needed to differentiate
 	// between contract internal errors and the local chain being out of sync.
-	CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error)
+	CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error)
 	// CallContract executes an Ethereum contract call with the specified data as the
 	// input.
-	CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error)
 }
 
 // PendingContractCaller defines methods to perform contract calls on the pending state.
@@ -82,7 +84,7 @@ type ContractTransactor interface {
 	// There is no guarantee that this is the true gas limit requirement as other
 	// transactions may be added or removed by miners, but it should provide a basis
 	// for setting a reasonable default.
-	EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error)
+	EstimateGas(ctx context.Context, callMsg ethereum.CallMsg) (gas uint64, err error)
 	// SendTransaction injects the transaction into the pending pool for execution.
 	SendTransaction(ctx context.Context, txn types.Transaction) error
 }
@@ -104,7 +106,7 @@ type ContractFilterer interface {
 // DeployBackend wraps the operations needed by WaitMined and WaitDeployed.
 type DeployBackend interface {
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
-	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
+	CodeAt(ctx context.Context, account common.Address, blockNumber *uint256.Int) ([]byte, error)
 }
 
 // ContractBackend defines the methods needed to work with contracts on a read-write basis.

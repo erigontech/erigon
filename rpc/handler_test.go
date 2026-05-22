@@ -27,7 +27,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
@@ -42,7 +42,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 		},
 		"error_without_stream_write": {
 			params:   []byte("[2]"),
-			expected: `{"jsonrpc":"2.0","id":1,"result":null,"error":{"code":-32000,"message":"id 2"}}`,
+			expected: `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"id 2"}}`,
 		},
 		"no_error": {
 			params:   []byte("[3]"),
@@ -98,11 +98,10 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				return nil
 			}
 
-			var arg1 int
 			cb := &callback{
 				fn:          reflect.ValueOf(dummyFunc),
 				rcvr:        reflect.Value{},
-				argTypes:    []reflect.Type{reflect.TypeOf(arg1)},
+				argTypes:    []reflect.Type{reflect.TypeFor[int]()},
 				hasCtx:      false,
 				errPos:      0,
 				isSubscribe: false,
@@ -119,6 +118,8 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 
 			h := handler{}
 			h.runMethod(context.Background(), &msg, cb, args, stream)
+
+			stream.Flush()
 
 			output := buf.String()
 			assert.Equal(t, testParams.expected, output, "expected output should match")

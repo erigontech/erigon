@@ -1,39 +1,85 @@
 name: Lint
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
   workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   lint:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.24'
+          fetch-depth: 1
 
-      - name: Install golangci-lint
-        if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: 'v2.1.6'
+      - name: Install actionlint
+        run: |
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin actionlint
 
-      - name: Lint
-        if: runner.os == 'Linux'
-        run: make lint
+      - name: Install zizmor
+        run: pip install --break-system-packages zizmor==1.24.1
+
+      # -shellcheck '' disables actionlint's built-in inline-script checking;
+      # the repo's QA workflow run: blocks have many pre-existing shellcheck
+      # warnings that need a separate cleanup pass (#21128).  .sh files are
+      # covered by the dedicated shellcheck step below.
+      # runner.workspace is suppressed: it was dropped from the official context
+      # spec but is still available on self-hosted runners; QA workflows rely on
+      # it until they are migrated to github.workspace / runner.temp.
+      - name: actionlint
+        run: actionlint -shellcheck '' --ignore '"workspace" is not defined in object type'
+
+      - name: Actions security audit (zizmor)
+        run: |
+          zizmor --config .github/zizmor.yml --format github .github/workflows/ || {
+            EC=$?; [ "$EC" -lt 14 ] && exit 0 || exit "$EC"
+          }
+
+      # severity=warning catches real bugs (word-splitting, masked exit codes)
+      # without noise from pure style hints.
+      - name: shellcheck
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 \
+            | xargs -0 shellcheck --severity=warning
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+
+      # golangci-lint internally trims cache entries unused for 5 days,
+      # so the cache is self-cleaning even as we save new versions.
+      - name: Restore golangci-lint cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+          restore-keys: |
+            golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|
+            golangci-lint|${{ runner.os }}|
+
+      - run: make lintci
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      - name: Save golangci-lint cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+
+      # In the merge queue, cancel the run on first failure so the gate
+      # doesn't stall waiting for still-running siblings. PR runs keep
+      # going so authors see the full failure picture.
+      - name: Cancel workflow run on failure
+        if: failure() && github.event_name == 'merge_group'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel ${{ github.run_id }} || true

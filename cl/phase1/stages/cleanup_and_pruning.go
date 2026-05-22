@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // cleanupAndPruning cleans up the database and prunes old data.
@@ -14,10 +14,10 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 	defer tx.Rollback()
-	pruneDistance := uint64(1_000_000)
+	const blockPruneDistance = uint64(1_000_000)
 
-	if !cfg.caplinConfig.ArchiveBlocks {
-		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-pruneDistance); err != nil {
+	if !cfg.caplinConfig.ArchiveBlocks && args.seenSlot > blockPruneDistance {
+		if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-blockPruneDistance); err != nil {
 			return err
 		}
 	}
@@ -25,5 +25,12 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return cfg.blobStore.Prune()
+	cfg.blobStore.Prune()
+	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
+	if columnKeepSlots == 0 {
+		// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
+		columnKeepSlots = cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
+	}
+	cfg.peerDas.Prune(columnKeepSlots)
+	return nil
 }

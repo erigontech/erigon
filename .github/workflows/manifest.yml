@@ -21,19 +21,29 @@ on:
 
 jobs:
   ManifestCheck:
-    if: github.event.pull_request.draft == false
+    # != true rather than == false: outside a pull_request event,
+    # github.event.pull_request.draft is '' (empty string). GA expressions
+    # have no type coercion, so '' == false is false and would skip the job
+    # on merge_group and push events. '' != true is true, so the job runs.
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+
+      - name: Get Go version from go.mod
+        id: goversion
+        run: |
+          minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
+          echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: ${{ steps.goversion.outputs.version }}
       - run: make downloader
       - run: echo $ModModified
-      - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon3-v1-snapshots-mainnet.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain bor-mainnet --webseed 'https://erigon3-v1-snapshots-bor-mainnet.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain gnosis      --webseed 'https://erigon3-v1-snapshots-gnosis.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain chiado      --webseed 'https://erigon3-v1-snapshots-chiado.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain sepolia     --webseed 'https://erigon3-v1-snapshots-sepolia.erigon.network'
-      - run: ./build/bin/downloader manifest-verify --chain amoy        --webseed 'https://erigon3-v1-snapshots-amoy.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon34-v1-snapshots-mainnet.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain gnosis      --webseed 'https://erigon34-v1-snapshots-gnosis.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain chiado      --webseed 'https://erigon34-v1-snapshots-chiado.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain sepolia     --webseed 'https://erigon34-v1-snapshots-sepolia.erigon.network'
+      - run: ./build/bin/downloader manifest-verify --chain hoodi       --webseed 'https://erigon34-v1-snapshots-hoodi.erigon.network'

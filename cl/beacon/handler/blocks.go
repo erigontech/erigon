@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type headerResponse struct {
@@ -141,6 +141,9 @@ func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request
 	}
 	blinded, err := blk.Blinded()
 	if err != nil {
+		if errors.Is(err, cltypes.ErrGloasCannotBlind) {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+		}
 		return nil, err
 	}
 	return newBeaconResponse(blinded).

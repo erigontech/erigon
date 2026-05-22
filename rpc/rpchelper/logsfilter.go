@@ -17,13 +17,15 @@
 package rpchelper
 
 import (
+	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 type LogsFilterAggregator struct {
@@ -44,12 +46,6 @@ type LogsFilter struct {
 	topics         *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
-}
-
-// Send sends a log to the subscriber represented by the LogsFilter.
-// It forwards the log to the subscriber's sender.
-func (l *LogsFilter) Send(lg *types.Log) {
-	l.sender.Send(lg)
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -104,12 +100,21 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	return true
 }
 
+// hasLogsFilter checks if a log filter identified by filterId is present in the LogsFilterAggregator.
+func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+
+	_, ok := a.logsFilters.Get(filterId)
+	return ok
+}
+
 // createFilterRequest creates a LogsFilterRequest from the current state of the LogsFilterAggregator.
 // It generates a request that represents the union of all current log filters.
-func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
+func (a *LogsFilterAggregator) createFilterRequest() *remoteproto.LogsFilterRequest {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
-	return &remote.LogsFilterRequest{
+	return &remoteproto.LogsFilterRequest{
 		AllAddresses: a.aggLogsFilter.allAddrs >= 1,
 		AllTopics:    a.aggLogsFilter.allTopics >= 1,
 	}
@@ -215,7 +220,7 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
@@ -249,11 +254,11 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
 		lg.Topics = topics
 		lg.Data = eventLog.Data
-		lg.BlockNumber = eventLog.BlockNumber
+		lg.BlockNumber = hexutil.Uint64(eventLog.BlockNumber)
 		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
-		lg.TxIndex = uint(eventLog.TransactionIndex)
+		lg.TxIndex = hexutil.Uint(eventLog.TransactionIndex)
 		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
-		lg.Index = uint(eventLog.LogIndex)
+		lg.Index = hexutil.Uint(eventLog.LogIndex)
 		lg.Removed = eventLog.Removed
 
 		filter.sender.Send(&lg)
@@ -265,28 +270,14 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 // chooseTopics checks if the log topics match the filter's topics.
 // It returns true if the log topics match the filter's topics, otherwise false.
 func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []common.Hash) bool {
-	var found bool
-	for _, logTopic := range logTopics {
-		if _, ok := filter.topics.Get(logTopic); ok {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return false
-	}
 	if len(filter.topicsOriginal) > len(logTopics) {
 		return false
 	}
 	for i, sub := range filter.topicsOriginal {
-		match := len(sub) == 0 // empty rule set == wildcard
-		for _, topic := range sub {
-			if logTopics[i] == topic {
-				match = true
-				break
-			}
+		if len(sub) == 0 { // empty rule set == wildcard
+			continue // Match any topic, so continue to next position
 		}
-		if !match {
+		if !slices.Contains(sub, logTopics[i]) {
 			return false
 		}
 	}

@@ -24,27 +24,32 @@ import (
 	"math/big"
 	"time"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	execution "github.com/erigontech/erigon-lib/gointerfaces/executionproto"
-	"github.com/erigontech/erigon-lib/gointerfaces/typesproto"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
-	chainRW eth1_chain_reader.ChainReaderWriterEth1
+	chainRW chainreader.ChainReaderWriterEth1
+	txpool  txpoolproto.TxpoolClient
 }
 
-func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
+func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
 		chainRW: chainRW,
+		txpool:  txpool,
 	}, nil
 }
 
@@ -106,32 +111,42 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
-	case execution.ExecutionStatus_BadBlock, execution.ExecutionStatus_InvalidForkchoice:
+	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
 		return PayloadStatusInvalidated, errors.New("bad block")
-	case execution.ExecutionStatus_Busy, execution.ExecutionStatus_MissingSegment, execution.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
-	case execution.ExecutionStatus_Success:
+	case execmodule.ExecutionStatusSuccess:
 		return PayloadStatusValidated, nil
 	}
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == execution.ExecutionStatus_InvalidForkchoice {
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == execution.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
 		return nil, nil
 	}
+	// Retry AssembleBlock if the EL is busy (semaphore contention with
+	// fork choice commits). This is common in single-process dev mode
+	// where the CL and EL share the same process.
 	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(head, attr)
+	var id uint64
+	for attempt := 0; attempt < 30; attempt++ {
+		id, err = cc.chainRW.AssembleBlock(head, attr)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -185,11 +200,37 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 	return cc.chainRW.HasBlock(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientDirect) GetAssembledBlock(_ context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	_, hasGap := cc.chainRW.FrozenBlocks(ctx)
 	return hasGap
+}
+
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {
+	if cc.txpool == nil {
+		return nil, nil, nil
+	}
+
+	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
+	for i, h := range versionedHashes {
+		req.BlobHashes[i] = gointerfaces.ConvertHashToH256(h)
+	}
+	resp, err := cc.txpool.GetBlobs(ctx, req)
+	if err != nil {
+		if errors.Is(err, txpool.ErrPoolDisabled) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
+	}
+	blobsWithProof := resp.BlobsWithProofs
+	blobs = make([][]byte, len(blobsWithProof))
+	proofs = make([][][]byte, len(blobsWithProof))
+	for i, bwp := range blobsWithProof {
+		blobs[i] = bwp.Blob
+		proofs[i] = bwp.Proofs
+	}
+	return blobs, proofs, nil
 }

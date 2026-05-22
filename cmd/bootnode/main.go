@@ -27,14 +27,14 @@ import (
 	"net"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/turbo/logging"
 )
 
 func main() {
@@ -122,22 +122,22 @@ func main() {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */, logger)
+	db, err := enode.OpenDBEx(ctx, "" /* path */, "" /* tmpDir */, logger)
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, nodeKey, logger)
+	ln := enode.NewLocalNode(db, nodeKey)
 	cfg := discover.Config{
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
 
 	if *runv5 {
-		if _, err := discover.ListenV5(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(ctx, "any", conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

@@ -18,9 +18,10 @@ package shutter
 
 import (
 	"context"
+	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type DecryptionMark struct {
@@ -108,4 +109,29 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 	decryptedTxnsPoolTotalCount.Sub(float64(txnDeletions))
 	decryptedTxnsPoolTotalBytes.Sub(float64(totalBytes))
 	return markDeletions, txnDeletions
+}
+
+func (p *DecryptedTxnsPool) AllDecryptedTxns() []types.Transaction {
+	p.decryptionCond.L.Lock()
+	defer p.decryptionCond.L.Unlock()
+	var totalTxns int
+	marks := make([]DecryptionMark, 0, len(p.decryptedTxns))
+	for mark, txnBatch := range p.decryptedTxns {
+		totalTxns += len(txnBatch.Transactions)
+		marks = append(marks, mark)
+	}
+	slices.SortStableFunc(marks, func(a, b DecryptionMark) int {
+		if a.Slot < b.Slot {
+			return -1
+		}
+		if a.Slot > b.Slot {
+			return 1
+		}
+		return 0
+	})
+	txns := make([]types.Transaction, 0, totalTxns)
+	for _, mark := range marks {
+		txns = append(txns, p.decryptedTxns[mark].Transactions...)
+	}
+	return txns
 }

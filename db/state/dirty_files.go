@@ -1,0 +1,872 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package state
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	btree2 "github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
+	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
+)
+
+// filesItem is "dirty" file - means file which can be:
+//   - uncomplete
+//   - not_indexed
+//   - overlaped_by_bigger_file
+//   - marked_as_ready_for_delete
+//   - can also be "good" file
+//
+// such files must be hiddend from user (reader), but may be useful for background merging process, etc...
+// list of filesItem must be represented as Tree - because they may overlap
+
+// visibleFile - class is used for good/visible files
+
+type DirtyFiles struct {
+	btree2.BTreeG[*FilesItem]
+}
+
+func newDirtyFiles() *DirtyFiles {
+	return &DirtyFiles{*btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})}
+}
+
+func (df *DirtyFiles) copy() *DirtyFiles {
+	return &DirtyFiles{*df.BTreeG.Copy()}
+}
+
+func (df *DirtyFiles) CloseItems(items []*FilesItem) {
+	for _, item := range items {
+		df.Delete(item)
+		item.closeFiles()
+	}
+}
+
+func (df *DirtyFiles) CloseIf(predicate func(*FilesItem) bool) {
+	toClose := make([]*FilesItem, 0, df.Len())
+	df.Scan(func(item *FilesItem) bool { // can't call .Delete() inside .Scan()
+		if predicate(item) {
+			toClose = append(toClose, item)
+		}
+		return true
+	})
+	for _, item := range toClose {
+		df.Delete(item)
+		item.closeFiles()
+	}
+}
+
+func (df *DirtyFiles) MadvNormal() {
+	df.Scan(func(f *FilesItem) bool { f.MadvNormal(); return true })
+}
+func (df *DirtyFiles) DisableReadAhead() {
+	df.Scan(func(f *FilesItem) bool { f.DisableReadAhead(); return true })
+}
+func (df *DirtyFiles) EnableReadAhead() {
+	df.Scan(func(f *FilesItem) bool { f.EnableReadAhead(); return true })
+}
+
+func (df *DirtyFiles) EndTxNumMax() uint64 {
+	if max, ok := df.Max(); ok {
+		return max.endTxNum
+	}
+	return 0
+}
+
+// updateMinimax: callers use 0 as "not set yet".
+func (df *DirtyFiles) updateMinimax(current uint64) uint64 {
+	if max, ok := df.Max(); ok {
+		if current == 0 {
+			return max.endTxNum
+		}
+		return min(current, max.endTxNum)
+	}
+	return current
+}
+
+type FilesItem struct {
+	decompressor         *seg.Decompressor
+	index                *recsplit.Index
+	bindex               *btindex.BtIndex
+	existence            *existence.Filter
+	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
+
+	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
+	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
+	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
+	frozen   bool         // immutable, don't need atomic
+	refcount atomic.Int32 // only for `frozen=false`
+
+	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
+	// other processes (which also reading files, may have same logic)
+	canDelete atomic.Bool
+}
+
+func newFilesItemWithSnapConfig(startTxNum, endTxNum uint64, snapConfig *SnapshotConfig) *FilesItem {
+	return newFilesItem(startTxNum, endTxNum, snapConfig.RootNumPerStep, snapConfig.StepsInFrozenFile())
+}
+
+func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint64) *FilesItem {
+	startStep := startTxNum / stepSize
+	endStep := endTxNum / stepSize
+	frozen := endStep-startStep >= stepsInFrozenFile
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+}
+
+func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
+
+func (i *FilesItem) AccessorIndex() *recsplit.Index { return i.index }
+
+func (i *FilesItem) BtIndex() *btindex.BtIndex { return i.bindex }
+
+func (i *FilesItem) ExistenceFilter() *existence.Filter { return i.existence }
+func (i *FilesItem) MadvNormal() {
+	i.decompressor.MadvNormal()
+	i.index.MadvNormal()
+	//i.bindex.MadvNormal()
+	//i.existence.MadvNormal()
+}
+func (i *FilesItem) EnableReadAhead() {
+	i.decompressor.MadvSequential()
+	i.index.MadvSequential()
+}
+func (i *FilesItem) DisableReadAhead() {
+	i.decompressor.DisableReadAhead()
+	i.index.DisableReadAhead()
+	//i.bindex.DisableReadAhead()
+	//i.existence.DisableReadAhead()
+}
+
+func (i *FilesItem) Range() (startTxNum, endTxNum uint64) {
+	return i.startTxNum, i.endTxNum
+}
+
+// warn: check the StepRange method docs for the details on how the step range is calculated.
+func (i *FilesItem) StartStep(stepSize uint64) kv.Step {
+	return kv.Step(i.startTxNum / stepSize)
+}
+
+// warn: check the StepRange method docs for the details on how the step range is calculated.
+func (i *FilesItem) EndStep(stepSize uint64) kv.Step {
+	return kv.Step(i.endTxNum / stepSize)
+}
+
+// Returns the [startTxNum, endTxNum) range converted to steps of a given size; FilesItem doesn't know about
+// step sizes (for now), hence the caller needs to provide it.
+//
+// IMPORTANT: the covered range in terms of steps is NOT intuitive as one should expect, due to historical reasons
+// and how this struct is built by callers, because the startTxNum/endTxNum are aligned to the beginning of the step.
+//
+// That means, the startStep is counted even if the startTxNum is not aligned to the step boundary, but that is not true
+// for the endTxNum. If the endTxNum is inside a certain step txNum range, the corresponding step is not considered in the returned range.
+func (i *FilesItem) StepRange(stepSize uint64) (startStep, endStep kv.Step) {
+	return i.StartStep(stepSize), i.EndStep(stepSize)
+}
+
+// Calculate how many steps are covered by [startTxNum, endTxNum) range. The number of steps follows the criteria
+// of the StepRange method, see its docs for the details.
+func (i *FilesItem) StepCount(stepSize uint64) uint64 {
+	fromStep, toStep := i.StepRange(stepSize)
+	return uint64(toStep - fromStep)
+}
+
+// isProperSubsetOf - when `j` covers `i` but not equal `i`
+func (i *FilesItem) isProperSubsetOf(j *FilesItem) bool {
+	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
+}
+func (i *FilesItem) isBefore(j *FilesItem) bool { return i.endTxNum <= j.startTxNum }
+
+func filesItemLess(i, j *FilesItem) bool {
+	if i.endTxNum == j.endTxNum {
+		return i.startTxNum > j.startTxNum
+	}
+	return i.endTxNum < j.endTxNum
+}
+
+func (i *FilesItem) closeFiles() {
+	if i == nil {
+		return
+	}
+	i.decompressor.Close()
+	i.decompressor = nil
+	i.index.Close()
+	i.index = nil
+	i.bindex.Close()
+	i.bindex = nil
+	i.existence.Close()
+	i.existence = nil
+}
+
+func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
+	if i.decompressor != nil {
+		relativePaths = append(relativePaths, i.decompressor.FilePath())
+	}
+	if i.index != nil {
+		relativePaths = append(relativePaths, i.index.FilePath())
+	}
+	if i.bindex != nil {
+		relativePaths = append(relativePaths, i.bindex.FilePath())
+	}
+	if i.existence != nil {
+		relativePaths = append(relativePaths, i.existence.FilePath)
+	}
+	var err error
+	for i := 0; i < len(relativePaths); i++ {
+		relativePaths[i], err = filepath.Rel(basePath, relativePaths[i])
+		if err != nil {
+			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
+		}
+	}
+	return relativePaths
+}
+
+func (i *FilesItem) closeFilesAndRemove() {
+	if i == nil {
+		return
+	}
+	// Delete accessors before the data file. If the process is killed between
+	// deleting the data file and accessors, the accessor files become
+	// permanently orphaned.
+	if i.index != nil {
+		i.index.Close()
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := dir.RemoveFile(i.index.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.index.FileName())
+			}
+			if err := dir.RemoveFile(i.index.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.index.FileName())
+			}
+		}
+		i.index = nil
+	}
+	if i.bindex != nil {
+		i.bindex.Close()
+		if err := dir.RemoveFile(i.bindex.FilePath()); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		}
+		if err := dir.RemoveFile(i.bindex.FilePath() + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
+		}
+		i.bindex = nil
+	}
+	if i.existence != nil {
+		i.existence.Close()
+		if err := dir.RemoveFile(i.existence.FilePath); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
+		}
+		if err := dir.RemoveFile(i.existence.FilePath + ".torrent"); err != nil {
+			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
+		}
+		i.existence = nil
+	}
+	if i.decompressor != nil {
+		i.decompressor.Close()
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+			}
+			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+			}
+		}
+		i.decompressor = nil
+	}
+}
+
+var filterDirtyFilesReCache sync.Map // pattern string → *regexp.Regexp
+
+func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
+	pattern := `^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`
+	reVal, ok := filterDirtyFilesReCache.Load(pattern)
+	if !ok {
+		re := regexp.MustCompile(pattern)
+		reVal, _ = filterDirtyFilesReCache.LoadOrStore(pattern, re)
+	}
+	re := reVal.(*regexp.Regexp)
+	var err error
+
+	for _, name := range fileNames {
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 4 {
+			if len(subs) != 0 {
+				logger.Warn("File ignored by domain scan, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		var startStep, endStep uint64
+		if startStep, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing startTxNum", "error", err, "name", name)
+			continue
+		}
+		if endStep, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
+			logger.Warn("File ignored by domain scan, parsing endTxNum", "error", err, "name", name)
+			continue
+		}
+		if startStep > endStep {
+			logger.Warn("File ignored by domain scan, startTxNum > endTxNum", "name", name)
+			continue
+		}
+
+		// Semantic: [startTxNum, endTxNum)
+		// Example:
+		//   stepSize = 4
+		//   0-1.kv: [0, 8)
+		//   0-2.kv: [0, 16)
+		//   1-2.kv: [8, 16)
+		startTxNum, endTxNum := startStep*stepSize, endStep*stepSize
+
+		var newFile = newFilesItem(startTxNum, endTxNum, stepSize, stepsInFrozenFile)
+		res = append(res, newFile)
+	}
+	return res
+}
+
+func deleteMergeFile(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase string, logger log.Logger) {
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + filenameBase)
+		}
+		dirtyFiles.Delete(out)
+		out.canDelete.Store(true)
+
+		// if merged file not visible for any alive reader (even for us): can remove it immediately
+		// otherwise: mark it as `canDelete=true` and last reader of this file - will remove it inside `aggRoTx.Close()`
+		if out.refcount.Load() == 0 {
+			out.closeFilesAndRemove()
+
+			if filenameBase == traceFileLife && out.decompressor != nil {
+				logger.Warn("[agg.dbg] deleteMergeFile: remove", "f", out.decompressor.FileName())
+			}
+		} else {
+			if filenameBase == traceFileLife && out.decompressor != nil {
+				logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
+			}
+		}
+	}
+}
+
+func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
+	var invalidFileItems []*FilesItem
+	iter := d.dirtyFiles.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		fromStep, toStep := item.StepRange(d.stepSize)
+		if item.decompressor == nil {
+			fNameMask := d.kvFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+			if !ok {
+				fName := fNameMask
+				d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exists", "f", fName)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+
+			fName := filepath.Base(fPath)
+			d.FileVersion.DataKV.MustSupport(fileVer, fName)
+
+			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				} else {
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+				}
+				invalidFileItems = append(invalidFileItems, item)
+				// don't interrupt on error. other files may be good. but skip indices open.
+				continue
+			}
+		}
+
+		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
+			fNameMask := d.kviAccessorFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				d.FileVersion.AccessorKVI.MustSupport(fileVer, fName)
+				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
+			fNameMask := d.kvBtAccessorFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				d.FileVersion.AccessorBT.MustSupport(fileVer, fName)
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+		if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
+			fNameMask := d.kvExistenceIdxFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				d.FileVersion.AccessorKVEI.MustSupport(fileVer, fName)
+				if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+	}
+	iter.Release()
+
+	d.dirtyFiles.CloseItems(invalidFileItems) // just close, not remove from disk
+
+	return nil
+}
+
+func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
+	var invalidFileItems []*FilesItem
+	iter := h.dirtyFiles.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		fromStep, toStep := item.StepRange(h.stepSize)
+		if item.decompressor == nil {
+			fNameMask := h.vFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, h.dirs.SnapHistory)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+			if !ok {
+				fName := fNameMask
+				h.logger.Debug("[agg] History.openDirtyFiles: file does not exists", "f", fName)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+			fName := filepath.Base(fPath)
+			h.FileVersion.DataV.MustSupport(fileVer, fName)
+
+			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					h.logger.Debug("[agg] History.openDirtyFiles", "err", err, "f", fName)
+					// TODO we do not restore those files so we could just remove them along with indices. Same for domains/indices.
+					//      Those files will keep space on disk and closed automatically as corrupted. So better to remove them, and maybe remove downloading prohibiter to allow downloading them again?
+					//
+					// itemPaths := []string{
+					// 	fPath,
+					// 	h.vAccessorFilePath(fromStep, toStep),
+					// }
+					// for _, fp := range itemPaths {
+					// 	err = dir.Remove(fp)
+					// 	if err != nil {
+					// 		h.logger.Warn("[agg] History.openDirtyFiles cannot remove corrupted file", "err", err, "f", fp)
+					// 	}
+					// }
+				} else {
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+				}
+				invalidFileItems = append(invalidFileItems, item)
+				// don't interrupt on error. other files may be good. but skip indices open.
+				continue
+			}
+		}
+
+		if item.index == nil {
+			fNameMask := h.vAccessorFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				h.FileVersion.AccessorVI.MustSupport(fileVer, fName)
+				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+	}
+	iter.Release()
+
+	h.dirtyFiles.CloseItems(invalidFileItems)
+
+	return nil
+}
+
+func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) error {
+	var invalidFileItems []*FilesItem
+	iter := ii.dirtyFiles.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		fromStep, toStep := item.StepRange(ii.stepSize)
+		if item.decompressor == nil {
+			fNameMask := ii.efFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, ii.dirs.SnapIdx)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: MatchVersionedFile error", "f", fName, "err", err)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+
+			if !ok {
+				fName := fNameMask
+				ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file does not exists", "f", fName)
+				invalidFileItems = append(invalidFileItems, item)
+				continue
+			}
+
+			fName := filepath.Base(fPath)
+			ii.FileVersion.DataEF.MustSupport(fileVer, fName)
+
+			if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+				if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+				} else {
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+				}
+				invalidFileItems = append(invalidFileItems, item)
+				// don't interrupt on error. other files may be good. but skip indices open.
+				continue
+			}
+		}
+
+		if item.index == nil {
+			fNameMask := ii.efAccessorFileNameMask(fromStep, toStep)
+			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
+			if err != nil {
+				fName := filepath.Base(fPath)
+				ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+				// don't interrupt on error. other files may be good
+			}
+			if ok {
+				fName := filepath.Base(fPath)
+				ii.FileVersion.AccessorEFI.MustSupport(fileVer, fName)
+				if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)
+					// don't interrupt on error. other files may be good
+				}
+			}
+		}
+	}
+	iter.Release()
+
+	ii.dirtyFiles.CloseItems(invalidFileItems)
+
+	return nil
+}
+
+// visibleFile is like filesItem but only for good/visible files (indexed, not overlaped, not marked for deletion, etc...)
+// it's ok to store visibleFile in array
+type visibleFile struct {
+	getter     *seg.Getter
+	reader     *recsplit.IndexReader
+	startTxNum uint64
+	endTxNum   uint64
+
+	i   int
+	src *FilesItem
+}
+
+func (i visibleFile) Fullpath() string {
+	return i.src.decompressor.FilePath()
+}
+
+func (i visibleFile) StartRootNum() uint64 {
+	return i.startTxNum
+}
+
+func (i visibleFile) EndRootNum() uint64 {
+	return i.endTxNum
+}
+
+func calcVisibleFiles(files *DirtyFiles, l statecfg.Accessors, checker func(startTxNum, endTxNum uint64) bool, trace bool, toTxNum uint64) (roItems visibleFiles) {
+	newVisibleFiles := make(visibleFiles, 0, files.Len())
+	// trace = true
+	if trace {
+		log.Warn("[dbg] calcVisibleFiles", "amount", files.Len(), "toTxNum", toTxNum)
+	}
+	iter := files.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		if item.endTxNum > toTxNum {
+			if trace {
+				log.Warn("[dbg] calcVisibleFiles: ends after limit", "f", item.decompressor.FileName(), "limitTxNum", toTxNum)
+			}
+			continue
+		}
+		if !checkForVisibility(item, l, trace) {
+			continue
+		}
+		if checker != nil && !checker(item.startTxNum, item.endTxNum) {
+			continue
+		}
+
+		// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
+		// see super-set file, just drop sub-set files from list
+		for len(newVisibleFiles) > 0 && newVisibleFiles[len(newVisibleFiles)-1].src.isProperSubsetOf(item) {
+			if trace {
+				log.Warn("[dbg] calcVisibleFiles: marked as garbage (is subset)", "item", item.decompressor.FileName(),
+					"of", newVisibleFiles[len(newVisibleFiles)-1].src.decompressor.FileName())
+			}
+			newVisibleFiles[len(newVisibleFiles)-1].src = nil
+			newVisibleFiles = newVisibleFiles[:len(newVisibleFiles)-1]
+		}
+
+		// log.Warn("willBeVisible", "newVisibleFile", item.decompressor.FileName())
+		newVisibleFiles = append(newVisibleFiles, visibleFile{
+			startTxNum: item.startTxNum,
+			endTxNum:   item.endTxNum,
+			i:          len(newVisibleFiles),
+			src:        item,
+		})
+	}
+	if newVisibleFiles == nil {
+		newVisibleFiles = visibleFiles{}
+	}
+
+	// Check for gaps in visible files and warn if found
+	for i := 1; i < len(newVisibleFiles); i++ {
+		prev := newVisibleFiles[i-1]
+		curr := newVisibleFiles[i]
+		if prev.endTxNum != curr.startTxNum {
+			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
+				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
+				"gap", curr.startTxNum-prev.endTxNum)
+		}
+	}
+
+	return newVisibleFiles
+}
+
+func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canBeVisible bool) {
+	if item.canDelete.Load() {
+		if trace {
+			log.Warn("[dbg] canDelete=true", "f", item.decompressor.FileName())
+		}
+		return false
+	}
+	if item.decompressor == nil {
+		if trace {
+			log.Warn("[dbg] decompressor not opened", "from", item.startTxNum, "to", item.endTxNum)
+		}
+		return false
+	}
+	if l.Has(statecfg.AccessorBTree) && item.bindex == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	if l.Has(statecfg.AccessorExistence) && item.existence == nil {
+		if trace {
+			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
+		}
+		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
+		return false
+	}
+	return true
+}
+
+// visibleFiles have no garbage (overlaps, unindexed, etc...)
+type visibleFiles []visibleFile
+
+func (files visibleFiles) MadvNormal() {
+	for _, f := range files {
+		f.src.MadvNormal()
+	}
+}
+func (files visibleFiles) EnableReadAhead() {
+	for _, f := range files {
+		f.src.EnableReadAhead()
+	}
+}
+func (files visibleFiles) DisableReadAhead() {
+	for _, f := range files {
+		f.src.DisableReadAhead()
+	}
+}
+
+// refcntIncrement pins every non-frozen file by incrementing its refcount.
+// Callers must pair this with a matching decrement in RoTx.Close.
+func (files visibleFiles) refcntIncrement() {
+	for i := range files {
+		if files[i].src.frozen {
+			continue
+		}
+		files[i].src.refcount.Add(1)
+	}
+}
+
+func (files visibleFiles) refcntDecrement(filenameBase string, logger log.Logger) {
+	traceActive := traceFileLife != "" && filenameBase == traceFileLife
+	for i := range files {
+		src := files[i].src
+		if src == nil || src.frozen {
+			continue
+		}
+		if src.refcount.Add(-1) == 0 && src.canDelete.Load() {
+			if traceActive {
+				logger.Warn("[agg.dbg] real remove at RoTx.Close", "file", src.decompressor.FileName())
+			}
+			src.closeFilesAndRemove()
+		}
+	}
+}
+
+// EndTxNum return txNum which not included in file - it will be first txNum in future file
+func (files visibleFiles) EndTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[len(files)-1].endTxNum
+}
+
+func (files visibleFiles) StartTxNum() uint64 {
+	if len(files) == 0 {
+		return 0
+	}
+	return files[0].startTxNum
+}
+
+func (files visibleFiles) LatestMergedRange(stepSize uint64) MergeRange {
+	if len(files) == 0 {
+		return MergeRange{}
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		shardSize := (files[i].endTxNum - files[i].startTxNum) / stepSize
+		if shardSize > 2 {
+			return MergeRange{from: files[i].startTxNum, to: files[i].endTxNum}
+		}
+	}
+	return MergeRange{}
+}
+func (files visibleFiles) String(stepSize uint64) string {
+	res := make([]string, 0, len(files))
+	for _, file := range files {
+		res = append(res, fmt.Sprintf("%d-%d", file.startTxNum/stepSize, file.endTxNum/stepSize))
+	}
+	return strings.Join(res, ",")
+}
+func (files visibleFiles) Len() int {
+	return len(files)
+}
+
+func (files visibleFiles) VisibleFiles() []VisibleFile {
+	res := make([]VisibleFile, 0, len(files))
+	for _, file := range files {
+		res = append(res, file)
+	}
+	return res
+}
+
+// dirListing holds a directory path and its pre-read entry names.
+type dirListing struct {
+	dir   string
+	names []string
+}
+
+// readDirNames reads a directory once and returns a dirListing for reuse.
+func readDirNames(dir string) dirListing {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return dirListing{dir: dir, names: names}
+}
+
+// fileItemsWithMissedAccessors returns list of files with missed accessors
+// here "accessors" are generated dynamically by `accessorsFor`
+func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
+	for _, item := range dirtyFiles {
+		for _, fName := range accessorsFor(item.StepRange(aggregationStep)) {
+			exists, err := dir.FileExist(fName)
+			if err != nil {
+				panic(err)
+			}
+			if !exists {
+				l = append(l, item)
+				break
+			}
+		}
+	}
+	return
+}
+
+// closeWhatNotInList closes and removes from dirtyFiles all items whose decompressor file name
+// is not in the provided fNames list.
+func closeWhatNotInList(dirtyFiles *DirtyFiles, fNames []string) {
+	protectFiles := make(map[string]struct{}, len(fNames))
+	for _, f := range fNames {
+		protectFiles[f] = struct{}{}
+	}
+	dirtyFiles.CloseIf(func(item *FilesItem) bool {
+		if item.decompressor == nil {
+			return true
+		}
+		_, protected := protectFiles[item.decompressor.FileName()]
+		return !protected
+	})
+}

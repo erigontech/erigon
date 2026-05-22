@@ -21,15 +21,15 @@ import (
 	"os"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/mem"
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpctest/rpctest"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func main() {
@@ -50,17 +50,20 @@ func main() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	var (
-		needCompare      bool
-		fullTest         bool
-		gethURL          string
-		erigonURL        string
-		blockFrom        uint64
-		blockTo          uint64
-		latest           bool
-		recordFile       string
-		errorFile        string
-		visitAllPages    bool
-		additionalParams string
+		needCompare       bool
+		fullTest          bool
+		gethURL           string
+		erigonURL         string
+		blockFrom         uint64
+		blockTo           uint64
+		randBlocks        uint64
+		concurentRequests uint64
+		latest            bool
+		recordFile        string
+		errorFile         string
+		visitAllPages     bool
+		additionalParams  string
+		failFast          bool
 	)
 	withErigonUrl := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&erigonURL, "erigonUrl", "http://localhost:8545", "Erigon rpcdaemon url")
@@ -72,6 +75,13 @@ func main() {
 		cmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
 		cmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 	}
+	withRandBlockNum := func(cmd *cobra.Command) {
+		cmd.Flags().Uint64Var(&randBlocks, "randBlocks", 1000, "Number of random blocks to process")
+	}
+	withConcurentRequestNum := func(cmd *cobra.Command) {
+		cmd.Flags().Uint64Var(&concurentRequests, "concurentRequests", 1, "Number of concurent requests")
+	}
+
 	withLatest := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&latest, "latest", false, "Exec on latest ")
 	}
@@ -89,6 +99,9 @@ func main() {
 	}
 	withAdditionalParams := func(cmd *cobra.Command) {
 		cmd.Flags().StringVar(&additionalParams, "additionalParams", "", "Additional params for the request")
+	}
+	withFailFast := func(cmd *cobra.Command) {
+		cmd.Flags().BoolVar(&failFast, "failFast", false, "Fail fast")
 	}
 	with := func(cmd *cobra.Command, opts ...func(*cobra.Command)) {
 		for i := range opts {
@@ -108,6 +121,19 @@ func main() {
 		},
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
+	var benchEthEstimateGasCmd = &cobra.Command{
+		Use:   "benchEthEstimateGas",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthEstimateGas(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchEthEstimateGasCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
 	var benchEthCreateAccessListCmd = &cobra.Command{
 		Use:   "benchEthCreateAccessList",
@@ -281,13 +307,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest)
+			err := rpctest.EthGetLogsInvariants(cmd.Context(), erigonURL, gethURL, needCompare, blockFrom, blockTo, latest, failFast)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+	with(ethGetLogsInvariantsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest, withFailFast)
 
 	var benchOverlayGetLogsCmd = &cobra.Command{
 		Use:   "benchOverlayGetLogs",
@@ -307,13 +333,13 @@ func main() {
 		Short: "",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.Bench9(erigonURL, gethURL, needCompare)
+			err := rpctest.Bench9(erigonURL, gethURL, needCompare, latest)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 		},
 	}
-	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
+	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare, withLatest)
 
 	var benchTraceCallCmd = &cobra.Command{
 		Use:   "benchTraceCall",
@@ -500,6 +526,32 @@ func main() {
 	}
 	with(benchEthGetBalanceCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum)
 
+	var BenchEthGetLogsRandomBlockCmd = &cobra.Command{
+		Use:   "benchEthGetLogsRandomBlock",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthGetLogsRandomBlock(erigonURL, int(concurentRequests))
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(BenchEthGetLogsRandomBlockCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
+
+	var BenchEthGetBalanceRandomAccountCmd = &cobra.Command{
+		Use:   "benchEthGetBalanceRandomAccount",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthGetBalanceRandomAccount(erigonURL, int(concurentRequests))
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(BenchEthGetBalanceRandomAccountCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
+
 	var replayCmd = &cobra.Command{
 		Use:   "replay",
 		Short: "",
@@ -534,6 +586,7 @@ func main() {
 		benchEthGetBlockByNumber2Cmd,
 		benchEthGetBlockByHash,
 		benchEthCallCmd,
+		benchEthEstimateGasCmd,
 		benchEthCreateAccessListCmd,
 		benchEthGetTransactionByHashCmd,
 		bench1Cmd,
@@ -562,6 +615,8 @@ func main() {
 		benchTraceTransactionCmd,
 		benchEthBlockByNumberCmd,
 		benchEthGetBalanceCmd,
+		BenchEthGetBalanceRandomAccountCmd,
+		BenchEthGetLogsRandomBlockCmd,
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)

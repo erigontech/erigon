@@ -22,7 +22,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,25 +32,26 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
-	privateapi2 "github.com/erigontech/erigon/turbo/privateapi"
 )
 
 type testAddresses struct {
@@ -59,6 +62,11 @@ type testAddresses struct {
 	address1 common.Address
 	address2 common.Address
 }
+
+var randSrc = rand.New(rand.NewSource(42)) // fixed seed
+var randMu sync.Mutex
+
+var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf storage mapping (of address1)
 
 func makeTestAddresses() testAddresses {
 	var (
@@ -80,78 +88,75 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.ChainPack) {
-	addresses := makeTestAddresses()
-	var (
-		key      = addresses.key
-		address  = addresses.address
-		address1 = addresses.address1
-		address2 = addresses.address2
-	)
+var (
+	testChainOnce     sync.Once
+	testChain         *blockgen.ChainPack
+	testOrphanedChain *blockgen.ChainPack
+)
 
-	var (
-		gspec = &types.Genesis{
-			Config: chain.TestChainConfig,
+func genTestChainOnce(t *testing.T) {
+	testChainOnce.Do(func() {
+		addresses := makeTestAddresses()
+		gspec := &types.Genesis{
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
-				address:  {Balance: big.NewInt(9000000000000000000)},
-				address1: {Balance: big.NewInt(200000000000000000)},
-				address2: {Balance: big.NewInt(300000000000000000)},
+				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+				addresses.address1: {Balance: big.NewInt(200000000000000000)},
+				addresses.address2: {Balance: big.NewInt(300000000000000000)},
 			},
 			GasLimit: 10000000,
 		}
-	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key)) // use it only to generate chain blocks, don't cache it
+		defer m.Close()
+		contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		defer contractBackend.Close()
 
-	// Generate empty chain to have some orphaned blocks for tests
-	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+		var err error
+		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate orphaned chain: %v", err)
+		}
+		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	chain, err := getChainInstance(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err = m.InsertChain(orphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err = m.InsertChain(chain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, chain, []*core.ChainPack{orphanedChain}
 }
 
-var chainInstance *core.ChainPack
+func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	genTestChainOnce(t)
 
-func getChainInstance(
-	addresses *testAddresses,
-	config *chain.Config,
-	parent *types.Block,
-	engine consensus.Engine,
-	db kv.TemporalRwDB,
-	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
-	var err error
-	if chainInstance == nil {
-		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
+	addresses := makeTestAddresses()
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+			addresses.address1: {Balance: big.NewInt(200000000000000000)},
+			addresses.address2: {Balance: big.NewInt(300000000000000000)},
+		},
+		GasLimit: 10000000,
 	}
-	return chainInstance.Copy(), err
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
 }
 
 func generateChain(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
+) (*blockgen.ChainPack, error) {
 	var (
 		key      = addresses.key
 		key1     = addresses.key1
@@ -160,7 +165,7 @@ func generateChain(
 		address1 = addresses.address1
 		address2 = addresses.address2
 		theAddr  = common.Address{1}
-		chainId  = big.NewInt(1337)
+		chainId  = uint256.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
@@ -170,9 +175,10 @@ func generateChain(
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
+	var tokenContract2 *contracts.Token
 
-	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
+	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
+	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -276,8 +282,49 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+
 		case 10:
-			// Empty block
+			break
+		case 11:
+			// Mint to address so it has a known balance to drain in the next block
+			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			txn, err = tokenContract2.Mint(transactOpts, address1, big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
+			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
+			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+
+			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
+			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
+			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+
+			// Assert first nibble of the hashed storage key is the same (trie path)
+			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
+				panic("hashed storage key prefix mismatch in trie")
+			}
+			txn, err = tokenContract2.Mint(transactOpts, common.Address(sameStoragePrefixAddresses[0]), big.NewInt(500))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 12:
+			// transfer everything out of address1
+			txn, err = tokenContract2.Transfer(transactOpts1, common.Address(address), big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 13:
+			// Empty block after storage deletes
 			break
 		}
 
@@ -295,11 +342,85 @@ func generateChain(
 	})
 }
 
+func computeMappingStorageKey(addr common.Address, slot uint64) common.Hash {
+	// Create 64-byte buffer: address (32 bytes, left-padded) || slot (32 bytes)
+	var buf [64]byte
+
+	// Copy address to bytes 12-31 (left-padded with zeros)
+	copy(buf[12:32], addr[:])
+
+	// Write slot number to bytes 56-63 (big-endian, left-padded)
+	binary.BigEndian.PutUint64(buf[56:64], slot)
+
+	return crypto.Keccak256Hash(buf[:])
+}
+
+// findAddressWithMatchingStorageKeyPrefix finds an address whose computeMappingStorageKey
+// result shares the first nNibbles with the target storage key.
+// This is useful for creating storage entries that share trie paths to test node collapses.
+func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int) common.Address {
+	// The trie path for a storage slot is keccak256(computeMappingStorageKey(addr, slot)).
+	// We need to match the first nNibbles of that hashed value.
+	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
+	targetNibbles := make([]byte, nNibbles)
+	for i := 0; i < nNibbles; i++ {
+		if i%2 == 0 {
+			targetNibbles[i] = targetHashedKey[i/2] >> 4
+		} else {
+			targetNibbles[i] = targetHashedKey[i/2] & 0x0f
+		}
+	}
+
+	var addr common.Address
+	for {
+		randMu.Lock()
+		randSrc.Read(addr[:])
+		randMu.Unlock()
+
+		storageKey := computeMappingStorageKey(addr, slot)
+		hashedStorageKey := crypto.Keccak256Hash(storageKey[:])
+
+		// Compare nibbles of the hashed storage key (the actual trie path)
+		match := true
+		for i := 0; i < nNibbles; i++ {
+			var nibble byte
+			if i%2 == 0 {
+				nibble = hashedStorageKey[i/2] >> 4
+			} else {
+				nibble = hashedStorageKey[i/2] & 0x0f
+			}
+			if nibble != targetNibbles[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return addr
+		}
+	}
+}
+
+// findAddressesWithMatchingStorageKeyPrefix finds multiple addresses whose storage keys
+// share the first nNibbles with the target, useful for populating a trie subtree.
+func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int, count int) []common.Address {
+	addresses := make([]common.Address, 0, count)
+	seen := make(map[common.Address]bool)
+
+	for len(addresses) < count {
+		addr := findAddressWithMatchingStorageKeyPrefix(targetKey, slot, nNibbles)
+		if !seen[addr] {
+			seen[addr] = true
+			addresses = append(addresses, addr)
+		}
+	}
+	return addresses
+}
+
 type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
@@ -310,10 +431,10 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remote.RegisterETHBACKENDServer(server, privateapi2.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
-		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore(), nil))
-	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpool.RegisterMiningServer(server, privateapi2.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
+		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
+	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
+	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
@@ -339,7 +460,7 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	return ctx, conn
 }
 
-func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
+func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTester {
 	var (
 		a0 = common.HexToAddress("0x00000000000000000000000000000000000000ff")
 		a1 = common.HexToAddress("0x00000000000000000000000000000000000001ff")
@@ -351,7 +472,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0x00ff
@@ -431,12 +552,12 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
-			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -449,7 +570,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 	return m
 }
 
-func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
+func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.ExecModuleTester {
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -489,9 +610,10 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	if l := len(initCode); l > 32 {
 		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
 	}
-	bbCode := []byte{
+	bbCode := make([]byte, 0, 1+len(initCode)+12)
+	bbCode = append(bbCode,
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1)+byte(len(initCode)-1))
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -503,12 +625,12 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.HashData(initCode))
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
-		Config: chain.TestChainConfig,
+		Config: chain.TestChainBerlinConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
@@ -530,19 +652,21 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	// This test uses intra-block SELFDESTRUCT + CREATE2 reincarnation which the
+	// parallel executor doesn't handle correctly yet. Use serial execution.
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithoutExperimentalBAL())
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		tx, _ = types.SignTx(types.NewTransaction(2, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {

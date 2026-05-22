@@ -20,36 +20,50 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/turbo/cli"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+// The integration tool defaults parallel exec on (the integration tool's
+// preferred mode for stage_exec), overriding the dbg package's default-off.
+// dbg.EnvBool honours both EXEC3_PARALLEL and ERIGON_EXEC3_PARALLEL — the
+// latter is what envLookup auto-prepends, so CI workflows that set
+// ERIGON_EXEC3_PARALLEL=false actually take effect.
+func init() {
+	dbg.Exec3Parallel = dbg.EnvBool("EXEC3_PARALLEL", true)
+}
+
 var (
-	chaindata                    string
-	databaseVerbosity            int
-	referenceChaindata           string
-	block, pruneTo, unwind       uint64
-	unwindEvery                  uint64
-	batchSizeStr                 string
-	domain                       string
-	reset, noCommit              bool
-	bucket                       string
-	datadirCli, toChaindata      string
-	migration                    string
-	integrityFast, integritySlow bool
-	file                         string
-	HeimdallURL                  string
-	txtrace                      bool // Whether to trace the execution (should only be used together with `block`)
-	unwindTypes                  []string
-	chain                        string // Which chain to use (mainnet, sepolia, etc.)
-	outputCsvFile                string
+	chaindata                     string
+	databaseVerbosity             int
+	referenceChaindata            string
+	block, pruneTo, unwind        uint64
+	unwindEvery                   uint64
+	batchSizeStr                  string
+	domain                        string
+	reset, noCommit, squeeze, yes bool
+	bucket                        string
+	datadirCli, toChaindata       string
+	migration                     string
+	integrityFast, integritySlow  bool
+	file                          string
+	HeimdallURL                   string
+	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
+	chain                         string // Which chain to use (mainnet, sepolia, etc.)
+	outputCsvFile                 string
 
 	startTxNum uint64
 
 	dbWriteMap bool
 
-	chainTipMode bool
-	syncCfg      = ethconfig.Defaults.Sync
+	chainTipMode                    bool
+	clearCommitment                 bool
+	resume                          bool
+	noHistory                       bool
+	erigondbDomainStepsInFrozenFile string
+	syncCfg                         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -66,11 +80,8 @@ func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
 	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultBlockGasLimit, "Target gas limit for mined blocks")
-	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
-	cmd.Flags().Duration("miner.recommit", ethconfig.Defaults.Miner.Recommit, "Time interval to recreate the block being mined")
-	cmd.Flags().Bool("miner.noverify", false, "Disable remote sealing verification")
 }
 
 func withFile(cmd *cobra.Command) {
@@ -112,6 +123,26 @@ func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
 }
 
+func withYes(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&yes, "yes", false, "skip interactive prompts (for non-interactive/background use)")
+}
+
+func withSqueeze(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withClearCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&clearCommitment, "clear-commitment", false, "remove commitment data from DB and delete state files, then exit without rebuilding")
+}
+
+func withResume(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withNoHistory(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
+}
+
 func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
@@ -121,22 +152,20 @@ func withDataDir2(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, "", utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
 
+	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enable internal database logs. Very high verbosity levels may require recompiling the database. The default value is 2, which means warnings are shown.")
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", "", "data directory for temporary ELT files")
-	must(cmd.MarkFlagRequired("datadir"))
-	must(cmd.MarkFlagDirname("datadir"))
+	withDataDir2(cmd)
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
+}
 
-	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
-
-	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
+func withConcurrentCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -181,13 +210,34 @@ func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
 }
 
-func withUnwindTypes(cmd *cobra.Command) {
-	cmd.Flags().StringSliceVar(&unwindTypes, "unwind.types", nil, "types to unwind for polygon sync")
-}
-
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
+
+func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&erigondbDomainStepsInFrozenFile,
+		utils.ErigondbDomainStepsInFrozenFileFlag.Name, "",
+		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
+}
+
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+func withStageBase(cmd *cobra.Command) {
+	withConfig(cmd)
+	withDataDir(cmd)
+	withChain(cmd)
+	withChaosMonkey(cmd)
+	withHeimdall(cmd)
+	withUnwind(cmd)
+}
+
+// withTraceFlags applies flags shared by exec-style tracing commands.
+func withTraceFlags(cmd *cobra.Command) {
+	withNoCommit(cmd)
+	withBatchSize(cmd)
+	withTxTrace(cmd)
+	withWorkers(cmd)
+}
+
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

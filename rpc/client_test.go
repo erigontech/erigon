@@ -21,6 +21,8 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -30,12 +32,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestClientRequest(t *testing.T) {
@@ -51,6 +54,22 @@ func TestClientRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp, echoResult{"hello", 10, &echoArgs{"world"}}) {
 		t.Errorf("incorrect result %#v", resp)
+	}
+}
+
+func TestNullResponse(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	var result json.RawMessage
+	if err := client.Call(&result, "test_returnNull"); err != nil {
+		t.Fatal(err)
+	}
+	if string(result) != "null" {
+		t.Errorf("expected null, got %s", result)
 	}
 }
 
@@ -80,7 +99,7 @@ func TestClientErrorData(t *testing.T) {
 	client := DialInProc(server, logger)
 	defer client.Close()
 
-	var resp interface{}
+	var resp any
 	err := client.Call(&resp, "test_returnError")
 	if err == nil {
 		t.Fatal("expected error")
@@ -110,17 +129,17 @@ func TestClientBatchRequest(t *testing.T) {
 	batch := []BatchElem{
 		{
 			Method: "test_echo",
-			Args:   []interface{}{"hello", 10, &echoArgs{"world"}},
+			Args:   []any{"hello", 10, &echoArgs{"world"}},
 			Result: new(echoResult),
 		},
 		{
 			Method: "test_echo",
-			Args:   []interface{}{"hello2", 11, &echoArgs{"world"}},
+			Args:   []any{"hello2", 11, &echoArgs{"world"}},
 			Result: new(echoResult),
 		},
 		{
 			Method: "no_such_method",
-			Args:   []interface{}{1, 2, 3},
+			Args:   []any{1, 2, 3},
 			Result: new(int),
 		},
 	}
@@ -130,23 +149,121 @@ func TestClientBatchRequest(t *testing.T) {
 	wantResult := []BatchElem{
 		{
 			Method: "test_echo",
-			Args:   []interface{}{"hello", 10, &echoArgs{"world"}},
+			Args:   []any{"hello", 10, &echoArgs{"world"}},
 			Result: &echoResult{"hello", 10, &echoArgs{"world"}},
 		},
 		{
 			Method: "test_echo",
-			Args:   []interface{}{"hello2", 11, &echoArgs{"world"}},
+			Args:   []any{"hello2", 11, &echoArgs{"world"}},
 			Result: &echoResult{"hello2", 11, &echoArgs{"world"}},
 		},
 		{
 			Method: "no_such_method",
-			Args:   []interface{}{1, 2, 3},
+			Args:   []any{1, 2, 3},
 			Result: new(int),
 			Error:  &jsonError{Code: -32601, Message: "the method no_such_method does not exist/is not available"},
 		},
 	}
 	if !reflect.DeepEqual(batch, wantResult) {
 		t.Errorf("batch results mismatch:\ngot %swant %s", spew.Sdump(batch), spew.Sdump(wantResult))
+	}
+}
+
+func TestClientBatchRequest_len(t *testing.T) {
+	logger := log.New()
+	b, err := json.Marshal([]jsonrpcMessage{
+		{Version: "2.0", ID: json.RawMessage("1"), Method: "foo", Result: json.RawMessage(`"0x1"`)},
+		{Version: "2.0", ID: json.RawMessage("2"), Method: "bar", Result: json.RawMessage(`"0x2"`)},
+	})
+	if err != nil {
+		t.Fatal("failed to encode jsonrpc message:", err)
+	}
+	s := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		_, err := rw.Write(b)
+		if err != nil {
+			t.Error("failed to write response:", err)
+		}
+	}))
+	t.Cleanup(s.Close)
+
+	client, err := Dial(s.URL, logger)
+	if err != nil {
+		t.Fatal("failed to dial test server:", err)
+	}
+	defer client.Close()
+
+	t.Run("too-few", func(t *testing.T) {
+		batch := []BatchElem{
+			{Method: "foo", Result: new(json.RawMessage)},
+			{Method: "bar", Result: new(json.RawMessage)},
+			{Method: "baz", Result: new(json.RawMessage)},
+		}
+		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFn()
+		if err := client.BatchCallContext(ctx, batch); err != nil {
+			t.Errorf("expected nil batch error but got: %v", err)
+		}
+		// The third element should have ErrMissingBatchResponse since the
+		// server only returned 2 responses for 3 requests.
+		if !errors.Is(batch[2].Error, ErrMissingBatchResponse) {
+			t.Errorf("expected ErrMissingBatchResponse for missing element but got: %v", batch[2].Error)
+		}
+	})
+
+	t.Run("too-many", func(t *testing.T) {
+		// Fresh client so the first request gets ID 1, matching the server's
+		// hardcoded response IDs.
+		c2, err := Dial(s.URL, logger)
+		if err != nil {
+			t.Fatal("failed to dial test server:", err)
+		}
+		defer c2.Close()
+
+		batch := []BatchElem{
+			{Method: "foo", Result: new(json.RawMessage)},
+		}
+		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFn()
+		// Server returns 2 responses for 1 request; the extra response is
+		// silently ignored and the call completes without hanging.
+		if err := c2.BatchCallContext(ctx, batch); err != nil {
+			t.Errorf("expected nil batch error but got: %v", err)
+		}
+		if batch[0].Error != nil {
+			t.Errorf("expected nil element error but got: %v", batch[0].Error)
+		}
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+		defer cancelFn()
+		err := client.BatchCallContext(ctx, nil)
+		if err == nil {
+			t.Fatal("expected error for empty batch but got nil")
+		}
+		var rpcErr Error
+		if !errors.As(err, &rpcErr) || rpcErr.ErrorCode() != -32600 {
+			t.Fatalf("expected invalid request error (-32600), got: %v", err)
+		}
+	})
+}
+
+func TestClientBatchRequest_emptyInproc(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	ctx, cancelFn := context.WithTimeout(context.Background(), time.Second)
+	defer cancelFn()
+	err := client.BatchCallContext(ctx, nil)
+	if err == nil {
+		t.Fatal("expected error for empty batch but got nil")
+	}
+	var rpcErr Error
+	if !errors.As(err, &rpcErr) || rpcErr.ErrorCode() != -32600 {
+		t.Fatalf("expected invalid request error (-32600), got: %v", err)
 	}
 }
 
@@ -166,51 +283,35 @@ func TestClientNotify(t *testing.T) {
 func TestClientCancelWebsocket(t *testing.T) { testClientCancel("ws", t, log.New()) }
 func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.New()) }
 
-// This test checks that requests made through CallContext can be canceled by canceling
-// the context.
+// testClientCancel checks that requests made through CallContext can be canceled
+// by canceling the context at various stages of request processing:
+//   - cancel during dial
+//   - cancel while performing an HTTP request
+//   - cancel while waiting for a response
+//
+// The HTTP transport uses synctest with in-memory connections for deterministic timing.
+// The WebSocket transport uses real TCP because its long-lived server goroutines
+// (pingLoop, ServeCodec, dispatch) have complex shutdown dependencies incompatible
+// with synctest's requirement that all bubble goroutines exit.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	if testing.Short() {
 		t.Skip()
 	}
 
-	// These tests take a lot of time, run them all at once.
-	// You probably want to run with -parallel 1 or comment out
-	// the call to t.Parallel if you enable the logging.
-	t.Parallel()
-
-	server := newTestServer(logger)
-	defer server.Stop()
-
-	// What we want to achieve is that the context gets canceled
-	// at various stages of request processing. The interesting cases
-	// are:
-	//  - cancel during dial
-	//  - cancel while performing a HTTP request
-	//  - cancel while waiting for a response
-	//
-	// To trigger those, the times are chosen such that connections
-	// are killed within the deadline for every other call (maxKillTimeout
-	// is 2x maxCancelTimeout).
-	//
-	// Once a connection is dead, there is a fair chance it won't connect
-	// successfully because the accept is delayed by 1s.
-	maxContextCancelTimeout := 300 * time.Millisecond
-	fl := &flakeyListener{
-		maxAcceptDelay: 1 * time.Second,
-		maxKillTimeout: 600 * time.Millisecond,
-	}
-
-	var client *Client
 	switch transport {
-	case "ws", "http":
-		c, hs := httpTestClient(server, transport, fl)
-		defer hs.Close()
-		client = c
+	case "http":
+		testClientCancelSynctest(t, logger)
+	case "ws":
+		testClientCancelTCP(t, logger)
 	default:
 		panic("unknown transport: " + transport)
 	}
+}
 
-	// The actual test starts here.
+// runCancelCallers spawns ncallers goroutines, each making nreqs calls to test_block
+// with random context cancellation. No call should ever succeed because test_block
+// blocks until the context is canceled.
+func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time.Duration) {
 	var (
 		wg       sync.WaitGroup
 		nreqs    = 10
@@ -225,25 +326,18 @@ func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 				timeout = time.Duration(rand.Int63n(int64(maxContextCancelTimeout)))
 			)
 			if index < ncallers/2 {
-				// For half of the callers, create a context without deadline
-				// and cancel it later.
+				// Half the callers cancel via explicit cancel func.
 				ctx, cancel = context.WithCancel(context.Background())
 				time.AfterFunc(timeout, cancel)
 			} else {
-				// For the other half, create a context with a deadline instead. This is
-				// different because the context deadline is used to set the socket write
-				// deadline.
+				// Other half use context deadline, which also sets the
+				// socket write deadline — a different cancellation path.
 				ctx, cancel = context.WithTimeout(context.Background(), timeout)
 			}
-
-			// Now perform a call with the context.
-			// The key thing here is that no call will ever complete successfully.
 			err := client.CallContext(ctx, nil, "test_block")
 			if err == nil {
 				_, hasDeadline := ctx.Deadline()
 				t.Errorf("no error for call with %v wait time (deadline: %v)", timeout, hasDeadline)
-				// default:
-				// 	t.Logf("got expected error with %v wait time: %v", timeout, err)
 			}
 			cancel()
 		}
@@ -255,6 +349,56 @@ func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	wg.Wait()
 }
 
+// testClientCancelSynctest runs the cancel test using synctest with in-memory
+// connections. All time.Sleep/time.AfterFunc use fake time, so it runs instantly
+// regardless of CI machine speed.
+func testClientCancelSynctest(t *testing.T, logger log.Logger) {
+	synctest.Test(t, func(t *testing.T) {
+		server := newTestServer(logger)
+
+		// To trigger cancels at various stages, the times are chosen such that
+		// connections are killed within the deadline for every other call
+		// (maxKillTimeout is 2x maxCancelTimeout).
+		// Once a connection is dead, there is a fair chance it won't connect
+		// successfully because the accept is delayed by 1s.
+		fl := &flakeyListener{
+			maxAcceptDelay: 1 * time.Second,
+			maxKillTimeout: 600 * time.Millisecond,
+		}
+
+		client, hs := memHTTPTestClient(server, fl)
+		defer server.Stop()
+		defer hs.Close()
+		defer client.Close()
+
+		runCancelCallers(t, client, 300*time.Millisecond)
+	})
+}
+
+// testClientCancelTCP runs the cancel test over real TCP connections.
+func testClientCancelTCP(t *testing.T, logger log.Logger) {
+	t.Parallel()
+
+	server := newTestServer(logger)
+	defer server.Stop()
+
+	// To trigger cancels at various stages, the times are chosen such that
+	// connections are killed within the deadline for every other call
+	// (maxKillTimeout is 2x maxCancelTimeout).
+	// Once a connection is dead, there is a fair chance it won't connect
+	// successfully because the accept is delayed by 1s.
+	fl := &flakeyListener{
+		maxAcceptDelay: 1 * time.Second,
+		maxKillTimeout: 600 * time.Millisecond,
+	}
+
+	client, hs := httpTestClient(server, "ws", fl)
+	defer hs.Close()
+	defer client.Close()
+
+	runCancelCallers(t, client, 300*time.Millisecond)
+}
+
 func TestClientSubscribeInvalidArg(t *testing.T) {
 	logger := log.New()
 	server := newTestServer(logger)
@@ -262,7 +406,7 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 	client := DialInProc(server, logger)
 	defer client.Close()
 
-	check := func(shouldPanic bool, arg interface{}) {
+	check := func(shouldPanic bool, arg any) {
 		defer func() {
 			err := recover()
 			if shouldPanic && err == nil {
@@ -388,9 +532,8 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
 	if testing.Short() {
-		t.Skip("too slow for testing.Short")
+		t.Skip("slow test")
 	}
-
 	logger := log.New()
 	server := newTestServer(logger)
 	defer server.Stop()
@@ -497,7 +640,6 @@ func TestClientHTTP(t *testing.T) {
 	)
 	defer client.Close()
 	for i := range results {
-		i := i
 		go func() {
 			errc <- client.Call(&results[i], "test_echo", wantResult.String, wantResult.Int, wantResult.Args)
 		}()
@@ -643,4 +785,87 @@ func (l *flakeyListener) Accept() (net.Conn, error) {
 		})
 	}
 	return c, err
+}
+
+// memListener is an in-memory net.Listener backed by net.Pipe.
+// It is compatible with synctest because it uses no real I/O.
+type memListener struct {
+	connCh chan net.Conn
+	done   chan struct{}
+	once   sync.Once
+}
+
+func newMemListener() *memListener {
+	return &memListener{
+		connCh: make(chan net.Conn),
+		done:   make(chan struct{}),
+	}
+}
+
+func (l *memListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.connCh:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *memListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return nil
+}
+
+func (l *memListener) Addr() net.Addr {
+	return memAddr{}
+}
+
+// Dial creates a new in-memory connection to this listener.
+func (l *memListener) Dial(ctx context.Context, _, _ string) (net.Conn, error) {
+	server, client := net.Pipe()
+	select {
+	case l.connCh <- server:
+		return client, nil
+	case <-l.done:
+		server.Close()
+		client.Close()
+		return nil, net.ErrClosed
+	case <-ctx.Done():
+		server.Close()
+		client.Close()
+		return nil, ctx.Err()
+	}
+}
+
+type memAddr struct{}
+
+func (memAddr) Network() string { return "mem" }
+func (memAddr) String() string  { return "mem" }
+
+// memHTTPTestClient creates an HTTP test client using in-memory connections
+// (no real TCP). Compatible with synctest.
+func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) {
+	logger := log.New()
+	ml := newMemListener()
+
+	var listener net.Listener = ml
+	if fl != nil {
+		fl.Listener = ml
+		listener = fl
+	}
+
+	hs := &http.Server{Handler: srv}
+	go hs.Serve(listener)
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: ml.Dial,
+		},
+	}
+
+	client, err := DialHTTPWithClient("http://mem", httpClient, logger)
+	if err != nil {
+		panic(err)
+	}
+	return client, hs
 }

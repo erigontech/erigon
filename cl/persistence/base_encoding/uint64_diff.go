@@ -29,7 +29,7 @@ import (
 
 // make a sync.pool of compressors (zstd)
 var compressorPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		if err != nil {
 			panic(err)
@@ -38,28 +38,33 @@ var compressorPool = sync.Pool{
 	},
 }
 
+func putComp(v *zstd.Encoder) {
+	v.Reset(nil)
+	compressorPool.Put(v)
+}
+
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &bytes.Buffer{}
 	},
 }
 
 var plainUint64BufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]uint64, 1028)
 		return &b
 	},
 }
 
 var plainBytesBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]byte, 1028)
 		return &b
 	},
 }
 
 var repeatedPatternBufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]repeatedPatternEntry, 1028)
 		return &b
 	},
@@ -76,7 +81,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, old, new []byte) err
 	}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer compressorPool.Put(compressor)
+	defer putComp(compressor)
 	compressor.Reset(w)
 
 	// Get one plain buffer from the pool
@@ -140,7 +145,7 @@ func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []by
 	}
 
 	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer compressorPool.Put(compressor)
+	defer putComp(compressor)
 	compressor.Reset(w)
 
 	// Get one plain buffer from the pool

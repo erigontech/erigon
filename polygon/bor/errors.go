@@ -30,24 +30,7 @@ func (e *MaxCheckpointLengthExceededError) Error() string {
 		"Start: %d and end block: %d exceed max allowed checkpoint length: %d",
 		e.Start,
 		e.End,
-		MaxCheckpointLength,
-	)
-}
-
-// MismatchingValidatorsError is returned if a last block in sprint contains a
-// list of validators different from the one that local node calculated
-type MismatchingValidatorsError struct {
-	Number             uint64
-	ValidatorSetSnap   []byte
-	ValidatorSetHeader []byte
-}
-
-func (e *MismatchingValidatorsError) Error() string {
-	return fmt.Sprintf(
-		"Mismatching validators at block %d\nValidatorBytes from snapshot: 0x%x\nValidatorBytes in Header: 0x%x\n",
-		e.Number,
-		e.ValidatorSetSnap,
-		e.ValidatorSetHeader,
+		maxCheckpointLength,
 	)
 }
 

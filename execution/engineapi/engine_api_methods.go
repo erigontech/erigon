@@ -19,32 +19,71 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/params"
+	"github.com/erigontech/erigon/rpc"
 )
+
+var errInvalidPayloadID = errors.New("invalid payload id: expected 8 bytes")
+
+func decodePayloadID(payloadID hexutil.Bytes) (uint64, error) {
+	if len(payloadID) != 8 {
+		return 0, errInvalidPayloadID
+	}
+	return binary.BigEndian.Uint64(payloadID), nil
+}
 
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
 	"engine_forkchoiceUpdatedV3",
+	"engine_forkchoiceUpdatedV4",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
 	"engine_newPayloadV4",
+	"engine_newPayloadV5",
 	"engine_getPayloadV1",
 	"engine_getPayloadV2",
 	"engine_getPayloadV3",
 	"engine_getPayloadV4",
 	"engine_getPayloadV5",
+	"engine_getPayloadV6",
 	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByHashV2",
 	"engine_getPayloadBodiesByRangeV1",
+	"engine_getPayloadBodiesByRangeV2",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
+	"engine_getBlobsV3",
+	"POST /engine/v1/payloads",
+	"POST /engine/v2/payloads",
+	"POST /engine/v3/payloads",
+	"POST /engine/v4/payloads",
+	"POST /engine/v5/payloads",
+	"GET /engine/v1/payloads/{payload_id}",
+	"GET /engine/v2/payloads/{payload_id}",
+	"GET /engine/v3/payloads/{payload_id}",
+	"GET /engine/v4/payloads/{payload_id}",
+	"GET /engine/v5/payloads/{payload_id}",
+	"GET /engine/v6/payloads/{payload_id}",
+	"POST /engine/v1/forkchoice",
+	"POST /engine/v2/forkchoice",
+	"POST /engine/v3/forkchoice",
+	"POST /engine/v4/forkchoice",
+	"POST /engine/v1/blobs",
+	"POST /engine/v2/blobs",
+	"POST /engine/v3/blobs",
+	"POST /engine/v1/client/version",
+	"POST /engine/v1/capabilities",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -56,7 +95,10 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 	}
 	e.engineLogSpamer.RecordRequest()
 
-	decodedPayloadId := binary.BigEndian.Uint64(payloadId)
+	decodedPayloadId, err := decodePayloadID(payloadId)
+	if err != nil {
+		return nil, err
+	}
 	e.logger.Info("Received GetPayloadV1", "payloadId", decodedPayloadId)
 
 	response, err := e.getPayload(ctx, decodedPayloadId, clparams.BellatrixVersion)
@@ -70,7 +112,10 @@ func (e *EngineServer) GetPayloadV1(ctx context.Context, payloadId hexutil.Bytes
 // Same as [GetPayloadV1] with addition of blockValue
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadv2
 func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	decodedPayloadId, err := decodePayloadID(payloadID)
+	if err != nil {
+		return nil, err
+	}
 	e.logger.Info("Received GetPayloadV2", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.CapellaVersion)
 }
@@ -78,7 +123,10 @@ func (e *EngineServer) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV2], with addition of blobsBundle containing valid blobs, commitments, proofs
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_getpayloadv3
 func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	decodedPayloadId, err := decodePayloadID(payloadID)
+	if err != nil {
+		return nil, err
+	}
 	e.logger.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.DenebVersion)
 }
@@ -86,7 +134,10 @@ func (e *EngineServer) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV3], but returning ExecutionPayloadV4 (= ExecutionPayloadV3 + requests)
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_getpayloadv4
 func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	decodedPayloadId, err := decodePayloadID(payloadID)
+	if err != nil {
+		return nil, err
+	}
 	e.logger.Info("Received GetPayloadV4", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.ElectraVersion)
 }
@@ -94,9 +145,23 @@ func (e *EngineServer) GetPayloadV4(ctx context.Context, payloadID hexutil.Bytes
 // Same as [GetPayloadV4], but returning BlobsBundleV2 instead of BlobsBundleV1
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getpayloadv5
 func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
-	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	decodedPayloadId, err := decodePayloadID(payloadID)
+	if err != nil {
+		return nil, err
+	}
 	e.logger.Info("Received GetPayloadV5", "payloadId", decodedPayloadId)
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
+}
+
+// Same as [GetPayloadV5], but returning ExecutionPayloadV6
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
+func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	decodedPayloadId, err := decodePayloadID(payloadID)
+	if err != nil {
+		return nil, err
+	}
+	e.logger.Info("Received GetPayloadV6", "payloadId", decodedPayloadId)
+	return e.getPayload(ctx, decodedPayloadId, clparams.GloasVersion)
 }
 
 // Updates the forkchoice state after validating the headBlockHash
@@ -117,6 +182,12 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+}
+
+// Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -142,9 +213,14 @@ func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.E
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
-	// TODO(racytech): add proper version or refactor this part
-	// add all version ralated checks here so the newpayload doesn't have to deal with checks
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
+}
+
+// NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5
+func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes
@@ -153,10 +229,34 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []co
 	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
+// Returns an array of execution payload bodies referenced by their block hashes,
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
+func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	if len(hashes) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	e.engineLogSpamer.RecordRequest()
+	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+}
+
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
 func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
+}
+
+// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count",
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
+func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	if uint64(start) == 0 || uint64(count) == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
+	}
+	if uint64(count) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	return e.chainRW.GetPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 // Returns the node's code and commit details in a slice
@@ -165,7 +265,7 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	if callerVersion != nil {
 		e.logger.Info("[GetClientVersionV1] Received request from" + callerVersion.String())
 	}
-	commitString := params.GitCommit
+	commitString := version.GitCommit
 	if len(commitString) >= 8 {
 		commitString = commitString[:8]
 	} else {
@@ -173,9 +273,9 @@ func (e *EngineServer) GetClientVersionV1(ctx context.Context, callerVersion *en
 	}
 	result := make([]engine_types.ClientVersionV1, 1)
 	result[0] = engine_types.ClientVersionV1{
-		Code:    params.ClientCode,
-		Name:    params.ClientName,
-		Version: params.VersionWithCommit(params.GitCommit),
+		Code:    version.ClientCode,
+		Name:    version.ClientName,
+		Version: version.VersionWithCommit(version.GitCommit),
 		Commit:  "0x" + commitString,
 	}
 	return result, nil
@@ -195,7 +295,7 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.CapellaVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +307,20 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
 	e.logger.Debug("[GetBlobsV2] Received Request", "hashes", len(blobHashes))
+	// GetBlobsV2 was actually introduced in Fusaka,
+	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
+	if err != nil {
+		return nil, err
+	}
+	if ret, ok := resp.([]*engine_types.BlobAndProofV2); ok {
+		return ret, err
+	}
+	return nil, err
+}
+
+func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error) {
+	e.logger.Debug("[GetBlobsV3] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
 	if err != nil {
 		return nil, err

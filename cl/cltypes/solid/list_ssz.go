@@ -19,10 +19,10 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type EncodableHashableSSZ interface {
@@ -157,6 +157,11 @@ func (l *ListSSZ[T]) Len() int {
 	return len(l.list)
 }
 
+func (l *ListSSZ[T]) Set(index int, value T) {
+	l.list[index] = value
+	l.root = common.Hash{}
+}
+
 func (l *ListSSZ[T]) Append(obj T) {
 	l.list = append(l.list, obj)
 	l.root = common.Hash{}
@@ -182,7 +187,7 @@ func (l *ListSSZ[T]) Cut(length int) {
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
-	leaves := make([]interface{}, l.limit)
+	leaves := make([]any, l.limit)
 	for i := range leaves {
 		leaves[i] = make([]byte, 32)
 	}
@@ -207,7 +212,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            common.Hash(common.CopyBytes(l.root[:])),
+		root:            common.Hash(common.Copy(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

@@ -18,32 +18,15 @@ package fork
 
 import (
 	"errors"
-	"sort"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var NO_GENESIS_TIME_ERR error = errors.New("genesis time is not set")
 var NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
-
-type fork struct {
-	epoch   uint64
-	version [4]byte
-}
-
-func forkList(schedule map[common.Bytes4]uint64) (f []fork) {
-	for version, epoch := range schedule {
-		f = append(f, fork{epoch: epoch, version: version})
-	}
-	sort.Slice(f, func(i, j int) bool {
-		return f[i].epoch < f[j].epoch
-	})
-	return
-}
 
 func ComputeDomain(
 	domainType []byte,

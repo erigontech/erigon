@@ -17,8 +17,8 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/clonable"
 )
 
 func (s *SignedBeaconBlock) Clone() clonable.Clonable {
@@ -75,8 +75,8 @@ func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
 }
 
-func (*SyncAggregate) Clone() clonable.Clonable {
-	return &SyncAggregate{}
+func (a *SyncAggregate) Clone() clonable.Clonable {
+	return NewSyncAggregateWithSize(len(a.SyncCommiteeBits))
 }
 
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {
@@ -134,7 +134,7 @@ func (*KZGCommitment) Clone() clonable.Clonable {
 }
 
 func (*Eth1Header) Clone() clonable.Clonable {
-	return &Eth1Header{}
+	return NewEth1Header(0)
 }
 
 func (*Withdrawal) Clone() clonable.Clonable {

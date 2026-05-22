@@ -22,7 +22,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txns acceptance into the pool.
@@ -41,6 +41,18 @@ type Config struct {
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
 	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
+	// MaxNonceGap is the maximum allowed gap between a sender's on-chain nonce and the nonce of a
+	// queued transaction. Transactions whose nonce exceeds the on-chain nonce by more than this
+	// value are considered "zombie" transactions that can never become pending (they would require
+	// an impossibly large number of preceding transactions to fill the gap), and are evicted from
+	// the pool. A value of 0 disables this eviction. Default is 64.
+	MaxNonceGap uint64
+
+	// QueuedDormancyDuration is the duration after which queued transactions from a sender with no
+	// on-chain state changes (nonce or balance) are proactively evicted. A value of 0 disables
+	// dormancy eviction. Resetting happens only on real on-chain activity — not on new transaction
+	// submissions — so senders cannot game the timer by re-submitting transactions. Default: 3h.
+	QueuedDormancyDuration time.Duration
 
 	// regular batch tasks processing
 	SyncToNewPeersEvery    time.Duration
@@ -76,6 +88,10 @@ var DefaultConfig = Config{
 	TotalBlobPoolLimit: 5400, // Default for a total of 10 different accounts hitting the above limit
 	PriceBump:          10,   // Price bump percentage to replace an already existing transaction
 	BlobPriceBump:      100,
+
+	MaxNonceGap: 64, // Evict queued txns with a nonce gap > 64 from the on-chain nonce
+
+	QueuedDormancyDuration: 3 * time.Hour, // Evict queued senders with no on-chain activity for 3h
 
 	NoGossip:     false,
 	MdbxWriteMap: false,
@@ -121,6 +137,9 @@ const (
 	ErrAuthorityReserved DiscardReason = 34 // EIP-7702 transaction with authority already reserved
 	InvalidAA            DiscardReason = 35 // Invalid RIP-7560 transaction
 	ErrGetCode           DiscardReason = 36 // Error getting code during AA validation
+	NonceTooDistant      DiscardReason = 37 // Nonce gap between tx and on-chain nonce exceeds MaxNonceGap; tx can never become pending
+	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
+	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
 )
 
 func (r DiscardReason) String() string {
@@ -199,6 +218,12 @@ func (r DiscardReason) String() string {
 		return "RIP-7560 transaction failed validation"
 	case ErrGetCode:
 		return "error getting account code during RIP-7560 validation"
+	case NonceTooDistant:
+		return "nonce gap too large: transaction nonce is too far ahead of sender's on-chain nonce"
+	case QueuedDormant:
+		return "queued sender dormant: no on-chain state change for too long"
+	case ErrGetSenderInfo:
+		return "error getting sender state during tx validation"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

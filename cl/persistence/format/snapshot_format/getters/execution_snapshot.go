@@ -21,14 +21,14 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type ExecutionSnapshotReader struct {
@@ -124,4 +124,8 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 		})
 	}
 	return ret, nil
+}
+
+func (r *ExecutionSnapshotReader) CacheBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	// No-op: local snapshot reader doesn't need caching — EL data is always available.
 }

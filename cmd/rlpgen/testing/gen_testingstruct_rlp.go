@@ -4,26 +4,20 @@ package testing
 
 import (
 	"fmt"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 	"io"
-	"math/big"
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {
-	size += rlp.IntLenExcludingHead(uint64(obj.a)) + 1
+	size += rlp.U64Len(uint64(obj.a))
 	if obj.aa != nil {
-		size += rlp.IntLenExcludingHead(uint64(*obj.aa)) + 1
+		size += rlp.U64Len(uint64(*obj.aa))
 	}
-	size += rlp.BigIntLenExcludingHead(&obj.b) + 1
-	size += 1
-	if obj.bb != nil {
-		size += rlp.BigIntLenExcludingHead(obj.bb)
-	}
-	size += rlp.Uint256LenExcludingHead(&obj.c) + 1
-	size += rlp.Uint256LenExcludingHead(obj.cc) + 1
+	size += rlp.Uint256Len(obj.c)
+	size += rlp.Uint256Len(*obj.cc)
 	size += 8 + 1
 	size += 1
 	if obj.dd != nil {
@@ -50,7 +44,7 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	} else {
 		size += 1
 	}
-	size += rlp.ByteSliceSliceSize(obj.i)
+	size += rlp.StringListLen(obj.i)
 	gidx := 0
 	gidx = (8 + 1) * len(obj.j)
 	size += rlp.ListPrefixLen(gidx) + gidx
@@ -97,27 +91,21 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 
 func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	var b [32]byte
-	if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(obj.EncodingSize(), w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(obj.a), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(obj.a), w, b[:]); err != nil {
 		return err
 	}
 	if obj.aa != nil {
-		if err := rlp.EncodeInt(uint64(*obj.aa), w, b[:]); err != nil {
+		if err := rlp.EncodeU64(uint64(*obj.aa), w, b[:]); err != nil {
 			return err
 		}
 	}
-	if err := rlp.EncodeBigInt(&obj.b, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(obj.c, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBigInt(obj.bb, w, b[:]); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(&obj.c, w, b[:]); err != nil {
-		return err
-	}
-	if err := rlp.EncodeUint256(obj.cc, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(*obj.cc, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 8
@@ -220,12 +208,12 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if err := rlp.EncodeByteSliceSlice(obj.i, w, b[:]); err != nil {
+	if err := rlp.EncodeStringList(obj.i, w, b[:]); err != nil {
 		return err
 	}
 	gidx := 0
 	gidx = (8 + 1) * len(obj.j)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.j); i++ {
@@ -241,7 +229,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.jj); i++ {
@@ -257,7 +245,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	}
 	gidx = 0
 	gidx = (20 + 1) * len(obj.k)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.k); i++ {
@@ -273,7 +261,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.kk); i++ {
@@ -289,7 +277,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	}
 	gidx = 0
 	gidx = (32 + 1) * len(obj.l)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.l); i++ {
@@ -305,7 +293,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.ll); i++ {
@@ -339,77 +327,44 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if obj.a, err = s.Uint(); err != nil {
+	if obj.a, err = s.Uint64(); err != nil {
 		return fmt.Errorf("error decoding field a, err: %w", err)
 	}
-	if n, err := s.Uint(); err != nil {
+	if n, err := s.Uint64(); err != nil {
 		return fmt.Errorf("error decoding field aa, err: %w", err)
 	} else {
 		i := n
 		obj.aa = &i
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("error decoding field b, err: %w", err)
-	}
-	obj.b = *(new(big.Int).SetBytes(b))
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("error decoding field bb, err: %w", err)
-	}
-	obj.bb = new(big.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&obj.c); err != nil {
 		return fmt.Errorf("error decoding field c, err: %w", err)
 	}
-	obj.c = *(new(uint256.Int).SetBytes(b))
-	if b, err = s.Uint256Bytes(); err != nil {
+	obj.cc = new(uint256.Int)
+	if err = s.ReadUint256(obj.cc); err != nil {
 		return fmt.Errorf("error decoding field cc, err: %w", err)
 	}
-	obj.cc = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.d[:]); err != nil {
 		return fmt.Errorf("error decoding field d, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 8 {
-		return fmt.Errorf("error decoded length mismatch, expected: 8, got: %d", len(b))
-	}
-	copy(obj.d[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.dd = &types.BlockNonce{}
+	if err = s.ReadBytes((*obj.dd)[:]); err != nil {
 		return fmt.Errorf("error decoding field dd, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 8 {
-		return fmt.Errorf("error decoded length mismatch, expected: 8, got: %d", len(b))
-	}
-	obj.dd = &types.BlockNonce{}
-	copy((*obj.dd)[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.e[:]); err != nil {
 		return fmt.Errorf("error decoding field e, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
-	}
-	copy(obj.e[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.ee = &common.Address{}
+	if err = s.ReadBytes((*obj.ee)[:]); err != nil {
 		return fmt.Errorf("error decoding field ee, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
-	}
-	obj.ee = &common.Address{}
-	copy((*obj.ee)[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.f[:]); err != nil {
 		return fmt.Errorf("error decoding field f, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 32 {
-		return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
-	}
-	copy(obj.f[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.ff = &common.Hash{}
+	if err = s.ReadBytes((*obj.ff)[:]); err != nil {
 		return fmt.Errorf("error decoding field ff, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 32 {
-		return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
-	}
-	obj.ff = &common.Hash{}
-	copy((*obj.ff)[:], b)
+	var b []byte
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("error decoding field g, err: %w", err)
 	}
@@ -518,18 +473,19 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field kk - fail to close list, err: %w", err)
 	}
-	_, err = s.List()
+	l, err := s.List()
 	if err != nil {
 		return fmt.Errorf("error decoding field l - expected list start, err: %w", err)
 	}
-	obj.l = []common.Hash{}
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) > 0 && len(b) != 32 {
-			return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
+	if l > 0 {
+		obj.l = make([]common.Hash, l/(1+32))
+		for i := range obj.l {
+			if err = s.ReadBytes(obj.l[i][:]); err != nil {
+				return err
+			}
 		}
-		var s common.Hash
-		copy(s[:], b)
-		obj.l = append(obj.l, s)
+	} else {
+		obj.l = []common.Hash{}
 	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field l - fail to close list, err: %w", err)

@@ -1,9 +1,9 @@
 package public_keys_registry
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 // This package as a whole gets plenty of test coverage in spectests, so we can skip unit testing here.

@@ -23,22 +23,21 @@ import (
 	"container/list"
 	"context"
 	crand "crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 )
 
 var (
 	// ErrNotificationsUnsupported is returned when the connection doesn't support notifications
 	ErrNotificationsUnsupported = errors.New("notifications not supported")
-	// ErrNotificationNotFound is returned when the notification for the given id is not found
+	// ErrSubscriptionNotFound is returned when the notification for the given id is not found
 	ErrSubscriptionNotFound = errors.New("subscription not found")
+	// ErrFilterNotFound is returned when the filter for the given id is not found
+	ErrFilterNotFound = errors.New("filter not found")
 )
 
 var globalGen = randomIDGenerator()
@@ -51,24 +50,15 @@ func NewID() ID {
 	return globalGen()
 }
 
-// randomIDGenerator returns a function generates a random IDs.
+// randomIDGenerator returns a function that generates cryptographically-strong random IDs.
+// We avoid math/rand and time-based seeds to prevent predictable sequences.
+// If crypto/rand fails, we propagate the error by panicking to avoid producing weak IDs.
 func randomIDGenerator() func() ID {
-	var buf = make([]byte, 8)
-	var seed int64
-	if _, err := crand.Read(buf); err == nil {
-		seed = int64(binary.BigEndian.Uint64(buf))
-	} else {
-		seed = int64(time.Now().Nanosecond())
-	}
-	var (
-		mu  sync.Mutex
-		rng = rand.New(rand.NewSource(seed)) // nolint: gosec
-	)
 	return func() ID {
-		mu.Lock()
-		defer mu.Unlock()
 		id := make([]byte, 16)
-		rng.Read(id)
+		if _, err := crand.Read(id); err != nil {
+			panic("crypto/rand failure generating subscription ID: " + err.Error())
+		}
 		return encodeID(id)
 	}
 }
@@ -97,8 +87,8 @@ func ContextWithNotifier(ctx context.Context, n Notifier) context.Context {
 // Notifier is used by Server callbacks to send notifications.
 type Notifier interface {
 	CreateSubscription() *Subscription
-	Notify(id ID, data interface{}) error
-	Closed() <-chan interface{}
+	Notify(id ID, data any) error
+	Closed() <-chan any
 }
 
 type LocalNotifier struct {
@@ -132,7 +122,7 @@ func (n *LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
-func (n *LocalNotifier) Notify(id ID, data interface{}) error {
+func (n *LocalNotifier) Notify(id ID, data any) error {
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {
@@ -147,7 +137,7 @@ func (n *LocalNotifier) Notify(id ID, data interface{}) error {
 	}
 }
 
-func (n *LocalNotifier) Closed() <-chan interface{} {
+func (n *LocalNotifier) Closed() <-chan any {
 	return n.closec
 }
 
@@ -182,7 +172,7 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
-func (n *RemoteNotifier) Notify(id ID, data interface{}) error {
+func (n *RemoteNotifier) Notify(id ID, data any) error {
 	enc, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -205,7 +195,7 @@ func (n *RemoteNotifier) Notify(id ID, data interface{}) error {
 
 // Closed returns a channel that is closed when the RPC connection is closed.
 // Deprecated: use subscription error channel
-func (n *RemoteNotifier) Closed() <-chan interface{} {
+func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
 }
 
@@ -380,13 +370,13 @@ func (sub *ClientSubscription) forward() (unsubscribeServer bool, err error) {
 	}
 }
 
-func (sub *ClientSubscription) unmarshal(result json.RawMessage) (interface{}, error) {
+func (sub *ClientSubscription) unmarshal(result json.RawMessage) (any, error) {
 	val := reflect.New(sub.etype)
 	err := json.Unmarshal(result, val.Interface())
 	return val.Elem().Interface(), err
 }
 
 func (sub *ClientSubscription) requestUnsubscribe() error {
-	var result interface{}
+	var result any
 	return sub.client.Call(&result, sub.namespace+unsubscribeMethodSuffix, sub.subid)
 }

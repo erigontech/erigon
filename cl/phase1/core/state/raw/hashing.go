@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
@@ -42,6 +42,9 @@ func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
 	}
 	if b.Version() >= clparams.FuluVersion {
 		endIndex = StateLeafSizeFulu * 32
+	}
+	if b.Version() >= clparams.GloasVersion {
+		endIndex = StateLeafSizeGloas * 32
 	}
 	err = merkle_tree.MerkleRootFromFlatLeaves(b.leaves[:endIndex], out[:])
 	return
@@ -65,11 +68,14 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeElectra
 	}
 	if b.Version() >= clparams.FuluVersion {
-		depth = 7
+		depth = 6
 		leafSize = StateLeafSizeFulu
 	}
+	if b.Version() >= clparams.GloasVersion {
+		leafSize = StateLeafSizeGloas
+	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -88,11 +94,14 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeElectra
 	}
 	if b.Version() >= clparams.FuluVersion {
-		depth = 7
+		depth = 6
 		leafSize = StateLeafSizeFulu
 	}
+	if b.Version() >= clparams.GloasVersion {
+		leafSize = StateLeafSizeGloas
+	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -110,11 +119,14 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeElectra
 	}
 	if b.Version() >= clparams.FuluVersion {
-		depth = 7
+		depth = 6
 		leafSize = StateLeafSizeFulu
 	}
+	if b.Version() >= clparams.GloasVersion {
+		leafSize = StateLeafSizeGloas
+	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -214,8 +226,12 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 
 	if b.version >= clparams.BellatrixVersion {
-		// Bellatrix fields
-		beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
+		// Position 24: pre-Gloas holds latestExecutionPayloadHeader; Gloas replaces it with latestBlockHash (consensus-specs #5113)
+		if b.version >= clparams.GloasVersion {
+			beaconStateHasher.add(LatestBlockHashLeafIndex, b.latestBlockHash)
+		} else {
+			beaconStateHasher.add(LatestExecutionPayloadHeaderLeafIndex, b.latestExecutionPayloadHeader)
+		}
 	}
 
 	if b.version >= clparams.CapellaVersion {
@@ -240,6 +256,17 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	if b.version >= clparams.FuluVersion {
 		beaconStateHasher.add(ProposerLookaheadLeafIndex, b.proposerLookahead)
+	}
+
+	if b.version >= clparams.GloasVersion {
+		beaconStateHasher.add(BuildersLeafIndex, b.builders)
+		beaconStateHasher.add(NextWithdrawalBuilderIndexLeafIndex, b.nextWithdrawalBuilderIndex)
+		beaconStateHasher.add(ExecutionPayloadAvailabilityLeafIndex, b.executionPayloadAvailability)
+		beaconStateHasher.add(BuilderPendingPaymentsLeafIndex, b.builderPendingPayments)
+		beaconStateHasher.add(BuilderPendingWithdrawalsLeafIndex, b.builderPendingWithdrawals)
+		beaconStateHasher.add(LatestExecutionPayloadBidLeafIndex, b.latestExecutionPayloadBid)
+		beaconStateHasher.add(PayloadExpectedWithdrawalsLeafIndex, b.payloadExpectedWithdrawals)
+		beaconStateHasher.add(PtcWindowLeafIndex, b.ptcWindow)
 	}
 
 	beaconStateHasher.run()

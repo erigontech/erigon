@@ -20,17 +20,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 func TestFiltersDeadlock(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
 	config := FiltersConfig{}
-	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger)
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, logger, nil)
 	crit := filters.FilterCriteria{
 		Addresses: nil,
 		Topics:    [][]common.Hash{},

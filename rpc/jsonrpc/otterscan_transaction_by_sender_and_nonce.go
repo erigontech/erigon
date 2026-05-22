@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/order"
-	"github.com/erigontech/erigon-lib/types/accounts"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
@@ -41,6 +40,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	defer it.Close()
 
 	var prevTxnID, nextTxnID uint64
 	for i := 0; it.HasNext(); i++ {
@@ -93,7 +93,8 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-			panic(err)
+			searchErr = err
+			return false
 		}
 		if !ok {
 			return false
@@ -125,14 +126,14 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	if nonceTxnID == 0 {
 		return nil, nil
 	}
-	bn, ok, err := api._txNumReader.FindBlockNum(tx, nonceTxnID)
+	bn, ok, err := api._txNumReader.FindBlockNum(ctx, tx, nonceTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", nonceTxnID)
 	}
-	minTxNum, err := api._txNumReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, bn)
 	if err != nil {
 		return nil, err
 	}

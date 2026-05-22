@@ -18,13 +18,13 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/execution/exec3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type GenericTracer interface {
@@ -34,7 +34,7 @@ type GenericTracer interface {
 }
 
 func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
-	executor := exec3.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
+	executor := exec.NewTraceWorker(tx, chainConfig, api.engine(), api._blockReader, tracer)
 	defer executor.Close()
 
 	// if block number changed, calculate all related field
@@ -43,8 +43,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	if header == nil {
-		log.Warn("[rpc] header is nil", "blockNum", blockNum)
-		return nil
+		return fmt.Errorf("header not found for block %d", blockNum)
 	}
 	executor.ChangeBlock(header)
 
@@ -53,8 +52,7 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 		return err
 	}
 	if txn == nil {
-		log.Warn("[rpc genericTracer] txn is nil", "blockNum", blockNum, "txIndex", txIndex)
-		return nil
+		return fmt.Errorf("txn not found at block %d, index %d", blockNum, txIndex)
 	}
 	err = executor.ExecTxn(txnID, txIndex, txn, false)
 	if err != nil {

@@ -21,24 +21,18 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/erigontech/erigon/polygon/polygoncommon"
-
-	"github.com/erigontech/erigon-lib/kv"
+	"github.com/erigontech/erigon/db/kv"
+	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
 type RangeIndex interface {
 	Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error)
+	Last(ctx context.Context) (uint64, bool, error)
 }
 
 type TransactionalRangeIndexer interface {
 	RangeIndexer
 	WithTx(tx kv.Tx) RangeIndexer
-}
-
-type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
-
-func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return f(ctx, blockNum)
 }
 
 type RangeIndexer interface {
@@ -48,7 +42,7 @@ type RangeIndexer interface {
 }
 
 type dbRangeIndex struct {
-	db    *polygoncommon.Database
+	db    *polygondb.Database
 	table string
 }
 
@@ -57,12 +51,12 @@ type txRangeIndex struct {
 	tx kv.Tx
 }
 
-func NewRangeIndex(db *polygoncommon.Database, table string) *dbRangeIndex {
+func NewRangeIndex(db *polygondb.Database, table string) *dbRangeIndex {
 	return &dbRangeIndex{db, table}
 }
 
 func NewTxRangeIndex(db kv.RoDB, table string, tx kv.Tx) *txRangeIndex {
-	return &txRangeIndex{&dbRangeIndex{polygoncommon.AsDatabase(db.(kv.RwDB)), table}, tx}
+	return &txRangeIndex{&dbRangeIndex{polygondb.AsDatabase(db.(kv.RwDB)), table}, tx}
 }
 
 func (i *dbRangeIndex) WithTx(tx kv.Tx) RangeIndexer {
@@ -129,6 +123,18 @@ func (i *dbRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 	return id, ok, err
 }
 
+func (i *dbRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	var lastKey uint64
+	var ok bool
+
+	err := i.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		lastKey, ok, err = i.WithTx(tx).Last(ctx)
+		return err
+	})
+	return lastKey, ok, err
+}
+
 func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
 	cursor, err := i.tx.Cursor(i.table)
 	if err != nil {
@@ -148,6 +154,26 @@ func (i *txRangeIndex) Lookup(ctx context.Context, blockNum uint64) (uint64, boo
 
 	id := rangeIndexValueParse(value)
 	return id, true, err
+}
+
+// last key in the index
+func (i *txRangeIndex) Last(ctx context.Context) (uint64, bool, error) {
+	cursor, err := i.tx.Cursor(i.table)
+	if err != nil {
+		return 0, false, err
+	}
+	defer cursor.Close()
+	key, value, err := cursor.Last()
+	if err != nil {
+		return 0, false, err
+	}
+
+	if value == nil || key == nil {
+		return 0, false, nil
+	}
+
+	lastKey := rangeIndexKeyParse(key)
+	return lastKey, true, nil
 }
 
 // Lookup ids for the given range [blockFrom, blockTo). Return boolean which checks if the result is reliable to use, because

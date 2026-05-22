@@ -23,8 +23,8 @@ import (
 	"runtime"
 	"strconv"
 
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 /*
@@ -46,7 +46,7 @@ type peer struct {
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
 	syncingStatus, err := beaconhttp.Uint64FromQueryParams(r, "syncing_status")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
 	syncingCode := http.StatusOK
@@ -62,19 +62,19 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 
 func (a *ApiHandler) GetEthV1NodeVersion(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	// Get OS and Arch
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"version": fmt.Sprintf("Caplin/%s %s/%s", a.version, runtime.GOOS, runtime.GOARCH),
 	}), nil
 }
 
 func (a *ApiHandler) GetEthV1NodePeerCount(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	ret, err := a.sentinel.GetPeers(r.Context(), &sentinel.EmptyMessage{})
+	ret, err := a.sentinel.GetPeers(r.Context(), &sentinelproto.EmptyMessage{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
 	// all fields should be converted to string
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"connected":     strconv.FormatUint(ret.Connected, 10),
 		"disconnected":  strconv.FormatUint(ret.Disconnected, 10),
 		"connecting":    strconv.FormatUint(ret.Connecting, 10),
@@ -94,7 +94,7 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 		directionIn = &direction
 	}
 
-	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinel.PeersInfoRequest{
+	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{
 		Direction: directionIn,
 		State:     stateIn,
 	})
@@ -103,6 +103,9 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 	}
 	peers := make([]peer, 0, len(ret.Peers))
 	for i := range ret.Peers {
+		if ret.Peers[i].Enr == "" {
+			continue
+		}
 		peers = append(peers, peer{
 			PeerID:             ret.Peers[i].Pid,
 			State:              ret.Peers[i].State,
@@ -121,13 +124,16 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinel.PeersInfoRequest{})
+	ret, err := a.sentinel.PeersInfo(r.Context(), &sentinelproto.PeersInfoRequest{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	// find the peer with matching enr
 	for _, p := range ret.Peers {
 		if p.Pid == pid {
+			if p.Enr == "" {
+				continue
+			}
 			return newBeaconResponse(peer{
 				PeerID:             p.Pid,
 				State:              p.State,
@@ -143,17 +149,17 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	id, err := a.sentinel.Identity(r.Context(), &sentinel.EmptyMessage{})
+	id, err := a.sentinel.Identity(r.Context(), &sentinelproto.EmptyMessage{})
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"peer_id":             id.Pid,
 		"enr":                 id.Enr,
 		"p2p_addresses":       id.P2PAddresses,
 		"discovery_addresses": id.DiscoveryAddresses,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
 			"attnets":  id.Metadata.Attnets,
 			"syncnets": id.Metadata.Syncnets,
@@ -165,7 +171,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 	currentSlot := a.ethClock.GetCurrentSlot()
 
 	return newBeaconResponse(
-		map[string]interface{}{
+		map[string]any{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
 			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
 			"is_syncing":    a.syncedData.Syncing(),

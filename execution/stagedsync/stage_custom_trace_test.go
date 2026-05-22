@@ -23,19 +23,22 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/stagedsync"
 )
 
 func TestCustomTraceReceiptDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
 	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
@@ -48,20 +51,20 @@ func TestCustomTraceReceiptDomain(t *testing.T) {
 		progress := rtx.Debug().DomainProgress(kv.ReceiptDomain)
 		assert.Greater(progress, uint64(0), "Receipt domain progress should be greater than 0")
 
-		cumGasUsed, _, logIndex, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
+		cumGasUsed, _, logIdxAfterTx, err := rawtemporaldb.ReceiptAsOf(rtx, 3)
 		require.NoError(err)
 		assert.Equal(0, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
-		cumGasUsed, _, logIndex, err = rawtemporaldb.ReceiptAsOf(rtx, 4)
+		cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(rtx, 4)
 		require.NoError(err)
 		assert.Equal(21_000, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
-		cumGasUsed, _, logIndex, err = rawtemporaldb.ReceiptAsOf(rtx, 5)
+		cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(rtx, 5)
 		require.NoError(err)
 		assert.Equal(0, int(cumGasUsed))
-		assert.Equal(0, int(logIndex))
+		assert.Equal(0, int(logIdxAfterTx))
 
 		return nil
 	})
@@ -85,11 +88,14 @@ func TestCustomTraceInvalidProduceMode(t *testing.T) {
 }
 
 func TestCustomTraceDomainProgressConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 
 	require.NoError(m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		return kvcfg.PersistReceipts.ForceWrite(tx, true)

@@ -24,17 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/cl/utils/bls"
-
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -42,16 +37,22 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
 // asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
 // will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinel.SentinelClient and *sentinel.GossipData to enable the service
+// that's why we are passing sentinelproto.SentinelClient and *sentinelproto.GossipData to enable the service
 // to do all of that by itself.
 type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
-	Receiver                *sentinel.Peer
+	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
 }
 
@@ -75,6 +76,10 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	validatorParams        *validator_params.ValidatorParams
+
+	// Cached proposer indices per epoch (for current epoch check)
+	proposerIndicesCache *lru.Cache[uint64, []uint64]
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -88,8 +93,13 @@ func NewAggregateAndProofService(
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
+	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	proposerIndicesCache, err := lru.New[uint64, []uint64]("proposerIndices", 3)
 	if err != nil {
 		panic(err)
 	}
@@ -101,9 +111,65 @@ func NewAggregateAndProofService(
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
+		validatorParams:        validatorParams,
+		proposerIndicesCache:   proposerIndicesCache,
 	}
 	go a.loop(ctx)
 	return a
+}
+
+func (a *aggregateAndProofServiceImpl) Names() []string {
+	return []string{gossip.TopicNameBeaconAggregateAndProof}
+}
+
+func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameBeaconAggregateAndProof
+}
+
+// isLocalValidatorProposer checks if any local validator is a proposer in the current or next epoch.
+// For current epoch: uses cached GetBeaconProposerIndices.
+// For next epoch: uses GetProposerLookahead() (Fulu+) or always returns true (pre-Fulu).
+func (a *aggregateAndProofServiceImpl) isLocalValidatorProposer(headState *state.CachingBeaconState, currentEpoch uint64, localValidators []uint64) bool {
+	if headState.Version() < clparams.FuluVersion {
+		return true
+	}
+	// Check current epoch using cached proposer indices
+	currentProposers, ok := a.proposerIndicesCache.Get(currentEpoch)
+	if !ok {
+		var err error
+		currentProposers, err = headState.GetBeaconProposerIndices(currentEpoch)
+		if err == nil {
+			a.proposerIndicesCache.Add(currentEpoch, currentProposers)
+		}
+	}
+	for _, validatorIndex := range localValidators {
+		if slices.Contains(currentProposers, validatorIndex) {
+			return true
+		}
+	}
+
+	// For Fulu+, use the efficient proposer lookahead for next epoch
+	lookahead := headState.GetProposerLookahead()
+	// The lookahead contains proposers for current and next epoch, skip current epoch slots
+	slotsPerEpoch := int(a.beaconCfg.SlotsPerEpoch)
+	for i := slotsPerEpoch; i < lookahead.Length(); i++ {
+		proposerIndex := lookahead.Get(i)
+		if slices.Contains(localValidators, proposerIndex) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
+	obj := &SignedAggregateAndProofForGossip{
+		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
+		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
+	}
+	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (a *aggregateAndProofServiceImpl) ProcessMessage(
@@ -118,10 +184,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	slot := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.Slot
 	committeeIndex := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex
 
-	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
-		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
-		return ErrIgnore
-	}
+	// Note: the original "future slot" check used HeadSlot() which can lag behind
+	// block production in solo-validator setups. The epoch check below (line ~218)
+	// and the finalized ancestor check (line ~234) provide sufficient validation.
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
@@ -131,9 +196,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if len(indices) != 1 {
 			return fmt.Errorf("invalid committee_bits length in aggregate and proof: %v", len(indices))
 		}
-		// [REJECT] aggregate.data.index == 0
-		if aggregate.Data.CommitteeIndex != 0 {
-			return errors.New("invalid committee_index in aggregate and proof")
+
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			// [New in GLOAS] [REJECT] aggregate.data.index >= 2
+			if aggregate.Data.CommitteeIndex >= 2 {
+				return errors.New("invalid committee_index in aggregate and proof: must be < 2")
+			}
+		} else {
+			// [Electra/Fulu] [REJECT] aggregate.data.index == 0
+			if aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof")
+			}
 		}
 		committeeIndex = uint64(indices[0])
 	}
@@ -142,11 +215,28 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateVerificationData *AggregateVerificationData
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
+		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
-		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
-			return ErrIgnore
+		// If our head state is too far from the aggregate's epoch, committee
+		// computations will use a stale RANDAO mix and produce wrong results.
+		// Allow current and previous epoch per spec: compute_epoch_at_slot(slot)
+		// in (get_previous_epoch(state), get_current_epoch(state)).
+		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
+		// with wrong target.Epoch still reach the reject check below.
+		headEpoch := state.Epoch(headState)
+		if epoch != headEpoch && epoch != state.PreviousEpoch(headState) {
+			return fmt.Errorf("head epoch %d too far from aggregate epoch %d: %w",
+				headEpoch, epoch, ErrIgnore)
+		}
+		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
+		// When the head state lags behind (solo validator / genesis start), use the
+		// highest seen slot to widen the accepted epoch window.
+		highestSeenEpoch := a.forkchoiceStore.HighestSeen() / a.beaconCfg.SlotsPerEpoch
+		prevEpoch := state.PreviousEpoch(headState)
+		currEpoch := max(state.Epoch(headState), highestSeenEpoch)
+		if epoch < prevEpoch || epoch > currEpoch {
+			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
@@ -164,13 +254,37 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			finalizedSlot,
-		) != finalizedCheckpoint.Root {
-			return ErrIgnore
+		).Root != finalizedCheckpoint.Root {
+			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
 		}
 
 		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
-			return ErrIgnore
+		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+		if !blockHeaderOk {
+			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+		}
+
+		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
+		// This means: when same slot, index MUST be 0 (reject if not 0)
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			if blockHeader.Slot == slot && aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
+			}
+
+			// [New in GLOAS] When index=1 (payload-present attestation), the execution
+			// payload envelope for the block must have been received and validated.
+			// Spec conditions:
+			//   [IGNORE] The signed execution payload envelope has been seen.
+			//   [REJECT] The signed execution payload envelope has been validated (processed by forkchoice).
+			// In our implementation, HasEnvelope returns true only after OnExecutionPayload
+			// has successfully processed and persisted the envelope, so it implies both
+			// "seen" and "validated". We use IGNORE disposition here because the envelope
+			// may simply not have arrived yet (timing issue, not a protocol violation).
+			if aggregate.Data.CommitteeIndex == 1 {
+				if !a.forkchoiceStore.HasEnvelope(aggregateData.BeaconBlockRoot) {
+					return fmt.Errorf("%w: execution payload envelope not seen/validated for block %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+				}
+			}
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
@@ -179,7 +293,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return ErrIgnore
+			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
@@ -203,7 +317,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			target.Epoch*a.beaconCfg.SlotsPerEpoch,
-		) != target.Root {
+		).Root != target.Root {
 			return errors.New("invalid target block")
 		}
 		if a.test {
@@ -216,21 +330,37 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("invalid aggregate and proof")
 		}
 
-		// aggregate signatures for later verification
-		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
-		if err != nil {
-			return err
-		}
-
 		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
+
+		// Check if any local validator is a proposer in this or the next epoch
+		localValidators := a.validatorParams.GetValidators()
+		if len(localValidators) > 0 {
+			currentEpoch := state.Epoch(headState)
+			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
+		}
+
+		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+			// Set beacon config on the aggregate's attestation so HashSSZ uses the correct
+			// AggregationBits limit for the active preset (e.g. minimal: 8192, mainnet: 131072).
+			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.SetBeaconConfig(a.beaconCfg)
+			// aggregate signatures for later verification
+			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}); err != nil {
 		return err
 	}
 	if a.test {
 		return nil
+	}
+	if aggregateVerificationData == nil {
+		return ErrIgnore
 	}
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
@@ -251,10 +381,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-
-	return ErrIgnore
+	return nil
 
 }
 
@@ -349,7 +477,7 @@ func AggregateMessageSignature(
 			return err
 		}
 		pk := val.PublicKeyBytes()
-		pks = append(pks, common.CopyBytes(pk))
+		pks = append(pks, common.Copy(pk))
 		return nil
 	}); err != nil {
 		return nil, nil, nil, err

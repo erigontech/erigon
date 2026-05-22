@@ -19,15 +19,12 @@ package sentinelcli
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
-
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/turbo/logging"
-
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 type SentinelCliCfg struct {
@@ -51,6 +48,7 @@ func SetupSentinelCli(ctx *cli.Context) (*SentinelCliCfg, error) {
 
 	cfg.Port = uint(ctx.Int(sentinelflags.SentinelDiscoveryPort.Name))
 	cfg.Addr = ctx.String(sentinelflags.SentinelDiscoveryAddr.Name)
+	cfg.ServerTcpPort = uint(ctx.Uint(sentinelflags.SentinelTcpPort.Name))
 
 	cfg.LogLvl = ctx.Uint(logging.LogVerbosityFlag.Name)
 	if cfg.LogLvl == uint(log.LvlInfo) || cfg.LogLvl == 0 {

@@ -24,13 +24,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
-	"github.com/erigontech/erigon/turbo/debug"
 
-	_ "github.com/erigontech/erigon-db/snaptype"      //hack
+	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )
 
@@ -56,7 +56,7 @@ func main() {
 			defer heimdallReader.Close()
 		}
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader)
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

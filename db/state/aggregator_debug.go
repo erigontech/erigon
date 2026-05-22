@@ -1,0 +1,373 @@
+package state
+
+import (
+	"context"
+	"time"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
+)
+
+type aggDirtyFilesRoTx struct {
+	agg    *Aggregator
+	domain []*domainDirtyFilesRoTx
+	ii     [kv.StandaloneIdxLen]*iiDirtyFilesRoTx
+}
+
+type domainDirtyFilesRoTx struct {
+	d       *Domain
+	files   []*FilesItem
+	history *historyDirtyFilesRoTx
+}
+
+type historyDirtyFilesRoTx struct {
+	h     *History
+	files []*FilesItem
+	ii    *iiDirtyFilesRoTx
+}
+
+type iiDirtyFilesRoTx struct {
+	ii    *InvertedIndex
+	files []*FilesItem
+}
+
+func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
+	ac := &aggDirtyFilesRoTx{
+		agg:    a,
+		domain: make([]*domainDirtyFilesRoTx, len(a.d)),
+	}
+
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	for i, d := range a.d {
+		ac.domain[i] = d.DebugBeginDirtyFilesRo()
+	}
+
+	for i := 0; i < a.iisCount; i++ {
+		ac.ii[i] = a.iis[i].DebugBeginDirtyFilesRo()
+	}
+
+	return ac
+}
+
+func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.files {
+			f.MadvNormal()
+		}
+		for _, f := range d.history.ii.files {
+			f.MadvNormal()
+		}
+	}
+	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
+		for _, f := range ii.files {
+			f.MadvNormal()
+		}
+	}
+	return ac
+}
+func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
+	for _, d := range ac.domain {
+		for _, f := range d.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.files {
+			f.DisableReadAhead()
+		}
+		for _, f := range d.history.ii.files {
+			f.DisableReadAhead()
+		}
+	}
+	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
+		for _, f := range ii.files {
+			f.DisableReadAhead()
+		}
+	}
+}
+
+func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFiles) {
+	mf = &MissedAccessorAggFiles{
+		domain: make(map[kv.Domain]*MissedAccessorDomainFiles),
+		ii:     make(map[kv.InvertedIdx]*MissedAccessorIIFiles),
+	}
+	domainDL := readDirNames(ac.agg.dirs.SnapDomain)
+	accessorDL := readDirNames(ac.agg.dirs.SnapAccessors)
+	for _, d := range ac.domain {
+		mf.domain[d.d.Name] = d.filesWithMissedAccessors(domainDL, accessorDL)
+	}
+	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
+		mf.ii[ii.ii.Name] = ii.filesWithMissedAccessors(accessorDL)
+	}
+	return
+}
+
+func (ac *aggDirtyFilesRoTx) Close() {
+	if ac.agg == nil {
+		return
+	}
+	for _, d := range ac.domain {
+		d.Close()
+	}
+
+	for _, ii := range ac.ii {
+		if ii == nil {
+			continue
+		}
+		ii.Close()
+	}
+	ac.agg = nil
+	ac.domain = nil
+	ac.ii = [kv.StandaloneIdxLen]*iiDirtyFilesRoTx{}
+}
+
+func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
+	var files []*FilesItem
+	iter := d.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
+	return &domainDirtyFilesRoTx{
+		d:       d,
+		files:   files,
+		history: d.History.DebugBeginDirtyFilesRo(),
+	}
+}
+
+func (d *domainDirtyFilesRoTx) filesWithMissedAccessors(domainDL, accessorDL dirListing) *MissedAccessorDomainFiles {
+	return &MissedAccessorDomainFiles{
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files, domainDL),
+			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files, domainDL),
+		},
+		history: d.history.filesWithMissedAccessors(accessorDL),
+	}
+}
+
+func (d *domainDirtyFilesRoTx) Close() {
+	if d.d == nil {
+		return
+	}
+	d.history.Close()
+	for _, item := range d.files {
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
+	}
+	d.files = nil
+	d.d = nil
+}
+
+func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
+	var files []*FilesItem
+	iter := h.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
+	return &historyDirtyFilesRoTx{
+		h:     h,
+		files: files,
+		ii:    h.InvertedIndex.DebugBeginDirtyFilesRo(),
+	}
+}
+
+func (f *historyDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) *MissedAccessorHistoryFiles {
+	return &MissedAccessorHistoryFiles{
+		ii: f.ii.filesWithMissedAccessors(dl),
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files, dl),
+		},
+	}
+}
+
+func (f *historyDirtyFilesRoTx) Close() {
+	if f.h == nil {
+		return
+	}
+	f.ii.Close()
+	for _, item := range f.files {
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
+	}
+	f.files = nil
+	f.h = nil
+}
+
+func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
+	var files []*FilesItem
+	iter := ii.dirtyFiles.Iter()
+	defer iter.Release()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		item := iter.Item()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
+	return &iiDirtyFilesRoTx{
+		ii:    ii,
+		files: files,
+	}
+}
+
+func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) (mf *MissedAccessorIIFiles) {
+	return &MissedAccessorIIFiles{
+		files: map[statecfg.Accessors][]*FilesItem{
+			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, dl),
+		},
+	}
+}
+
+func (f *iiDirtyFilesRoTx) Close() {
+	if f.ii == nil {
+		return
+	}
+	for _, item := range f.files {
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
+	}
+	f.files = nil
+	f.ii = nil
+}
+
+func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
+	go func() {
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				if s := a.ps.String(); s != "" {
+					a.logger.Info("[agg] building", "files", s)
+				}
+			}
+		}
+	}()
+}
+
+// fileItems collection of missed files
+type MissedFilesMap map[statecfg.Accessors][]*FilesItem
+type MissedAccessorAggFiles struct {
+	domain map[kv.Domain]*MissedAccessorDomainFiles
+	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
+}
+
+func (m MissedFilesMap) IsEmpty() bool {
+	for _, v := range m {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (m MissedFilesMap) Get(accessor statecfg.Accessors) []*FilesItem {
+	return m[accessor]
+}
+
+func (m *MissedAccessorAggFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.domain {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+	for _, v := range m.ii {
+		if !v.IsEmpty() {
+			return false
+		}
+	}
+
+	return true
+}
+
+type MissedAccessorDomainFiles struct {
+	history *MissedAccessorHistoryFiles
+	files   MissedFilesMap
+}
+
+func (m *MissedAccessorDomainFiles) missedBtreeAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorBTree]
+}
+
+func (m *MissedAccessorDomainFiles) missedMapAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorHashMap]
+}
+
+func (m *MissedAccessorDomainFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	return m.files.IsEmpty() && m.history.IsEmpty()
+}
+
+type MissedAccessorHistoryFiles struct {
+	ii    *MissedAccessorIIFiles
+	files MissedFilesMap
+}
+
+func (m *MissedAccessorHistoryFiles) missedMapAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorHashMap]
+}
+
+func (m *MissedAccessorHistoryFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	for _, v := range m.files {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return m.ii.IsEmpty()
+}
+
+type MissedAccessorIIFiles struct {
+	files MissedFilesMap
+}
+
+func (m *MissedAccessorIIFiles) missedMapAccessors() []*FilesItem {
+	return m.files[statecfg.AccessorHashMap]
+}
+
+func (m *MissedAccessorIIFiles) IsEmpty() bool {
+	if m == nil {
+		return true
+	}
+	return m.files.IsEmpty()
+}
+
+func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }
+func (at *AggregatorRoTx) DbgII(idx kv.InvertedIdx) *InvertedIndexRoTx { return at.searchII(idx) }
+func (at *AggregatorRoTx) searchII(idx kv.InvertedIdx) *InvertedIndexRoTx {
+	for i := 0; i < at.iisCount; i++ {
+		if at.iis[i].name == idx {
+			return at.iis[i]
+		}
+	}
+	return nil
+}

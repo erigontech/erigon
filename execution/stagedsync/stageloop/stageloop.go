@@ -1,0 +1,824 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package stageloop
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"runtime"
+	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/metrics"
+	execp2p "github.com/erigontech/erigon/execution/p2p"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
+)
+
+var inMemHistoryReads = dbg.EnvBool("ERIGON_IN_MEM_HISTORY", true)
+
+// StageLoop runs the continuous loop of staged sync
+func StageLoop(
+	ctx context.Context,
+	db kv.TemporalRwDB,
+	sync *stagedsync.Sync,
+	hd *headerdownload.HeaderDownload,
+	waitForDone chan struct{},
+	loopMinTime time.Duration,
+	logger log.Logger,
+	blockReader services.FullBlockReader,
+	hook *Hook,
+) {
+	defer close(waitForDone)
+
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
+		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
+			return
+		}
+
+		logger.Error("Staged Sync", "err", err)
+		if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+			logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+		}
+	}
+
+	logger.Debug("[stageloop] Starting iteration")
+	initialCycle := true
+	for {
+		start := time.Now()
+		select {
+		case <-hd.ShutdownCh:
+			return
+		default:
+			// continue
+		}
+		hook.LastNewBlockSeen(hd.Progress())
+		t := time.Now()
+		err := StageLoopIteration(ctx, db, sync, initialCycle, false, logger, blockReader, hook)
+		if err != nil {
+			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
+				return
+			}
+			// During parallel execution, an invalid block in initial sync is unrecoverable:
+			// retrying hits the same block forever, pushing Caplin's backward target further back.
+			// Stop the stage loop so the operator can investigate.
+			if dbg.Exec3Parallel && initialCycle && errors.Is(err, rules.ErrInvalidBlock) {
+				logger.Error("Invalid block during parallel initial sync — stopping stage loop", "err", err)
+				return
+			}
+			logger.Error("Staged Sync", "err", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			}
+			time.Sleep(500 * time.Millisecond) // just to avoid too many similar error logs
+			continue
+		}
+		if time.Since(t) < 5*time.Minute {
+			initialCycle = false
+		}
+		if !initialCycle {
+			hd.AfterInitialCycle()
+		}
+		if loopMinTime != 0 {
+			waitTime := loopMinTime - time.Since(start)
+			logger.Info("Wait time until next loop", "for", waitTime)
+			c := time.After(waitTime)
+			select {
+			case <-ctx.Done():
+				return
+			case <-c:
+			}
+		}
+	}
+}
+
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
+	sawZeroBlocksTimes := 0
+
+	// Snapshot download uses a brief RwTx.
+	{
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:gocritic // safety net; explicit Rollback/Commit above take precedence
+		if err := sync.RunSnapshots(nil, tx); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if onlySnapDownload {
+			return nil
+		}
+		if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
+			return tx.Commit()
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	// Execution loop: RO tx for reads, brief RwTx for commit.
+	// New SharedDomains after each commit so SeekCommitment picks up
+	// the freshly committed state.
+	roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // deferred via closure below (roTx is reassigned across iterations)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if roTx != nil {
+			roTx.Rollback()
+		}
+	}() // safety net; roTx is reassigned per iteration, explicit Rollbacks below
+
+	doms, err := execctx.NewSharedDomains(ctx, roTx, logger)
+	if err != nil {
+		roTx.Rollback()
+		return err
+	}
+	// inMemHistoryReads MUST be true — correctness requirement, not a perf/RPC
+	// toggle. Any task classified HistoryExecution=true reads through
+	// HistoryReaderV3; if sd.mem's inMemHistoryReads is off, sd.GetAsOf errors
+	// and falls through to ttx.GetAsOf which cannot see intra-block writes.
+	doms.SetInMemHistoryReads(true)
+
+	var finishStageBeforeSync uint64
+	if hook != nil {
+		finishStageBeforeSync, err = stages.GetStageProgress(roTx, stages.Finish)
+		if err != nil {
+			return err
+		}
+		if err = hook.BeforeRun(roTx, false); err != nil {
+			return err
+		}
+	}
+
+	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		return fmt.Errorf("ProcessFrozenBlocks: init block overlay: %w", err)
+	}
+
+	initialCycle, firstCycle := true, false
+	for more := true; more; {
+		overlay := doms.BlockOverlay()
+		more, err = sync.Run(doms, overlay, initialCycle, firstCycle)
+		if err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+		}
+
+		// Close RO tx so no reader holds back MDBX GC during prune.
+		roTx.Rollback()
+
+		// Collate+prune OLD data (its own RwTx).
+		if a, ok := db.(state.HasAgg); ok {
+			agg := a.Agg().(*state.Aggregator)
+			if capRoTx, capErr := db.BeginTemporalRo(ctx); capErr == nil {
+				if maxTxNum, e := rawdbv3.TxNums.Max(ctx, capRoTx, blockReader.FrozenBlocks()); e == nil && maxTxNum > 0 {
+					stepSize := agg.StepSize()
+					agg.SetMaxCollationTxNum((maxTxNum / stepSize) * stepSize)
+				}
+				capRoTx.Rollback()
+			}
+			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
+			}, logger); err != nil {
+				return fmt.Errorf("ProcessFrozenBlocks: collate+prune: %w", err)
+			}
+		}
+
+		// Lock commitGate so background collation RO txs are closed
+		// before we commit — MDBX GC needs openTxs=1 to reclaim pages.
+		// defer the unlock so every error path (begin, overlay flush,
+		// doms flush, commit) releases the gate; otherwise a flush error
+		// would leave the gate held in write mode and deadlock every
+		// subsequent reader/writer (DB-wide blast radius).
+		var collationLocked bool
+		if a, ok := db.(state.HasAgg); ok {
+			a.Agg().(*state.Aggregator).LockCollation()
+			collationLocked = true
+			defer func() {
+				if collationLocked {
+					a.Agg().(*state.Aggregator).UnlockCollation()
+				}
+			}()
+		}
+
+		// Flush execution state + overlay via brief RwTx, then commit.
+		commitTx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: begin rw: %w", err)
+		}
+		defer commitTx.Rollback() //nolint:gocritic // safety net; explicit Rollback/Commit below take precedence
+		if err := overlay.Flush(ctx, commitTx); err != nil {
+			commitTx.Rollback()
+			return fmt.Errorf("ProcessFrozenBlocks: flush overlay: %w", err)
+		}
+		if err := doms.Flush(ctx, commitTx); err != nil {
+			commitTx.Rollback()
+			return fmt.Errorf("ProcessFrozenBlocks: flush doms: %w", err)
+		}
+		doms.Close()
+		if err := commitTx.Commit(); err != nil {
+			return err
+		}
+		// Release the collation gate as early as possible so the post-commit
+		// RO read below (and downstream collation) doesn't wait on it.
+		if a, ok := db.(state.HasAgg); ok {
+			a.Agg().(*state.Aggregator).UnlockCollation()
+			collationLocked = false
+		}
+
+		// Read the actual committed txNum from the DB "state" key.
+		// This is the authoritative source for what's been committed —
+		// use it to cap collation so files don't capture uncommitted data.
+		if verifyTx, verifyErr := db.BeginTemporalRo(ctx); verifyErr == nil {
+			v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+			if getErr != nil {
+				// Log but continue — aggregator stays at its prior watermark; the next iteration
+				// will retry. Silent failure here is the failure mode that motivated the fix:
+				// without the watermark refresh, collation files capture uncommitted data.
+				logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
+			} else if len(v) >= 16 {
+				committedTxNum := binary.BigEndian.Uint64(v[:8])
+				if a, ok := db.(state.HasAgg); ok {
+					a.Agg().(*state.Aggregator).SetLastFlushedCommitmentTxNum(committedTxNum)
+				}
+			}
+			verifyTx.Rollback()
+		} else {
+			logger.Warn("[stageloop frozen] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
+		}
+
+		// Reopen RO tx and reinit block overlay on same doms.
+		// Keep doms alive across iterations — it tracks commitment
+		// position in memory and advances past the snapshot value.
+		roTx, err = db.BeginTemporalRo(ctx) //nolint:gocritic // rolled back at next iteration's line 207 or outer defer
+		if err != nil {
+			return err
+		}
+
+		var finStageProgress uint64
+		if blockReader.FrozenBlocks() > 0 {
+			finStageProgress, err = stages.GetStageProgress(roTx, stages.Finish)
+			if err != nil {
+				return err
+			}
+			if finStageProgress >= blockReader.FrozenBlocks() {
+				break
+			}
+		} else {
+			sawZeroBlocksTimes++
+			if sawZeroBlocksTimes > 2 {
+				break
+			}
+		}
+
+		// New SharedDomains with fresh RO tx — SeekCommitment reads
+		// the committed state from MDBX.
+		doms, err = execctx.NewSharedDomains(ctx, roTx, logger)
+		if err != nil {
+			return err
+		}
+		// inMemHistoryReads MUST be true — correctness requirement, not a
+		// perf toggle. See the detailed comment at the first SetInMemHistoryReads
+		// call above (ProcessFrozenBlocks entry).
+		doms.SetInMemHistoryReads(true)
+		if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			return fmt.Errorf("ProcessFrozenBlocks: reinit overlay: %w", err)
+		}
+	}
+
+	doms.Close()
+	roTx.Rollback()
+
+	if hook != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			headersProgress, _, _, err := stagesHeadersAndFinish(tx)
+			if err != nil {
+				return err
+			}
+			if err = hook.SendNotifications(tx, finishStageBeforeSync); err != nil {
+				return err
+			}
+			if err = hook.UpdateHead(tx, finishStageBeforeSync, false); err != nil {
+				return err
+			}
+			hook.LastNewBlockSeen(headersProgress)
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+	// avoid crash because Erigon's core does many things
+	defer dbg.RecoverPanicIntoError(logger, &err)
+	hasMore := true
+	for hasMore {
+		// Execution + flush in one transaction.
+		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			sd.SetInMemHistoryReads(inMemHistoryReads)
+			hasMore, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+			if err != nil {
+				return err
+			}
+			return sd.Flush(ctx, tx)
+		})
+		if err != nil {
+			return err
+		}
+		// Collate (if steps accumulated) + prune in separate transaction.
+		if a, ok := db.(state.HasAgg); ok {
+			agg := a.Agg().(*state.Aggregator)
+			if err := agg.CollateAndPruneIfNeeded(ctx, db, func(tx kv.TemporalRwTx) error {
+				return sync.RunPrune(ctx, tx, initialCycle, 0)
+			}, logger); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
+	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(tx)
+	if err != nil {
+		return false, err
+	}
+	// Sync from scratch must be able Commit partial progress
+	// In all other cases - process blocks batch in 1 RwTx
+	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
+	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	// Main steps:
+	// - process new blocks
+	// - commit(no_sync). NoSync - making data available for readers as-soon-as-possible. Can
+	//       send notifications Now and do write to disks Later.
+	// - Send Notifications: about new blocks, new receipts, state changes, etc...
+	// - Prune(limited time)+Commit(sync). Write to disk happening here.
+	if err = hook.BeforeRun(tx, isSynced); err != nil {
+		return false, err
+	}
+	hasMore, err = sync.Run(sd, tx, initialCycle, firstCycle)
+	if err != nil {
+		return false, err
+	}
+	logCtx := sync.PrintTimings()
+	// -- send notifications START
+	if err = hook.SendNotifications(tx, finishProgressBefore); err != nil {
+		return false, err
+	}
+	if err = hook.UpdateHead(tx, finishProgressBefore, isSynced); err != nil {
+		return false, err
+	}
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	if gasUsed > 0 {
+		var mgasPerSec float64
+		// this is a bit hacky
+		for i, v := range logCtx {
+			if stringVal, ok := v.(string); ok && stringVal == "Execution" {
+				execTime := logCtx[i+1].(string)
+				// convert from ..ms to duration
+				execTimeDuration, err := time.ParseDuration(execTime)
+				if err != nil {
+					logger.Error("Failed to parse execution time", "err", err)
+				} else {
+					gasUsedMgas := float64(gasUsed) / 1e6
+					mgasPerSec = gasUsedMgas / execTimeDuration.Seconds()
+				}
+			}
+		}
+		if mgasPerSec > 0 {
+			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
+			logCtx = append(logCtx, "mgas/s", mgasPerSec)
+		}
+	}
+	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logger.Info("Timings", logCtx...)
+	// -- send notifications END
+	// Prune is called in a separate transaction by the caller.
+	return hasMore, nil
+}
+
+func stagesHeadersAndFinish(tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
+	if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
+		return head, fin, gasUsed, err
+	}
+	if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
+		return head, fin, gasUsed, err
+	}
+	h := rawdb.ReadHeaderByNumber(tx, head)
+	if h != nil {
+		gasUsed = h.GasUsed
+	}
+	return head, fin, gasUsed, nil
+}
+
+// NotificationSender abstracts notification dispatch so Hook can delegate to
+// an implementation defined in another package (e.g. execmodule.Dispatcher)
+// without creating a circular import.
+type NotificationSender interface {
+	Dispatch(ctx context.Context, tx kv.Tx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts, finishProgressBefore, finishProgressAfter uint64, prevUnwindPoint *uint64) error
+}
+
+type Hook struct {
+	ctx                                 context.Context
+	notifications                       *shards.Notifications
+	sync                                *stagedsync.Sync
+	chainConfig                         *chain.Config
+	logger                              log.Logger
+	dispatcher                          NotificationSender
+	updateHead                          func(ctx context.Context)
+	statusDataGetter                    sentry_multi_client.StatusGetter
+	blockRangePublisher                 *execp2p.Publisher
+	lastAnnouncedBlockRangeLatestNumber uint64
+	lastAnnouncedBlockRangeTime         time.Time
+}
+
+func NewHook(
+	ctx context.Context,
+	notifications *shards.Notifications,
+	sync *stagedsync.Sync,
+	chainConfig *chain.Config,
+	logger log.Logger,
+	dispatcher NotificationSender,
+	updateHead func(ctx context.Context),
+	statusDataGetter sentry_multi_client.StatusGetter,
+	blockRangePublisher *execp2p.Publisher,
+) *Hook {
+	return &Hook{
+		ctx:                 ctx,
+		notifications:       notifications,
+		sync:                sync,
+		chainConfig:         chainConfig,
+		logger:              logger,
+		dispatcher:          dispatcher,
+		updateHead:          updateHead,
+		statusDataGetter:    statusDataGetter,
+		blockRangePublisher: blockRangePublisher,
+	}
+}
+
+func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
+	notifications := h.notifications
+	if notifications != nil && notifications.Accumulator != nil && inSync {
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			h.logger.Error("problem reading plain state version", "err", err)
+		}
+		notifications.Accumulator.Reset(stateVersion)
+	}
+	return nil
+}
+
+func (h *Hook) LastNewBlockSeen(n uint64) {
+	if h == nil || h.notifications == nil {
+		return
+	}
+	h.notifications.NewLastBlockSeen(n)
+}
+
+func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
+	if h == nil {
+		return nil
+	}
+	return h.beforeRun(tx, inSync)
+}
+
+// SendNotifications dispatches all pending notifications (state changes,
+// headers, logs, receipts) via the Dispatcher. The tx is the data source —
+// either the SD's blockOverlay (pre-commit) or a committed DB tx.
+//
+// All call sites follow the same pattern:
+//
+//	hook.SendNotifications(tx, finishProgressBefore)
+//	hook.UpdateHead(tx, finishProgressBefore, isSynced)
+func (h *Hook) SendNotifications(tx kv.Tx, finishProgressBefore uint64) error {
+	if h == nil {
+		return nil
+	}
+	if h.notifications == nil || h.dispatcher == nil {
+		return nil
+	}
+	finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	return h.dispatcher.Dispatch(
+		h.ctx, tx,
+		h.notifications.Accumulator,
+		h.notifications.RecentReceipts,
+		finishProgressBefore,
+		finishStageAfterSync,
+		h.sync.PrevUnwindPoint(),
+	)
+}
+
+// UpdateHead updates the sentry head status and announces the block range
+// to P2P peers. Called after SendNotifications.
+func (h *Hook) UpdateHead(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
+	if h == nil {
+		return nil
+	}
+	if h.updateHead != nil {
+		h.updateHead(h.ctx)
+	}
+	finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
+	return nil
+}
+
+func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSync uint64, isSynced bool) {
+	if h.blockRangePublisher == nil || h.statusDataGetter == nil {
+		return
+	}
+
+	// we want to announce BlockRangeUpdate
+	// - after initialization
+	// - during sync: every 1 minute. A time limit is used to prevent excessive announcements in
+	//									case of fast execution due to empty blocks or small SyncLoopBlockLimit
+	// - after sync: every 32 blocks or on unwind of any depth
+	hadUnwind := h.sync != nil && h.sync.PrevUnwindPoint() != nil && *h.sync.PrevUnwindPoint() < finishStageBeforeSync
+	isInitialAnnouncement := h.lastAnnouncedBlockRangeLatestNumber == 0
+	progressed := finishStageAfterSync >= h.lastAnnouncedBlockRangeLatestNumber+32
+	timeElapsed := time.Since(h.lastAnnouncedBlockRangeTime)
+	shouldPublishByTime := !isSynced && timeElapsed >= 1*time.Minute
+
+	if !hadUnwind && !isInitialAnnouncement && !progressed && !shouldPublishByTime {
+		return
+	}
+
+	status, err := h.statusDataGetter.GetStatusData(h.ctx)
+	if err != nil {
+		h.logger.Warn("[hook] block range update skipped; status data unavailable", "err", err)
+		return
+	}
+
+	packet := eth.BlockRangeUpdatePacket{
+		Earliest:   status.MinimumBlockHeight,
+		Latest:     status.MaxBlockHeight,
+		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
+	}
+
+	if err := packet.Validate(); err != nil {
+		h.logger.Warn("[hook] block range update skipped", "err", err)
+		return
+	}
+
+	h.logger.Debug("[hook] publishing block range update", "earliest", packet.Earliest, "latest", packet.Latest, "hadUnwind", hadUnwind, "isSynced", isSynced, "timeElapsed", timeElapsed)
+	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
+	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
+	h.lastAnnouncedBlockRangeTime = time.Now()
+}
+
+func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
+	currentHeight := currentHeader.Number.Uint64()
+	currentHash := currentHeader.Hash()
+	if chainReader != nil {
+		if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
+			log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
+			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+		}
+		if err := engine.VerifyUncles(chainReader, currentHeader, currentBody.Uncles); err != nil {
+			log.Warn("Unlcles Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
+			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+		}
+	}
+	// Prepare memory state for block execution
+	if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
+		return err
+	}
+	prevHash, err := rawdb.ReadCanonicalHash(batch, currentHeight)
+	if err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
+		return err
+	}
+	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
+		return err
+	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+		return err
+	}
+	if prevHash != currentHash {
+		if err := rawdbv3.TxNums.Truncate(batch, currentHeight); err != nil {
+			return err
+		}
+		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
+			return err
+		}
+	}
+
+	if err := stages.SaveStageProgress(batch, stages.Headers, currentHeight); err != nil {
+		return err
+	}
+	if err := stages.SaveStageProgress(batch, stages.Bodies, currentHeight); err != nil {
+		return err
+	}
+	return nil
+}
+
+func cleanupProgressIfNeeded(batch kv.RwTx, header *types.Header) error {
+	// If we fail state root then we have wrong execution stage progress set (+1), we need to decrease by one!
+	progress, err := stages.GetStageProgress(batch, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if progress == header.Number.Uint64() && progress > 0 {
+		progress--
+		if err := stages.SaveStageProgress(batch, stages.Execution, progress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.Engine, sd *execctx.SharedDomains, tx kv.TemporalRwTx, stateSync *stagedsync.Sync, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
+	shouldUnwind := unwindPoint > 0
+	// Construct side fork if we have one
+	if shouldUnwind {
+		// Run it through the unwind
+		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
+			return err
+		}
+		if err = stateSync.RunUnwind(sd, tx); err != nil {
+			return err
+		}
+	}
+	lastNum := headersChain[len(headersChain)-1].Number.Uint64()
+	if err := rawdb.TruncateCanonicalChain(ctx, tx, lastNum+1); err != nil {
+		return err
+	}
+	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
+	for i := range headersChain {
+		currentHeader := headersChain[i]
+		currentBody := bodiesChain[i]
+		if err := addAndVerifyBlockStep(tx, engine, chainReader, currentHeader, currentBody); err != nil {
+			return err
+		}
+		// Run state sync
+		hasMore, err := stateSync.RunNoInterrupt(sd, tx)
+		if err != nil {
+			// Don't lose the original error, like cancellation or common.ErrStopped.
+			return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
+		}
+		if hasMore {
+			// should not ever happen since we exec blocks 1 by 1
+			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
+				return err
+			}
+			return errors.New("unexpected state step has more work")
+		}
+	}
+	return nil
+}
+
+func NewDefaultStages(ctx context.Context,
+	db kv.TemporalRwDB,
+	p2pCfg p2p.Config,
+	cfg *ethconfig.Config,
+	controlServer *sentry_multi_client.MultiClient,
+	notifications *shards.Notifications,
+	snapDownloader downloader.Client,
+	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
+	tracer *tracers.Tracer,
+	afterSnapshotDownload func(ctx context.Context) error,
+	readAheader *exec.BlockReadAheader,
+) []*stagedsync.Stage {
+	var tracingHooks *tracing.Hooks
+	if tracer != nil {
+		tracingHooks = tracer.Hooks
+	}
+	dirs := cfg.Dirs
+	blockWriter := blockio.NewBlockWriter()
+	return stagedsync.DefaultStages(
+		ctx,
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageHeadersCfg(controlServer.Hd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, p2pCfg.NoDiscovery, blockReader),
+		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
+		stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
+		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
+		stagedsync.StageFinishCfg(),
+	)
+}
+
+func NewPipelineStages(ctx context.Context,
+	db kv.TemporalRwDB,
+	cfg *ethconfig.Config,
+	controlServer *sentry_multi_client.MultiClient,
+	notifications *shards.Notifications,
+	snapDownloader downloader.Client,
+	blockReader services.FullBlockReader,
+	blockRetire services.BlockRetire,
+	tracer *tracers.Tracer,
+	afterSnapshotDownload func(ctx context.Context) error,
+	readAheader *exec.BlockReadAheader,
+) []*stagedsync.Stage {
+	var tracingHooks *tracing.Hooks
+	if tracer != nil {
+		tracingHooks = tracer.Hooks
+	}
+	dirs := cfg.Dirs
+	blockWriter := blockio.NewBlockWriter()
+
+	var depositContract common.Address
+	if cfg.Genesis != nil {
+		depositContract = cfg.Genesis.Config.DepositContract
+	}
+	_ = depositContract
+
+	return stagedsync.PipelineStages(ctx,
+		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
+		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
+		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
+		stagedsync.StageFinishCfg(),
+		stagedsync.StageWitnessProcessingCfg(controlServer.ChainConfig, controlServer.WitnessBuffer),
+	)
+}
+
+func NewInMemoryExecution(
+	ctx context.Context,
+	db kv.TemporalRwDB,
+	cfg *ethconfig.Config,
+	controlServer *sentry_multi_client.MultiClient,
+	notifications *shards.Notifications,
+	blockReader services.FullBlockReader,
+	blockWriter *blockio.BlockWriter,
+	logger log.Logger,
+	readAheader *exec.BlockReadAheader,
+) *stagedsync.Sync {
+	return stagedsync.New(
+		cfg.Sync,
+		stagedsync.StateStages(ctx,
+			stagedsync.StageHeadersCfg(controlServer.Hd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, false /* noP2PDiscovery */, blockReader),
+			stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
+			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
+			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, cfg.Dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, readAheader),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		),
+		stagedsync.StateUnwindOrder,
+		nil, /* pruneOrder */
+		logger,
+		stages.ModeForkValidation,
+	)
+}

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -90,7 +90,7 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 				errCheckPeer = err
 				break
 			}
-			errCheckPeer = checkMinPeers(uint(peers), netAPI)
+			errCheckPeer = checkMinPeers(r.Context(), uint(peers), netAPI)
 		}
 		if after, ok := strings.CutPrefix(lHeader, checkBlock); ok {
 			block, err := strconv.Atoi(after)
@@ -98,7 +98,7 @@ func processFromHeaders(headers []string, ethAPI EthAPI, netAPI NetAPI, w http.R
 				errCheckBlock = err
 				break
 			}
-			errCheckBlock = checkBlockNumber(rpc.BlockNumber(block), ethAPI)
+			errCheckBlock = checkBlockNumber(r.Context(), rpc.BlockNumber(block), ethAPI)
 		}
 		if after, ok := strings.CutPrefix(lHeader, maxSecondsBehind); ok {
 			seconds, err := strconv.Atoi(after)
@@ -130,11 +130,11 @@ func processFromBody(w http.ResponseWriter, r *http.Request, netAPI NetAPI, ethA
 	} else {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
-			errMinPeerCount = checkMinPeers(*body.MinPeerCount, netAPI)
+			errMinPeerCount = checkMinPeers(r.Context(), *body.MinPeerCount, netAPI)
 		}
 		// 2. custom query (shouldn't fail)
 		if body.BlockNumber != nil {
-			errCheckBlock = checkBlockNumber(*body.BlockNumber, ethAPI)
+			errCheckBlock = checkBlockNumber(r.Context(), *body.BlockNumber, ethAPI)
 		}
 		// TODO add time from the last sync cycle
 	}

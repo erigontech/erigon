@@ -24,16 +24,16 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
@@ -57,7 +57,7 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &types.Genesis{
-			Config: chain.TestChainConfig,
+			Config: chain.TestChainBerlinConfig,
 			Alloc: types.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -65,7 +65,7 @@ func TestCallMany(t *testing.T) {
 			},
 			GasLimit: 10000000,
 		}
-		chainID = big.NewInt(1337)
+		chainID = uint256.NewInt(1337)
 		ctx     = context.Background()
 
 		addr1BalanceCheck = "70a08231" + "000000000000000000000000" + address1.Hex()[2:]
@@ -84,7 +84,8 @@ func TestCallMany(t *testing.T) {
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
-	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+
+	contractBackend := backends.NewSimulatedBackend(t, gspec.Alloc, gspec.GasLimit)
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
@@ -98,7 +99,7 @@ func TestCallMany(t *testing.T) {
 
 	db := contractBackend.DB()
 	engine := contractBackend.Engine()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil), db, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), false, rpccfg.DefaultEvmCallTimeout, engine, datadir.New(t.TempDir()), nil, 0, 0), db, nil, nil)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

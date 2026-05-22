@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	goruntime "runtime"
 	"runtime/pprof"
@@ -35,28 +34,28 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/config3"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-	state2 "github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/evm/internal/compiler"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/runtime"
-	"github.com/erigontech/erigon/eth/tracers"
-	"github.com/erigontech/erigon/eth/tracers/logger"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 var runCommand = cli.Command{
@@ -105,7 +104,7 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		// Do one warm-up run
 		output, gasUsed, err := execFunc()
 		result := testing.Benchmark(func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				haveOutput, haveGasUsed, haveErr := execFunc()
 				if !bytes.Equal(haveOutput, output) {
 					panic(fmt.Sprintf("output differs\nhave %x\nwant %x\n", haveOutput, output))
@@ -113,8 +112,14 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 				if haveGasUsed != gasUsed {
 					panic(fmt.Sprintf("gas differs, have %v want %v", haveGasUsed, gasUsed))
 				}
-				if haveErr != err {
-					panic(fmt.Sprintf("err differs, have %v want %v", haveErr, err))
+				// Compare errors by their string representation because struct-based
+				// errors (e.g. &ErrStackUnderflow{stackLen: n, required: m}) are
+				// distinct pointer allocations on each call, so direct == fails.
+				if (haveErr == nil) != (err == nil) {
+					panic(fmt.Sprintf("err differs in nil-ness, have %v want %v", haveErr, err))
+				}
+				if haveErr != nil && err != nil && haveErr.Error() != err.Error() {
+					panic(fmt.Sprintf("err differs, have %q want %q", haveErr.Error(), err.Error()))
 				}
 			}
 		})
@@ -147,11 +152,11 @@ func runCmd(ctx *cli.Context) error {
 		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(VerbosityFlag.Name)), log.StderrHandler))
 	}
 	logconfig := &logger.LogConfig{
-		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.Bool(DisableStackFlag.Name),
-		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
-		Debug:             ctx.Bool(DebugFlag.Name),
+		EnableMemory:     !ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:     ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
+		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
+		Debug:            ctx.Bool(DebugFlag.Name),
 	}
 
 	var (
@@ -159,8 +164,8 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
 		chainConfig   *chain.Config
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		sender        = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
+		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
 	if machineFriendlyOutput {
@@ -171,32 +176,29 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := memdb.New(os.TempDir(), kv.ChainDB)
+	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
+	if err != nil {
+		return err
+	}
+	defer dir.RemoveAll(tmpDir)
+	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
+		genesiswrite.MustCommitGenesis(gen, db, datadir.New(tmpDir), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
 		genesisConfig = new(types.Genesis)
 	}
-	agg, err := state2.NewAggregator(context.Background(), datadir.New(os.TempDir()), config3.DefaultStepSize, db, log.New())
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return err
-	}
-	tx, err := tdb.BeginTemporalRw(context.Background())
+
+	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	sd, err := state2.NewSharedDomains(tx, log.Root())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
 	if err != nil {
 		return err
 	}
@@ -204,12 +206,12 @@ func runCmd(ctx *cli.Context) error {
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
 	}
 
 	var code []byte
@@ -266,18 +268,17 @@ func runCmd(ctx *cli.Context) error {
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
-		GasPrice:    gasPrice,
-		Value:       value,
+		GasPrice:    *gasPrice,
+		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
-		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
-		Coinbase:    genesisConfig.Coinbase,
-		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
+		Time:        genesisConfig.Timestamp,
+		Coinbase:    accounts.InternAddress(genesisConfig.Coinbase),
+		BlockNumber: genesisConfig.Number,
 	}
 
 	if tracer != nil {
 		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
 	}
-	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
@@ -315,15 +316,15 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
-			return output, gasLeft, err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code)
+			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
-			return output, initialGas - gasLeft, err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	}
 
@@ -333,7 +334,11 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.Bool(DumpFlag.Name) {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
-			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
+			blockContext := evmtypes.BlockContext{
+				BlockNumber: runtimeConfig.BlockNumber,
+				Time:        runtimeConfig.Time,
+			}
+			rules = blockContext.Rules(chainConfig)
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)

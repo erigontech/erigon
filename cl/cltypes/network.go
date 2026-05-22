@@ -20,12 +20,12 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
+	"github.com/erigontech/erigon/cl/clparams"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type Metadata struct {
@@ -36,7 +36,7 @@ type Metadata struct {
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	schema := []interface{}{
+	schema := []any{
 		m.SeqNumber,
 		m.Attnets[:],
 	}
@@ -83,7 +83,7 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (m *Metadata) MarshalJSON() ([]byte, error) {
-	out := map[string]interface{}{
+	out := map[string]any{
 		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
 		"attnets":    hexutil.Bytes(m.Attnets[:]),
 	}
@@ -112,6 +112,9 @@ func (p *Ping) EncodingSizeSSZ() int {
 }
 
 func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 8 {
+		return ssz.ErrLowBufferSize
+	}
 	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
 }
@@ -181,23 +184,55 @@ func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
  * It contains network information about the other peer and if mismatching we drop it.
  */
 type Status struct {
-	ForkDigest     [4]byte
-	FinalizedRoot  [32]byte
-	FinalizedEpoch uint64
-	HeadRoot       [32]byte
-	HeadSlot       uint64
+	ForkDigest            [4]byte
+	FinalizedRoot         [32]byte
+	FinalizedEpoch        uint64
+	HeadRoot              [32]byte
+	HeadSlot              uint64
+	EarliestAvailableSlot *uint64 // Fulu:EIP7594
 }
 
 func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, s.ForkDigest[:], s.FinalizedRoot[:], s.FinalizedEpoch, s.HeadRoot[:], s.HeadSlot)
+	return ssz2.MarshalSSZ(buf, s.schema()...)
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, s.ForkDigest[:], s.FinalizedRoot[:], &s.FinalizedEpoch, s.HeadRoot[:], &s.HeadSlot)
+	schema := []any{
+		s.ForkDigest[:],
+		s.FinalizedRoot[:],
+		&s.FinalizedEpoch,
+		s.HeadRoot[:],
+		&s.HeadSlot,
+	}
+	if version >= int(clparams.FuluVersion) {
+		if s.EarliestAvailableSlot == nil {
+			s.EarliestAvailableSlot = new(uint64)
+		}
+		schema = append(schema, s.EarliestAvailableSlot)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, schema...)
+}
+
+func (s *Status) schema() []any {
+	schema := []any{
+		s.ForkDigest[:],
+		s.FinalizedRoot[:],
+		&s.FinalizedEpoch,
+		s.HeadRoot[:],
+		&s.HeadSlot,
+	}
+	if s.EarliestAvailableSlot != nil {
+		schema = append(schema, s.EarliestAvailableSlot)
+	}
+	return schema
 }
 
 func (s *Status) EncodingSizeSSZ() int {
-	return 84
+	size := 84
+	if s.EarliestAvailableSlot != nil {
+		size += 8
+	}
+	return size
 }
 
 type BlobsByRangeRequest struct {
@@ -219,4 +254,29 @@ func (l *BlobsByRangeRequest) EncodingSizeSSZ() int {
 
 func (*BlobsByRangeRequest) Clone() clonable.Clonable {
 	return &BlobsByRangeRequest{}
+}
+
+/*
+ * ExecutionPayloadEnvelopesByRangeRequest requests execution payload envelopes by slot range.
+ * [New in Gloas:EIP7732]
+ */
+type ExecutionPayloadEnvelopesByRangeRequest struct {
+	StartSlot uint64
+	Count     uint64
+}
+
+func (l *ExecutionPayloadEnvelopesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, &l.StartSlot, &l.Count)
+}
+
+func (l *ExecutionPayloadEnvelopesByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
+	return ssz2.UnmarshalSSZ(buf, 0, &l.StartSlot, &l.Count)
+}
+
+func (l *ExecutionPayloadEnvelopesByRangeRequest) EncodingSizeSSZ() int {
+	return 16
+}
+
+func (*ExecutionPayloadEnvelopesByRangeRequest) Clone() clonable.Clonable {
+	return &ExecutionPayloadEnvelopesByRangeRequest{}
 }

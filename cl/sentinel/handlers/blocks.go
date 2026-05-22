@@ -17,12 +17,14 @@
 package handlers
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/libp2p/go-libp2p/core/network"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -34,6 +36,12 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	req := &cltypes.BeaconBlocksByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
 		return err
+	}
+
+	// Consume additional rate-limit tokens proportional to the requested block count.
+	// The wrapper already consumed 1 token for admission.
+	if cost := min(int(req.Count), MaxRequestsBlocks) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -97,6 +105,12 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	if len(blockRoots) == 0 {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
+
+	// Consume additional rate-limit tokens proportional to the number of roots.
+	if cost := len(blockRoots) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err
@@ -109,7 +123,13 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err != nil {
 			return false
 		}
+		// If the block is not in the database, check the fork choice store.
+		// Recently received blocks (e.g. via gossip) may not have been persisted yet.
+		if block == nil && c.forkChoiceReader != nil {
+			block, _ = c.forkChoiceReader.GetBlock(blockRoot)
+		}
 		if block == nil {
+			log.Debug("[Sentinel] beaconBlocksByRoot: block not found", "root", blockRoot)
 			return true
 		}
 

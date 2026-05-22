@@ -12,8 +12,8 @@ package mock_services
 import (
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	solid "github.com/erigontech/erigon/cl/cltypes/solid"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 

@@ -26,17 +26,21 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-db/rawdb/rawdbhelpers"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/backup"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/rawdbv3"
-	reset2 "github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var cmdResetState = &cobra.Command{
@@ -44,7 +48,7 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -68,7 +72,9 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx); err != nil {
+		dirs := datadir.New(datadirCli)
+		br, _ := blocksIO(db, logger)
+		if err = rawdbreset.ResetState(db, ctx, dirs, br, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -92,7 +98,7 @@ var cmdClearBadBlocks = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return err
@@ -151,8 +157,23 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+	stepSize := tx.Debug().StepSize()
 
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n\n", rawdbhelpers.IdxStepsCountV3(tx), _lb, _lt)
+	dbg := tx.Debug()
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		cfg := statecfg.Schema.GetDomainCfg(d)
+		keysSteps := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
+		valsPrg, _ := dbstate.GetPruneValProgress(tx, []byte(cfg.Hist.ValuesTable))
+		if valsPrg != nil {
+			fmt.Fprintf(w, "%s.hist: keys steps=%.02f, vals pruneProgress(txTo=%d/step=%d keys=%s vals=%s)\n",
+				d, keysSteps, valsPrg.TxTo, valsPrg.TxTo/stepSize, valsPrg.KeyProgress, valsPrg.ValueProgress)
+		} else {
+			fmt.Fprintf(w, "%s.hist: keys steps=%.02f, vals no pruneProgress\n", d, keysSteps)
+		}
+	}
+	fmt.Fprintf(w, "\n")
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
@@ -191,8 +212,6 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 	fmt.Fprintf(w, "Note: progress for commitment domain (in terms of txNum) is not presented.\n")
 	fmt.Fprint(w, "\n \t\t historyStartFrom \t\t progress(txnum) \t\t progress(step)\n")
 
-	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
 	for i := 0; i < int(kv.DomainLen); i++ {
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
@@ -202,6 +221,14 @@ func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *h
 			continue
 		}
 		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+	}
+	fmt.Fprintf(w, " \t\t  \t\t  \t\t  \n") // newline acts as a table separator, this is a hack to maintain same tabwriter group
+	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+		txNum := dbg.IIProgress(ii)
+		step := txNum / stepSize
+		iiCfg := statecfg.Schema.GetIICfg(ii)
+		keysSteps := rawdbhelpers.IdxStepsInDB(tx, iiCfg.KeysTable, stepSize)
+		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d \t\t db_steps=%.02f\n", ii.String(), txNum, step, keysSteps)
 	}
 	fmt.Fprintf(w, "--\n")
 

@@ -22,10 +22,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestEth1Header(t *testing.T) {
@@ -80,7 +80,7 @@ func TestEth1Header(t *testing.T) {
 	// Test EncodeSSZ and DecodeSSZ
 	encodedData, err := header.EncodeSSZ(nil)
 	require.NoError(t, err)
-	decodedHeader := &Eth1Header{}
+	decodedHeader := NewEth1Header(0)
 	err = decodedHeader.DecodeSSZ(encodedData, int(version))
 	require.NoError(t, err)
 	assert.Equal(t, header, decodedHeader)

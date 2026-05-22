@@ -24,33 +24,36 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/dbutils"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-
-	_ "modernc.org/sqlite"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
 // make a buffer pool
 var bufferPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(bytes.Buffer)
 	},
 }
 
 // make a zstd writer pool
 var zstdWriterPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
 		if err != nil {
 			panic(err)
 		}
 		return encoder
 	},
+}
+
+func putWriter(v *zstd.Encoder) {
+	v.Reset(nil)
+	zstdWriterPool.Put(v)
 }
 
 func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
@@ -157,6 +160,20 @@ func WriteExecutionBlockNumber(tx kv.RwTx, blockRoot common.Hash, blockNumber ui
 
 func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash common.Hash) error {
 	return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], blockHash[:])
+}
+
+// WriteExecutionPayloadEnvelopeIndicies writes execution block number and hash indices
+// for a GLOAS beacon block. In GLOAS (EIP-7732), the execution payload is delivered
+// separately via SignedExecutionPayloadEnvelope, so these indices cannot be written
+// at block arrival time; they are written here when the envelope is processed.
+func WriteExecutionPayloadEnvelopeIndicies(tx kv.RwTx, beaconBlockRoot common.Hash, envelope *cltypes.ExecutionPayloadEnvelope) error {
+	if envelope == nil || envelope.Payload == nil {
+		return nil
+	}
+	if err := WriteExecutionBlockNumber(tx, beaconBlockRoot, envelope.Payload.BlockNumber); err != nil {
+		return err
+	}
+	return WriteExecutionBlockHash(tx, beaconBlockRoot, envelope.Payload.BlockHash)
 }
 
 func ReadExecutionBlockNumber(tx kv.Tx, blockRoot common.Hash) (*uint64, error) {
@@ -318,7 +335,7 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	buf := bufferPool.Get().(*bytes.Buffer)
 	defer bufferPool.Put(buf)
 	encoder := zstdWriterPool.Get().(*zstd.Encoder)
-	defer zstdWriterPool.Put(encoder)
+	defer putWriter(encoder)
 	buf.Reset()
 	encoder.Reset(buf)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
@@ -348,7 +365,9 @@ func WriteBeaconBlockAndIndicies(ctx context.Context, tx kv.RwTx, block *cltypes
 	if err != nil {
 		return err
 	}
-	if block.Version() >= clparams.BellatrixVersion {
+	// [Modified in Gloas:EIP7732] ExecutionPayload is nil in GLOAS blocks; indices are written
+	// later via WriteExecutionPayloadEnvelopeIndicies when the envelope arrives.
+	if block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion {
 		if err := WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
 			return err
 		}
@@ -378,7 +397,7 @@ func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
 		return err
 	}
 	defer cursor.Close()
-	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Prev() {
+	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Next() {
 		if len(k) != 40 {
 			continue
 		}

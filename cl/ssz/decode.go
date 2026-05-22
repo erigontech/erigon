@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/types/ssz"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 /*
@@ -52,12 +52,12 @@ The Decode function is used to decode an SSZ-encoded byte slice into the specifi
 types such as uint64, []byte, and objects that implement the SizedObjectSSZ interface.
 It handles both static (fixed size) and dynamic (variable size) objects based on their respective decoding methods and offsets.
 */
-func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
-	// defer func() {
-	// 	if err2 := recover(); err2 != nil {
-	// 		err = fmt.Errorf("panic while decoding: %v", err2)
-	// 	}
-	// }()
+func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
+	defer func() {
+		if err2 := recover(); err2 != nil {
+			err = fmt.Errorf("panic while decoding: %v", err2)
+		}
+	}()
 	position := 0
 	offsets := []int{}
 	dynamicObjs := []SizedObjectSSZ{}
@@ -79,6 +79,13 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 			// If the element is a byte slice, copy the corresponding data from the buf to the slice
 			copy(obj, buf[position:])
 			position += len(obj)
+		case *bool:
+			if len(buf) < position+1 {
+				return ssz.ErrLowBufferSize
+			}
+			// If the element is a pointer to bool, decode it from the buf
+			*obj = buf[position] != 0
+			position += 1
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {

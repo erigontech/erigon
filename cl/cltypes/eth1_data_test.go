@@ -22,8 +22,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 var testEth1Data = &cltypes.Eth1Data{

@@ -22,18 +22,17 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
+	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
-	"github.com/erigontech/erigon/cl/utils/threading"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
@@ -42,39 +41,31 @@ import (
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *CachingBeaconState) GetActiveValidatorsIndices(epoch uint64) []uint64 {
-	var indicies []uint64
+	// Check per-state cache first
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
 
-	numWorkers := runtime.NumCPU()
-	wp := threading.NewParallelExecutor()
-	indiciesShards := make([][]uint64, numWorkers)
-	shardsJobSize := b.ValidatorLength() / numWorkers
-
-	for i := 0; i < numWorkers; i++ {
-		start := i * shardsJobSize
-		end := (i + 1) * shardsJobSize
-		if i == numWorkers-1 || end > b.ValidatorLength() {
-			end = b.ValidatorLength()
+	// Check global cache using block root at beginning of previous epoch
+	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
+	if err == nil {
+		if cachedIndicies, _, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && len(cachedIndicies) > 0 {
+			b.activeValidatorsCache.Add(epoch, cachedIndicies)
+			return cachedIndicies
 		}
-		indiciesShards[i] = make([]uint64, 0, end-start)
-		workerID := i
-		wp.AddWork(func() error {
-			for j := start; j < end; j++ {
-				if b.ValidatorSet().Get(j).Active(epoch) {
-					indiciesShards[workerID] = append(indiciesShards[workerID], uint64(j))
-				}
-			}
-			return nil
-		})
 	}
 
-	wp.Execute()
-	for i := 0; i < numWorkers; i++ {
-		indicies = append(indicies, indiciesShards[i]...)
+	// Compute active validators
+	indicies := make([]uint64, 0, b.ValidatorLength())
+	for i := 0; i < b.ValidatorLength(); i++ {
+		if b.ValidatorSet().Get(i).Active(epoch) {
+			indicies = append(indicies, uint64(i))
+		}
 	}
+
+	// Store in both caches (totalActiveBalance will be set by _refreshActiveBalancesIfNeeded)
 	b.activeValidatorsCache.Add(epoch, indicies)
+
 	return indicies
 }
 
@@ -222,15 +213,9 @@ func (b *CachingBeaconState) SyncRewards() (proposerReward, participantReward ui
 
 // CommitteeCount returns current number of committee for epoch.
 func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
-	committeCount := uint64(
+	committeCount := max(min(b.BeaconConfig().MaxCommitteesPerSlot, uint64(
 		len(b.GetActiveValidatorsIndices(epoch)),
-	) / b.BeaconConfig().SlotsPerEpoch / b.BeaconConfig().TargetCommitteeSize
-	if b.BeaconConfig().MaxCommitteesPerSlot < committeCount {
-		committeCount = b.BeaconConfig().MaxCommitteesPerSlot
-	}
-	if committeCount < 1 {
-		committeCount = 1
-	}
+	)/b.BeaconConfig().SlotsPerEpoch/b.BeaconConfig().TargetCommitteeSize), 1)
 	return committeCount
 }
 
@@ -259,8 +244,31 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	if err != nil {
 		return nil, err
 	}
+
 	matchingTarget := data.Target.Root == targetRoot
 	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
+
+	if b.Version() >= clparams.GloasVersion {
+		var payloadMatch bool
+		ok, err := IsAttestationSameSlot(b, data)
+		if err != nil {
+			return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: failed to check attestation same slot: %w", err)
+		}
+		if ok {
+			// assert data.Index == 0
+			if data.CommitteeIndex != 0 {
+				return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: committee index is not zero for indexed payload attestation")
+			}
+			payloadMatch = true
+		} else {
+			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			aval := b.GetExecutionPayloadAvailability()
+			payloadAvailable := aval.GetBitAt(int(slotIndex))
+			payloadMatch = (data.CommitteeIndex == 1) == payloadAvailable
+		}
+		matchingHead = matchingHead && payloadMatch
+	}
+
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(
@@ -308,6 +316,36 @@ func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]u
 }
 
 func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
+	if b.Version() >= clparams.GloasVersion {
+		indicies, err := GetNextSyncCommitteeIndices(b)
+		if err != nil {
+			return nil, err
+		}
+		pubKeys := make([]common.Bytes48, 0, len(indicies))
+		for _, index := range indicies {
+			validator, err := b.ValidatorForValidatorIndex(int(index))
+			if err != nil {
+				return nil, err
+			}
+			pubKeys = append(pubKeys, validator.PublicKey())
+		}
+		// Compute aggregate pubkey
+		formattedKeys := make([][]byte, len(pubKeys))
+		for i := range formattedKeys {
+			formattedKeys[i] = make([]byte, 48)
+			copy(formattedKeys[i], pubKeys[i][:])
+		}
+		aggregatePublicKeyBytes, err := bls.AggregatePublickKeys(formattedKeys)
+		if err != nil {
+			return nil, err
+		}
+		var aggregate common.Bytes48
+		copy(aggregate[:], aggregatePublicKeyBytes)
+
+		return solid.NewSyncCommitteeFromParameters(pubKeys, aggregate), nil
+	}
+
+	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
 	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
@@ -320,9 +358,10 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 	mix := b.GetRandaoMix(int(mixPosition))
 	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
-	syncCommitteePubKeys := make([]common.Bytes48, 0, cltypes.SyncCommitteeSize)
+	syncCommitteeSize := int(beaconConfig.SyncCommitteeSize)
+	syncCommitteePubKeys := make([]common.Bytes48, 0, syncCommitteeSize)
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
-	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
+	for len(syncCommitteePubKeys) < syncCommitteeSize {
 		shuffledIndex, err := shuffling.ComputeShuffledIndex(
 			b.BeaconConfig(),
 			i%activeValidatorCount,
@@ -366,8 +405,9 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		}
 		i++
 	}
+
 	// Format public keys.
-	formattedKeys := make([][]byte, cltypes.SyncCommitteeSize)
+	formattedKeys := make([][]byte, syncCommitteeSize)
 	for i := range formattedKeys {
 		formattedKeys[i] = make([]byte, 48)
 		copy(formattedKeys[i], syncCommitteePubKeys[i][:])
@@ -469,4 +509,175 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 		)
 	}
 	return b.GetValidatorChurnLimit()
+}
+
+// GetPTC returns the Payload Timeliness Committee for the given slot.
+// For Gloas and later, it reads from the precomputed ptcWindow.
+// Falls back to ComputePTC when the requested slot is outside the
+// ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
+func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	if b.Version() >= clparams.GloasVersion {
+		ptc, err := b.GetPTCFromWindow(slot)
+		if err == nil {
+			return ptc, nil
+		}
+		return b.ComputePTC(slot)
+	}
+	return b.ComputePTC(slot)
+}
+
+// GetPTCFromWindow reads the PTC for a given slot from the ptc_window state field.
+// Index calculation follows the spec's get_ptc:
+//   - previous epoch: index = slot % SLOTS_PER_EPOCH
+//   - current/lookahead: index = (epoch - state_epoch + 1) * SLOTS_PER_EPOCH + slot % SLOTS_PER_EPOCH
+//
+// The ptc_window only covers [stateEpoch-1, stateEpoch, stateEpoch+1]. Slots
+// outside this range return an error.
+func (b *CachingBeaconState) GetPTCFromWindow(slot uint64) ([]uint64, error) {
+	cfg := b.BeaconConfig()
+	epoch := GetEpochAtSlot(cfg, slot)
+	stateEpoch := b.Slot() / cfg.SlotsPerEpoch
+	slotInEpoch := slot % cfg.SlotsPerEpoch
+
+	// ptcWindow covers exactly 3 epochs: [stateEpoch-1, stateEpoch, stateEpoch+1].
+	// Reject requests outside this range to avoid uint64 underflow in the index
+	// arithmetic (e.g. epoch=68, stateEpoch=70 → epoch-stateEpoch+1 underflows).
+	if epoch+1 < stateEpoch || epoch > stateEpoch+1 {
+		return nil, fmt.Errorf("getPTCFromWindow: slot %d (epoch %d) outside ptcWindow range [%d, %d]",
+			slot, epoch, stateEpoch-1, stateEpoch+1)
+	}
+
+	var index uint64
+	if stateEpoch > 0 && epoch == stateEpoch-1 {
+		// Previous epoch
+		index = slotInEpoch
+	} else {
+		// Current epoch or lookahead
+		index = (epoch-stateEpoch+1)*cfg.SlotsPerEpoch + slotInEpoch
+	}
+
+	ptcWindow := b.GetPtcWindow()
+	if ptcWindow == nil {
+		return nil, errors.New("GetPTCFromWindow: ptcWindow is nil")
+	}
+	if index >= uint64(ptcWindow.Length()) {
+		return nil, fmt.Errorf("GetPTCFromWindow: index %d out of range (window size %d)", index, ptcWindow.Length())
+	}
+
+	vec := ptcWindow.Get(int(index))
+	result := make([]uint64, vec.Length())
+	for i := 0; i < vec.Length(); i++ {
+		result[i] = vec.Get(i)
+	}
+	return result, nil
+}
+
+// ComputePTC computes the Payload Timeliness Committee for a given slot from scratch.
+// This is used internally by ProcessPtcWindow and InitializePtcWindow to populate the window.
+func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	mix := b.GetRandaoMix(int(mixPosition))
+	baseSeed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainPtcAttester)
+
+	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
+	slotBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotBytes, slot)
+	seedInput := append(baseSeed[:], slotBytes...)
+	seed := utils.Sha256(seedInput)
+
+	// Concatenate all committees for this slot in order
+	indices := []uint64{}
+	committeesPerSlot := b.CommitteeCount(epoch)
+	for i := uint64(0); i < committeesPerSlot; i++ {
+		committee, err := b.GetBeaconCommitee(slot, i)
+		if err != nil {
+			return nil, err
+		}
+		indices = append(indices, committee...)
+	}
+
+	// compute_balance_weighted_selection with shuffle_indices=false
+	ptcIndices, err := shuffling.ComputeBalanceWeightedSelection(
+		b.BeaconState,
+		indices,
+		seed,
+		b.BeaconConfig().PtcSize,
+		false,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return ptcIndices, nil
+}
+
+// InitializePtcWindow populates the ptc_window for a fork upgrade to Gloas.
+// The first SLOTS_PER_EPOCH entries (previous epoch) are zero vectors.
+// The remaining (1 + MIN_SEED_LOOKAHEAD) epochs are filled via ComputePTC.
+func (b *CachingBeaconState) InitializePtcWindow() error {
+	cfg := b.BeaconConfig()
+	slotsPerEpoch := cfg.SlotsPerEpoch
+	totalSlots := (2 + cfg.MinSeedLookahead) * slotsPerEpoch
+
+	ptcWindow := solid.NewUint64VectorOfVectors(int(totalSlots), int(cfg.PtcSize))
+
+	// First SLOTS_PER_EPOCH entries (previous epoch) remain as zero vectors (already initialized).
+
+	// Fill current epoch and lookahead epochs: (1 + MIN_SEED_LOOKAHEAD) epochs.
+	currentEpoch := b.Slot() / slotsPerEpoch
+	for epochOffset := uint64(0); epochOffset < 1+cfg.MinSeedLookahead; epochOffset++ {
+		epoch := currentEpoch + epochOffset
+		epochStartSlot := epoch * slotsPerEpoch
+		for i := uint64(0); i < slotsPerEpoch; i++ {
+			slot := epochStartSlot + i
+			ptc, err := b.ComputePTC(slot)
+			if err != nil {
+				return fmt.Errorf("InitializePtcWindow: failed to compute PTC for slot %d: %w", slot, err)
+			}
+			vec := solid.NewUint64VectorSSZ(int(cfg.PtcSize))
+			for j, idx := range ptc {
+				vec.Set(j, idx)
+			}
+			// Window index: previous epoch takes [0, slotsPerEpoch), so current epoch starts at slotsPerEpoch
+			windowIndex := (epochOffset+1)*slotsPerEpoch + i
+			ptcWindow.Set(int(windowIndex), vec)
+		}
+	}
+
+	b.SetPtcWindow(ptcWindow)
+	return nil
+}
+
+func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error) {
+	slot := payloadAttestation.Data.Slot
+	ptc, err := b.GetPTC(slot)
+	if err != nil {
+		return nil, err
+	}
+	bits := payloadAttestation.AggregationBits
+	indices := []uint64{}
+	for i, index := range ptc {
+		if bits.GetBitAt(i) {
+			indices = append(indices, index)
+		}
+	}
+	sort.SliceStable(indices, func(i, j int) bool {
+		return indices[i] < indices[j]
+	})
+
+	return &cltypes.IndexedPayloadAttestation{
+		AttestingIndices: solid.NewRawUint64List(len(indices), indices),
+		Data:             payloadAttestation.Data,
+		Signature:        payloadAttestation.Signature,
+	}, nil
+}
+
+// GetBuilderPaymentQuorumThreshold calculates the quorum threshold for builder payments.
+func (b *CachingBeaconState) GetBuilderPaymentQuorumThreshold() uint64 {
+	perSlotBalance := b.GetTotalActiveBalance() / b.BeaconConfig().SlotsPerEpoch
+	quorum := perSlotBalance * clparams.BuilderPaymentThresholdNumerator
+	return quorum / clparams.BuilderPaymentThresholdDenominator
 }

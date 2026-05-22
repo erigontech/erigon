@@ -17,12 +17,12 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
@@ -47,7 +47,9 @@ func (a *ContributionAndProof) Static() bool {
 }
 
 func (a *ContributionAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.Contribution = new(Contribution)
+	if a.Contribution == nil {
+		a.Contribution = new(Contribution)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
@@ -69,8 +71,12 @@ func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.Message = new(ContributionAndProof)
-	a.Message.Contribution = new(Contribution)
+	if a.Message == nil {
+		a.Message = new(ContributionAndProof)
+	}
+	if a.Message.Contribution == nil {
+		a.Message.Contribution = new(Contribution)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
@@ -83,7 +89,8 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
-var SyncCommitteeAggregationBitsSize = 16
+// DefaultSyncCommitteeAggregationBitsSize is the mainnet default: 512/4/8 = 16 bytes.
+const DefaultSyncCommitteeAggregationBitsSize = 16
 
 type Contribution struct {
 	Slot              uint64         `json:"slot,string"`
@@ -91,6 +98,20 @@ type Contribution struct {
 	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
 	AggregationBits   hexutil.Bytes  `json:"aggregation_bits"`
 	Signature         common.Bytes96 `json:"signature"`
+
+	aggregationBitsSize int // config-driven; 0 means use DefaultSyncCommitteeAggregationBitsSize
+}
+
+// SetAggregationBitsSize overrides the aggregation bits byte length for non-mainnet presets.
+func (a *Contribution) SetAggregationBitsSize(size int) {
+	a.aggregationBitsSize = size
+}
+
+func (a *Contribution) getAggregationBitsSize() int {
+	if a.aggregationBitsSize > 0 {
+		return a.aggregationBitsSize
+	}
+	return DefaultSyncCommitteeAggregationBitsSize
 }
 
 type ContributionKey struct {
@@ -101,7 +122,7 @@ type ContributionKey struct {
 
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
-		a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+		a.AggregationBits = make([]byte, a.getAggregationBitsSize())
 	}
 	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
@@ -117,66 +138,20 @@ func (a *Contribution) Copy() *Contribution {
 }
 
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
+	a.AggregationBits = make([]byte, a.getAggregationBitsSize())
 	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
 func (a *Contribution) EncodingSizeSSZ() int {
-	return length.BlockNum*2 + length.Hash + length.Bytes96 + len(a.AggregationBits)
+	bitsSize := len(a.AggregationBits)
+	if bitsSize == 0 {
+		bitsSize = a.getAggregationBitsSize()
+	}
+	return length.BlockNum*2 + length.Hash + length.Bytes96 + bitsSize
 }
 
 func (a *Contribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
-}
-
-/*
- * SyncContribution, Determines successful committee, bits shows active participants,
- * and signature is the aggregate BLS signature of the committee.
- */
-type SyncContribution struct {
-	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature common.Bytes96 `json:"signature"`
-}
-
-// return sum of the committee bits
-func (agg *SyncContribution) Sum() int {
-	ret := 0
-	for i := range agg.SyncCommiteeBits {
-		for bit := 1; bit <= 128; bit *= 2 {
-			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
-				ret++
-			}
-		}
-	}
-	return ret
-}
-
-func (agg *SyncContribution) IsSet(idx uint64) bool {
-	if idx >= 2048 {
-		return false
-	}
-	return agg.SyncCommiteeBits[idx/8]&(1<<(idx%8)) > 0
-}
-
-func (agg *SyncContribution) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
-}
-
-func (*SyncContribution) Static() bool {
-	return true
-}
-
-func (agg *SyncContribution) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
-}
-
-func (agg *SyncContribution) EncodingSizeSSZ() int {
-	return 160
-}
-
-func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
-
 }
 
 type SyncCommitteeMessage struct {

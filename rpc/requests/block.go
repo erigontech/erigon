@@ -19,12 +19,11 @@ package requests
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	hexutil2 "github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	hexutil2 "github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -37,10 +36,6 @@ func (bn BlockNumber) Uint64() uint64 {
 	}
 
 	return 0
-}
-
-func AsBlockNumber(n *big.Int) BlockNumber {
-	return BlockNumber(hexutil2.EncodeBig(n))
 }
 
 var BlockNumbers = struct {
@@ -107,9 +102,9 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 	b.Transactions = bd.Transactions
 
 	if bd.Transactions != nil {
-		b.TransactionHashes = make([]common.Hash, len(b.Transactions))
-		for _, t := range bd.Transactions {
-			b.TransactionHashes = append(b.TransactionHashes, t.Hash)
+		b.TransactionHashes = make([]common.Hash, len(bd.Transactions))
+		for i, t := range bd.Transactions {
+			b.TransactionHashes[i] = t.Hash
 		}
 	}
 

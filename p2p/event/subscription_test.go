@@ -80,6 +80,9 @@ loop:
 }
 
 func TestResubscribe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	var i int
@@ -140,8 +143,9 @@ func TestResubscribeWithErrorHandler(t *testing.T) {
 		sub := NewSubscription(func(unsubscribed <-chan struct{}) error {
 			if i < nfails {
 				return fmt.Errorf("err-%v", i)
+			} else {
+				return nil
 			}
-			return nil
 		})
 		return sub, nil
 	})
@@ -155,4 +159,28 @@ func TestResubscribeWithErrorHandler(t *testing.T) {
 	if !reflect.DeepEqual(subErrs, expectedSubErrs) {
 		t.Fatalf("unexpected subscription errors %v, want %v", subErrs, expectedSubErrs)
 	}
+}
+
+func TestResubscribeWithCompletedSubscription(t *testing.T) {
+	t.Parallel()
+
+	quitProducerAck := make(chan struct{})
+	quitProducer := make(chan struct{})
+
+	sub := ResubscribeErr(100*time.Millisecond, func(ctx context.Context, lastErr error) (Subscription, error) {
+		return NewSubscription(func(unsubscribed <-chan struct{}) error {
+			select {
+			case <-quitProducer:
+				quitProducerAck <- struct{}{}
+				return nil
+			case <-unsubscribed:
+				return nil
+			}
+		}), nil
+	})
+
+	// Ensure producer has started and exited before Unsubscribe
+	close(quitProducer)
+	<-quitProducerAck
+	sub.Unsubscribe()
 }

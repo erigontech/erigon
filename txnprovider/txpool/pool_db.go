@@ -25,10 +25,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 var PoolChainConfigKey = []byte("chain_config")
@@ -68,9 +70,44 @@ func LastSeenBlock(tx kv.Getter) (uint64, error) {
 func PutLastSeenBlock(tx kv.Putter, n uint64, buf []byte) error {
 	buf = common.EnsureEnoughSize(buf, 8)
 	binary.BigEndian.PutUint64(buf, n)
-	err := tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
+	return tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
+}
+
+// LoadSenderLastActivity reads the persisted senderID→lastActivityBlock map from the pool DB.
+// Returns an empty map (not an error) when the table is absent or empty — e.g. on the first
+// run after this feature was introduced.
+func LoadSenderLastActivity(tx kv.Tx) (map[uint64]uint64, error) {
+	result := make(map[uint64]uint64)
+	it, err := tx.Range(kv.SenderLastActivity, nil, nil, order.Asc, kv.Unlim)
 	if err != nil {
+		return result, err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return result, err
+		}
+		if len(k) == 8 && len(v) == 8 {
+			result[binary.BigEndian.Uint64(k)] = binary.BigEndian.Uint64(v)
+		}
+	}
+	return result, nil
+}
+
+// SaveSenderLastActivity persists the senderID→lastActivityBlock map to the pool DB,
+// replacing any previously stored entries.
+func SaveSenderLastActivity(tx kv.RwTx, m map[uint64]uint64) error {
+	if err := tx.ClearTable(kv.SenderLastActivity); err != nil {
 		return err
+	}
+	key := make([]byte, 8)
+	val := make([]byte, 8)
+	for senderID, blockNum := range m {
+		binary.BigEndian.PutUint64(key, senderID)
+		binary.BigEndian.PutUint64(val, blockNum)
+		if err := tx.Put(kv.SenderLastActivity, key, val); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -95,17 +132,25 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	if err := json.NewEncoder(wr).Encode(cc); err != nil {
 		return fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
-	if err := tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes()); err != nil {
-		return err
+	return tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes())
+}
+
+func initBor(cc *chain.Config) *chain.Config {
+	if cc.Bor == nil && cc.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		err := json.Unmarshal(cc.BorJSON, borConfig)
+		if err != nil {
+			panic(fmt.Errorf("Could not parse 'bor' chainspec: %w", err))
+		}
+		cc.Bor = borConfig
 	}
-	return nil
+	return cc
 }
 
 func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
-	force bool,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
 	if err = poolDB.View(ctx, func(tx kv.Tx) error {
@@ -120,12 +165,6 @@ func SaveChainConfigIfNeed(
 		return nil
 	}); err != nil {
 		return nil, 0, err
-	}
-	if cc != nil && !force {
-		if cc.ChainID.Uint64() == 0 {
-			return nil, 0, errors.New("wrong chain config")
-		}
-		return cc, blockNum, nil
 	}
 
 	for {
@@ -165,8 +204,8 @@ func SaveChainConfigIfNeed(
 	}); err != nil {
 		return nil, 0, err
 	}
-	if cc.ChainID.Uint64() == 0 {
+	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
-	return cc, blockNum, nil
+	return initBor(cc), blockNum, nil
 }

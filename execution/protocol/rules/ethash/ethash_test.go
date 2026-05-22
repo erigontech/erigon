@@ -1,0 +1,151 @@
+// Copyright 2017 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package ethash
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
+)
+
+func TestRemoteSealer(t *testing.T) {
+	ethash := NewTester(false)
+	defer ethash.Close()
+
+	api := &API{ethash}
+	if _, err := api.GetWork(); err != errNoMiningWork {
+		t.Error("expect to return an error indicate there is no mining work")
+	}
+	header := &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(100)}
+	block := types.NewBlockWithHeader(header)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block}
+	sealhash := ethash.SealHash(header)
+
+	// Push new work.
+	results := make(chan *types.BlockWithReceipts)
+	if err := ethash.Seal(nil, blockWithReceipts, results, nil); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		work [4]string
+		err  error
+	)
+	if work, err = api.GetWork(); err != nil || work[0] != sealhash.Hex() {
+		t.Error("expect to return a mining work has same hash")
+	}
+
+	if res := api.SubmitWork(types.BlockNonce{}, sealhash, common.Hash{}); res {
+		t.Error("expect to return false when submit a fake solution")
+	}
+	// Push new block with same block number to replace the original one.
+	header = &types.Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(1000)}
+	block = types.NewBlockWithHeader(header)
+	blockWithReceipts = &types.BlockWithReceipts{Block: block}
+	sealhash = ethash.SealHash(header)
+	err = ethash.Seal(nil, blockWithReceipts, results, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work, err = api.GetWork(); err != nil || work[0] != sealhash.Hex() {
+		t.Error("expect to return the latest pushed work")
+	}
+}
+
+func TestHashRate(t *testing.T) {
+	var (
+		hashrate = []hexutil.Uint64{100, 200, 300}
+		expect   uint64
+		ids      = []common.Hash{common.HexToHash("a"), common.HexToHash("b"), common.HexToHash("c")}
+	)
+	ethash := NewTester(false)
+	defer ethash.Close()
+
+	if tot := ethash.Hashrate(); tot != 0 {
+		t.Error("expect the result should be zero")
+	}
+
+	api := &API{ethash}
+	for i := 0; i < len(hashrate); i += 1 {
+		if res := api.SubmitHashRate(hashrate[i], ids[i]); !res {
+			t.Error("remote miner submit hashrate failed")
+		}
+		expect += uint64(hashrate[i])
+	}
+	if tot := ethash.Hashrate(); tot != float64(expect) {
+		t.Error("expect total hashrate should be same")
+	}
+}
+
+func TestClosedRemoteSealer(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	ethash := NewTester(false)
+	time.Sleep(1 * time.Second) // ensure exit channel is listening
+	_ = ethash.Close()
+
+	api := &API{ethash}
+	if _, err := api.GetWork(); err != errEthashStopped {
+		t.Error("expect to return an error to indicate ethash is stopped")
+	}
+
+	if res := api.SubmitHashRate(hexutil.Uint64(100), common.HexToHash("a")); res {
+		t.Error("expect to return false when submit hashrate to a stopped ethash")
+	}
+}
+
+func TestMemoryMapAndGenerateCleansTempFileOnRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+
+	// Force rename failure by making the destination path a directory.
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("failed to create destination directory: %v", err)
+	}
+
+	_, _, _, err := memoryMapAndGenerate(path, 1024, false, func(buffer []uint32) {})
+	if err == nil {
+		t.Fatal("expected rename failure, got nil")
+	}
+	// Pin the failure to os.Rename so the test fails loudly if a future change
+	// shifts the failure to an earlier step (Create/Truncate/mmap) — the cleanup
+	// path under test is the post-rename one.
+	var linkErr *os.LinkError
+	if !errors.As(err, &linkErr) || linkErr.Op != "rename" {
+		t.Fatalf("expected *os.LinkError with Op=rename, got: %v", err)
+	}
+
+	temps, globErr := filepath.Glob(path + ".*")
+	if globErr != nil {
+		t.Fatalf("glob failed: %v", globErr)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("temporary files were not cleaned up: %v", temps)
+	}
+}

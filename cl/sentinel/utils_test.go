@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/erigontech/erigon/cl/p2p"
 )
 
 var pyRecord, _ = hex.DecodeString("f884b8407098ad865b00a582051940cb9cf36836572411a47278783077011599ed5cd16b76f2635f4e234738f30813a89eb9137e3e3df5266e3a1f11df72ecf1145ccb9c01826964827634826970847f00000189736563703235366b31a103ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31388375647082765f")
@@ -63,7 +65,7 @@ func TestMultiAddressBuilderWithID(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		multiAddr, err := multiAddressBuilderWithID(testCase.ipAddr, testCase.protocol, testCase.port, testCase.id)
+		multiAddr, err := p2p.MultiAddressBuilderWithID(testCase.ipAddr, testCase.protocol, testCase.port, testCase.id)
 		if testCase.shouldError {
 			if err == nil {
 				t.Errorf("expected error, got nil")
@@ -76,7 +78,7 @@ func TestMultiAddressBuilderWithID(t *testing.T) {
 	}
 }
 
-// TODO: reimplement this test with the new erigon-lib rlp decoder at some point
+// TODO: reimplement this test with the new RLP decoder at some point
 //func TestConvertToMultiAddr(t *testing.T) {
 //	var r enr.Record
 //	if err := rlp.DecodeBytes(pyRecord, &r); err != nil {

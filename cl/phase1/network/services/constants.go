@@ -19,6 +19,9 @@ package services
 import (
 	"errors"
 	"time"
+
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/utils/bls"
 )
 
 const (
@@ -42,4 +45,9 @@ var (
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")
 	ErrInvalidSidecarSlot              = errors.New("invalid sidecar slot")
 	ErrBlobIndexOutOfRange             = errors.New("blob index out of range")
+)
+
+var (
+	computeSigningRoot = fork.ComputeSigningRoot
+	blsVerify          = bls.Verify
 )

@@ -1,0 +1,71 @@
+{
+    "config": {
+        "chainName": "steel_example_1",
+        "chainId": 12345,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "mergeForkBlock": 0,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "shanghaiTime": 1696000704,
+        "cancunTime": 1707305664,
+        "pragueTime": 1740434112,
+        "osakaTime": 1759308480,
+        "bpo1Time": 1759800000,
+        "bpo2Time": 1760389824,
+        "blobSchedule": {
+            "cancun": {
+                "target": 3,
+                "max": 6,
+                "baseFeeUpdateFraction": 3338477
+            },
+            "prague": {
+                "target": 6,
+                "max": 9,
+                "baseFeeUpdateFraction": 5007716
+            },
+            "osaka": {
+                "target": 6,
+                "max": 9,
+                "baseFeeUpdateFraction": 5007716
+            },
+            "bpo1": {
+                "target": 10,
+                "max": 15,
+                "baseFeeUpdateFraction": 8346193
+            },
+            "bpo2": {
+                "target": 14,
+                "max": 21,
+                "baseFeeUpdateFraction": 11684671
+            }
+        },
+        "depositContractAddress": "0x4242424242424242424242424242424242424242",
+        "defaultBlockGasLimit": 60000000
+    },
+    "nonce": "0x1234",
+    "timestamp": "0x67d80ec0",
+    "extraData": "0x",
+    "gasLimit": "0x2255100",
+    "difficulty": "0x1",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x0000000000000000000000000000000000000000",
+    "alloc": {},
+    "seal": null,
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "baseFeePerGas": null,
+    "blobGasUsed": null,
+    "excessBlobGas": null,
+    "parentBeaconBlockRoot": null,
+    "requestsHash": null
+}

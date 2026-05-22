@@ -17,14 +17,16 @@
 package handlers
 
 import (
+	"encoding/hex"
+	"io"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -110,12 +112,7 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 		return err
 	}
 
-	cgc := uint64(0)
-	if c.forkChoiceReader.GetPeerDas() == nil {
-		log.Warn("metadata v3: peer das is nil")
-	} else {
-		cgc = c.forkChoiceReader.GetPeerDas().CustodyGroupCount()
-	}
+	cgc := c.peerdasStateReader.GetAdvertisedCgc()
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber:         c.me.Seq(),
 		Attnets:           subnetField,
@@ -124,7 +121,38 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 	}, SuccessfulResponsePrefix)
 }
 
-// TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
+	// Per eth2 spec the responder must read the peer's Status before replying.
+	// Read and discard the incoming request body so the stream advances correctly.
+	peerStatus := &cltypes.Status{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
+		// If we cannot read the request, drain whatever is left and proceed.
+		_, _ = io.Copy(io.Discard, s)
+	}
+	status := c.hs.Status()
+	status.EarliestAvailableSlot = nil
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
+}
+
+func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
+	// Per eth2 spec the responder must read the peer's Status before replying.
+	peerStatus := &cltypes.Status{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, peerStatus, clparams.Phase0Version); err != nil {
+		_, _ = io.Copy(io.Discard, s)
+	}
+	status := c.hs.Status()
+	forkDigest, err := c.ethClock.CurrentForkDigest()
+	if err != nil {
+		return err
+	}
+	copy(status.ForkDigest[:], forkDigest[:])
+	// StatusV2 requires EarliestAvailableSlot (92 bytes total).
+	// Without it, peers like Prysm reject the 84-byte response as malformed.
+	if status.EarliestAvailableSlot == nil {
+		eas := c.peerdasStateReader.GetEarliestAvailableSlot()
+		status.EarliestAvailableSlot = &eas
+	}
+	log.Trace("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", *status.EarliestAvailableSlot)
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

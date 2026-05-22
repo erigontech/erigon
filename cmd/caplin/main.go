@@ -25,21 +25,21 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/disk"
-	"github.com/erigontech/erigon-lib/common/mem"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
-	execution_client2 "github.com/erigontech/erigon/cl/phase1/execution_client"
-
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelflags"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/turbo/app"
-	"github.com/erigontech/erigon/turbo/debug"
+	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/disk"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func main() {
@@ -59,7 +59,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		log.Error("[Phase1] Could not initialize caplin", "err", err)
 		return err
 	}
-	if _, _, _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
+	if _, err := debug.SetupSimple(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
@@ -87,14 +87,16 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 
-	var executionEngine execution_client2.ExecutionEngine
+	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client.NewExecutionClientEngineRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort, nil)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
+		} else {
+			log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+			defer cc.Close()
+			executionEngine = cc
 		}
-		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
-		executionEngine = cc
 	}
 	chainName := cliCtx.String(utils.ChainFlag.Name)
 	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
@@ -111,11 +113,15 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
+		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		CustomConfigPath:          cfg.CustomConfig,
 		CustomGenesisStatePath:    cfg.CustomGenesisState,
 		MaxPeerCount:              cfg.MaxPeerCount,
+		SubscribeAllTopics:        cfg.SubscribeAllTopics,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
-	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
+		BootstrapNodes:            cfg.Bootnodes,
+		StaticPeers:               cfg.StaticPeers,
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }

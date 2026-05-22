@@ -23,15 +23,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
@@ -44,7 +45,10 @@ func (m mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 var (
 	mockUrl, _       = url.Parse("https://anywhere.io")
 	mockBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerEpoch: 32,
+		SlotsPerEpoch:    32,
+		ElectraForkEpoch: math.MaxUint64,
+		FuluForkEpoch:    math.MaxUint64,
+		GloasForkEpoch:   math.MaxUint64,
 	}
 
 	//go:embed test_data/mock_blinded_block.json
@@ -287,14 +291,14 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 		result := struct {
 			Version string `json:"version"`
 			Data    struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			} `json:"data"`
 		}{
 			Version: "deneb",
 			Data: struct {
-				ExecutionPayload *cltypes.Eth1Block          `json:"execution_payload"`
-				BlobsBundle      *engine_types.BlobsBundleV1 `json:"blobs_bundle"`
+				ExecutionPayload *cltypes.Eth1Block        `json:"execution_payload"`
+				BlobsBundle      *engine_types.BlobsBundle `json:"blobs_bundle"`
 			}{
 				ExecutionPayload: block,
 				BlobsBundle:      bundle,

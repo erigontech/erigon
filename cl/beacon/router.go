@@ -25,9 +25,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/handler"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type LayeredBeaconHandler struct {
@@ -52,7 +52,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		}))
 
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
+		nfw := &notFoundNoWriter{ResponseWriter: w, r: r} //nolint:govet
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()

@@ -2,16 +2,16 @@ package testing
 
 import (
 	"bytes"
-	"math/big"
 	"math/rand"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type TRand struct {
@@ -38,10 +38,6 @@ func (tr *TRand) RandUint256() *uint256.Int {
 	return a
 }
 
-func (tr *TRand) RandBig() *big.Int {
-	return big.NewInt(int64(tr.rnd.Int()))
-}
-
 func (tr *TRand) RandBytes(size int) []byte {
 	arr := make([]byte, size)
 	for i := 0; i < size; i++ {
@@ -62,7 +58,7 @@ func (tr *TRand) RandBloom() types.Bloom {
 	return types.Bloom(tr.RandBytes(types.BloomByteLength))
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}
@@ -71,8 +67,6 @@ func check(t *testing.T, f string, want, got interface{}) {
 func compareTestingStructs(t *testing.T, a, b *TestingStruct) {
 	check(t, "obj.a", a.a, b.a)
 	check(t, "obj.aa", a.aa, b.aa)
-	check(t, "obj.b", a.b, b.b)
-	check(t, "obj.bb", a.bb, b.bb)
 	check(t, "obj.c", a.c, b.c)
 	check(t, "obj.cc", a.cc, b.cc)
 	check(t, "obj.d", a.d, b.d)
@@ -188,8 +182,6 @@ func randTestingStruct(tr *TRand) *TestingStruct {
 	enc := TestingStruct{
 		a:  *tr.RandUint64(),
 		aa: tr.RandUint64(),
-		b:  *tr.RandBig(),
-		bb: tr.RandBig(),
 		c:  *tr.RandUint256(),
 		cc: tr.RandUint256(),
 		d:  types.BlockNonce(tr.RandBytes(8)),
@@ -243,8 +235,8 @@ func BenchmarkTestingStructRLP(b *testing.B) {
 	tr := NewTRand()
 	header := randTestingStruct(tr)
 	var buf bytes.Buffer
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		buf.Reset()
 		header.EncodeRLP(&buf)
 	}

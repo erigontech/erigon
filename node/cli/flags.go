@@ -1,0 +1,565 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package cli
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
+	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
+)
+
+var (
+	DatabaseVerbosityFlag = cli.IntFlag{
+		Name:  "database.verbosity",
+		Usage: "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.",
+		Value: 2,
+	}
+	BatchSizeFlag = cli.StringFlag{
+		Name:  "batchSize",
+		Usage: "Batch size for the execution stage",
+		Value: "512M",
+	}
+	EtlBufferSizeFlag = cli.StringFlag{
+		Name:  "etl.bufferSize",
+		Usage: "Buffer size for ETL operations.",
+		Value: etl.BufferOptimalSize.String(),
+	}
+	BodyCacheLimitFlag = cli.StringFlag{
+		Name:  "bodies.cache",
+		Usage: "Limit on the cache for block bodies",
+		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
+	}
+
+	PrivateApiAddr = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
+		Value: "127.0.0.1:9090",
+	}
+
+	PrivateApiRateLimit = cli.IntFlag{
+		Name:  "private.api.ratelimit",
+		Usage: "Amount of requests server handle simultaneously - requests over this limit will wait. Increase it - if clients see 'request timeout' while server load is low - it means your 'hot data' is small or have much RAM. ",
+		Value: kv.ReadersLimit - 128,
+	}
+
+	PruneModeFlag = cli.StringFlag{
+		Name: "prune.mode",
+		Usage: `Choose a pruning preset to run on. Available values: "full", "archive", "minimal", "blocks".
+				full: Keep only necessary blocks and latest state,
+				blocks: Keep all blocks but not the state history,
+				archive: Keep the entire state history and all blocks,
+				minimal: Keep only latest state`,
+		Value: "full",
+	}
+	PruneDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.distance",
+		Usage: `Keep state history for the latest N blocks (default: everything)`,
+	}
+	PruneBlocksDistanceFlag = cli.Uint64Flag{
+		Name:  "prune.distance.blocks",
+		Usage: `Keep block history for the latest N blocks (default: everything)`,
+	}
+	StateStreamDisableFlag = cli.BoolFlag{
+		Name:  "state.stream.disable",
+		Usage: "Disable streaming of state changes from core to RPC daemon",
+	}
+	ExperimentalBALFlag = cli.BoolFlag{
+		Name:  "experimental.bal",
+		Usage: "generate block access list",
+		Value: false,
+	}
+
+	// Throttling Flags
+	SyncLoopThrottleFlag = cli.StringFlag{
+		Name:  "sync.loop.throttle",
+		Usage: "Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)",
+		Value: "",
+	}
+
+	SyncLoopBreakAfterFlag = cli.StringFlag{
+		Name:  "sync.loop.break.after",
+		Usage: "Sets the last stage of the sync loop to run",
+		Value: "",
+	}
+
+	SyncLoopBlockLimitFlag = cli.UintFlag{
+		Name:  "sync.loop.block.limit",
+		Usage: "Sets the maximum number of blocks to process per loop iteration",
+		Value: 5_000,
+	}
+
+	SyncParallelStateFlushing = cli.BoolFlag{
+		Name:  "sync.parallel-state-flushing",
+		Usage: "Enables parallel state flushing",
+		Value: true,
+	}
+
+	BadBlockFlag = cli.StringFlag{
+		Name:  "bad.block",
+		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
+		Value: "",
+	}
+
+	HTTPReadTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.read",
+		Usage: "Maximum duration for reading the entire request, including the body.",
+		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+	}
+	HTTPWriteTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.write",
+		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+	}
+	HTTPIdleTimeoutFlag = cli.DurationFlag{
+		Name:  "http.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used.",
+		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+	}
+
+	AuthRpcReadTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.read",
+		Usage: "Maximum duration for reading the entire request, including the body.",
+		Value: rpccfg.DefaultHTTPTimeouts.ReadTimeout,
+	}
+	AuthRpcWriteTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.write",
+		Usage: "Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read.",
+		Value: rpccfg.DefaultHTTPTimeouts.WriteTimeout,
+	}
+	AuthRpcIdleTimeoutFlag = cli.DurationFlag{
+		Name:  "authrpc.timeouts.idle",
+		Usage: "Maximum amount of time to wait for the next request when keep-alive connections are enabled. If authrpc.timeouts.idle is zero, the value of authrpc.timeouts.read is used.",
+		Value: rpccfg.DefaultHTTPTimeouts.IdleTimeout,
+	}
+
+	EvmCallTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.evmtimeout",
+		Usage: "Maximum amount of time to wait for the answer from EVM call.",
+		Value: rpccfg.DefaultEvmCallTimeout,
+	}
+
+	OverlayGetLogsFlag = cli.DurationFlag{
+		Name:  "rpc.overlay.getlogstimeout",
+		Usage: "Maximum amount of time to wait for the answer from the overlay_getLogs call.",
+		Value: rpccfg.DefaultOverlayGetLogsTimeout,
+	}
+
+	OverlayReplayBlockFlag = cli.DurationFlag{
+		Name:  "rpc.overlay.replayblocktimeout",
+		Usage: "Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call.",
+		Value: rpccfg.DefaultOverlayReplayBlockTimeout,
+	}
+
+	RpcSubscriptionFiltersMaxLogsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxlogs",
+		Usage: "Maximum number of logs to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxLogs,
+	}
+	RpcSubscriptionFiltersMaxHeadersFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxheaders",
+		Usage: "Maximum number of block headers to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxHeaders,
+	}
+	RpcSubscriptionFiltersMaxTxsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtxs",
+		Usage: "Maximum number of transactions to store per subscription.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs,
+	}
+	RpcSubscriptionFiltersMaxAddressesFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxaddresses",
+		Usage: "Maximum number of addresses per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses,
+	}
+	RpcSubscriptionFiltersMaxTopicsFlag = cli.IntFlag{
+		Name:  "rpc.subscription.filters.maxtopics",
+		Usage: "Maximum number of topics per subscription to filter logs by.",
+		Value: rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics,
+	}
+)
+
+// BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
+// entry point for flag-to-config mapping — it calls utils.SetEthConfig internally
+// and then applies the remaining flags defined in this package.
+//
+// After this function returns, the config is fully populated from CLI flags.
+func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+// Deprecated: use BuildEthConfig instead.
+func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	chainId := cfg.NetworkID
+	if cfg.Genesis != nil {
+		chainId = cfg.Genesis.Config.ChainID.Uint64()
+	}
+	_ = chainId
+
+	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
+	distance := ctx.Uint64(PruneDistanceFlag.Name)
+
+	// check if the prune.mode flag is not set to archive
+	persistenceReceiptsV2 := ctx.String(PruneModeFlag.Name) != prune.ArchiveMode.String()
+
+	// overwrite receipts persistence if the flag is set
+	if ctx.IsSet(utils.PersistReceiptsV2Flag.Name) {
+		persistenceReceiptsV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
+	}
+
+	if persistenceReceiptsV2 {
+		cfg.PersistReceiptsCacheV2 = true
+	}
+
+	mode, err := prune.FromCli(ctx.String(PruneModeFlag.Name), distance, blockDistance)
+	if err != nil {
+		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	cfg.Prune = mode
+
+	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
+		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
+			utils.Fatalf("Invalid batchSize provided: %v", err)
+		}
+	}
+
+	if bufsize := ctx.String(EtlBufferSizeFlag.Name); bufsize != "" {
+		sizeVal := datasize.ByteSize(0)
+		if err := (&sizeVal).UnmarshalText([]byte(bufsize)); err != nil {
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
+		}
+		etl.BufferOptimalSize = sizeVal
+	}
+
+	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
+	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
+		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
+			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
+		}
+	}
+
+	if loopThrottle := ctx.String(SyncLoopThrottleFlag.Name); loopThrottle != "" {
+		syncLoopThrottle, err := time.ParseDuration(loopThrottle)
+		if err != nil {
+			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
+		}
+		cfg.Sync.LoopThrottle = syncLoopThrottle
+	}
+
+	if ctx.IsSet(utils.SnapDownloadToBlockFlag.Name) {
+		cfg.Sync.SnapshotDownloadToBlock = ctx.Uint64(utils.SnapDownloadToBlockFlag.Name)
+	}
+
+	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
+		cfg.Sync.BreakAfterStage = stage
+	}
+
+	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
+		cfg.Sync.LoopBlockLimit = limit
+	}
+	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
+
+	if ctx.String(BadBlockFlag.Name) != "" {
+		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
+		if err != nil {
+			logger.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
+		} else {
+			cfg.BadBlockHash = common.BytesToHash(bytes)
+		}
+	}
+
+	if ctx.Bool(utils.DisableIPV6.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv6 = true
+	}
+
+	if ctx.Bool(utils.DisableIPV4.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv4 = true
+	}
+
+	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
+		cfg.ChaosMonkey = true
+	}
+}
+
+func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
+	pruneMode := cobraStringValueOrDefault(f, PruneModeFlag.Name, PruneModeFlag.Value)
+	pruneBlockDistance := cobraUint64ValueOrDefault(f, PruneBlocksDistanceFlag.Name, PruneBlocksDistanceFlag.Value)
+	pruneDistance := cobraUint64ValueOrDefault(f, PruneDistanceFlag.Name, PruneDistanceFlag.Value)
+
+	mode, err := prune.FromCli(pruneMode, pruneDistance, pruneBlockDistance)
+	if err != nil {
+		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	cfg.Prune = mode
+
+	if v := cobraStringValueOrDefault(f, BatchSizeFlag.Name, BatchSizeFlag.Value); v != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(v))
+		if err != nil {
+			utils.Fatalf("Invalid batchSize provided: %v", err)
+		}
+	}
+
+	if v := cobraStringValueOrDefault(f, EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value); v != "" {
+		sizeVal := datasize.ByteSize(0)
+		size := &sizeVal
+		err := size.UnmarshalText([]byte(v))
+		if err != nil {
+			utils.Fatalf("Invalid etl.bufferSize provided: %v", err)
+		}
+		etl.BufferOptimalSize = *size
+	}
+
+	cfg.StateStream = !cobraBoolValueOrDefault(f, StateStreamDisableFlag.Name, StateStreamDisableFlag.Value)
+	cfg.ExperimentalBAL = cobraBoolValueOrDefault(f, ExperimentalBALFlag.Name, ExperimentalBALFlag.Value)
+
+	if cobraBoolValueOrDefault(f, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value) {
+		cfg.ChaosMonkey = true
+	}
+}
+
+func cobraStringValueOrDefault(f *pflag.FlagSet, name, fallback string) string {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetString(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraUint64ValueOrDefault(f *pflag.FlagSet, name string, fallback uint64) uint64 {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetUint64(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func cobraBoolValueOrDefault(f *pflag.FlagSet, name string, fallback bool) bool {
+	if f.Lookup(name) == nil {
+		return fallback
+	}
+	v, err := f.GetBool(name)
+	if err != nil {
+		utils.Fatalf("failed to read --%s: %v", name, err)
+	}
+	return v
+}
+
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+	setPrivateApi(ctx, cfg)
+	setEmbeddedRpcDaemon(ctx, cfg, logger)
+	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
+
+	// Warn if deprecated flag was explicitly set by user
+	if ctx.IsSet(utils.TorrentDownloadSlotsFlag.Name) {
+		logger.Warn(
+			"[DEPRECATED] --torrent.download.slots flag is deprecated and has no effect",
+			"flag", "torrent.download.slots",
+			"provided_value", ctx.Int(utils.TorrentDownloadSlotsFlag.Name),
+			"action", "This flag will be removed in a future release. The downloader now manages concurrent downloads automatically.",
+		)
+	}
+}
+
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
+	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
+	if jwtSecretPath == "" {
+		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
+	}
+
+	apis := ctx.String(utils.HTTPApiFlag.Name)
+
+	c := &httpcfg.HttpCfg{
+		Enabled: func() bool {
+			if ctx.IsSet(utils.HTTPEnabledFlag.Name) {
+				return ctx.Bool(utils.HTTPEnabledFlag.Name)
+			}
+
+			return true
+		}(),
+		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
+		Dirs:              cfg.Dirs,
+
+		TLSKeyFile:  cfg.TLSKeyFile,
+		TLSCACert:   cfg.TLSCACert,
+		TLSCertfile: cfg.TLSCertFile,
+
+		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
+		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
+		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
+		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
+		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
+		JWTSecretPath:            jwtSecretPath,
+		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
+		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
+		HttpCORSDomain:           common.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),
+		HttpVirtualHost:          common.CliString2Array(ctx.String(utils.HTTPVirtualHostsFlag.Name)),
+		AuthRpcVirtualHost:       common.CliString2Array(ctx.String(utils.AuthRpcVirtualHostsFlag.Name)),
+		API:                      common.CliString2Array(apis),
+		HTTPTimeouts: rpccfg.HTTPTimeouts{
+			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
+			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
+		},
+		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
+			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
+			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(AuthRpcIdleTimeoutFlag.Name),
+		},
+		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
+		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
+		OverlayReplayBlockTimeout: ctx.Duration(OverlayReplayBlockFlag.Name),
+		WebsocketPort:             ctx.Int(utils.WSPortFlag.Name),
+		WebsocketEnabled:          ctx.IsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
+		WsMaxConnections:          ctx.Int(utils.WsMaxConnectionsFlag.Name),
+		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
+		RpcFiltersConfig: rpchelper.FiltersConfig{
+			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),
+			RpcSubscriptionFiltersMaxHeaders:   ctx.Int(RpcSubscriptionFiltersMaxHeadersFlag.Name),
+			RpcSubscriptionFiltersMaxTxs:       ctx.Int(RpcSubscriptionFiltersMaxTxsFlag.Name),
+			RpcSubscriptionFiltersMaxAddresses: ctx.Int(RpcSubscriptionFiltersMaxAddressesFlag.Name),
+			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
+		},
+		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
+		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
+		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
+		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),
+
+		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
+
+		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
+
+		StateCache:          kvcache.DefaultCoherentConfig,
+		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+
+		RpcTxSyncDefaultTimeout: ctx.Duration(utils.RpcTxSyncDefaultTimeoutFlag.Name),
+		RpcTxSyncMaxTimeout:     ctx.Duration(utils.RpcTxSyncMaxTimeoutFlag.Name),
+	}
+
+	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {
+		c.WebsocketSubscribeLogsChannelSize = ctx.Int(utils.WSSubscribeLogsChannelSize.Name)
+	} else {
+		c.WebsocketSubscribeLogsChannelSize = 8192
+	}
+
+	if c.Enabled {
+		if ctx.IsSet(utils.HttpCompressionFlag.Name) {
+			c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
+		} else {
+			c.HttpCompression = true
+		}
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis, "http.compression", c.HttpCompression)
+	} else {
+		c.HttpCompression = false
+	}
+
+	if c.WebsocketEnabled {
+		if ctx.IsSet(utils.WsCompressionFlag.Name) {
+			c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
+		} else {
+			c.WebsocketCompression = true
+		}
+	} else {
+		c.WebsocketCompression = false
+	}
+
+	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
+
+	err = c.StateCache.CodeCacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
+
+	/*
+		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
+		rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
+		rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
+	*/
+
+	cfg.Http = *c
+}
+
+// setPrivateApi populates configuration fields related to the remote
+// read-only interface to the database
+func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
+	cfg.PrivateApiAddr = ctx.String(PrivateApiAddr.Name)
+	cfg.PrivateApiRateLimit = uint32(ctx.Uint64(PrivateApiRateLimit.Name))
+	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
+	if cfg.PrivateApiRateLimit > maxRateLimit {
+		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
+		cfg.PrivateApiRateLimit = maxRateLimit
+	}
+	if ctx.Bool(utils.TLSFlag.Name) {
+		certFile := ctx.String(utils.TLSCertFlag.Name)
+		keyFile := ctx.String(utils.TLSKeyFlag.Name)
+		if certFile == "" {
+			log.Warn("Could not establish TLS grpc: missing certificate")
+			return
+		} else if keyFile == "" {
+			log.Warn("Could not establish TLS grpc: missing key file")
+			return
+		}
+		cfg.TLSConnection = true
+		cfg.TLSCertFile = certFile
+		cfg.TLSKeyFile = keyFile
+		cfg.TLSCACert = ctx.String(utils.TLSCACertFlag.Name)
+	}
+	cfg.HealthCheck = ctx.Bool(utils.HealthCheckFlag.Name)
+}

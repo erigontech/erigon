@@ -1,15 +1,29 @@
+ifeq ($(OS),Windows_NT)
+  SHELL := bash
+else
+  SHELL := /bin/bash
+endif
+
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
-GOBIN := $(CURDIR)/$(GOBINREL)
+export GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
+GOEXE := $(shell $(GO) env GOEXE 2>/dev/null)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
+DOCKER_BINARIES ?= "erigon"
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 SHORT_COMMIT := $(shell echo $(GIT_COMMIT) | cut -c 1-8)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags '--match=*.*.*' --abbrev=7 --dirty)
+
+# Use git tag value for "release/" branches only. Otherwise it make no sense.
+ifeq (,$(findstring release/,$(GIT_BRANCH)))
+  GIT_TAG	:= .
+endif
+
 ERIGON_USER ?= erigon
 # if using volume-mounting data dir, then must exist on host OS
 DOCKER_UID ?= $(shell id -u)
@@ -21,11 +35,11 @@ DOCKER_TAG ?= erigontech/erigon:latest
 # Pipe error below to /dev/null since Makefile structure kind of expects
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
-CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
-#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'main' branch and disable in releases
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=0 # Can disable it on CI by separated PR which will measure perf impact.
+#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=1 # Disabled by default; enable for MDBX GC profiling
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
 
 CGO_CFLAGS += -D__BLST_PORTABLE__
@@ -46,37 +60,63 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-# about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125 and https://github.com/golang/go/issues/57757
-BUILD_TAGS = noboltdb
-
-ifneq ($(shell "$(CURDIR)/turbo/silkworm/silkworm_compat_check.sh"),)
-	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
+CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
+ifeq ($(CGO_CXXFLAGS),)
+	CGO_CXXFLAGS += -g
+	CGO_CXXFLAGS += -O2
 endif
+export CGO_CXXFLAGS
+
+BUILD_TAGS =
 
 override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
-
-GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
 # Add to user provided GO_FLAGS. Insert it after a bunch of other stuff to allow overrides, and before tags to maintain BUILD_TAGS (set that instead if you want to modify it).
 
 GO_RELEASE_FLAGS := -trimpath -buildvcs=false \
-	-ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+	-ldflags "-X ${PACKAGE}/db/version.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/db/version.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/db/version.GitTag=${GIT_TAG}"
 GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" GOPRIVATE="$(GOPRIVATE)"
 
 # Basic release build. Pass EXTRA_BUILD_TAGS if you want to modify the tags set.
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GODEBUG ?= cgocheck=0
+
+# Defaults suitable for local use on a reasonable machine; adjust as conditions
+# change. CI can override via GO_FLAGS.
+default_test_timeout      := 20m
+default_test_race_timeout := 60m
+
+GOTEST_PACKAGES = ./...
+GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
+
+GOINSTALL = go install -trimpath
+
+OS = $(shell uname -s)
+ARCH = $(shell uname -m)
+
+ifeq ($(OS),Darwin)
+PROTOC_OS := osx
+ifeq ($(ARCH),arm64)
+ARCH = aarch_64
+endif
+endif
+ifeq ($(OS),Linux)
+PROTOC_OS = linux
+endif
+
+PROTOC_INCLUDE = build/include/google
+PROTO_PATH = node/interfaces
 
 default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 20 ]; then \
-		echo "minimum required Golang version is 1.20"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 25 ]; then \
+		echo "minimum required Golang version is 1.25"; \
 		exit 1 ;\
 	fi
 
@@ -98,6 +138,7 @@ docker:
 	DOCKER_BUILDKIT=1 $(DOCKER) build -t ${DOCKER_TAG} \
 		--build-arg "BUILD_DATE=$(shell date +"%Y-%m-%dT%H:%M:%S:%z")" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg BINARIES="${DOCKER_BINARIES}" \
 		${DOCKER_FLAGS} \
 		.
 
@@ -124,36 +165,32 @@ dbg:
 
 .PHONY: %.cmd
 # Deferred (=) because $* isn't defined until the rule is executed.
-%.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
+%.cmd: override OUTPUT = $(GOBIN)/$*$(GOEXE)
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
-	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+	@echo "Run \"$(OUTPUT)/$*\" to launch $*."
 
 ## geth:                              run erigon (TODO: remove?)
 geth: erigon
 
 ## erigon:                            build erigon
 erigon: go-version erigon.cmd
-	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	@rm -f $(GOBIN)/tg$(GOEXE) # Remove old binary to prevent confusion where users still use it because of the scripts
 
-COMMANDS += devnet
 COMMANDS += capcli
 COMMANDS += downloader
-COMMANDS += hack
 COMMANDS += integration
-COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
 COMMANDS += sentry
-COMMANDS += state
 COMMANDS += txpool
 COMMANDS += evm
-COMMANDS += sentinel
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag
+COMMANDS += mcp
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -163,6 +200,10 @@ all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
 db-tools:
+ifeq ($(GOEXE),.exe)
+	@echo "db-tools is not supported on Windows. Use WSL or Docker."
+	@exit 1
+else
 	@echo "Building db-tools"
 
 	go mod vendor
@@ -171,60 +212,120 @@ db-tools:
 	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
+endif
 
-test-erigon-lib-short:
-	@cd erigon-lib && $(MAKE) test-short
+test-filtered: export ERIGON_SKIP_CL_SPECTEST = true
+test-filtered:
+	@_rd=""; \
+	_cleanup() { [ -n "$$_rd" ] && hdiutil detach -force "$$_rd" >/dev/null 2>&1 || true; }; \
+	trap _cleanup EXIT; \
+	if [ -z "$${ERIGON_EXECUTION_TESTS_TMPDIR:-}" ] && [ "$$(uname -s)" = "Darwin" ]; then \
+		_rd=$$(bash tools/create-ramdisk) || true; \
+		if [ -n "$$_rd" ]; then \
+			export ERIGON_EXECUTION_TESTS_TMPDIR="$$_rd"; \
+			echo "ramdisk: $$_rd"; \
+		fi; \
+	fi; \
+	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
-test-erigon-lib-all:
-	@cd erigon-lib && $(MAKE) test-all
+test-short: override GO_FLAGS += -short -failfast
+test-short: test-filtered
 
-test-erigon-lib-all-race:
-	@cd erigon-lib && $(MAKE) test-all-race
+test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
+test-all: test-filtered
 
-test-erigon-db-short:
-	@cd erigon-db && $(MAKE) test-short
+## test-fixtures:                      download & verify all pinned test fixture tarballs
+.PHONY: test-fixtures
+test-fixtures: test-fixtures-cl
+	tools/test-fixtures.sh
 
-test-erigon-db-all:
-	@cd erigon-db && $(MAKE) test-all
+## test-fixtures-cl:                   download & extract only the cl_mainnet tarball
+# cl/spectest excludes these forks: stale or experimental fixtures that
+# don't pass against caplin yet. Apply post-extract so the exclusions
+# also hold under `make test-all` / `make test-group` / etc., not just
+# under `cd cl/spectest && make tests`.
+.PHONY: test-fixtures-cl
+test-fixtures-cl:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache cl_mainnet
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip6110
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/whisk
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7441
+	rm -rf test-fixtures-cache/cl_mainnet/tests/mainnet/eip7805
 
-test-erigon-db-all-race:
-	@cd erigon-db && $(MAKE) test-all-race
+## test-fixtures-eest:                 download & extract only the EEST tarballs (eest_stable, eest_devnet, eest_benchmark)
+.PHONY: test-fixtures-eest
+test-fixtures-eest:
+	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache eest_stable eest_devnet eest_benchmark
 
-test-erigon-ext:
-	@cd tests/erigon-ext-test && ./test.sh $(GIT_COMMIT)
+# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
+# against EEST fixtures. The shard list, workers, and failure budgets live in
+# tools/eest-spec-shards.json (single source of truth shared with
+# .github/workflows/test-eest-spec.yml's load-matrix job and
+# tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
+# "-race-" dispatch through the race-instrumented evm.race binary so race
+# coverage works without polluting the non-race shards.
+EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
+EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
 
-## test-short:                run short tests with a 10m timeout
-test-short: test-erigon-lib-short test-erigon-db-short
-	@{ \
-		$(GOTEST) -short --timeout 10m -coverprofile=coverage-test.out > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+.PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
 
-## test-all:                  run all tests with a 1h timeout
-test-all: test-erigon-lib-all test-erigon-db-all
-	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+evm.race:
+	$(GO_BUILD_ENV) $(GO) build -race $(GO_FLAGS) -tags $(BUILD_TAGS) -o $(GOBIN)/evm.race ./cmd/evm
 
-## test-all-race:             run all tests with the race flag
-test-all-race: test-erigon-lib-all-race test-erigon-db-all-race
-	@{ \
-		$(GOTEST) --timeout 60m -coverprofile=coverage-test-all.out -race > run.log 2>&1; \
-		STATUS=$$?; \
-		grep -v -e ' CONT ' -e 'RUN' -e 'PAUSE' -e 'PASS' run.log; \
-		exit $$STATUS; \
-	}
+$(addprefix eest-spec-,$(EEST_SPEC_SHARDS)): eest-spec-%: test-fixtures-eest evm
+	@bash tools/run-eest-spec-test.sh "$*"
+
+$(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)): eest-spec-%: test-fixtures-eest evm.race
+	@EVM_BIN=$(GOBIN)/evm.race bash tools/run-eest-spec-test.sh "$*"
+
+## test-bench:                         check the benchmarks compile and run
+test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
+test-bench:
+	$(GOTEST)
+
+test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
+test-all-race: test-filtered
+
+## check-generated:                     verify go.mod/go.sum are tidy
+check-generated:
+	@go mod tidy
+	@if ! git diff --exit-code -- go.mod go.sum; then \
+		echo "ERROR: go.mod or go.sum is out of date. Run 'go mod tidy' and commit."; exit 1; fi
+
+## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
+check-large-files:
+	@base="${BASE:-main}"; \
+	found=0; \
+	while IFS= read -r file; do \
+		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
+		if [ "$$size" -gt 1048576 ]; then \
+			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
+			found=1; \
+		fi; \
+	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
+	if [ "$$found" -eq 1 ]; then \
+		echo "ERROR: Files exceeding 1 MB found."; \
+		exit 1; \
+	fi
+
+## test-group TEST_GROUP=<name>			run a named CI test group
+test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
+test-group: test-filtered
+
+test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
+test-sonar-coverage: test-filtered
+
+## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
+test-rpc: rpcdaemon integration
+	.github/workflows/scripts/run_rpc_tests_local.sh \
+		$(if $(DATADIR),--datadir $(DATADIR)) \
+		$(if $(CHAIN),--chain $(CHAIN))
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
 	@if ! command -v act >/dev/null 2>&1; then \
 		echo "act command not found in PATH, please source it in PATH. If nektosact is not installed, install it by visiting https://nektosact.com/installation/index.html"; \
-	elif [ -z "$(GITHUB_TOKEN)"]; then \
+	elif [ -z "$(GITHUB_TOKEN)" ]; then \
 		echo "Please export GITHUB_TOKEN var in the environment" ; \
 	elif [ "$(SUITE)" = "eest" ]; then \
 		act -j test-hive-eest -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
@@ -232,13 +333,30 @@ test-hive:
 		act -j test-hive -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
 	fi
 
+# Pull the pinned devnet tarball URL and branch straight from test-fixtures.json
+# so this target stays in sync with whatever the rest of the test suite uses.
+# Lazy `=` so unrelated targets don't shell out to jq at make-parse time.
+EEST_DEVNET_URL = $(shell jq -r '."eest_devnet".url' test-fixtures.json)
+EEST_DEVNET_BRANCH = $(shell jq -r '."eest_devnet".branch' test-fixtures.json)
+
+eest-devnet:
+	@if [ ! -d "temp" ]; then mkdir temp; fi
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
+	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=$(EEST_DEVNET_BRANCH) --sim.buildarg fixtures=$(EEST_DEVNET_URL))
 
 # Define the run_suite function
 define run_suite
     printf "\n\n============================================================"; \
     echo "Running test: $1-$2"; \
     printf "\n"; \
-    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --client erigon $3 2>&1 | tee output.log; \
+    ./hive --sim ethereum/$1 --sim.limit=$2 --sim.parallelism=8 --docker.nocache=true --client erigon $3 2>&1 | tee output.log; \
     if [ $$? -gt 0 ]; then \
         echo "Exitcode gt 0"; \
     fi; \
@@ -258,17 +376,13 @@ endef
 
 hive-local:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
-	docker build -t "test/erigon:$(SHORT_COMMIT)" . 
+	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/hive-local-$(SHORT_COMMIT)" && mkdir "temp/hive-local-$(SHORT_COMMIT)"
-	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
-	$(if $(filter Darwin,$(UNAME)), \
-		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
-		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
-	)
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
@@ -278,27 +392,28 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,auth)
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,rpc-compat,)
 
+# Pull the pinned develop tarball URL straight from test-fixtures.json
+# so this target stays in sync with the rest of the test suite. Lazy `=`
+# so unrelated targets don't shell out to jq at make-parse time.
+EEST_STABLE_URL = $(shell jq -r '."eest_stable".url' test-fixtures.json)
+
 eest-hive:
 	@if [ ! -d "temp" ]; then mkdir temp; fi
 	docker build -t "test/erigon:$(SHORT_COMMIT)" .
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
-	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/erigontech/hive
+	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
-	$(if $(filter Darwin,$(UNAME)), \
-		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
-		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
-	)
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eest/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/v4.5.0/fixtures_develop.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=$(EEST_STABLE_URL))
 
 # define kurtosis assertoor runner
 define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
-	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package@5.0.1 --args-file $(1) ; \
 	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
@@ -323,32 +438,54 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@cd erigon-lib && $(MAKE) lint-deps
-
-## lintci:                            run golangci-lint linters
+## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@cd erigon-lib && $(MAKE) lintci
-	@./erigon-lib/tools/golangci_lint.sh
+	@go tool golangci-lint run --config ./.golangci.yml
+	@$(MAKE) check-generated
 
-## lint:                              run all linters
+## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
-	@cd erigon-lib && $(MAKE) lint
-	@./erigon-lib/tools/golangci_lint.sh
-	@./erigon-lib/tools/mod_tidy_check.sh
-	@cd erigon-db && ./../erigon-lib/tools/mod_tidy_check.sh
+	@go tool golangci-lint run --config ./.golangci.yml --fast-only
+	@go tool golangci-lint run --config ./.golangci.yml
+	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`
 tidy:
-	cd erigon-lib && go mod tidy
-	cd erigon-db && go mod tidy
 	go mod tidy
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
 	go clean -cache
 	rm -fr build/*
+
+$(GOBINREL):
+	mkdir -p "$(GOBIN)"
+
+$(GOBINREL)/protoc: | $(GOBINREL)
+	$(eval PROTOC_TMP := $(shell mktemp -d))
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v33.1/protoc-33.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
+	mkdir -p "$(PROTOC_INCLUDE)"
+	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
+	rm -rf "$(PROTOC_TMP)"
+
+# 'protoc-gen-go' tool generates proto messages
+$(GOBINREL)/protoc-gen-go: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/protobuf/cmd/protoc-gen-go
+
+# 'protoc-gen-go-grpc' tool generates grpc services
+$(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
+	$(GOINSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+$(PROTO_PATH):
+	git submodule update --init $@
+
+protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+
+protoc-clean:
+	rm -f "$(GOBIN)/protoc"*
+	rm -rf "$(PROTOC_INCLUDE)"
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
@@ -364,15 +501,16 @@ devtools:
 
 ## mocks:                             generate test mocks
 mocks:
-	@cd erigon-lib && $(MAKE) mocks
 	rm -f $(GOBIN)/mockgen
+	$(GOINSTALL) go.uber.org/mock/mockgen@latest
 	$(GOBUILD) -o "$(GOBIN)/mockgen" go.uber.org/mock/mockgen
-	grep -r -l --exclude-dir="erigon-lib" --exclude-dir="tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
+	grep -r -l --exclude-dir="execution/tests" --exclude-dir="*$(GOBINREL)*" "^// Code generated by MockGen. DO NOT EDIT.$$" . | xargs rm -r
 	PATH="$(GOBIN):$(PATH)" go generate -run "mockgen" ./...
 
 ## solc:                              generate all solidity contracts
-solc:
-	PATH="$(GOBIN):$(PATH)" go generate -run "solc" ./...
+solc: $(OPENZEPPELIN)
+	PATH="$(GOBIN):$(PATH)" go generate -run "solc" -skip "txnprovider/shutter" ./...
+	@cd txnprovider/shutter && $(MAKE) solc
 
 ## abigen:                            generate abis using abigen
 abigen:
@@ -389,8 +527,36 @@ graphql:
 	PATH=$(GOBIN):$(PATH) cd ./cmd/rpcdaemon/graphql && go run github.com/99designs/gqlgen .
 
 ## grpc:                              generate grpc and protobuf code
-grpc:
-	@cd erigon-lib && $(MAKE) grpc
+grpc: protoc-all $(PROTO_PATH)
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=./typesproto \
+		types/types.proto
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=$(PROTO_PATH) --go_out=node/gointerfaces --go-grpc_out=node/gointerfaces -I=$(PROTOC_INCLUDE) \
+		--go_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go-grpc_opt=Mtypes/types.proto=github.com/erigontech/erigon/node/gointerfaces/typesproto \
+		--go_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go-grpc_opt=Mp2psentry/sentry.proto=./sentryproto \
+		--go_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go-grpc_opt=Mp2psentinel/sentinel.proto=./sentinelproto \
+		--go_opt=Mremote/kv.proto=./remoteproto \
+		--go-grpc_opt=Mremote/kv.proto=./remoteproto \
+		--go_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go-grpc_opt=Mremote/ethbackend.proto=./remoteproto \
+		--go_opt=Mremote/bor.proto=./remoteproto \
+		--go-grpc_opt=Mremote/bor.proto=./remoteproto \
+		--go_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go-grpc_opt=Mdownloader/downloader.proto=./downloaderproto \
+		--go_opt=Mexecution/execution.proto=./executionproto \
+		--go-grpc_opt=Mexecution/execution.proto=./executionproto \
+		--go_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/txpool.proto=./txpoolproto \
+		--go_opt=Mtxpool/mining.proto=./txpoolproto \
+		--go-grpc_opt=Mtxpool/mining.proto=./txpoolproto \
+		p2psentry/sentry.proto p2psentinel/sentinel.proto \
+		remote/bor.proto remote/kv.proto remote/ethbackend.proto \
+		downloader/downloader.proto execution/execution.proto \
+		txpool/txpool.proto txpool/mining.proto
+
 	@cd txnprovider/shutter && $(MAKE) proto
 
 ## stringer:                          generate stringer code
@@ -398,14 +564,18 @@ stringer:
 	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	PATH="$(GOBIN):$(PATH)" go generate -run "stringer" ./...
 
+## versions-gen:                       regenerate version_schema_gen.go from versions.yaml
+versions-gen:
+	$(GOBUILD) -o $(GOBIN)/bumper ./cmd/bumper
+	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
+
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer
-	@cd erigon-lib && $(MAKE) gen
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
-	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
-	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/tests/contracts/
+	PATH=$(GOBIN):$(PATH) go generate ./execution/state/contracts/
 
 ## prometheus:                        run prometheus and grafana with docker-compose
 prometheus:
@@ -429,7 +599,6 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/turbo/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"
@@ -464,11 +633,6 @@ user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER) NFSHomeDirectory /Users/$(ERIGON_USER)
 	sudo dscl . -append /Groups/admin GroupMembership $(ERIGON_USER)
 	sudo -u $(ERIGON_USER) mkdir -p /Users/$(ERIGON_USER)/.local/share
-
-## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
-.PHONY: automated-tests
-automated-tests:
-	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

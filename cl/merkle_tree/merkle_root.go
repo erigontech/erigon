@@ -23,17 +23,18 @@ import (
 	"reflect"
 	"unsafe"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/ssz"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
+
+	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // HashTreeRoot returns the hash for a given schema of objects.
 // IMPORTANT: DATA TYPE MUST IMPLEMENT HASHABLE
 // SUPPORTED PRIMITIVES: uint64, *uint64 and []byte
-func HashTreeRoot(schema ...interface{}) ([32]byte, error) {
+func HashTreeRoot(schema ...any) ([32]byte, error) {
 	// Calculate the total number of leaves needed based on the schema length
 	leaves := make([]byte, NextPowerOfTwo(uint64(len(schema)*length.Hash)))
 	pos := 0
@@ -147,7 +148,7 @@ func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) 
 }
 
 // Merkle Proof computes the merkle proof for a given schema of objects.
-func MerkleProof(depth, proofIndex int, schema ...interface{}) ([][32]byte, error) {
+func MerkleProof(depth, proofIndex int, schema ...any) ([][32]byte, error) {
 	// Calculate the total number of leaves needed based on the schema length
 	maxDepth := GetDepth(uint64(len(schema)))
 	if utils.PowerOf2(uint64(maxDepth)) != uint64(len(schema)) {

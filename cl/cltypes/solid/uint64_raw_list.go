@@ -21,11 +21,11 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
 )
 
 type RawUint64List struct {
@@ -62,6 +62,7 @@ func (arr *RawUint64List) Get(index int) uint64 {
 }
 
 func (arr *RawUint64List) Set(index int, v uint64) {
+	arr.cachedHash = common.Hash{}
 	arr.u[index] = v
 }
 

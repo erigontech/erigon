@@ -22,18 +22,19 @@ package dnsdisc
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
+	"maps"
+	"net"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -457,16 +458,14 @@ func (mr mapResolver) clear() {
 }
 
 func (mr mapResolver) add(m map[string]string) {
-	for k, v := range m {
-		mr[k] = v
-	}
+	maps.Copy(mr, m)
 }
 
-func (mr mapResolver) LookupTXT(ctx context.Context, name string) ([]string, error) {
+func (mr mapResolver) LookupTXT(_ context.Context, name string) ([]string, time.Duration, error) {
 	if record, ok := mr[name]; ok {
-		return []string{record}, nil
+		return []string{record}, 300 * time.Second, nil
 	}
-	return nil, errors.New("not found")
+	return nil, 0, &net.DNSError{Err: "no such host", Name: name, IsNotFound: true}
 }
 
 func parseNodes(rec []string) []*enode.Node {

@@ -19,7 +19,11 @@
 
 package rpc
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon/common"
+)
 
 var (
 	_ Error = new(methodNotFoundError)
@@ -31,7 +35,27 @@ var (
 	_ Error = new(CustomError)
 )
 
-const defaultErrorCode = -32000
+const (
+	ErrCodeNonceTooHigh            = -38011
+	ErrCodeNonceTooLow             = -38010
+	ErrCodeIntrinsicGas            = -38013
+	ErrCodeInsufficientFunds       = -38014
+	ErrCodeBlockGasLimitReached    = -38015
+	ErrCodeBlockNumberInvalid      = -38020
+	ErrCodeBlockTimestampInvalid   = -38021
+	ErrCodeSenderIsNotEOA          = -38024
+	ErrCodeMaxInitCodeSizeExceeded = -38025
+	ErrCodeClientLimitExceeded     = -38026
+	ErrCodeInternalError           = -32603
+	ErrCodeInvalidParams           = -32602
+	ErrCodeDefault                 = -32000
+	ErrCodeVMError                 = -32015
+	ErrCodeServerOverloaded        = -32005 // JSON-RPC "Too many requests"
+
+	ErrCodeTxSyncTimeout = 4
+)
+
+const ErrMsgServerOverloaded = "server overloaded, retry later"
 
 type methodNotFoundError struct{ method string }
 
@@ -83,6 +107,25 @@ type UnsupportedForkError struct{ Message string }
 func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
 
 func (e *UnsupportedForkError) Error() string { return e.Message }
+
+type BlockNotFoundErr struct {
+	BlockId string
+}
+
+func (e BlockNotFoundErr) ErrorCode() int { return -32000 }
+
+func (e BlockNotFoundErr) Error() string {
+	return fmt.Sprintf("block not found: %s", e.BlockId)
+}
+
+type TxSyncTimeoutError struct {
+	Msg  string
+	Hash common.Hash
+}
+
+func (e *TxSyncTimeoutError) Error() string  { return e.Msg }
+func (e *TxSyncTimeoutError) ErrorCode() int { return ErrCodeTxSyncTimeout }
+func (e *TxSyncTimeoutError) ErrorData() any { return e.Hash.Hex() }
 
 type CustomError struct {
 	Code    int

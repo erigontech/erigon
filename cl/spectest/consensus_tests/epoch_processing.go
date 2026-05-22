@@ -21,15 +21,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type EpochProcessing struct {
@@ -132,4 +131,20 @@ var pendingDepositTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 var PendingConsolidationTest = NewEpochProcessing(func(s abstract.BeaconState) error {
 	statechange.ProcessPendingConsolidations(s)
 	return nil
+})
+
+var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessProposerLookahead(s)
+	return nil
+})
+
+var historicalSummariesUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
+
+var builderPendingPaymentsTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessBuilderPendingPayments(s)
+	return nil
+})
+
+var ptcWindowTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	return statechange.ProcessPtcWindow(s)
 })

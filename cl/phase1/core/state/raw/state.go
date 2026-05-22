@@ -22,18 +22,20 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 )
 
 const (
+	// These legacy constants are kept for reference but are NOT used in state
+	// initialization — New() reads all vector sizes from the BeaconChainConfig
+	// so that minimal and mainnet presets work correctly.
 	BlockRootsLength = 8192
 	StateRootsLength = 8192
 	RandoMixesLength = 65536
-	SlashingsLength  = 8192
 
 	// slot offset in the state = genesis time + genesis validators root
 	SlotOffsetSSZ = 8 + length.Hash
@@ -67,7 +69,8 @@ type BeaconState struct {
 	currentSyncCommittee        *solid.SyncCommittee
 	nextSyncCommittee           *solid.SyncCommittee
 	// Bellatrix
-	latestExecutionPayloadHeader *cltypes.Eth1Header
+	latestExecutionPayloadHeader *cltypes.Eth1Header          // will be removed and replaced by latestExecutionPayloadBid after Gloas fork
+	latestExecutionPayloadBid    *cltypes.ExecutionPayloadBid // New in EIP7732 after Gloas fork
 	// Capella
 	nextWithdrawalIndex          uint64
 	nextWithdrawalValidatorIndex uint64
@@ -90,6 +93,16 @@ type BeaconState struct {
 	// Fulu
 	proposerLookahead solid.Uint64VectorSSZ // Vector[ValidatorIndex, (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH]
 
+	// Gloas [New in EIP7732]
+	builders                     *solid.ListSSZ[*cltypes.Builder]                  // List[Builder, BUILDER_REGISTRY_LIMIT]
+	nextWithdrawalBuilderIndex   uint64                                            // next_withdrawal_builder_index
+	executionPayloadAvailability *solid.BitVector                                  // Bitvector[SLOTS_PER_HISTORICAL_ROOT]
+	builderPendingPayments       *solid.VectorSSZ[*cltypes.BuilderPendingPayment]  // Vector[BuilderPendingPayment, 2 * SLOTS_PER_EPOCH]
+	builderPendingWithdrawals    *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] // List[BuilderPendingWithdrawal, BUILDER_PENDING_WITHDRAWALS_LIMIT]
+	latestBlockHash              common.Hash                                       // latest_block_hash
+	payloadExpectedWithdrawals   *solid.ListSSZ[*cltypes.Withdrawal]               // List[Withdrawal, MAX_WITHDRAWALS_PER_PAYLOAD]
+	ptcWindow                    *solid.VectorSSZ[solid.Uint64VectorSSZ]           // Vector[Vector[uint64, PTC_SIZE], (2 + MIN_SEED_LOOKAHEAD) * SLOTS_PER_EPOCH]
+
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
 	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
@@ -110,14 +123,14 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		eth1Data:                     &cltypes.Eth1Data{},
 		eth1DataVotes:                solid.NewStaticListSSZ[*cltypes.Eth1Data](int(cfg.EpochsPerEth1VotingPeriod)*int(cfg.SlotsPerEpoch), 72),
 		historicalSummaries:          solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(cfg.HistoricalRootsLimit), 64),
-		currentSyncCommittee:         &solid.SyncCommittee{},
-		nextSyncCommittee:            &solid.SyncCommittee{},
-		latestExecutionPayloadHeader: &cltypes.Eth1Header{},
+		currentSyncCommittee:         solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize)),
+		nextSyncCommittee:            solid.NewSyncCommitteeWithSize(int(cfg.SyncCommitteeSize)),
+		latestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.Phase0Version),
 		inactivityScores:             solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		balances:                     solid.NewUint64ListSSZ(int(cfg.ValidatorRegistryLimit)),
 		previousEpochParticipation:   solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
 		currentEpochParticipation:    solid.NewParticipationBitList(0, int(cfg.ValidatorRegistryLimit)),
-		slashings:                    solid.NewUint64VectorSSZ(SlashingsLength),
+		slashings:                    solid.NewUint64VectorSSZ(int(cfg.EpochsPerSlashingsVector)),
 		currentEpochAttestations:     solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.CurrentEpochAttestationsLength())),
 		previousEpochAttestations:    solid.NewDynamicListSSZ[*solid.PendingAttestation](int(cfg.PreviousEpochAttestationsLength())),
 		historicalRoots:              solid.NewHashList(int(cfg.HistoricalRootsLimit)),
@@ -130,6 +143,16 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
 		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
 		proposerLookahead:            solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)),
+		// gloas
+		latestExecutionPayloadBid:    &cltypes.ExecutionPayloadBid{},
+		builders:                     solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ()),
+		nextWithdrawalBuilderIndex:   0,
+		executionPayloadAvailability: solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot)),
+		builderPendingPayments:       solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch)),
+		builderPendingWithdrawals:    solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ()),
+		latestBlockHash:              common.Hash{},
+		payloadExpectedWithdrawals:   solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ()),
+		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)),
 	}
 	state.init()
 	return state
@@ -145,7 +168,7 @@ func (b *BeaconState) init() error {
 }
 
 func (b *BeaconState) MarshalJSON() ([]byte, error) {
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"genesis_time":                  strconv.FormatInt(int64(b.genesisTime), 10),
 		"genesis_validators_root":       b.genesisValidatorsRoot,
 		"slot":                          strconv.FormatInt(int64(b.slot), 10),
@@ -200,6 +223,23 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 	if b.version >= clparams.FuluVersion {
 		obj["proposer_lookahead"] = b.proposerLookahead
 	}
+	if b.version >= clparams.GloasVersion {
+		delete(obj, "latest_execution_payload_header")
+		obj["latest_execution_payload_bid"] = b.latestExecutionPayloadBid
+		obj["builders"] = b.builders
+		obj["next_withdrawal_builder_index"] = strconv.FormatInt(int64(b.nextWithdrawalBuilderIndex), 10)
+		// Serialize as raw bytes so Go's JSON encoder emits base64
+		// (the standard Go encoding for []byte), matching what assertoor and
+		// other Go-based Eth2 tooling expect for Bitvector fields.
+		epaBuf := make([]byte, b.executionPayloadAvailability.EncodingSizeSSZ())
+		epaBuf, _ = b.executionPayloadAvailability.EncodeSSZ(epaBuf)
+		obj["execution_payload_availability"] = epaBuf
+		obj["builder_pending_payments"] = b.builderPendingPayments
+		obj["builder_pending_withdrawals"] = b.builderPendingWithdrawals
+		obj["latest_block_hash"] = b.latestBlockHash
+		obj["payload_expected_withdrawals"] = b.payloadExpectedWithdrawals
+		obj["ptc_window"] = b.ptcWindow
+	}
 	return json.Marshal(obj)
 }
 
@@ -251,48 +291,4 @@ func (b *BeaconState) HistoricalSummary(index int) *cltypes.HistoricalSummary {
 
 func (b *BeaconState) RawSlashings() []byte {
 	return b.slashings.Bytes()
-}
-
-func (b *BeaconState) EarliestExitEpoch() uint64 {
-	return b.earliestExitEpoch
-}
-
-func (b *BeaconState) ExitBalanceToConsume() uint64 {
-	return b.exitBalanceToConsume
-}
-
-func (b *BeaconState) GetDepositBalanceToConsume() uint64 {
-	return b.depositBalanceToConsume
-}
-
-func (b *BeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
-	return b.pendingDeposits
-}
-
-func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
-	return b.depositRequestsStartIndex
-}
-
-func (b *BeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
-	return b.pendingConsolidations
-}
-
-func (b *BeaconState) GetEarlistConsolidationEpoch() uint64 {
-	return b.earliestConsolidationEpoch
-}
-
-func (b *BeaconState) GetEarlistExitEpoch() uint64 {
-	return b.earliestExitEpoch
-}
-
-func (b *BeaconState) GetExitBalanceToConsume() uint64 {
-	return b.exitBalanceToConsume
-}
-
-func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
-	return b.consolidationBalanceToConsume
-}
-
-func (b *BeaconState) GetProposerLookahead() solid.Uint64VectorSSZ {
-	return b.proposerLookahead
 }

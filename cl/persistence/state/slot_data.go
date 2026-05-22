@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 )
 
 type SlotData struct {
@@ -47,6 +48,9 @@ type SlotData struct {
 	EarliestExitEpoch             uint64
 	ConsolidationBalanceToConsume uint64
 	EarliestConsolidationEpoch    uint64
+	// GLOAS (EIP-7732)
+	NextWithdrawalBuilderIndex uint64
+	LatestBlockHash            common.Hash
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -75,7 +79,10 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		EarliestExitEpoch:             s.EarliestExitEpoch(),
 		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
 		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
-		Fork:                          s.Fork(),
+		// GLOAS
+		NextWithdrawalBuilderIndex: s.GetNextWithdrawalBuilderIndex(),
+		LatestBlockHash:            s.GetLatestBlockHash(),
+		Fork:                       s.Fork(),
 	}
 }
 
@@ -131,8 +138,8 @@ func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error 
 	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }
 
-func (m *SlotData) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
+func (m *SlotData) getSchema() []any {
+	schema := []any{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}
@@ -145,6 +152,12 @@ func (m *SlotData) getSchema() []interface{} {
 			&m.EarliestExitEpoch,
 			&m.ConsolidationBalanceToConsume,
 			&m.EarliestConsolidationEpoch,
+		)
+	}
+	if m.Version >= clparams.GloasVersion {
+		schema = append(schema,
+			&m.NextWithdrawalBuilderIndex,
+			m.LatestBlockHash[:],
 		)
 	}
 	return schema

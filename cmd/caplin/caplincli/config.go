@@ -25,13 +25,13 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplinflags"
 	"github.com/erigontech/erigon/cmd/sentinel/sentinelcli"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 )
 
 type CaplinCliCfg struct {
@@ -54,9 +54,10 @@ type CaplinCliCfg struct {
 	MaxPeerCount          uint64        `json:"max_peer_count"`
 	JwtSecret             []byte
 
-	AllowedMethods   []string `json:"allowed_methods"`
-	AllowedOrigins   []string `json:"allowed_origins"`
-	AllowCredentials bool     `json:"allow_credentials"`
+	AllowedMethods     []string `json:"allowed_methods"`
+	AllowedOrigins     []string `json:"allowed_origins"`
+	AllowCredentials   bool     `json:"allow_credentials"`
+	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
 
 	Dirs datadir.Dirs
 }
@@ -101,6 +102,7 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		clparams.ConfigurableCheckpointsURLs = checkpointUrls
 	}
 
+	cfg.SubscribeAllTopics = ctx.Bool(utils.CaplinSubscribeAllTopicsFlag.Name)
 	cfg.Chaindata = ctx.String(caplinflags.ChaindataFlag.Name)
 
 	cfg.MevRelayUrl = ctx.String(caplinflags.MevRelayUrl.Name)

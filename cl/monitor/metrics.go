@@ -1,11 +1,11 @@
 package monitor
 
 import (
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -89,7 +89,7 @@ func (a *aggregateQualityMetric) observe(participationCount int, totalCount int)
 	if len(a.qualities) <= 40 {
 		return
 	}
-	sort.Float64s(a.qualities)
+	slices.Sort(a.qualities)
 	aggregateQuality50Per.Set(a.qualities[len(a.qualities)/2])
 	aggregateQuality25Per.Set(a.qualities[len(a.qualities)/4])
 	aggregateQuality75Per.Set(a.qualities[(len(a.qualities)*3)/4])
@@ -167,14 +167,8 @@ func ObserveBatchVerificationThroughput(d time.Duration, totalSigs int) {
 
 // ObserveGossipTopicSeen increments the gossip topic seen metric
 func ObserveGossipTopicSeen(topic string, l int) {
-	var metric metrics.Counter
-	metricI, ok := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
-	if ok {
-		metric = metricI.(metrics.Counter)
-	} else {
-		metric = metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix + "_" + topic)
-		gossipMetricsMap.Store(topic, metric)
-	}
+	metricI, _ := gossipMetricsMap.LoadOrStore(topic, metrics.GetOrCreateCounter(gossipTopicsMetricCounterPrefix+"_"+topic))
+	metric := metricI.(metrics.Counter)
 	metric.Add(float64(l))
 }
 

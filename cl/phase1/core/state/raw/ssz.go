@@ -19,51 +19,137 @@ package raw
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
-// BlockRoot computes the block root for the state.
+// BlockRoot computes hash_tree_root(latest_block_header) — the block root for the current state.
+//
+// LatestBlockHeader.Root (the state_root field) follows a deferred-fill pattern from the spec:
+//   - process_block_header sets it to Bytes32() (zero) because the state is still being modified.
+//   - It is backfilled later by either:
+//     (a) process_slot at the start of the next slot, or
+//     (b) process_execution_payload (GLOAS/EIP-7732) before envelope processing in the same slot.
+//
+// In GLOAS the envelope further mutates the state after the block, but the block root must
+// reflect the pre-envelope state. Since (b) locks Root before those mutations, we must use
+// the already-stored value when present rather than recomputing HashSSZ() on a post-envelope state.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
-	stateRoot, err := b.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
+	// Use the stored state_root from latestBlockHeader when it has already been
+	// backfilled (by process_slot at the start of the next slot, or by
+	// ProcessExecutionPayloadEnvelope in GLOAS). Only fall back to computing the
+	// state root when Root is still zero (right after process_block_header sets a
+	// new header with zero state_root).
+	root := b.latestBlockHeader.Root
+	if root == [32]byte{} {
+		var err error
+		root, err = b.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
 	}
+	// Reconstruct a complete header (with the resolved state_root) and hash it.
 	return (&cltypes.BeaconBlockHeader{
 		Slot:          b.latestBlockHeader.Slot,
 		ProposerIndex: b.latestBlockHeader.ProposerIndex,
 		BodyRoot:      b.latestBlockHeader.BodyRoot,
 		ParentRoot:    b.latestBlockHeader.ParentRoot,
-		Root:          stateRoot,
+		Root:          root,
 	}).HashSSZ()
 }
 
+// baseOffsetSSZ computes the fixed portion of the SSZ encoding (all fixed-size
+// fields plus 4-byte offsets for each variable-length field). This is derived
+// from beaconConfig so it works with any preset (mainnet, minimal, custom).
 func (b *BeaconState) baseOffsetSSZ() uint32 {
-	switch b.version {
-	case clparams.Phase0Version:
-		return 2687377
-	case clparams.AltairVersion:
-		return 2736629
-	case clparams.BellatrixVersion:
-		return 2736633
-	case clparams.CapellaVersion:
-		return 2736653
-	case clparams.DenebVersion:
-		return 2736653
-	case clparams.ElectraVersion:
-		return 2736653
-	case clparams.FuluVersion:
-		return 2736653
-	default:
-		// ?????
-		panic("tf is that")
+	cfg := b.beaconConfig
+	size := uint32(0)
+
+	// Phase0 base fields (all versions):
+	size += 8                                          // genesis_time
+	size += 32                                         // genesis_validators_root
+	size += 8                                          // slot
+	size += 16                                         // fork (prev_version + cur_version + epoch)
+	size += 112                                        // latest_block_header
+	size += uint32(cfg.SlotsPerHistoricalRoot) * 32    // block_roots (Vector[Hash, SLOTS_PER_HISTORICAL_ROOT])
+	size += uint32(cfg.SlotsPerHistoricalRoot) * 32    // state_roots (Vector[Hash, SLOTS_PER_HISTORICAL_ROOT])
+	size += 4                                          // historical_roots offset (List, variable)
+	size += 72                                         // eth1_data
+	size += 4                                          // eth1_data_votes offset (List, variable)
+	size += 8                                          // eth1_deposit_index
+	size += 4                                          // validators offset (List, variable)
+	size += 4                                          // balances offset (List, variable)
+	size += uint32(cfg.EpochsPerHistoricalVector) * 32 // randao_mixes (Vector[Hash, EPOCHS_PER_HISTORICAL_VECTOR])
+	size += uint32(cfg.EpochsPerSlashingsVector) * 8   // slashings (Vector[uint64, EPOCHS_PER_SLASHINGS_VECTOR])
+
+	if b.version == clparams.Phase0Version {
+		size += 4 // previous_epoch_attestations offset
+		size += 4 // current_epoch_attestations offset
+	} else {
+		// Altair+
+		size += 4 // previous_epoch_participation offset
+		size += 4 // current_epoch_participation offset
 	}
+
+	size += 1  // justification_bits
+	size += 40 // previous_justified_checkpoint (epoch + root)
+	size += 40 // current_justified_checkpoint
+	size += 40 // finalized_checkpoint
+
+	if b.version >= clparams.AltairVersion {
+		size += 4                                     // inactivity_scores offset (List, variable)
+		size += uint32(cfg.SyncCommitteeSize)*48 + 48 // current_sync_committee
+		size += uint32(cfg.SyncCommitteeSize)*48 + 48 // next_sync_committee
+	}
+
+	if b.version >= clparams.BellatrixVersion {
+		size += 4 // latest_execution_payload_header offset (variable)
+	}
+
+	if b.version >= clparams.CapellaVersion {
+		size += 8 // next_withdrawal_index
+		size += 8 // next_withdrawal_validator_index
+		size += 4 // historical_summaries offset (List, variable)
+	}
+
+	if b.version >= clparams.ElectraVersion {
+		size += 8 // deposit_requests_start_index
+		size += 8 // deposit_balance_to_consume
+		size += 8 // exit_balance_to_consume
+		size += 8 // earliest_exit_epoch
+		size += 8 // consolidation_balance_to_consume
+		size += 8 // earliest_consolidation_epoch
+		size += 4 // pending_deposits offset
+		size += 4 // pending_partial_withdrawals offset
+		size += 4 // pending_consolidations offset
+	}
+
+	if b.version >= clparams.FuluVersion {
+		size += uint32((cfg.MinSeedLookahead+1)*cfg.SlotsPerEpoch) * 8 // proposer_lookahead (Vector)
+	}
+
+	if b.version >= clparams.GloasVersion {
+		// In GLOAS, latestExecutionPayloadHeader (variable, 4-byte offset) is replaced by
+		// latestBlockHash (fixed 32-byte Hash) at the Bellatrix position.
+		size -= 4  // remove latestExecutionPayloadHeader offset (already counted)
+		size += 32 // latestBlockHash (fixed Hash)
+		// New GLOAS fields:
+		size += 4                                                                                          // builders offset (List, variable)
+		size += 8                                                                                          // next_withdrawal_builder_index
+		size += uint32(cfg.SlotsPerHistoricalRoot) / 8                                                     // execution_payload_availability (BitVector)
+		size += uint32(2*cfg.SlotsPerEpoch) * uint32(new(cltypes.BuilderPendingPayment).EncodingSizeSSZ()) // builder_pending_payments (Vector, fixed-size elements)
+		size += 4                                                                                          // builder_pending_withdrawals offset (List, variable)
+		size += 4                                                                                          // latest_execution_payload_bid offset (variable)
+		size += 4                                                                                          // payload_expected_withdrawals offset (List, variable)
+		size += uint32((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch) * uint32(cfg.PtcSize) * 8               // ptc_window (Vector[Vector[uint64, PTC_SIZE]])
+	}
+
+	return size
 }
 
 func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -71,8 +157,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
-func (b *BeaconState) getSchema() []interface{} {
-	s := []interface{}{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
+func (b *BeaconState) getSchema() []any {
+	s := []any{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
 		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
 	if b.version == clparams.Phase0Version {
 		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
@@ -81,7 +167,12 @@ func (b *BeaconState) getSchema() []interface{} {
 	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 		&b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
 	if b.version >= clparams.BellatrixVersion {
-		s = append(s, b.latestExecutionPayloadHeader)
+		// Position 24: pre-Gloas holds latestExecutionPayloadHeader; Gloas replaces it with latestBlockHash (consensus-specs #5113)
+		if b.version >= clparams.GloasVersion {
+			s = append(s, b.latestBlockHash[:])
+		} else {
+			s = append(s, b.latestExecutionPayloadHeader)
+		}
 	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
@@ -94,6 +185,9 @@ func (b *BeaconState) getSchema() []interface{} {
 	if b.version >= clparams.FuluVersion {
 		s = append(s, b.proposerLookahead)
 	}
+	if b.version >= clparams.GloasVersion {
+		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestExecutionPayloadBid, b.payloadExpectedWithdrawals, b.ptcWindow)
+	}
 	return s
 }
 
@@ -103,7 +197,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
 	if version >= int(clparams.BellatrixVersion) {
-		b.latestExecutionPayloadHeader = &cltypes.Eth1Header{}
+		b.latestExecutionPayloadHeader = cltypes.NewEth1Header(clparams.StateVersion(version))
 	}
 	if version >= int(clparams.ElectraVersion) {
 		b.pendingDeposits = solid.NewPendingDepositList(b.beaconConfig)
@@ -112,6 +206,17 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 	if version >= int(clparams.FuluVersion) {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
+	}
+	if version >= int(clparams.GloasVersion) {
+		b.latestExecutionPayloadBid = &cltypes.ExecutionPayloadBid{}
+		b.builders = solid.NewStaticListSSZ[*cltypes.Builder](int(b.beaconConfig.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+		b.nextWithdrawalBuilderIndex = 0
+		b.executionPayloadAvailability = solid.NewBitVector(int(b.beaconConfig.SlotsPerHistoricalRoot))
+		b.builderPendingPayments = solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * b.beaconConfig.SlotsPerEpoch))
+		b.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+		b.latestBlockHash = common.Hash{}
+		b.payloadExpectedWithdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(b.beaconConfig.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
+		b.ptcWindow = solid.NewUint64VectorOfVectors(int((2+b.beaconConfig.MinSeedLookahead)*b.beaconConfig.SlotsPerEpoch), int(b.beaconConfig.PtcSize))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -122,7 +227,10 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 
 // SSZ size of the Beacon State
 func (b *BeaconState) EncodingSizeSSZ() (size int) {
-	size = int(b.baseOffsetSSZ()) + b.historicalRoots.EncodingSizeSSZ()
+	// Start with the fixed portion (includes offset pointers for variable-size fields).
+	size = int(b.baseOffsetSSZ())
+	// Add the variable-size field data (only fields where Static() == false).
+	size += b.historicalRoots.EncodingSizeSSZ()
 	size += b.eth1DataVotes.EncodingSizeSSZ()
 	size += b.validators.EncodingSizeSSZ()
 	size += b.balances.Length() * 8
@@ -132,20 +240,24 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	} else {
 		size += b.previousEpochParticipation.Length()
 		size += b.currentEpochParticipation.Length()
+		size += b.inactivityScores.Length() * 8
 	}
-
-	size += b.inactivityScores.Length() * 8
-	size += b.historicalSummaries.EncodingSizeSSZ()
-
+	if b.version >= clparams.BellatrixVersion && b.version < clparams.GloasVersion {
+		size += b.latestExecutionPayloadHeader.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.CapellaVersion {
+		size += b.historicalSummaries.EncodingSizeSSZ()
+	}
 	if b.version >= clparams.ElectraVersion {
-		// 6 uint64 fields
-		size += 6 * 8
 		size += b.pendingDeposits.EncodingSizeSSZ()
 		size += b.pendingPartialWithdrawals.EncodingSizeSSZ()
 		size += b.pendingConsolidations.EncodingSizeSSZ()
 	}
-	if b.version >= clparams.FuluVersion {
-		size += b.proposerLookahead.EncodingSizeSSZ()
+	if b.version >= clparams.GloasVersion {
+		size += b.builders.EncodingSizeSSZ()
+		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
+		size += b.latestExecutionPayloadBid.EncodingSizeSSZ()
+		size += b.payloadExpectedWithdrawals.EncodingSizeSSZ()
 	}
 	return
 }

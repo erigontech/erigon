@@ -17,8 +17,11 @@
 package services
 
 import (
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"go.uber.org/mock/gomock"
+
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type mockFuncs struct {
@@ -47,4 +50,40 @@ func (m *mockFuncs) BlsVerifyMultipleSignatures(pubkey, message, signature [][]b
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarInclusionProof(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarInclusionProof", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofs", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecar", sidecar)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// [New in Gloas:EIP7732] GLOAS verification functions with kzg_commitments parameter
+func (m *mockFuncs) VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarWithCommitments", sidecar, kzgCommitments)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+func (m *mockFuncs) VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyDataColumnSidecarKZGProofsWithCommitments", sidecar, kzgCommitments)
+	ret0, _ := ret[0].(bool)
+	return ret0
 }

@@ -19,7 +19,7 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/common/clonable"
 )
 
 type uint64ListSSZ struct {
@@ -122,6 +122,16 @@ func (arr *uint64ListSSZ) Append(v uint64) {
 func IsUint64SortedSet(set IterableSSZ[uint64]) bool {
 	for i := 0; i < set.Length()-1; i++ {
 		if set.Get(i) >= set.Get(i+1) {
+			return false
+		}
+	}
+	return true
+}
+
+// IsUint64Sorted checks if the list is sorted in non-decreasing order (duplicates allowed). O(N) complexity.
+func IsUint64Sorted(list IterableSSZ[uint64]) bool {
+	for i := 0; i < list.Length()-1; i++ {
+		if list.Get(i) > list.Get(i+1) {
 			return false
 		}
 	}

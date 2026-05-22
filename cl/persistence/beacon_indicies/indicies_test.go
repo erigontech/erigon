@@ -20,24 +20,28 @@ import (
 	"context"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t, kv.ChainDB)
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
 	return db
 }
 
 func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	// Mock a block
@@ -70,7 +74,8 @@ func TestWriteBlockRoot(t *testing.T) {
 func TestReadParentBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -94,7 +99,8 @@ func TestReadParentBlockRoot(t *testing.T) {
 func TestTruncateCanonicalChain(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -124,7 +130,8 @@ func TestTruncateCanonicalChain(t *testing.T) {
 func TestReadBeaconBlockHeader(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -160,7 +167,8 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 func TestWriteExecutionBlockNumber(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	tHash := common.HexToHash("0x2")
@@ -177,7 +185,8 @@ func TestWriteExecutionBlockNumber(t *testing.T) {
 func TestWriteExecutionBlockHash(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	tHash := common.HexToHash("0x2")
@@ -187,4 +196,43 @@ func TestWriteExecutionBlockHash(t *testing.T) {
 	tHash3, err := ReadExecutionBlockHash(tx, tHash)
 	require.NoError(t, err)
 	require.Equal(t, tHash2, tHash3)
+}
+
+func TestPruneBlocksRemovesAllBlocksBeforeSlot(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	type storedBlock struct {
+		slot uint64
+		root common.Hash
+	}
+
+	var blocks []storedBlock
+	for _, slot := range []uint64{1, 2, 3, 4} {
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+		block.Block.Slot = slot
+		block.EncodingSizeSSZ()
+
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		require.NoError(t, WriteBeaconBlockAndIndicies(context.Background(), tx, block, false))
+
+		blocks = append(blocks, storedBlock{slot: slot, root: root})
+	}
+
+	require.NoError(t, PruneBlocks(context.Background(), tx, 3))
+
+	for _, block := range blocks {
+		body, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.slot, block.root))
+		require.NoError(t, err)
+		if block.slot < 3 {
+			require.Empty(t, body)
+			continue
+		}
+		require.NotEmpty(t, body)
+	}
 }

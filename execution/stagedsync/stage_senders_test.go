@@ -22,25 +22,26 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestSenders(t *testing.T) {
 	require := require.New(t)
 
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	db := m.DB
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -57,8 +58,8 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare txn so it works with our test
-	signer1 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
-	header := &types.Header{Number: common.Big1}
+	signer1 := types.MakeSigner(chain.TestChainBerlinConfig, *chain.TestChainBerlinConfig.BerlinBlock, 0)
+	header := &types.Header{Number: *common.Num1}
 	hash := header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	require.NoError(rawdb.WriteBody(tx, hash, 1, &types.Body{
@@ -89,8 +90,8 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
-	header.Number = common.Big2
+	signer2 := types.MakeSigner(chain.TestChainBerlinConfig, *chain.TestChainBerlinConfig.BerlinBlock, 0)
+	header.Number = *common.Num2
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	require.NoError(rawdb.WriteBody(tx, hash, 2, &types.Body{
@@ -133,7 +134,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 2))
 
-	header.Number = common.Big3
+	header.Number = *common.Num3
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
 	err = rawdb.WriteBody(tx, hash, 3, &types.Body{
@@ -145,24 +146,24 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(db, chain.TestChainConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil)
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, nil, exec.NewBlockReadAheader())
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 
 	{
-		header.Number = common.Big1
+		header.Number = *common.Num1
 		hash = header.Hash()
 		found, senders, _ := br.BlockWithSenders(m.Ctx, tx, hash, 1)
 		assert.NotNil(t, found)
 		assert.Len(t, found.Body().Transactions, 2)
 		assert.Len(t, senders, 2)
-		header.Number = common.Big2
+		header.Number = *common.Num2
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Body().Transactions))
 		assert.Len(t, senders, 3)
-		header.Number = common.Big3
+		header.Number = *common.Num3
 		hash = header.Hash()
 		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 3)
 		assert.NotNil(t, found)

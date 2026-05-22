@@ -20,8 +20,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"

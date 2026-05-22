@@ -37,11 +37,10 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/log/v3"
-
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 const (
@@ -57,7 +56,7 @@ type httpConn struct {
 	client    *http.Client
 	url       string
 	closeOnce sync.Once
-	closeCh   chan interface{}
+	closeCh   chan any
 	mu        sync.Mutex // protects headers
 	headers   http.Header
 }
@@ -66,7 +65,7 @@ type httpConn struct {
 // and some methods don't work. The panic() stubs here exist to ensure
 // this special treatment is correct.
 
-func (hc *httpConn) WriteJSON(context.Context, interface{}) error {
+func (hc *httpConn) WriteJSON(context.Context, any) error {
 	panic("writeJSON called on httpConn")
 }
 
@@ -87,7 +86,7 @@ func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
 
-func (hc *httpConn) closed() <-chan interface{} {
+func (hc *httpConn) closed() <-chan any {
 	return hc.closeCh
 }
 
@@ -109,7 +108,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 			client:  client,
 			headers: headers,
 			url:     endpoint,
-			closeCh: make(chan interface{}),
+			closeCh: make(chan any),
 		}
 		return hc, nil
 	}, logger)
@@ -117,20 +116,21 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	return DialHTTPWithClient(endpoint, new(http.Client), logger)
+	client := &http.Client{Timeout: 30 * time.Second}
+	return DialHTTPWithClient(endpoint, client, logger)
 }
 
-func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg interface{}) error {
+func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	hc := c.writeConn.(*httpConn)
 	respBody, err := hc.doRequest(ctx, msg)
 	if err != nil {
 		return err
 	}
-	var respmsg jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsg); err != nil {
+	var respMsg jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsg); err != nil {
 		return err
 	}
-	op.resp <- &respmsg
+	op.resp <- []*jsonrpcMessage{&respMsg}
 	return nil
 }
 
@@ -140,17 +140,15 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	if err != nil {
 		return err
 	}
-	var respmsgs []jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
+	var respMsgs []*jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsgs); err != nil {
 		return err
 	}
-	for i := 0; i < len(respmsgs); i++ {
-		op.resp <- &respmsgs[i]
-	}
+	op.resp <- respMsgs
 	return nil
 }
 
-func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, error) {
+func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
@@ -181,6 +179,10 @@ func (hc *httpConn) doRequest(ctx context.Context, msg interface{}) ([]byte, err
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
+	}
+
+	if len(respBody) == 0 {
+		return nil, errors.New("empty response from JSON-RPC server")
 	}
 
 	return respBody, nil
@@ -236,6 +238,45 @@ func (t *httpServerConn) RemoteAddr() string {
 // SetWriteDeadline does nothing and always returns nil.
 func (t *httpServerConn) SetWriteDeadline(time.Time) error { return nil }
 
+// httpOverloadedKey signals that the inner DB gate (kv.ErrReadTxLimitExceeded) rejected this request.
+// ServeHTTP injects the *bool; runMethod sets it so the correct HTTP 503 status is written before flush.
+type httpOverloadedKey struct{}
+
+// httpFlusherContextKey carries a gzip-activation hook for the current request.
+// It must only be set by the gzip middleware (not by a generic http.Flusher check),
+// so that it is absent when gzip is disabled and cannot prematurely commit HTTP headers.
+type httpFlusherContextKey struct{}
+
+// WithGzipStreamingHook stores hook in ctx so that runMethod will call it before
+// writing the first byte of a streamable response, switching the gzip middleware from
+// one-shot buffering to incremental streaming. Must only be called by the gzip middleware.
+func WithGzipStreamingHook(ctx context.Context, hook func()) context.Context {
+	return context.WithValue(ctx, httpFlusherContextKey{}, hook)
+}
+
+func withOverloadedFlag(ctx context.Context) (context.Context, *bool) {
+	flag := new(bool)
+	return context.WithValue(ctx, httpOverloadedKey{}, flag), flag
+}
+
+// SetOverloadedFlag marks the current HTTP request as DB-overloaded.
+func SetOverloadedFlag(ctx context.Context) {
+	if flag, _ := ctx.Value(httpOverloadedKey{}).(*bool); flag != nil {
+		*flag = true
+	}
+}
+
+// overloadedBody is precomputed; id is null because the request has not been parsed yet.
+var overloadedBody = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"` + ErrMsgServerOverloaded + `"}}` + "\n")
+
+// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for the outer admission gate.
+func WriteOverloadedResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Retry-After", "1")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write(overloadedBody)
+}
+
 // ServeHTTP serves JSON-RPC requests over HTTP.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Permit dumb empty requests for remote health-checks (AWS)
@@ -248,6 +289,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Don't serve if server is stopped.
+	if !s.run.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
 	// Create request-scoped context.
 	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
 	connInfo.HTTP.Version = r.Proto
@@ -256,6 +303,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	connInfo.HTTP.UserAgent = r.Header.Get("User-Agent")
 	ctx := r.Context()
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, connInfo)
+	ctx, overloaded := withOverloadedFlag(ctx)
+	// Note: the gzip-streaming hook (httpFlusherContextKey) is injected by the gzip
+	// middleware via WithGzipStreamingHook, not here, to avoid prematurely committing
+	// HTTP headers when gzip is disabled.
 
 	// All checks passed, create a codec that reads directly from the request body
 	// until EOF, writes the response to w, and orders the server to process a
@@ -271,8 +322,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
-			ctx = dbg.ContextWithDebug(ctx, true)
-
+			ctx = dbg.WithDebug(ctx, true)
 		}
 	}
 
@@ -288,6 +338,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
+		return
+	}
+
+	if !s.disableStreaming {
+		// If the inner DB gate rejected the request, the JSON-RPC error body is already
+		// buffered in the stream. Set 503 before flushing so the status is correct.
+		if *overloaded {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		stream.Flush()
 	}
 }
 
@@ -328,7 +389,7 @@ func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bo
 		return false
 	}
 
-	keyFunc := func(token *jwt.Token) (interface{}, error) {
+	keyFunc := func(token *jwt.Token) (any, error) {
 		return jwtSecret, nil
 	}
 	claims := jwt.RegisteredClaims{}

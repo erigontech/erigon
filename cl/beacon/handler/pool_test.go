@@ -25,8 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -34,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
@@ -344,12 +344,12 @@ func TestPoolSyncCommittees(t *testing.T) {
 		Slot:              1,
 		BeaconBlockRoot:   common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
 		SubcommitteeIndex: 0,
-		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+		AggregationBits:   make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize),
 	}, out.Data)
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
-	aggrBits := make([]byte, cltypes.SyncCommitteeAggregationBitsSize)
+	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1
 	msgs := []*cltypes.SignedContributionAndProof{
 		{

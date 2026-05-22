@@ -21,11 +21,11 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/transition/machine"
-	"github.com/erigontech/erigon/spectest"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/spectest/spectest"
+	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {

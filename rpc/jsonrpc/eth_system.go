@@ -18,26 +18,25 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
-	"hash/crc32"
-	"math/big"
-	"reflect"
-	"strconv"
-	"time"
+	"errors"
+	"math"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/params"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/gasprice"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -48,7 +47,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
+	blockNum, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
 	if err != nil {
 		return 0, err
 	}
@@ -56,7 +55,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
@@ -78,7 +77,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
@@ -122,9 +121,9 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
-	gasResult := big.NewInt(0)
+	gasResult := uint256.NewInt(0)
 
 	gasResult.Set(tipcap)
 	if err != nil {
@@ -134,7 +133,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
-	return (*hexutil.Big)(gasResult), err
+	return (*hexutil.Big)(gasResult.ToBig()), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
@@ -144,12 +143,12 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, nil, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(tipcap), err
+	return (*hexutil.Big)(tipcap.ToBig()), err
 }
 
 type feeHistoryResult struct {
@@ -167,7 +166,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 		return nil, err
 	}
 	defer tx.Rollback()
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(api.db, tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.feeHistoryCache, api.logger.New("app", "gasPriceOracle"))
 
 	oldest, reward, baseFee, gasUsed, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -189,13 +188,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if baseFee != nil {
 		results.BaseFee = make([]*hexutil.Big, len(baseFee))
 		for i, v := range baseFee {
-			results.BaseFee[i] = (*hexutil.Big)(v)
+			results.BaseFee[i] = (*hexutil.Big)(v.ToBig())
 		}
 	}
 	if blobBaseFee != nil {
 		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
 		for i, v := range blobBaseFee {
-			results.BlobBaseFee[i] = (*hexutil.Big)(v)
+			results.BlobBaseFee[i] = (*hexutil.Big)(v.ToBig())
 		}
 	}
 	if blobGasUsedRatio != nil {
@@ -213,7 +212,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil || header.BlobGasUsed == nil {
+	if header == nil || header.ExcessBlobGas == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
@@ -224,7 +223,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
 	if err != nil {
 		return nil, err
 	}
@@ -253,182 +252,132 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if !config.IsLondon(header.Number.Uint64() + 1) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
-	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
+	baseFee := misc.CalcBaseFee(config, header)
+	return (*hexutil.Big)(baseFee.ToBig()), nil
 }
 
 // EthHardForkConfig represents config of a hard-fork
 type EthHardForkConfig struct {
-	ActivationTime  hexutil.Uint              `json:"activationTime"`
-	BlobSchedule    params.BlobConfig         `json:"blobSchedule"`
+	ActivationTime  uint64                    `json:"activationTime"`
+	BlobSchedule    *params.BlobConfig        `json:"blobSchedule"`
 	ChainId         hexutil.Uint              `json:"chainId"`
-	Precompiles     map[common.Address]string `json:"precompiles"`
+	ForkId          hexutil.Bytes             `json:"forkId"`
+	Precompiles     map[string]common.Address `json:"precompiles"`
 	SystemContracts map[string]common.Address `json:"systemContracts"`
 }
 
 // EthConfigResp is the response type of eth_config
 type EthConfigResp struct {
-	Current     *EthHardForkConfig `json:"current"`
-	CurrentHash string             `json:"currentHash"`
-	Next        *EthHardForkConfig `json:"next"`
-	NextHash    *string            `json:"nextHash"`
-}
-
-// SystemContractsMap maps system contract addresses to names expected in eth_config
-var SystemContractsMap = map[common.Address]string{
-	params.BeaconRootsAddress:          "BEACON_ROOTS_ADDRESS",
-	params.ConsolidationRequestAddress: "CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS",
-	params.HistoryStorageAddress:       "HISTORY_STORAGE_ADDRESS",
-	params.WithdrawalRequestAddress:    "WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS",
-}
-
-// PrecompileNamesMap maps object names used in the codebase to expected names in the output of eth_config
-// DO NOT RENAME THE UNDERLYING PRECOMPILED CONTRACTS WITHOUT CHANGING THIS OR VICE-VERSA
-var PrecompileNamesMap = map[string]string{
-	"ecrecover":              "ECREC",
-	"sha256hash":             "SHA256",
-	"ripemd160hash":          "RIPEMD160",
-	"dataCopy":               "ID",
-	"bigModExp":              "MODEXP",
-	"bn256AddIstanbul":       "BN256_ADD",
-	"bn256ScalarMulIstanbul": "BN256_MUL",
-	"bn256PairingIstanbul":   "BN256_PAIRING",
-	"blake2F":                "BLAKE2F",
-	"pointEvaluation":        "KZG_POINT_EVALUATION",
-	"bls12381G1Add":          "BLS12_G1ADD",
-	"bls12381G1MultiExp":     "BLS12_G1MSM",
-	"bls12381G2Add":          "BLS12_G2ADD",
-	"bls12381G2MultiExp":     "BLS12_G2MSM",
-	"bls12381Pairing":        "BLS12_PAIRING_CHECK",
-	"bls12381MapFpToG1":      "BLS12_MAP_FP_TO_G1",
-	"bls12381MapFp2ToG2":     "BLS12_MAP_FP2_TO_G2",
+	Current *EthHardForkConfig `json:"current"`
+	Next    *EthHardForkConfig `json:"next"`
+	Last    *EthHardForkConfig `json:"last"`
 }
 
 // Config returns the HardFork config for current and upcoming forks:
 // assuming linear fork progression and ethereum-like schedule
-func (api *APIImpl) Config(ctx context.Context) (*EthConfigResp, error) {
+func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint64) (*EthConfigResp, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	config, err := api.BaseAPI.chainConfig(ctx, tx)
+	var currentBlockTime uint64
+	if blockTimeOverride != nil {
+		// optional utility arg to aid with testing
+		currentBlockTime = blockTimeOverride.Uint64()
+	} else {
+		h, err := api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return nil, err
+		}
+		if h == nil {
+			return nil, errors.New("latest header not found")
+		}
+		currentBlockTime = h.Time
+	}
+
+	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	tt := uint64(time.Now().Unix())
+	gatherForksFrom := genesis.Time()
+	if genesis.Time() >= currentBlockTime {
+		// handle forks activated at genesis with activation time 0
+		gatherForksFrom = 0
+		currentBlockTime = 0
+	}
 
-	ret := &EthConfigResp{
-		Current: &EthHardForkConfig{},
+	response := EthConfigResp{}
+	forkBlockNums, forkTimes := forkid.GatherForks(chainConfig, gatherForksFrom)
+	// current fork config
+	currentForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentBlockTime)
+	response.Current = fillForkConfig(chainConfig, currentForkId.Hash, currentForkId.Activation)
+
+	// next fork config
+	if currentForkId.Next == 0 {
+		// means there are no later forks setup to be activated after the current one
+		return &response, nil
 	}
-	switch {
-	case config.IsOsaka(tt):
-		fillOsakaForkConfig(ret.Current, config)
-		ret.Next = nil
-	case config.IsPrague(tt):
-		fillPragueForkConfig(ret.Current, config)
-		if config.OsakaTime != nil {
-			ret.Next = &EthHardForkConfig{}
-			fillOsakaForkConfig(ret.Next, config)
-		}
-	case config.IsCancun(tt):
-		fillCancunForkConfig(ret.Current, config)
-		if config.PragueTime != nil {
-			ret.Next = &EthHardForkConfig{}
-			fillPragueForkConfig(ret.Next, config)
-		}
-	default:
-	}
-	if ret.Current != nil {
-		ret.CurrentHash = checkSumConfig(ret.Current)
-	}
-	if ret.Next != nil {
-		cs := checkSumConfig(ret.Next)
-		ret.NextHash = &cs
-	}
-	return ret, nil
+
+	nextForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, currentForkId.Next)
+	response.Next = fillForkConfig(chainConfig, nextForkId.Hash, nextForkId.Activation)
+
+	// last fork config
+	lastForkId := forkid.NewIDFromForks(forkBlockNums, forkTimes, genesis.Hash(), math.MaxUint64, math.MaxUint64)
+	response.Last = fillForkConfig(chainConfig, lastForkId.Hash, lastForkId.Activation)
+
+	return &response, nil
 }
 
-func fillPragueForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.PragueTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.PragueTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap([]common.Address{
-		params.BeaconRootsAddress,
-		params.ConsolidationRequestAddress,
-		params.HistoryStorageAddress,
-		params.WithdrawalRequestAddress,
-	}, &config.DepositContract)
-
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsPrague {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
+func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
+	forkConfig := EthHardForkConfig{}
+	forkConfig.ActivationTime = activationTime
+	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime)
+	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
+	forkConfig.ForkId = forkId[:]
+	blockContext := evmtypes.BlockContext{
+		BlockNumber: math.MaxUint64,
+		Time:        activationTime,
 	}
-}
-
-func fillOsakaForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.OsakaTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.OsakaTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap([]common.Address{
-		params.BeaconRootsAddress,
-		params.ConsolidationRequestAddress,
-		params.HistoryStorageAddress,
-		params.WithdrawalRequestAddress,
-	}, &config.DepositContract)
-
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsOsaka {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
+	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
+	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
+	for addr, precompile := range precompiles {
+		forkConfig.Precompiles[precompile.Name()] = addr.Value()
 	}
-}
-
-func fillCancunForkConfig(ret *EthHardForkConfig, config *chain.Config) {
-	ret.ActivationTime = hexutil.Uint(config.CancunTime.Uint64())
-	ret.BlobSchedule = *config.GetBlobConfig(config.CancunTime.Uint64())
-	ret.ChainId = hexutil.Uint(config.ChainID.Uint64())
-	ret.SystemContracts = makeSystemContractsConfigMap(
-		[]common.Address{},
-		&config.DepositContract,
-	)
-	ret.Precompiles = make(map[common.Address]string)
-	for k, v := range vm.PrecompiledContractsCancun {
-		ret.Precompiles[k] = PrecompileNamesMap[reflect.TypeOf(v).Elem().Name()]
+	systemContracts := chainConfig.SystemContracts(activationTime)
+	forkConfig.SystemContracts = make(map[string]common.Address, len(systemContracts))
+	for name, contract := range systemContracts {
+		forkConfig.SystemContracts[name] = contract.Value()
 	}
-}
-
-func checkSumConfig(ehfc *EthHardForkConfig) string {
-	ms, err := json.Marshal(ehfc)
-	if err != nil {
-		log.Error("checkSumConfig: Error occurred while json Marshalling config", "err", err)
-		return ""
-	}
-	cs := uint64(crc32.ChecksumIEEE(ms))
-	return strconv.FormatUint(cs, 16)
-}
-
-func makeSystemContractsConfigMap(contracts []common.Address, depositContract *common.Address) map[string]common.Address {
-	ret := make(map[string]common.Address)
-	for _, c := range contracts {
-		ret[SystemContractsMap[c]] = c
-	}
-	if depositContract != nil {
-		ret["DEPOSIT_CONTRACT_ADDRESS"] = *depositContract
-	}
-	return ret
+	return &forkConfig
 }
 
 type GasPriceOracleBackend struct {
+	db      kv.TemporalRoDB // nil if Fork is not supported
 	tx      kv.TemporalTx
 	baseApi *BaseAPI
 }
 
-func NewGasPriceOracleBackend(tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{tx: tx, baseApi: baseApi}
+func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
+	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
+}
+
+func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
+	if b.db == nil {
+		return nil, nil, nil // Fork not supported; caller falls back to sequential
+	}
+	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, nil, err
+	}
+	return &GasPriceOracleBackend{db: b.db, tx: tx, baseApi: b.baseApi},
+		func() { tx.Rollback() },
+		nil
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi.headerByRPCNumber(ctx, number, b.tx)
+	header, err := b.baseApi.headerByNumber(ctx, number, b.tx)
 	if err != nil {
 		return nil, err
 	}
@@ -437,18 +386,52 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	}
 	return header, nil
 }
+
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
+	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
 }
+
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	cc, _ := b.baseApi.chainConfig(context.Background(), b.tx)
 	return cc
 }
+
+func (b *GasPriceOracleBackend) GetLatestBlockNumber() (uint64, error) {
+	return rpchelper.GetLatestBlockNumber(b.tx)
+}
+
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
+
+// PendingBlockAndReceipts returns the pending block and its receipts.
+// It first tries the real pending block from the mining client (cached in filters),
+// which is a block built on top of the current head and not yet finalised.
+// When available, receipts are nil because the block has not been executed yet;
+// callers that request reward percentiles will receive an empty entry for the
+// pending slot, which is acceptable.
+// If no pending block is available (e.g. no mining client configured), it falls
+// back to the latest confirmed block with its receipts. This is a pragmatic
+// workaround to avoid returning N-1 blocks instead of N when the caller requests
+// "pending": baseFee and gasUsedRatio from the latest block are the best available
+// approximation for the next block.
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
+	if block := b.baseApi.pendingBlock(); block != nil {
+		return block, nil
+	}
+	latestNum, err := rpchelper.GetLatestBlockNumber(b.tx)
+	if err != nil {
+		return nil, nil
+	}
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	if err != nil || block == nil {
+		return nil, nil
+	}
+	receipts, err := b.baseApi.getReceipts(context.Background(), b.tx, block)
+	if err != nil {
+		return nil, nil
+	}
+	return block, receipts
 }
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {

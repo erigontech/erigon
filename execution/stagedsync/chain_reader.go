@@ -18,17 +18,16 @@ package stagedsync
 
 import (
 	"context"
-	"math/big"
 
-	"github.com/erigontech/erigon-db/rawdb"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 // ChainReader implements consensus.ChainReader
@@ -101,7 +100,7 @@ func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
 }
 
 // GetTd retrieves the total difficulty from the database by hash and number.
-func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
 		cr.Logger.Error("ReadTd failed", "err", err)
@@ -110,22 +109,7 @@ func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	return td
 }
 
-func (cr ChainReader) FrozenBlocks() uint64    { return cr.BlockReader.FrozenBlocks() }
-func (cr ChainReader) FrozenBorBlocks() uint64 { return cr.BlockReader.FrozenBorBlocks() }
-
-func (cr ChainReader) BorStartEventId(_ common.Hash, _ uint64) uint64 {
-	panic("bor events by block not implemented")
-}
-func (cr ChainReader) BorEventsByBlock(_ common.Hash, _ uint64) []rlp.RawValue {
-	panic("bor events by block not implemented")
-}
-
-func (cr ChainReader) BorSpan(spanId uint64) *heimdall.Span {
-	span, _, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
-	if err != nil {
-		cr.Logger.Error("BorSpan failed", "err", err)
-		return nil
-	}
-
-	return span
+func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
+func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
+	return cr.BlockReader.FrozenBorBlocks(align)
 }

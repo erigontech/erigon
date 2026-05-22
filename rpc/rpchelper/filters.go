@@ -31,17 +31,20 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/concurrent"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	txpool "github.com/erigontech/erigon-lib/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/filters"
-	txpool2 "github.com/erigontech/erigon/txnprovider/txpool"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Filters holds the state for managing subscriptions to various Ethereum events.
@@ -52,18 +55,29 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs   *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs         *LogsFilterAggregator
-	logsRequestor    atomic.Value
-	onNewSnapshot    func()
+	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs              *LogsFilterAggregator
+	logsRequestor         atomic.Value
+	receiptsSubs          *ReceiptsFilterAggregator
+	receiptsRequestor     atomic.Value
+	pendingReceiptsUpdate atomic.Bool
+	onNewSnapshot         func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
+
+	// latestSD is the local fallback for the most recent SharedDomains.
+	// When events is non-nil (embedded mode), LatestSD() reads directly from
+	// Events.LatestSD() which is updated synchronously in PublishOverlay.
+	// When events is nil (remote mode), latestSD is not populated and
+	// LatestSD() returns nil — remote rpcdaemons do not use the overlay.
+	latestSD atomic.Pointer[execctx.SharedDomains]
+	events   *shards.Events
 
 	config FiltersConfig
 }
@@ -71,7 +85,7 @@ type Filters struct {
 // New creates a new Filters instance, initializes it, and starts subscription goroutines for Ethereum events.
 // It requires a context, Ethereum backend, transaction pool client, mining client, snapshot callback function,
 // and a logger for logging events.
-func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func(), logger log.Logger) *Filters {
+func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, onNewSnapshot func(), logger log.Logger, events *shards.Events) *Filters {
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -79,6 +93,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
 		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
 		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
+		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
 		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
@@ -86,6 +101,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
 		config:             config,
+		events:             events,
 	}
 
 	go func() {
@@ -145,6 +161,43 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		}
 	}()
 
+	go func() {
+		if ethBackend == nil {
+			return
+		}
+		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Inc()
+		for {
+			select {
+			case <-ctx.Done():
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
+				return
+			default:
+			}
+			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
+				ff.mu.Lock()
+				ff.receiptsRequestor.Store(send)
+				ff.mu.Unlock()
+				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
+					if err := ff.sendReceiptsFilterUpdate(); err != nil {
+						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+					}
+				}
+			}); err != nil {
+				select {
+				case <-ctx.Done():
+					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
+					return
+				default:
+				}
+				if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				logger.Warn("rpc filters: error subscribing to receipts", "err", err)
+			}
+		}
+	}()
+
 	if txPool != nil {
 		go func() {
 			activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingTxs"}).Inc()
@@ -162,7 +215,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 						return
 					default:
 					}
-					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
+					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool.ErrPoolDisabled) {
 						time.Sleep(3 * time.Second)
 						continue
 					}
@@ -235,8 +288,8 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 
 // subscribeToPendingTransactions subscribes to pending transactions using the given transaction pool client.
 // It listens for new transactions and processes them as they arrive.
-func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
-	subscription, err := txPool.OnAdd(ctx, &txpool.OnAddRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpoolproto.TxpoolClient) error {
+	subscription, err := txPool.OnAdd(ctx, &txpoolproto.OnAddRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -257,8 +310,8 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 
 // subscribeToPendingBlocks subscribes to pending blocks using the given mining client.
 // It listens for new pending blocks and processes them as they arrive.
-func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.MiningClient) error {
-	subscription, err := mining.OnPendingBlock(ctx, &txpool.OnPendingBlockRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpoolproto.MiningClient) error {
+	subscription, err := mining.OnPendingBlock(ctx, &txpoolproto.OnPendingBlockRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -285,7 +338,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 
 // HandlePendingBlock handles a new pending block received from the mining client.
 // It updates the internal state and notifies subscribers about the new block.
-func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
+func (ff *Filters) HandlePendingBlock(reply *txpoolproto.OnPendingBlockReply) {
 	b := &types.Block{}
 	if reply == nil || len(reply.RplBlock) == 0 {
 		return
@@ -306,8 +359,8 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 
 // subscribeToPendingLogs subscribes to pending logs using the given mining client.
 // It listens for new pending logs and processes them as they arrive.
-func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
-	subscription, err := mining.OnPendingLogs(ctx, &txpool.OnPendingLogsRequest{}, grpc.WaitForReady(true))
+func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpoolproto.MiningClient) error {
+	subscription, err := mining.OnPendingLogs(ctx, &txpoolproto.OnPendingLogsRequest{}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -333,7 +386,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 
 // HandlePendingLogs handles new pending logs received from the mining client.
 // It updates the internal state and notifies subscribers about the new logs.
-func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
+func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 	if len(reply.RplLogs) == 0 {
 		return
 	}
@@ -381,13 +434,15 @@ func (ff *Filters) SubscribePendingLogs(size int) (<-chan types.Logs, PendingLog
 }
 
 // UnsubscribePendingLogs unsubscribes from pending logs using the given subscription ID.
-func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) bool {
 	ch, ok := ff.pendingLogsSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingLogsSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingBlock subscribes to pending blocks and returns a channel to receive the blocks
@@ -400,13 +455,15 @@ func (ff *Filters) SubscribePendingBlock(size int) (<-chan *types.Block, Pending
 }
 
 // UnsubscribePendingBlock unsubscribes from pending blocks using the given subscription ID.
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	ch, ok := ff.pendingBlockSubs.Get(id)
 	if !ok {
-		return
+		return false
 	}
 	ch.Close()
 	ff.pendingBlockSubs.Delete(id)
+	return true
 }
 
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
@@ -431,6 +488,49 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 	}
 	ff.pendingTxsStores.Delete(id)
 	return true
+}
+
+// SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
+// and a subscription ID to manage the subscription.
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID) {
+	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size)
+	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter", "err", err)
+		ff.receiptsSubs.removeReceiptsFilter(id)
+	}
+	return sub.ch, id
+}
+
+// UnsubscribeReceipts unsubscribes from transaction receipts using the given subscription ID.
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
+	removed := ff.receiptsSubs.removeReceiptsFilter(id)
+	if !removed {
+		return false
+	}
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
+	}
+	return true
+}
+
+// sendReceiptsFilterUpdate sends the current receipts filter state to the server.
+// If the requestor is not yet available, it sets a flag so the onReady callback
+// will send the update once the receipts subscription goroutine connects.
+// The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
+// storing the requestor concurrently.
+func (ff *Filters) sendReceiptsFilterUpdate() error {
+	rfr := ff.receiptsSubs.createFilterRequest()
+	ff.mu.Lock()
+	loaded := ff.receiptsRequestor.Load()
+	if loaded == nil {
+		ff.pendingReceiptsUpdate.Store(true)
+		ff.mu.Unlock()
+		return nil
+	}
+	ff.mu.Unlock()
+	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
@@ -467,7 +567,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]common.Hash{}
+		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
 		for _, topics := range criteria.Topics {
 			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
@@ -479,9 +579,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 					break
 				}
 			}
-			if len(allowedTopicsRow) > 0 {
-				allowedTopics = append(allowedTopics, allowedTopicsRow)
-			}
+			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
+			allowedTopics = append(allowedTopics, allowedTopicsRow)
 		}
 		f.topicsOriginal = allowedTopics
 	}
@@ -501,7 +600,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
-		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
 		}
@@ -515,6 +614,22 @@ func (ff *Filters) loadLogsRequester() any {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	return ff.logsRequestor.Load()
+}
+
+func (ff *Filters) HasSubscription(id LogsSubID) bool {
+	return ff.logsSubs.hasLogsFilter(id)
+}
+
+// HasHeadsSubscription returns true if a heads (new block headers) subscription exists for the given ID.
+func (ff *Filters) HasHeadsSubscription(id HeadsSubID) bool {
+	_, ok := ff.headsSubs.Get(id)
+	return ok
+}
+
+// HasPendingTxsSubscription returns true if a pending transactions subscription exists for the given ID.
+func (ff *Filters) HasPendingTxsSubscription(id PendingTxsSubID) bool {
+	_, ok := ff.pendingTxsSubs.Get(id)
+	return ok
 }
 
 // UnsubscribeLogs unsubscribes from logs using the given subscription ID.
@@ -535,7 +650,7 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	}
 	loaded := ff.loadLogsRequester()
 	if loaded != nil {
-		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+		if err := loaded.(func(*remoteproto.LogsFilterRequest) error)(lfr); err != nil {
 			ff.logger.Warn("Could not update remote logs filter", "err", err)
 			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
@@ -552,7 +667,7 @@ func (ff *Filters) deleteLogStore(id LogsSubID) {
 }
 
 // OnNewEvent is called when there is a new event from the remote and processes it.
-func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
+func (ff *Filters) OnNewEvent(event *remoteproto.SubscribeReply) {
 	err := ff.onNewEvent(event)
 	if err != nil {
 		ff.logger.Warn("OnNewEvent Filters", "event", event.Type, "err", err)
@@ -560,16 +675,16 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 }
 
 // onNewEvent processes the given event from the remote and updates the internal state.
-func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
+func (ff *Filters) onNewEvent(event *remoteproto.SubscribeReply) error {
 	switch event.Type {
-	case remote.Event_HEADER:
+	case remoteproto.Event_HEADER:
 		return ff.onNewHeader(event)
-	case remote.Event_NEW_SNAPSHOT:
+	case remoteproto.Event_NEW_SNAPSHOT:
 		ff.onNewSnapshot()
 		return nil
-	case remote.Event_PENDING_LOGS:
+	case remoteproto.Event_PENDING_LOGS:
 		return ff.onPendingLog(event)
-	case remote.Event_PENDING_BLOCK:
+	case remoteproto.Event_PENDING_BLOCK:
 		return ff.onPendingBlock(event)
 	default:
 		return errors.New("unsupported event type")
@@ -578,7 +693,7 @@ func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
 
 // TODO: implement?
 // onPendingLog handles a new pending log event from the remote.
-func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
+func (ff *Filters) onPendingLog(event *remoteproto.SubscribeReply) error {
 	//	payload := event.Data
 	//	var logs types.Logs
 	//	err := rlp.Decode(bytes.NewReader(payload), &logs)
@@ -595,7 +710,7 @@ func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
 
 // TODO: implement?
 // onPendingBlock handles a new pending block event from the remote.
-func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
+func (ff *Filters) onPendingBlock(event *remoteproto.SubscribeReply) error {
 	//	payload := event.Data
 	//	var block types.Block
 	//	err := rlp.Decode(bytes.NewReader(payload), &block)
@@ -611,7 +726,7 @@ func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
 }
 
 // onNewHeader handles a new block header event from the remote and updates the internal state.
-func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
+func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	payload := event.Data
 	var header types.Header
 	if len(payload) == 0 {
@@ -621,14 +736,20 @@ func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
 	if err != nil {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
+
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 		v.Send(&header)
 		return nil
 	})
 }
 
+// OnReceipts handles a new receipt event from the remote and processes it.
+func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
+	ff.receiptsSubs.distributeReceipt(reply)
+}
+
 // OnNewTx handles a new transaction event from the transaction pool and processes it.
-func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
+func (ff *Filters) OnNewTx(reply *txpoolproto.OnAddReply) {
 	txs := make([]types.Transaction, len(reply.RplTxs))
 	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
@@ -649,7 +770,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 }
 
 // OnNewLogs handles a new log event from the remote and processes it.
-func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
+func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 	ff.logsSubs.distributeLog(reply)
 }
 
@@ -662,16 +783,11 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
-			// Calculate the number of logs to remove
 			excessLogs := len(st) + 1 - maxLogs
-			if excessLogs > 0 {
-				if excessLogs >= len(st) {
-					// If excessLogs is greater than or equal to the length of st, remove all
-					st = []*types.Log{}
-				} else {
-					// Otherwise, remove the oldest logs
-					st = st[excessLogs:]
-				}
+			if excessLogs >= len(st) {
+				st = []*types.Log{}
+			} else {
+				st = st[excessLogs:]
 			}
 		}
 
@@ -684,11 +800,7 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	res, ok := ff.logsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.logsStores.Delete(id)
 }
 
 // AddPendingBlock adds a pending block header to the store associated with the given subscription ID.
@@ -700,16 +812,11 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 
 		maxHeaders := ff.config.RpcSubscriptionFiltersMaxHeaders
 		if maxHeaders > 0 && len(st)+1 > maxHeaders {
-			// Calculate the number of headers to remove
 			excessHeaders := len(st) + 1 - maxHeaders
-			if excessHeaders > 0 {
-				if excessHeaders >= len(st) {
-					// If excessHeaders is greater than or equal to the length of st, remove all
-					st = []*types.Header{}
-				} else {
-					// Otherwise, remove the oldest headers
-					st = st[excessHeaders:]
-				}
+			if excessHeaders >= len(st) {
+				st = []*types.Header{}
+			} else {
+				st = st[excessHeaders:]
 			}
 		}
 
@@ -722,11 +829,7 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 // ReadPendingBlocks reads pending block headers from the store associated with the given subscription ID.
 // It returns the block headers and a boolean indicating whether the headers were found.
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	res, ok := ff.pendingHeadsStores.Delete(id)
-	if !ok {
-		return res, false
-	}
-	return res, true
+	return ff.pendingHeadsStores.Delete(id)
 }
 
 // AddPendingTxs adds pending transactions to the store associated with the given subscription ID.
@@ -751,16 +854,11 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 				flatSt = append(flatSt, txBatch...)
 			}
 
-			// Calculate how many transactions need to be removed
 			excessTxs := len(flatSt) + len(txs) - maxTxs
-			if excessTxs > 0 {
-				if excessTxs >= len(flatSt) {
-					// If excessTxs is greater than or equal to the length of flatSt, remove all
-					flatSt = []types.Transaction{}
-				} else {
-					// Otherwise, remove the oldest transactions
-					flatSt = flatSt[excessTxs:]
-				}
+			if excessTxs >= len(flatSt) {
+				flatSt = []types.Transaction{}
+			} else {
+				flatSt = flatSt[excessTxs:]
 			}
 
 			// Convert flatSt back to [][]types.Transaction with a single batch
@@ -776,9 +874,52 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 // ReadPendingTxs reads pending transactions from the store associated with the given subscription ID.
 // It returns the transactions and a boolean indicating whether the transactions were found.
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	res, ok := ff.pendingTxsStores.Delete(id)
-	if !ok {
-		return res, false
+	return ff.pendingTxsStores.Delete(id)
+}
+
+// LatestSD returns the most recent SharedDomains published via Events,
+// or nil if none is available (either no background commit in progress
+// or the commit has completed).
+// In embedded mode, reads directly from Events.LatestSD() which is updated
+// synchronously in PublishOverlay — no channel delay.
+func (ff *Filters) LatestSD() *execctx.SharedDomains {
+	if ff.events != nil {
+		return ff.events.LatestSD()
 	}
-	return res, true
+	return ff.latestSD.Load()
+}
+
+// WithOverlay returns a read view backed by the latest block overlay if one
+// is available, otherwise returns the given tx unchanged. The read view uses
+// the overlay's in-memory data for table lookups, falling back to the caller's tx
+// for data not in the overlay.
+// Safe to call on a nil receiver.
+func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
+}
+
+// WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
+// avoiding repeated type assertions at callsites that need temporal access.
+func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
+	if ff == nil {
+		return tx
+	}
+	sd := ff.LatestSD()
+	if sd == nil {
+		return tx
+	}
+	if overlay := sd.BlockOverlay(); overlay != nil {
+		return overlay.NewReadView(tx)
+	}
+	return tx
 }

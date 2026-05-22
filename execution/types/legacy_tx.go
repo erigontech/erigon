@@ -1,0 +1,434 @@
+// Copyright 2020 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package types
+
+import (
+	"fmt"
+	"io"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+type CommonTx struct {
+	TransactionMisc
+
+	Nonce    uint64          // nonce of sender account
+	GasLimit uint64          // gas limit
+	To       *common.Address `rlp:"nil"` // nil means contract creation
+	Value    uint256.Int     // wei amount
+	Data     []byte          // contract invocation input data
+	V, R, S  uint256.Int     // signature values
+}
+
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
+}
+
+func (ct *CommonTx) GetNonce() uint64 {
+	return ct.Nonce
+}
+
+func (ct *CommonTx) GetTo() *common.Address {
+	return ct.To
+}
+
+func (ct *CommonTx) GetBlobGas() uint64 {
+	return 0
+}
+
+func (ct *CommonTx) GetGasLimit() uint64 {
+	return ct.GasLimit
+}
+
+func (ct *CommonTx) GetValue() *uint256.Int {
+	return &ct.Value
+}
+
+func (ct *CommonTx) GetData() []byte {
+	return ct.Data
+}
+
+func (ct *CommonTx) GetSender() (accounts.Address, bool) {
+	if sc := ct.from; !sc.IsNil() {
+		return sc, true
+	}
+	return accounts.NilAddress, false
+}
+
+func (ct *CommonTx) SetSender(addr accounts.Address) {
+	ct.from = addr
+}
+
+func (ct *CommonTx) Protected() bool {
+	return true
+}
+
+func (ct *CommonTx) IsContractDeploy() bool {
+	return ct.GetTo() == nil
+}
+
+func (ct *CommonTx) GetBlobHashes() []common.Hash {
+	// Only blob txs have blob hashes
+	return []common.Hash{}
+}
+
+// LegacyTx is the transaction data of regular Ethereum transactions.
+type LegacyTx struct {
+	CommonTx
+	GasPrice uint256.Int // wei per gas
+}
+
+func (tx *LegacyTx) GetTipCap() *uint256.Int { return &tx.GasPrice }
+func (tx *LegacyTx) GetFeeCap() *uint256.Int { return &tx.GasPrice }
+func (tx *LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) uint256.Int {
+	return CalcEffectiveGasTip(baseFee, tx.GetTipCap, tx.GetFeeCap)
+}
+
+func (tx *LegacyTx) GetAccessList() AccessList {
+	return AccessList{}
+}
+
+func (tx *LegacyTx) GetAuthorizations() []Authorization {
+	return nil
+}
+
+func (tx *LegacyTx) Protected() bool {
+	return isProtectedV(&tx.V)
+}
+
+func (tx *LegacyTx) Unwrap() Transaction {
+	return tx
+}
+
+// NewTransaction creates an unsigned legacy transaction.
+//
+// Deprecated: use NewTx instead.
+func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
+	tx := &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce:    nonce,
+			To:       &to,
+			GasLimit: gasLimit,
+			Data:     data,
+		},
+	}
+	if amount != nil {
+		tx.Value = *amount
+	}
+	if gasPrice != nil {
+		tx.GasPrice = *gasPrice
+	}
+	return tx
+}
+
+// NewContractCreation creates an unsigned legacy transaction.
+//
+// Deprecated: use NewTx instead.
+func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
+	tx := &LegacyTx{
+		CommonTx: CommonTx{
+			Nonce:    nonce,
+			GasLimit: gasLimit,
+			Data:     data,
+		},
+	}
+	if amount != nil {
+		tx.Value = *amount
+	}
+	if gasPrice != nil {
+		tx.GasPrice = *gasPrice
+	}
+	return tx
+}
+
+// copy creates a deep copy of the transaction data and initializes all fields.
+func (tx *LegacyTx) copy() *LegacyTx {
+	return &LegacyTx{
+		CommonTx: CommonTx{
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            common.Copy(tx.Data),
+			GasLimit:        tx.GasLimit,
+			Value:           tx.Value,
+			V:               tx.V,
+			R:               tx.R,
+			S:               tx.S,
+		},
+		GasPrice: tx.GasPrice,
+	}
+}
+
+func (tx *LegacyTx) EncodingSize() int {
+	return tx.payloadSize()
+}
+
+func (tx *LegacyTx) payloadSize() (payloadSize int) {
+	payloadSize += rlp.U64Len(tx.Nonce)
+	payloadSize += rlp.Uint256Len(tx.GasPrice)
+	payloadSize += rlp.U64Len(tx.GasLimit)
+	payloadSize++
+	if tx.To != nil {
+		payloadSize += 20
+	}
+	payloadSize += rlp.Uint256Len(tx.Value)
+	payloadSize += rlp.StringLen(tx.Data)
+	payloadSize += rlp.Uint256Len(tx.V)
+	payloadSize += rlp.Uint256Len(tx.R)
+	payloadSize += rlp.Uint256Len(tx.S)
+	return payloadSize
+}
+
+func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
+	payloadSize := tx.payloadSize()
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+	// prefix
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
+		return err
+	}
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
+	payloadSize := tx.payloadSize()
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return fmt.Errorf("legacy txn must be a list: %w", err)
+	}
+	if tx.Nonce, err = s.Uint64(); err != nil {
+		return fmt.Errorf("read Nonce: %w", err)
+	}
+	if err = s.ReadUint256(&tx.GasPrice); err != nil {
+		return fmt.Errorf("read GasPrice: %w", err)
+	}
+	if tx.GasLimit, err = s.Uint64(); err != nil {
+		return fmt.Errorf("read GasLimit: %w", err)
+	}
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
+		return fmt.Errorf("read To: %w", err)
+	}
+	if err = s.ReadUint256(&tx.Value); err != nil {
+		return fmt.Errorf("read Value: %w", err)
+	}
+	if tx.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("read Data: %w", err)
+	}
+	if err = s.ReadUint256(&tx.V); err != nil {
+		return fmt.Errorf("read V: %w", err)
+	}
+	if err = s.ReadUint256(&tx.R); err != nil {
+		return fmt.Errorf("read R: %w", err)
+	}
+	if err = s.ReadUint256(&tx.S); err != nil {
+		return fmt.Errorf("read S: %w", err)
+	}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("close txn struct: %w", err)
+	}
+	return nil
+}
+
+// AsMessage returns the transaction as a core.Message.
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
+	msg := Message{
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         tx.GasPrice,
+		tipCap:           tx.GasPrice,
+		feeCap:           tx.GasPrice,
+		to:               to,
+		amount:           tx.Value,
+		data:             tx.Data,
+		accessList:       nil,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
+	}
+
+	var err error
+	msg.from, err = tx.Sender(s)
+	return &msg, err
+}
+
+func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	cpy := tx.copy()
+	r, s, v, err := signer.SignatureValues(tx, sig)
+	if err != nil {
+		return nil, err
+	}
+	cpy.R.Set(r)
+	cpy.S.Set(s)
+	cpy.V.Set(v)
+	return cpy, nil
+}
+
+// Hash computes the hash (but not for signatures!)
+func (tx *LegacyTx) Hash() common.Hash {
+	if hash := tx.hash.Load(); hash != nil {
+		return *hash
+	}
+	hash := RlpHash([]any{
+		tx.Nonce,
+		&tx.GasPrice,
+		tx.GasLimit,
+		tx.To,
+		&tx.Value,
+		tx.Data,
+		tx.V, tx.R, tx.S,
+	})
+	tx.hash.Store(&hash)
+	return hash
+}
+
+type legacyTxSigHash struct {
+	Nonce    uint64
+	GasPrice *uint256.Int
+	Gas      uint64
+	To       *common.Address `rlp:"nil"`
+	Value    *uint256.Int
+	Data     []byte
+	ChainID  *uint256.Int
+	V        uint
+	R        uint
+}
+
+func (tx *LegacyTx) SigningHash(chainID *uint256.Int) common.Hash {
+	if chainID != nil && chainID.Sign() != 0 {
+		return RlpHash(&legacyTxSigHash{
+			Nonce:    tx.Nonce,
+			GasPrice: &tx.GasPrice,
+			Gas:      tx.GasLimit,
+			To:       tx.To,
+			Value:    &tx.Value,
+			Data:     tx.Data,
+			ChainID:  chainID,
+			V:        uint(0),
+			R:        uint(0),
+		})
+	}
+	return RlpHash([]any{
+		tx.Nonce,
+		&tx.GasPrice,
+		tx.GasLimit,
+		tx.To,
+		&tx.Value,
+		tx.Data,
+	})
+}
+
+func (tx *LegacyTx) Type() byte { return LegacyTxType }
+
+func (tx *LegacyTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	return &tx.V, &tx.R, &tx.S
+}
+
+func (tx *LegacyTx) GetChainID() *uint256.Int {
+	return DeriveChainId(&tx.V)
+}
+
+func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
+		return sender, false
+	}
+	return s, true
+}
+func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
+	}
+
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return accounts.ZeroAddress, err
+	}
+	tx.from = addr
+	return addr, nil
+}

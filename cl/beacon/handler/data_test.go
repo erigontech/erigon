@@ -26,8 +26,6 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beacontest"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -35,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 //go:embed test_data/*
@@ -71,7 +71,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 	if c.v >= clparams.AltairVersion {
 		fcu.LightClientBootstraps[lastBlockRoot], err = lightclient_utils.CreateLightClientBootstrap(postState, blocks[len(blocks)-1])
 		require.NoError(c.t, err)
-		fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version())
+		fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version(), postState.BeaconConfig())
 		fcu.NewestLCUpdate.NextSyncCommittee = postState.NextSyncCommittee()
 		fcu.NewestLCUpdate.SignatureSlot = 1234
 		fcu.NewestLCUpdate.SyncAggregate = blocks[len(blocks)-1].Block.Body.SyncAggregate

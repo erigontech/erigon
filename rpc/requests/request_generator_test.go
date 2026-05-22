@@ -53,7 +53,7 @@ func TestParseResponse(t *testing.T) {
 	}
 
 	testCases := []struct {
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{

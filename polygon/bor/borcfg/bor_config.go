@@ -17,15 +17,15 @@
 package borcfg
 
 import (
-	"math/big"
 	"sort"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// BorConfig is the consensus engine configs for Matic bor based sealing.
+// BorConfig is the rules engine configs for Matic bor based sealing.
 type BorConfig struct {
 	Period                map[string]uint64 `json:"period"`                // Number of seconds between blocks to enforce
 	ProducerDelay         map[string]uint64 `json:"producerDelay"`         // Number of seconds delay between two producer interval
@@ -34,22 +34,23 @@ type BorConfig struct {
 	ValidatorContract     string            `json:"validatorContract"`     // Validator set contract
 	StateReceiverContract string            `json:"stateReceiverContract"` // State receiver contract
 
-	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
-	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
+	OverrideStateSyncRecords map[string]int `json:"overrideStateSyncRecords"` // override state records count
+	BlockAlloc               map[string]any `json:"blockAlloc"`
 
-	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
-	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
-	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
-	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
-	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
-	AhmedabadBlock             *big.Int          `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
-	BhilaiBlock                *big.Int          `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Ahmedabad)
-	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
-
-	sprints sprints
+	JaipurBlock                *uint64                   `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
+	DelhiBlock                 *uint64                   `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
+	IndoreBlock                *uint64                   `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
+	AgraBlock                  *uint64                   `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
+	NapoliBlock                *uint64                   `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
+	AhmedabadBlock             *uint64                   `json:"ahmedabadBlock"`             // Ahmedabad switch block (nil = no fork, 0 = already on Ahmedabad)
+	BhilaiBlock                *uint64                   `json:"bhilaiBlock"`                // Bhilai switch block (nil = no fork, 0 = already on Bhilai)
+	RioBlock                   *uint64                   `json:"rioBlock"`                   // Rio switch block (nil = no fork, 0 = already on Rio)
+	StateSyncConfirmationDelay map[string]uint64         `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
+	Coinbase                   map[string]common.Address `json:"coinbase"`                   // coinbase address
+	sprints                    sprints
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *BorConfig) String() string {
 	return "bor"
 }
@@ -121,11 +122,11 @@ func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
-func isForked(s *big.Int, head uint64) bool {
+func isForked(s *uint64, head uint64) bool {
 	if s == nil {
 		return false
 	}
-	return s.Uint64() <= head
+	return *s <= head
 }
 
 func (c *BorConfig) IsJaipur(number uint64) bool {
@@ -148,7 +149,7 @@ func (c *BorConfig) IsAgra(num uint64) bool {
 	return isForked(c.AgraBlock, num)
 }
 
-func (c *BorConfig) GetAgraBlock() *big.Int {
+func (c *BorConfig) GetAgraBlock() *uint64 {
 	return c.AgraBlock
 }
 
@@ -157,7 +158,7 @@ func (c *BorConfig) IsNapoli(num uint64) bool {
 	return isForked(c.NapoliBlock, num)
 }
 
-func (c *BorConfig) GetNapoliBlock() *big.Int {
+func (c *BorConfig) GetNapoliBlock() *uint64 {
 	return c.NapoliBlock
 }
 
@@ -165,7 +166,7 @@ func (c *BorConfig) IsAhmedabad(number uint64) bool {
 	return isForked(c.AhmedabadBlock, number)
 }
 
-func (c *BorConfig) GetAhmedabadBlock() *big.Int {
+func (c *BorConfig) GetAhmedabadBlock() *uint64 {
 	return c.AhmedabadBlock
 }
 
@@ -173,16 +174,32 @@ func (c *BorConfig) IsBhilai(number uint64) bool {
 	return isForked(c.BhilaiBlock, number)
 }
 
-func (c *BorConfig) GetBhilaiBlock() *big.Int {
+func (c *BorConfig) GetBhilaiBlock() *uint64 {
 	return c.BhilaiBlock
+}
+
+func (c *BorConfig) IsRio(number uint64) bool {
+	return isForked(c.RioBlock, number)
+}
+
+func (c *BorConfig) GetRioBlock() *uint64 {
+	return c.RioBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {
 	return chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.StateSyncConfirmationDelay), number)
 }
 
-func (c *BorConfig) StateReceiverContractAddress() common.Address {
-	return common.HexToAddress(c.StateReceiverContract)
+func (c *BorConfig) CalculateCoinbase(number uint64) accounts.Address {
+	if c.Coinbase != nil {
+		return accounts.InternAddress(chain.ConfigValueLookup(common.ParseMapKeysIntoUint64(c.Coinbase), number))
+	} else {
+		return accounts.ZeroAddress
+	}
+}
+
+func (c *BorConfig) StateReceiverContractAddress() accounts.Address {
+	return accounts.InternAddress(common.HexToAddress(c.StateReceiverContract))
 }
 
 type sprint struct {

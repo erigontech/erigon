@@ -20,11 +20,11 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 )
 
 const (
@@ -42,9 +42,18 @@ type IndexedAttestation struct {
 }
 
 func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
+	return NewIndexedAttestationWithConfig(version, nil)
+}
+
+// NewIndexedAttestationWithConfig creates a new IndexedAttestation with preset-aware limits.
+// If cfg is nil, mainnet defaults are used.
+func NewIndexedAttestationWithConfig(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *IndexedAttestation {
 	var attLimit int
 	if version.AfterOrEqual(clparams.ElectraVersion) {
 		attLimit = attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			attLimit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
 	} else {
 		attLimit = attestingIndicesLimit
 	}
@@ -55,8 +64,18 @@ func NewIndexedAttestation(version clparams.StateVersion) *IndexedAttestation {
 }
 
 func (i *IndexedAttestation) SetVersion(v clparams.StateVersion) {
+	i.SetVersionWithConfig(v, nil)
+}
+
+// SetVersionWithConfig sets the version and adjusts the attesting indices limit based on config.
+// If cfg is nil, mainnet defaults are used.
+func (i *IndexedAttestation) SetVersionWithConfig(v clparams.StateVersion, cfg *clparams.BeaconChainConfig) {
 	if v >= clparams.ElectraVersion {
-		i.AttestingIndices.SetCap(attestingIndicesLimitElectra)
+		limit := attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
+		i.AttestingIndices.SetCap(limit)
 	} else {
 		i.AttestingIndices.SetCap(attestingIndicesLimit)
 	}
@@ -98,9 +117,19 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 
 // DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte, version int) error {
+	return i.DecodeSSZWithConfig(buf, version, nil)
+}
+
+// DecodeSSZWithConfig ssz unmarshals the IndexedAttestation object with preset-aware limits.
+// If cfg is nil, mainnet defaults are used.
+func (i *IndexedAttestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
 	i.Data = &solid.AttestationData{}
 	if version >= int(clparams.ElectraVersion) {
-		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimitElectra, nil)
+		limit := attestingIndicesLimitElectra
+		if cfg != nil && cfg.MaxCommitteesPerSlot > 0 {
+			limit = int(cfg.MaxValidatorsPerCommittee) * int(cfg.MaxCommitteesPerSlot)
+		}
+		i.AttestingIndices = solid.NewRawUint64List(limit, nil)
 	} else {
 		i.AttestingIndices = solid.NewRawUint64List(attestingIndicesLimit, nil)
 	}

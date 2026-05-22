@@ -1,12 +1,12 @@
 package solid
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
 )
 
 var (
@@ -25,7 +25,7 @@ const (
 type WithdrawalRequest struct {
 	SourceAddress   common.Address `json:"source_address"`
 	ValidatorPubKey common.Bytes48 `json:"validator_pubkey"` // BLS public key
-	Amount          uint64         `json:"amount"`           // Gwei
+	Amount          uint64         `json:"amount,string"`    // Gwei
 }
 
 func (p *WithdrawalRequest) EncodingSizeSSZ() int {
@@ -53,9 +53,9 @@ func (p *WithdrawalRequest) Static() bool {
 }
 
 type PendingPartialWithdrawal struct {
-	Index             uint64 // validator index
-	Amount            uint64 // Gwei
-	WithdrawableEpoch uint64
+	ValidatorIndex    uint64 `json:"validator_index,string"`    // validator index
+	Amount            uint64 `json:"amount,string"`             // Gwei
+	WithdrawableEpoch uint64 `json:"withdrawable_epoch,string"` // epoch when the withdrawal can be processed
 }
 
 func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
@@ -63,11 +63,11 @@ func (p *PendingPartialWithdrawal) EncodingSizeSSZ() int {
 }
 
 func (p *PendingPartialWithdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz2.MarshalSSZ(buf, &p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, &p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return ssz2.UnmarshalSSZ(buf, version, &p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
@@ -75,7 +75,7 @@ func (p *PendingPartialWithdrawal) Clone() clonable.Clonable {
 }
 
 func (p *PendingPartialWithdrawal) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(&p.Index, &p.Amount, &p.WithdrawableEpoch)
+	return merkle_tree.HashTreeRoot(&p.ValidatorIndex, &p.Amount, &p.WithdrawableEpoch)
 }
 
 func (p *PendingPartialWithdrawal) Static() bool {

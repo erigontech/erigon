@@ -29,21 +29,22 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/jsonstream"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
-	contextType      = reflect.TypeOf((*context.Context)(nil)).Elem()
-	jsonStreamType   = reflect.TypeOf((*jsonstream.Stream)(nil)).Elem()
-	errorType        = reflect.TypeOf((*error)(nil)).Elem()
-	subscriptionType = reflect.TypeOf(Subscription{})
-	stringType       = reflect.TypeOf("")
+	contextType      = reflect.TypeFor[context.Context]()
+	jsonStreamType   = reflect.TypeFor[jsonstream.Stream]()
+	errorType        = reflect.TypeFor[error]()
+	subscriptionType = reflect.TypeFor[Subscription]()
+	stringType       = reflect.TypeFor[string]()
 )
 
 type invoker interface {
-	call(ctx context.Context, raw json.RawMessage, s *jsoniter.Stream) error
+	call(ctx context.Context, raw json.RawMessage, s jsonstream.Stream) error
 }
 
 type Method[M any, R any] struct {
@@ -52,7 +53,7 @@ type Method[M any, R any] struct {
 }
 
 func (m Method[M, R]) call(
-	ctx context.Context, raw json.RawMessage, s *jsoniter.Stream,
+	ctx context.Context, raw json.RawMessage, s jsonstream.Stream,
 ) error {
 	var req M
 	if len(raw) > 0 {
@@ -66,7 +67,11 @@ func (m Method[M, R]) call(
 		return err
 	}
 
-	s.WriteVal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	s.Write(data) //nolint:errcheck
 	return nil
 }
 
@@ -94,6 +99,9 @@ type callback struct {
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
 	logger      log.Logger
+
+	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
+	timerFailure metrics.Summary // pre-cached failure timer
 }
 
 func registerName[M any, R any](
@@ -110,7 +118,7 @@ func registerName[M any, R any](
 	r.callbacks[name] = Method[M, R]{Name: name, Fn: fn}
 }
 
-func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
+func (r *serviceRegistry) registerName(name string, rcvr any) error {
 	rcvrVal := reflect.ValueOf(rcvr)
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
@@ -134,11 +142,16 @@ func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
 		}
 		r.services[name] = svc
 	}
-	for name, cb := range callbacks {
+	for shortName, cb := range callbacks {
+		// Pre-cache metrics timers using the full "namespace_method" name so the
+		// hot call path never needs to call GetOrCreateSummary or fmt.Sprintf.
+		fullMethod := name + serviceMethodSeparator + shortName
+		cb.timerSuccess = newRPCServingTimerMS(fullMethod, true)
+		cb.timerFailure = newRPCServingTimerMS(fullMethod, false)
 		if cb.isSubscribe {
-			svc.subscriptions[name] = cb
+			svc.subscriptions[shortName] = cb
 		} else {
-			svc.callbacks[name] = cb
+			svc.callbacks[shortName] = cb
 		}
 	}
 	return nil
@@ -146,13 +159,13 @@ func (r *serviceRegistry) registerName(name string, rcvr interface{}) error {
 
 // callback returns the callback corresponding to the given RPC method name.
 func (r *serviceRegistry) callback(method string) *callback {
-	elem := strings.SplitN(method, serviceMethodSeparator, 2)
-	if len(elem) != 2 {
+	svc, name, ok := strings.Cut(method, serviceMethodSeparator)
+	if !ok {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.services[elem[0]].callbacks[elem[1]]
+	return r.services[svc].callbacks[name]
 }
 
 func (r *serviceRegistry) invoke(method string) invoker {
@@ -256,7 +269,7 @@ func (c *callback) makeArgTypes() {
 }
 
 // call invokes the callback.
-func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res interface{}, errRes error) {
+func (c *callback) call(ctx context.Context, method string, args []reflect.Value, stream jsonstream.Stream) (res any, errRes error) {
 	// Create the argument slice.
 	fullargs := make([]reflect.Value, 0, 2+len(args))
 	if c.rcvr.IsValid() {
@@ -283,16 +296,18 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 		return nil, nil
 	}
 	if c.errPos >= 0 && !results[c.errPos].IsNil() {
-		// Method has returned non-nil error value.
 		err := results[c.errPos].Interface().(error)
 		return reflect.Value{}, err
+	}
+	if dbg.RpcDropResponse {
+		return nil, nil
 	}
 	return results[0].Interface(), nil
 }
 
 // Is t context.Context or *context.Context?
 func isContextType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t == contextType
@@ -300,7 +315,7 @@ func isContextType(t reflect.Type) bool {
 
 // Does t satisfy the error interface?
 func isErrorType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t.Implements(errorType)
@@ -308,7 +323,7 @@ func isErrorType(t reflect.Type) bool {
 
 // Is t Subscription or *Subscription?
 func isSubscriptionType(t reflect.Type) bool {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t == subscriptionType

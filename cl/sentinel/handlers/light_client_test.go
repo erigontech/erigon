@@ -30,7 +30,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -48,13 +48,13 @@ var (
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6011"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6013"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -62,16 +62,16 @@ func TestLightClientOptimistic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:    cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee: &solid.SyncCommittee{},
+		NextSyncCommittee: solid.NewSyncCommittee(),
 		SignatureSlot:     1234,
-		SyncAggregate:     &cltypes.SyncAggregate{},
+		SyncAggregate:     cltypes.NewSyncAggregate(),
 		FinalizedHeader:   cltypes.NewLightClientHeader(clparams.AltairVersion),
 		// 8 is fine as this is a test
 		FinalityBranch:          solid.NewHashVector(8),
@@ -91,7 +91,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -119,13 +119,13 @@ func TestLightClientOptimistic(t *testing.T) {
 func TestLightClientFinality(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6005"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6006"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -133,16 +133,16 @@ func TestLightClientFinality(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -161,7 +161,7 @@ func TestLightClientFinality(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -192,13 +192,13 @@ func TestLightClientBootstrap(t *testing.T) {
 	ctx := context.Background()
 	ethClock := getEthClock(t)
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6007"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6008"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -206,16 +206,16 @@ func TestLightClientBootstrap(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 
 	f.NewestLCUpdate = &cltypes.LightClientUpdate{
 		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
+		NextSyncCommittee:       solid.NewSyncCommittee(),
 		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
+		SyncAggregate:           cltypes.NewSyncAggregate(),
 		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
 		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
 		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
@@ -224,7 +224,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	reqRoot := common.Hash{1, 2, 3}
 	f.LightClientBootstraps[reqRoot] = &cltypes.LightClientBootstrap{
 		Header:                     cltypes.NewLightClientHeader(clparams.AltairVersion),
-		CurrentSyncCommittee:       &solid.SyncCommittee{1, 2, 3, 5, 6},
+		CurrentSyncCommittee:       solid.NewSyncCommittee(),
 		CurrentSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
 	}
 	f.LightClientBootstraps[reqRoot].Header.Beacon.Slot = altairSlot
@@ -239,7 +239,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -252,7 +252,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -275,13 +275,13 @@ func TestLightClientBootstrap(t *testing.T) {
 func TestLightClientUpdates(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6009"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6041"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -289,29 +289,21 @@ func TestLightClientUpdates(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool()
+	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := mock_services.NewForkChoiceStorageMock(t)
 	ethClock := getEthClock(t)
 
-	up := &cltypes.LightClientUpdate{
-		AttestedHeader:          cltypes.NewLightClientHeader(clparams.AltairVersion),
-		NextSyncCommittee:       &solid.SyncCommittee{},
-		SignatureSlot:           altairSlot,
-		SyncAggregate:           &cltypes.SyncAggregate{},
-		FinalizedHeader:         cltypes.NewLightClientHeader(clparams.AltairVersion),
-		FinalityBranch:          solid.NewHashVector(cltypes.FinalizedBranchSize),
-		NextSyncCommitteeBranch: solid.NewHashVector(cltypes.SyncCommitteeBranchSize),
-	}
-	up.AttestedHeader.Beacon.Slot = altairSlot
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+
 	// just some stupid randomization
 	for i := 1; i < 5; i++ {
-		upC := *up
+		upC := cltypes.NewLightClientUpdate(clparams.AltairVersion, beaconCfg)
+		upC.AttestedHeader.Beacon.Slot = altairSlot
 		upC.SignatureSlot = uint64(i)
-		f.LCUpdates[uint64(i)] = &upC
+		f.LCUpdates[uint64(i)] = upC
 	}
-	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
 		beaconDB,
@@ -322,7 +314,7 @@ func TestLightClientUpdates(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, f, nil, nil, true,
+		nil, f, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -335,7 +327,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -383,7 +375,7 @@ func TestLightClientUpdates(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		update := cltypes.NewLightClientUpdate(version)
+		update := cltypes.NewLightClientUpdate(version, beaconCfg)
 		if err = update.DecodeSSZ(raw, int(version)); err != nil {
 			require.NoError(t, err)
 			return
@@ -399,4 +391,29 @@ func TestLightClientUpdates(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
+}
+
+// BenchmarkLightClientPrefixConstruction benchmarks the prefix construction
+// for light client responses, comparing the optimized version (stack allocation)
+// against the old version (heap allocation with append).
+func BenchmarkLightClientPrefixConstruction(b *testing.B) {
+	forkDigest := common.Bytes4{0xAA, 0xBB, 0xCC, 0xDD}
+
+	b.Run("Optimized", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var prefix [5]byte
+			prefix[0] = SuccessfulResponsePrefix
+			copy(prefix[1:], forkDigest[:])
+			_ = prefix
+		}
+	})
+
+	b.Run("Old", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+			_ = prefix
+		}
+	})
 }

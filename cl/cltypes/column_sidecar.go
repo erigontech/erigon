@@ -4,18 +4,19 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 const (
 	KzgCommitmentsInclusionProofDepth = 4
 	BytesPerCell                      = 2048
+	BytesPerBlob                      = BytesPerCell * 64
 )
 
 var (
@@ -31,12 +32,17 @@ var (
 )
 
 type DataColumnSidecar struct {
-	Index                        uint64                         `json:"index"` // index of the column
+	BlockRoot                    common.Hash                    `json:"-"`
+	Index                        uint64                         `json:"index,string"` // index of the column
 	Column                       *solid.ListSSZ[*Cell]          `json:"column"`
-	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
-	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header"`
-	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof"`
+	Slot                         uint64                         `json:"slot"`                                      // [New in Gloas:EIP7732]
+	BeaconBlockRoot              common.Hash                    `json:"beacon_block_root"`                         // [New in Gloas:EIP7732]
+	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments,omitempty"`                 // [Removed in Gloas:EIP7732]
+	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header,omitempty"`             // [Removed in Gloas:EIP7732]
+	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof,omitempty"` // [Removed in Gloas:EIP7732]
+
+	version clparams.StateVersion // internal: tracks the version for encoding
 }
 
 func NewDataColumnSidecar() *DataColumnSidecar {
@@ -45,53 +51,102 @@ func NewDataColumnSidecar() *DataColumnSidecar {
 	return d
 }
 
+// NewDataColumnSidecarWithVersion creates a new DataColumnSidecar with a specific version.
+// Use this when you need version-aware encoding.
+func NewDataColumnSidecarWithVersion(version clparams.StateVersion) *DataColumnSidecar {
+	d := &DataColumnSidecar{version: version}
+	d.tryInitWithVersion(version)
+	return d
+}
+
+// Version returns the version used for encoding.
+func (d *DataColumnSidecar) Version() clparams.StateVersion {
+	return d.version
+}
+
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
-	newSidecar := &DataColumnSidecar{}
-	newSidecar.tryInit()
+	newSidecar := &DataColumnSidecar{
+		BlockRoot:       d.BlockRoot,
+		Slot:            d.Slot,
+		BeaconBlockRoot: d.BeaconBlockRoot,
+		version:         d.version,
+	}
+	newSidecar.tryInitWithVersion(d.version)
 	return newSidecar
 }
 
 func (d *DataColumnSidecar) tryInit() {
+	d.tryInitWithVersion(d.version)
+}
+
+func (d *DataColumnSidecar) tryInitWithVersion(version clparams.StateVersion) {
 	cfg := clparams.GetBeaconConfig()
 	if d.Column == nil {
 		d.Column = solid.NewStaticListSSZ[*Cell](int(cfg.MaxBlobCommittmentsPerBlock), BytesPerCell)
 	}
-	if d.KzgCommitments == nil {
-		d.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
-	}
 	if d.KzgProofs == nil {
 		d.KzgProofs = solid.NewStaticListSSZ[*KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
 	}
-	if d.SignedBlockHeader == nil {
-		d.SignedBlockHeader = &SignedBeaconBlockHeader{}
-		d.SignedBlockHeader.Header = &BeaconBlockHeader{}
-	}
-	if d.KzgCommitmentsInclusionProof == nil {
-		d.KzgCommitmentsInclusionProof = solid.NewHashVector(KzgCommitmentsInclusionProofDepth)
+	// Pre-Gloas fields (Fulu and earlier)
+	if version < clparams.GloasVersion {
+		if d.KzgCommitments == nil {
+			d.KzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+		}
+		if d.SignedBlockHeader == nil {
+			d.SignedBlockHeader = &SignedBeaconBlockHeader{}
+			d.SignedBlockHeader.Header = &BeaconBlockHeader{}
+		}
+		if d.KzgCommitmentsInclusionProof == nil {
+			d.KzgCommitmentsInclusionProof = solid.NewHashVector(KzgCommitmentsInclusionProofDepth)
+		}
 	}
 }
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, d.getSchema()...)
+	d.version = clparams.StateVersion(version)
+	d.tryInitWithVersion(d.version)
+	return ssz2.UnmarshalSSZ(buf, version, d.getSchemaForVersion(d.version)...)
 }
 
 func (d *DataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, d.getSchema()...)
+	return ssz2.MarshalSSZ(buf, d.getSchemaForVersion(d.version)...)
 }
 
-func (d *DataColumnSidecar) getSchema() []interface{} {
-	d.tryInit()
-	return []interface{}{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
+// getSchemaForVersion returns the SSZ schema for the given version.
+// Fulu and earlier: Index, Column, KzgCommitments, KzgProofs, SignedBlockHeader, KzgCommitmentsInclusionProof
+// Gloas and later: Index, Column, KzgProofs, Slot, BeaconBlockRoot
+func (d *DataColumnSidecar) getSchemaForVersion(version clparams.StateVersion) []any {
+	d.tryInitWithVersion(version)
+	if version >= clparams.GloasVersion {
+		return []any{&d.Index, d.Column, d.KzgProofs, &d.Slot, d.BeaconBlockRoot[:]}
+	}
+	// Fulu and earlier
+	return []any{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
+}
+
+// getSchema returns the SSZ schema using the stored version.
+func (d *DataColumnSidecar) getSchema() []any {
+	return d.getSchemaForVersion(d.version)
 }
 
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {
-	d.tryInit()
+	return d.EncodingSizeSSZForVersion(d.version)
+}
+
+// EncodingSizeSSZForVersion returns the encoding size for the given version.
+func (d *DataColumnSidecar) EncodingSizeSSZForVersion(version clparams.StateVersion) int {
+	d.tryInitWithVersion(version)
+	if version >= clparams.GloasVersion {
+		// Index (8) + Column (variable) + KzgProofs (variable) + Slot (8) + BeaconBlockRoot (32)
+		return 8 + d.Column.EncodingSizeSSZ() + d.KzgProofs.EncodingSizeSSZ() + 8 + 32
+	}
+	// Fulu and earlier
 	return 8 + d.Column.EncodingSizeSSZ() + d.KzgCommitments.EncodingSizeSSZ() + d.KzgProofs.EncodingSizeSSZ() +
 		d.SignedBlockHeader.EncodingSizeSSZ() + d.KzgCommitmentsInclusionProof.EncodingSizeSSZ()
 }
 
 func (d *DataColumnSidecar) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(d.getSchema()...)
+	return merkle_tree.HashTreeRoot(d.getSchemaForVersion(d.version)...)
 }
 
 func (d *DataColumnSidecar) Static() bool {
@@ -128,10 +183,16 @@ func (c *Cell) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hexutil.Bytes(c[:]))
 }
 
-var cellType = reflect.TypeOf(Cell{})
+var cellType = reflect.TypeFor[Cell]()
 
 func (c *Cell) UnmarshalJSON(in []byte) error {
 	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])
+}
+
+// CellsAndKZGProofs is a struct that contains a list of cells and a list of KZG proofs
+type CellsAndKZGProofs struct {
+	Blobs  []Cell
+	Proofs []KZGProof
 }
 
 type MatrixEntry struct {
@@ -216,6 +277,12 @@ func (c *ColumnSidecarsByRangeRequest) Static() bool {
 type DataColumnsByRootIdentifier struct {
 	BlockRoot common.Hash
 	Columns   solid.Uint64ListSSZ
+}
+
+func NewDataColumnsByRootIdentifier() *DataColumnsByRootIdentifier {
+	d := &DataColumnsByRootIdentifier{}
+	d.tryInit()
+	return d
 }
 
 func (d *DataColumnsByRootIdentifier) tryInit() {

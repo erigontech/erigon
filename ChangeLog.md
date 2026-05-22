@@ -1,146 +1,173 @@
-ChangeLog
----------
+# Changelog
 
-## v3.1.0 (in development)
+## [3.5.0] – 2026-04-25
 
-**Improvements:**
+### Breaking Changes
 
-TODO
+#### `debug_trace*` RPC: `enableMemory` / `enableReturnData` replace `disableMemory` / `disableReturnData`
 
-**Bugfixes:**
+Aligns Erigon with the execution-apis specification ([ethereum/execution-apis#762](https://github.com/ethereum/execution-apis/pull/762)) and Geth behavior.
 
-TODO
+**What changed:**
 
-### TODO
+| Field | Before (Erigon) | After (Erigon / Geth / Spec) |
+|-------|-----------------|------------------------------|
+| Memory in trace | `disableMemory` (default: included) | `enableMemory` (default: excluded) |
+| Return data in trace | `disableReturnData` (default: included) | `enableReturnData` (default: excluded) |
 
-- milestones:
-https://github.com/erigontech/erigon/milestone/31
+The change is **twofold**:
+1. The JSON key is renamed (`disable*` → `enable*`).
+2. The default value is inverted: previously memory and return data were **included** by default (opt-out model); now they are **excluded** by default (opt-in model), matching the spec and Geth.
 
+**Migration:**
 
-## v3.0.0 (in development)
+```jsonc
+// Before — disable memory explicitly
+{ "disableMemory": true }
 
+// After — enable memory explicitly
+{ "enableMemory": true }
 
-### Milestone
+// Before — memory included by default (no flag needed)
+{}
 
-https://github.com/erigontech/erigon/milestone/30
+// After — must opt in
+{ "enableMemory": true }
+```
 
-## v3.0.0-rc2
+Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug_traceBlockByNumber`, `debug_traceCall`.
 
-**Bugfixes:**
+---
 
-- Caplin: error on aggregation_bit merge by @domiwei in https://github.com/erigontech/erigon/pull/14063
-- Pectra: fix bad deposit contract deposit unmarshalling by @Giulio2002 in https://github.com/erigontech/erigon/pull/14068
+## [3.3.0] – 2025-11-17
 
-### Milestone
+### Added
 
-https://github.com/erigontech/erigon/milestone/36
+- Support of historical `eth_getProof` (https://github.com/erigontech/erigon/issues/12984). It requires
+  `--prune.experimental.include-commitment-history` flag.
+- Look our new Docs and HelpCenter: https://docs.erigon.tech/
 
-## v3.0.0-rc1
+#### RPC Endpoints
 
-**Improvements:**
+- `eth_simulateV1`: Complete implementation of Ethereum simulation API with support for state overrides, blob
+  transactions, block overrides, and historical state roots (#15771)
+- `eth_createAccessList`: StateOverrides parameter support (#17653)
+- Support for `eth_call` with blockOverrides (#17261)
+- `trace_filter`: Block tags support (#17238)
+- `debug_traceTransaction`: Self-destruct operation validation (EIP 6780) (#17728)
 
-- Schedule Pectra for Chiado by @yperbasis in https://github.com/erigontech/erigon/pull/13898
-- stagedsync: dbg option to log receipts on receipts hash mismatch (#13905) by @taratorio in https://github.com/erigontech/erigon/pull/13940
-- Introduces a new method for estimating transaction gas that targets the maximum gas a contract could use (#13913). Fixes eth_estimateGas for historical blocks (#13903) by @somnathb1 in https://github.com/erigontech/erigon/pull/13916
+#### Consensus & Execution
 
-**Bugfixes:**
+- EIP-7928: BlockAccessList type support (#17544)
+- EIP-7934: EstimateGas capped by MaxTxnGasLimit in Osaka (#17251)
+- EIP-7702 transaction support in `(r *Receipt) decodeTyped` (#17412)
+- Rewrite bytecode support for post-Merge blocks (#17770)
 
-- rpcdaemon: Show state sync transactions in eth_getLogs (#13924) by @shohamc1 in https://github.com/erigontech/erigon/pull/13951
-- polygon/heimdall: fix snapshot store last entity to check in snapshots too (#13845) by @taratorio in https://github.com/erigontech/erigon/pull/13938
-- Implemented wait if heimdall is not synced to the chain (#13807) by @taratorio in https://github.com/erigontech/erigon/pull/13939
+#### Caplin (Consensus Layer)
 
-**Known Problems:**
+- Get blobs support (Fusaka compatibility) (#17829)
 
-- polygon: `eth_getLogs` if search by filters - doesn't return state-sync (state-sync events are not indexed yet). Without filter can see state-sync events. In `eth_getReceipts` also can see. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
-- polygon: `eth_getLogs` state-sync events have incorrect `index` field. [Will](https://github.com/erigontech/erigon/issues/14003) release fixed files in E3.1
+### Changed
 
-### Milestone
+#### RPC Improvements
 
-https://github.com/erigontech/erigon/milestone/34
+- `eth_getTransactionReceipt`: Pre-Byzantium transaction handling (#17479, #17509)
+- `eth_estimateGas`: Improved handling with StateOverrides (#17914, #17295)
+- `debug_traceCall`: System contract execution support (#17339)
+- Blob transaction and blob base fee override support (#17313)
 
-## v3.0.0-beta2
+#### Execution Engine
 
-### Breaking changes
-- Reverts Optimize gas by default in eth_createAccessList #8337  
+- Experimental Parallel Exec (#16922)
+- MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP for Gnosis (#17501)
+- Reduce goroutines amount produced by BitTorrent library (#17765)
+- Up base image to `Go 1.25-trixie` (#17837)
 
-### Improvements:
+### Removed
 
-- `eth_estimateGas`: StateOverrides and HistoricalBlocks support
-- fixes a number of issues on Polygon with the new default flow (Astrid)
-  - `nonsequential block in bridge processing` - should be fixed
-  - `pos sync failed: fork choice update failure: status=5, validationErr=''` - should be fixed
-  - `external rpc daemon getting stuck` - should be fixed
-  - `process not exiting in a clean way (getting stuck) upon astrid errs` - should be fixed
-  - `very rare chance of bridge deadlock while at chain tip due to forking` - should be fixed
+- PoW mining was removed in #17813. The `--chain=dev` mode now uses an embedded PoS
+  consensus layer (Caplin) with deterministic validators instead of Clique. See
+  `docs/DEV_CHAIN.md` for usage.
+- Holesky network support removed (#17685)
+- eth/67 protocol support removed (#17318)
+- SkipAnalysis VM optimization removed (#17217)
 
-### TODO
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.2...v3.3.0
 
-- milestone: https://github.com/erigontech/erigon/milestone/28
-- Known problem:
-    - external CL support
-    - `erigon_getLatestLogs` not implemented
+---
 
-### Acknowledgements:
+## [3.2.2] "Quirky Quests" – 2025-11-03
 
-## v3.0.0-beta1
+v3.2.2 schedules Fusaka on Ethereum mainnet on December 3, 2025 at 09:49:11pm UTC. Thus it is a mandatory update for all Ethereum mainnet users.
 
-### Breaking changes
+**New features**
 
-- Bor chains: enable our internal Consensus Layer by default (name: Astrid)
-    - The process should auto upgrade - in which case you may find that it starts creating new snapshots for checkpoints
-      and milestones.
-    - This may however fail, as there are a number of potential edge cases. If this happens the process will likely stop
-      with a failure message.
-    - In this situation you will need to do a clean sync, in which case the complete snapshot set will be downloaded and
-      astrid will sync.
-    - If you want to prevent this and retain the old behaviour start erigon with --polygon.sync=false
+- Schedule Fusaka on Ethereum mainnet in #17736 by @yperbasis
+- Tool to fetch and recover blobs from a remote beacon API in #17611 by @Giulio2002 
 
-### Acknowledgements:
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.1...v3.2.2
 
-## v3.0.0-alpha7
+---
 
-### Improvements:
+## [3.2.1] "Quirky Quests" – 2025-10-20
 
-- Faster eth_getTransactionReceipt with "txn-granularity cache" in https://github.com/erigontech/erigon/pull/13134 and "
-  executing only 1 txn"  https://github.com/erigontech/erigon/pull/12424
-- Return PrunedError when trying to read unavailable historical data in https://github.com/erigontech/erigon/pull/13014
+v3.2.1 is a bugfix release recommended for all users, especially validators.
 
-### Fixes:
+**Fixes**
 
-- Fix trace_block returning "insufficient funds" (Issues #12525 and similar) with standalone rpcdaemon
-  in https://github.com/erigontech/erigon/pull/13129
+- Fix validators producing bad blocks on Hoodi in #17487 by @mh0lt 
+- RPC: fix "insufficient funds for gas * price + value" error in traces retrieval for a specific block (Issues #16909, #17232) in #17523 by @antonis19
+- RPC: fix no changes and filter not found in eth_getFilter* (Issue #17246) in #17350 by @canepat
+- RPC: debug_traceCall fix avoid to trace sysContract (Issue #17220) in #17360 by @lupin012
+- CL: fix initial previous_version in fork_schedule (Issue #17262) in #17331 by @domiwei
 
-### Acknowledgements:
+**Improvements**
 
-## v3.0.0-alpha6
+- Ethereum mainnet default block gas limit is raised to 60M in #17321 by @yperbasis
+- CL: Allow blob requests after Fusaka in #17500 by @domiwei
 
-### Breaking changes
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.2.0...v3.2.1
 
-- `--prune.mode` default is `full`. For compatibility with `geth` and other clients. Plz set explicit
-  `--prune.mode` flag to your Erigon3 setups - to simplify future upgrade/downgrade.
+---
 
-### New features:
+## [3.2.0] "Quirky Quests" – 2025-10-02
 
-- Reduced `.idx` and `.efi` files size by 25% (require re-sync)
-- Support: `debug_getRawReceipts`
-- debian packages
-- `--externalcl` support
-- bor-mainnet can work on 32G machine
-- Erigon3 book: https://development.erigon-documentation-preview.pages.dev/
+Erigon 3.2.0 has a complete implementation of [Fusaka](https://eips.ethereum.org/EIPS/eip-7607) and schedules it on the
+test nets (#17197):
 
-### Fixes:
+- Holesky on Wednesday, 1 October 2025 08:48:00 UTC
+- Sepolia on Tuesday, 14 October 2025 07:36:00 UTC
+- Hoodi on Tuesday, 28 October 2025 18:53:12 UTC
 
-- `eth_syncing` works on Bor chains
-- support upper-bounds at: `eth_accRange` https://github.com/erigontech/erigon/pull/12609 ,
-  `erigon_getBalanceChangesInBlock` https://github.com/erigontech/erigon/pull/12642,
-  `debug_getModifiedAccountsByNumber` https://github.com/erigontech/erigon/pull/12634
-- `eth_getLogs` fix `fee cap less than block` https://github.com/erigontech/erigon/pull/12640
+**Fixes**
 
-### Acknowledgements:
+- Re-org/unwind fixes (#17105, #17165) by @taratorio
+- RPC: Fixes to eth_getProof (#16220, #16251, #16564, #16606, #16687) by @awskii
+- tracer: fix prestates for EIP7702 transactions (#16497) by @nebojsa94
 
-## v3.0.0-alpha5
+**Improvements**
 
-- Breaking change: Caplin changed snapshots format
-- RPC-compatibility tests passed
-- Caplin eating 1Gb less RAM. And Erigon3 works on 16gb machine.
-- time-limit for pruning on chain-tip: https://github.com/erigontech/erigon/pull/12535
+- New EL block downloader (#16270, #16673) by @taratorio
+- Caplin p2p improvements (#16719, #16995) by @Giulio2002
+- EVM: MODEXP precompile performance improvements (#16579, #16583, #16396, #17151) by @chfast & @yperbasis
+- execution: more accurate bad block responses (#16994) by @taratorio
+- Block builder: improve txpool polling (#16412) by @taratorio
+- execution/stagedsync: handle sync loop block limit exhaustion (#16268) by @taratorio
+- RPC: Apply batch limit to WebSocket/IPC connections (#16255) by @grandchildrice
+- RPC: Estimate gas align to geth (#16397) by @lupin012
+- snapshotsync: add support for `--snap.download.to.block` (#16938) by @taratorio
+
+**New features**
+
+- Complete Fusaka implementation (#16183, #16185, #16186, #16187, #16184, #16391, #16401, #16207, #16420, #16428,
+  #16494, #16457, #16644, #16928, #16945, #17060, #16989, #17076, #17169) by @taratorio, @yperbasis, @Giulio2002 and
+  @domiwei
+- Implement eth/69 (#15279, #17186, #17171) by @shohamc1
+- RPC: implement new eth_config spec (#16218, #16410) by @taratorio
+- RPC: impl admin_RemovePeer (#16292) by @lupin012
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.1.0...v3.2.0
+ 
+-----
+
+File following Keep a Changelog spec: https://keepachangelog.com/en/1.1.0/

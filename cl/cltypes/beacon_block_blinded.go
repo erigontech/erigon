@@ -20,21 +20,20 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
 var (
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
-	_ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBody)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBlock)(nil)
+	_ ssz.EncodableSSZ            = (*SignedBlindedBeaconBlock)(nil)
 
 	_ GenericBeaconBlock = (*BlindedBeaconBlock)(nil)
 	_ GenericBeaconBody  = (*BlindedBeaconBody)(nil)
@@ -118,6 +117,26 @@ func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals 
 		Signature: b.Signature,
 		Block:     b.Block.Full(txs, withdrawals),
 	}
+}
+
+// GetSlot returns the slot of the inner block.
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) GetSlot() uint64 {
+	return b.Block.Slot
+}
+
+// BlockHashSSZ returns the hash of the inner block (not the signed block).
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) BlockHashSSZ() ([32]byte, error) {
+	return b.Block.HashSSZ()
+}
+
+// GetBlobKzgCommitments returns blob KZG commitments from the block body.
+// Implements ColumnSyncableSignedBlock interface.
+// Note: BlindedBeaconBlock cannot exist for GLOAS (Blinded() returns error),
+// so this always returns the pre-GLOAS commitments.
+func (b *SignedBlindedBeaconBlock) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.Block.Body.GetBlobKzgCommitments()
 }
 
 // Definitions of BlindedBeaconBlock
@@ -252,10 +271,10 @@ func NewBlindedBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparam
 		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](maxAttestation),
 		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
 		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
-		SyncAggregate:      NewSyncAggregate(),
+		SyncAggregate:      NewSyncAggregateWithSize(int(beaconCfg.SyncCommitteeSize) / 8),
 		ExecutionPayload:   NewEth1Header(version),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
-		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(beaconCfg.MaxBlobCommittmentsPerBlock), 48),
 		ExecutionRequests:  executionRequests,
 		Version:            0,
 		beaconCfg:          beaconCfg,
@@ -271,11 +290,8 @@ func (b *BlindedBeaconBody) SetVersion(version clparams.StateVersion) *BlindedBe
 	return b
 }
 
-func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
-}
-
-func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+// ensureNilFields initializes any nil fields required for SSZ encoding/hashing.
+func (b *BlindedBeaconBody) ensureNilFields() {
 	var (
 		maxAttSlashing = MaxAttesterSlashings
 		maxAttestation = MaxAttestations
@@ -284,12 +300,15 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 		maxAttSlashing = MaxAttesterSlashingsElectra
 		maxAttestation = MaxAttestationsElectra
 	}
-
 	if b.Eth1Data == nil {
 		b.Eth1Data = &Eth1Data{}
 	}
 	if b.SyncAggregate == nil {
-		b.SyncAggregate = &SyncAggregate{}
+		bitsSize := defaultSyncCommitteeBitsSize
+		if b.beaconCfg != nil {
+			bitsSize = int(b.beaconCfg.SyncCommitteeSize) / 8
+		}
+		b.SyncAggregate = NewSyncAggregateWithSize(bitsSize)
 	}
 	if b.ExecutionPayload == nil {
 		b.ExecutionPayload = NewEth1Header(b.Version)
@@ -309,15 +328,25 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 	if b.VoluntaryExits == nil {
 		b.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
 	}
-	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = NewEth1Header(b.Version)
-	}
 	if b.ExecutionChanges == nil {
 		b.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
 	}
 	if b.BlobKzgCommitments == nil {
-		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+		maxBlobCommitments := MaxBlobsCommittmentsPerBlock
+		if b.beaconCfg != nil && b.beaconCfg.MaxBlobCommittmentsPerBlock > 0 {
+			maxBlobCommitments = int(b.beaconCfg.MaxBlobCommittmentsPerBlock)
+		}
+		b.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](maxBlobCommitments, 48)
 	}
+}
+
+func (b *BlindedBeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
+	b.ensureNilFields()
+	return ssz2.MarshalSSZ(dst, b.getSchema(false)...)
+}
+
+func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
+	b.ensureNilFields()
 
 	size += b.ProposerSlashings.EncodingSizeSSZ()
 	size += b.AttesterSlashings.EncodingSizeSSZ()
@@ -350,16 +379,31 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	b.ExecutionPayload = NewEth1Header(b.Version)
 
-	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
-	return err
+	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+		return err
+	}
+
+	// Post-decode fixup: propagate preset-aware limits to decoded attestations and slashings.
+	if b.beaconCfg != nil && b.Version.AfterOrEqual(clparams.ElectraVersion) {
+		b.Attestations.Range(func(_ int, att *solid.Attestation, _ int) bool {
+			att.SetBeaconConfig(b.beaconCfg)
+			return true
+		})
+		b.AttesterSlashings.Range(func(_ int, as *AttesterSlashing, _ int) bool {
+			as.SetVersionWithConfig(b.Version, b.beaconCfg)
+			return true
+		})
+	}
+	return nil
 }
 
 func (b *BlindedBeaconBody) HashSSZ() ([32]byte, error) {
+	b.ensureNilFields()
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
-func (b *BlindedBeaconBody) getSchema(storage bool) []interface{} {
-	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+func (b *BlindedBeaconBody) getSchema(storage bool) []any {
+	s := []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
@@ -413,8 +457,12 @@ func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.
 		PrevRandao:    b.ExecutionPayload.PrevRandao,
 		Transactions:  txs,
 		Withdrawals:   withdrawals,
+		SlotNumber:    b.ExecutionPayload.SlotNumber,
 		version:       b.ExecutionPayload.version,
 		beaconCfg:     b.beaconCfg,
+	}
+	if b.ExecutionPayload.version >= clparams.GloasVersion {
+		executionPayload.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
 	}
 
 	return &BeaconBody{
@@ -484,6 +532,12 @@ func (b *BlindedBeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryE
 }
 
 func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	// [Modified in Gloas:EIP7732] BlindedBeaconBody does not support GLOAS
+	// In GLOAS, blob_kzg_commitments are in signed_execution_payload_bid.message,
+	// which is not available in blinded blocks
+	if b.Version >= clparams.GloasVersion {
+		return nil
+	}
 	return b.BlobKzgCommitments
 }
 
@@ -493,4 +547,16 @@ func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExe
 
 func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
+}
+
+func (b *BlindedBeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
+	return nil
+}
+
+func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
+	return nil
+}
+
+func (b *BlindedBeaconBody) GetParentExecutionRequests() *ExecutionRequests {
+	return nil
 }

@@ -21,10 +21,10 @@ import (
 	"errors"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // BitList is like a dynamic binary string. It's like a flipbook of 1s and 0s!
@@ -55,6 +55,12 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 		l: len(xs),
 		c: c,
 	}
+}
+
+// SetLimit overrides the capacity (limit) used for HashSSZ computation.
+// This is needed for preset-aware hash computation where the limit differs between mainnet and minimal.
+func (u *BitList) SetLimit(limit int) {
+	u.c = limit
 }
 
 func (u *BitList) GetBitAt(i int) bool {

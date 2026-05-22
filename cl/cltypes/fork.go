@@ -17,9 +17,9 @@
 package cltypes
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 )
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.

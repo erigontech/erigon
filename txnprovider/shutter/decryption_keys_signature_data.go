@@ -20,14 +20,13 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	merkletree "github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 var (
@@ -52,7 +51,7 @@ func (ip *IdentityPreimage) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) != identityPreimageSize {
-		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
+		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(buf))
 	}
 
 	copy(ip[:], buf)
@@ -60,7 +59,7 @@ func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (ip *IdentityPreimage) Clone() clonable.Clonable {
-	clone := IdentityPreimage(slices.Clone(ip[:]))
+	clone := *ip
 	return &clone
 }
 

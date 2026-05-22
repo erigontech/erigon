@@ -17,13 +17,13 @@
 package optimistic
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 type OptimisticStore interface {
-	AddOptimisticCandidate(block *cltypes.BeaconBlock) error
-	ValidateBlock(block *cltypes.BeaconBlock) error
-	InvalidateBlock(block *cltypes.BeaconBlock) error
+	AddOptimisticCandidate(blockRoot common.Hash, block *cltypes.BeaconBlock) error
+	ValidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
+	InvalidateBlock(blockRoot common.Hash, block *cltypes.BeaconBlock) error
 	IsOptimistic(root common.Hash) bool
 }

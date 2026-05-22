@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -40,7 +41,7 @@ func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (Sy
 	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
-	s := NewSyncContributionService(syncedDataManager, cfg, syncContributionPool, ethClock, beaconevents.NewEventEmitter(), batchSignatureVerifier, true)
+	s := NewSyncContributionService(syncedDataManager, cfg, syncContributionPool, ethClock, beaconevents.NewEventEmitter(), batchSignatureVerifier, validator_params.NewValidatorParams(), true)
 	syncContributionPool.EXPECT().AddSyncContribution(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 	return s, syncedDataManager, ethClock
 }
@@ -144,5 +145,5 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.NoError(t, err)
 	err = s.ProcessMessage(context.TODO(), nil, msg)
-	require.Error(t, err)
+	require.NoError(t, err) // Silent ignore: returns nil when seen before
 }
