@@ -131,6 +131,30 @@ The staging-directory tag used by adoption (`adoption-<tag>`) is a *separate
 local concern* — it needs only per-node uniqueness and can stay a local
 counter or use a digest prefix. It is not the canonical identity.
 
+### 4.1 Stream identity sits above the digest
+
+The digest identifies canonical *content* — but only *within one stream*. Which
+stream a canonical view belongs to is a separate, higher identity: the pair
+`(forkid, lineage)`, where `forkid` is the EIP-2124 fork ID (consensus rules)
+and `lineage` is the `[view]` branch point. This is specified in the
+*Identification* section of `erigon-documents` →
+`ethereum/design/erigon-archive/fork-spec.md`.
+
+Consequences for this spec:
+
+- The canonical view, its slots, and its digest are all per-`(forkid, lineage)`.
+  Two streams never share a canonical view; their digests are not comparable.
+- `forkid` is an early-reject filter: a received manifest whose fork ID is not
+  EIP-2124-compatible with the local node's is dropped before any entry reaches
+  promotion/demotion logic here.
+- Which stream a node follows is fixed by its chain configuration, never by
+  quorum. Quorum decides bytes within a stream (§3); configuration decides the
+  stream. A node on a minority fork stays on it regardless of how many
+  publishers advertise the other side.
+- A contentious split shares all pre-split history: pre-cut epochs draw quorum
+  witnesses from *every* lineage that shares them; post-cut epochs are
+  stream-specific.
+
 ## 5. Rewind and recovery — the liveness section
 
 This is the foundational correctness section, not an appendix.
