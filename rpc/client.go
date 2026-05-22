@@ -658,6 +658,16 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 				// lastOp can be nil if a fatal read error fired first and already
 				// cancelled the in-flight op.
 				conn.handler.removeRequestOp(lastOp)
+			} else if !reading {
+				// The write succeeded but the connection is already dead (read
+				// loop exited with an error). The in-flight request was excluded
+				// from cancelAllRequests so it could be re-registered on a
+				// reconnected connection, but no reconnect happened because the
+				// write did not fail. Cancel it now to avoid blocking forever.
+				if lastOp != nil {
+					lastOp.err = errDead
+					close(lastOp.resp)
+				}
 			}
 			// Let the next request in.
 			reqInitLock = c.reqInit
