@@ -646,7 +646,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
-		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+		notificationDispatchStart := time.Now()
+		err = e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore)
+		UpdateForkChoiceNotificationDispatchDuration(notificationDispatchStart)
+		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
 
@@ -781,7 +784,9 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	// the BlockListener (overlay-aware shutter) sees the overlay as active
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
+	publishOverlayStart := time.Now()
 	dispatcher.PublishOverlay(sd)
+	UpdateForkChoiceNotificationPublishOverlayDuration(publishOverlayStart)
 
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(

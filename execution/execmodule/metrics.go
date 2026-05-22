@@ -27,6 +27,12 @@ var (
 	updateForkChoiceDuration      = metrics.NewSummary(`update_fork_choice{type="execution_duration"}`)
 	updateForkChoiceDepth         = metrics.NewSummary(`update_fork_choice{type="fork_depth"}`)
 	updateForkChoicePruneDuration = metrics.NewSummary(`update_fork_choice{type="prune_duration"}`)
+
+	forkChoiceNotificationDispatchDuration       = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="total"}`)
+	forkChoiceNotificationPublishOverlayDuration = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="publish_overlay"}`)
+	forkChoiceNotificationReceiptsDuration       = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="receipts"}`)
+	forkChoiceNotificationLogsDuration           = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="logs"}`)
+	forkChoiceNotificationStateChangesDuration   = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="state_changes"}`)
 )
 
 func UpdateForkChoiceArrivalDelay(blockTime uint64) {
@@ -44,4 +50,24 @@ func UpdateForkChoiceDepth(depth uint64) {
 
 func UpdateForkChoicePruneDuration(start time.Time) {
 	updateForkChoicePruneDuration.ObserveDuration(start)
+}
+
+func UpdateForkChoiceNotificationDispatchDuration(start time.Time) {
+	forkChoiceNotificationDispatchDuration.ObserveDuration(start)
+}
+
+func UpdateForkChoiceNotificationPublishOverlayDuration(start time.Time) {
+	forkChoiceNotificationPublishOverlayDuration.ObserveDuration(start)
+}
+
+func UpdateForkChoiceNotificationReceiptsDuration(start time.Time) {
+	forkChoiceNotificationReceiptsDuration.ObserveDuration(start)
+}
+
+func UpdateForkChoiceNotificationLogsDuration(start time.Time) {
+	forkChoiceNotificationLogsDuration.ObserveDuration(start)
+}
+
+func UpdateForkChoiceNotificationStateChangesDuration(start time.Time) {
+	forkChoiceNotificationStateChangesDuration.ObserveDuration(start)
 }

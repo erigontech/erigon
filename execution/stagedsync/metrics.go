@@ -1,11 +1,26 @@
 package stagedsync
 
 import (
+	"time"
+
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 var initialCycleDurationSecs = metrics.GetOrCreateGauge("initial_cycle_duration_secs")
+
+var (
+	notificationDispatchHeadersScanDuration = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="headers_scan"}`)
+	notificationDispatchHeadersSendDuration = metrics.NewSummary(`update_fork_choice_notification_dispatch_duration_seconds{stage="headers_send"}`)
+)
+
+func updateNotificationDispatchHeadersScanDuration(start time.Time) {
+	notificationDispatchHeadersScanDuration.ObserveDuration(start)
+}
+
+func updateNotificationDispatchHeadersSendDuration(start time.Time) {
+	notificationDispatchHeadersSendDuration.ObserveDuration(start)
+}
 
 type metricsCache struct {
 	stageRunDurationSummaries    map[stages.SyncStage]metrics.Summary

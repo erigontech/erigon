@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -117,13 +118,21 @@ func (d *Dispatcher) Dispatch(
 			return err
 		}
 		if recentReceipts != nil {
+			receiptsStart := time.Now()
 			recentReceipts.NotifyReceipts(d.events, notifyFrom, notifyTo, isUnwind)
+			UpdateForkChoiceNotificationReceiptsDuration(receiptsStart)
+
+			logsStart := time.Now()
 			recentReceipts.NotifyLogs(d.events, notifyFrom, notifyTo, isUnwind)
+			UpdateForkChoiceNotificationLogsDuration(logsStart)
 		}
 	}
 
+	stateChangesStart := time.Now()
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if accumulator != nil && currentHeader != nil {
+		defer UpdateForkChoiceNotificationStateChangesDuration(stateChangesStart)
+
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
 			accumulator.StartChange(currentHeader, nil, false)
 		}

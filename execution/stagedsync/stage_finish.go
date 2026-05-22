@@ -86,6 +86,7 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var headersRlp [][]byte
+	headersScanStart := time.Now()
 	if err := tx.ForEach(kv.HeaderCanonical, hexutil.EncodeTs(notifyFrom), func(k, hash []byte) (err error) {
 		if len(hash) == 0 {
 			return nil
@@ -100,12 +101,16 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		}
 		return common.Stopped(ctx.Done())
 	}); err != nil {
+		updateNotificationDispatchHeadersScanDuration(headersScanStart)
 		logger.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
+	updateNotificationDispatchHeadersScanDuration(headersScanStart)
 
 	if len(headersRlp) > 0 {
+		headersSendStart := time.Now()
 		notifier.OnNewHeader(headersRlp)
+		updateNotificationDispatchHeadersSendDuration(headersSendStart)
 		logger.Debug("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp))
 	}
 	return nil
