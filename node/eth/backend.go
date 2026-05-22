@@ -443,6 +443,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			agg = a
 		}
 	}
+	// Pass the aggregator through the StateAggregator interface, but keep
+	// the Deps field a true nil interface when there is no aggregator —
+	// a typed-nil *state.Aggregator boxed into the interface would defeat
+	// the storage Provider's `Aggregator != nil` guards.
+	var aggDep storagecomp.StateAggregator
+	if agg != nil {
+		aggDep = agg
+	}
 	if err := backend.components.BuildStorage(storagecomp.Deps{
 		Ctx:              ctx,
 		ChainDB:          temporalDb,
@@ -470,7 +478,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return backend.components.Downloader.Downloader.PublishLocalChainToml()
 		},
 		Inventory:    inv,
-		Aggregator:   agg,
+		Aggregator:   aggDep,
 		IndexWorkers: estimate.IndexSnapshot.Workers(),
 		// PostIndexedSeed: invoked by the orchestrator after every
 		// phase-1 file reaches LifecycleIndexed AND snapshots.OpenFolder

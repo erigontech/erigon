@@ -89,7 +89,7 @@ type Provider struct {
 	// the staged-adoption cutover (adoption.go) can take its commit
 	// barrier and OpenFolder it after swapping files. May be nil for
 	// tools / tests that construct a Provider without state.
-	Aggregator *dbstate.Aggregator
+	Aggregator StateAggregator
 
 	// Inventory is the storage component's metadata registry of all
 	// known snapshot files (local + remote, per the snapshot-flow PR).
@@ -236,7 +236,7 @@ type Deps struct {
 	// when the lifecycle driver runs. nil → only E2 (block) indexes
 	// are built via the storage-driven path; E3 stays on the stage
 	// path until this is wired.
-	Aggregator *dbstate.Aggregator
+	Aggregator StateAggregator
 
 	// IndexWorkers is the parallelism for accessor builds. Sourced
 	// from estimate.IndexSnapshot.Workers() in production. Zero →

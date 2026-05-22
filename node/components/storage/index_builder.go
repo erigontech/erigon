@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -49,7 +48,7 @@ import (
 // tools that only construct one half of the storage stack).
 type productionIndexBuilder struct {
 	blockRetire  services.BlockRetire
-	agg          *state.Aggregator
+	agg          StateAggregator
 	notifier     services.DBEventNotifier
 	logger       log.Logger
 	indexWorkers int
