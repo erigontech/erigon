@@ -97,7 +97,7 @@ func NewWitness(context *types.Header, chain HeaderReader) (*Witness, error) {
 		return nil, errors.New("failed to retrieve parent header")
 	}
 	headers := []*types.Header{parent}
-	// Create the wtness with a reconstructed gutted out block
+	// Create the witness with a reconstructed gutted out block
 	return &Witness{
 		context: context,
 		Headers: headers,

@@ -2,8 +2,10 @@
 
 ## Overview
 - Port the EIP-8025 execution witness test suite from PR #20533 onto fresh origin/main
-- Adds test runner for 93 zkevm@v0.3.3 fixtures from ethereum/execution-spec-tests
-- All 93 fixtures (176 subtests) are marked as expected failures — documents current witness mismatches
+- Adds test runner for the zkevm fixtures from ethereum/execution-spec-tests
+  (the exact version pin lives in `test-fixtures.json` under key `eest_zkevm`
+  and follows the lazy-download manifest machinery introduced in #21002)
+- All fixtures are marked as expected failures via `bt.Fails` — documents current witness mismatches
 - Test-suite-only scope: no RPC fixes, no signer change, no MDBX changes (those go in separate PRs)
 
 ## Context (from discovery)
@@ -94,10 +96,9 @@
 
 ### Task 6: Run witness test suite
 
-- [x] Initialize submodule: `git submodule update --init execution/tests/execution-spec-tests`
-- [x] Fetch LFS fixtures: fixtures already checked out as real JSON (git-lfs not needed)
+- [x] Download & extract fixtures: `make test-fixtures-zkevm` (populates `test-fixtures-cache/eest_zkevm/` from the pinned tarball in `test-fixtures.json`)
 - [x] Run test suite: `go test -count=1 -v -run TestExecutionSpecWitness ./execution/tests/eest_zkevm_witness/...`
-- [x] Verify all 93 fixtures run and pass (via expected-failure annotations) — 176 subtests, 0 failures
+- [x] Verify the corpus runs end-to-end with all mismatches absorbed by `bt.Fails`
 - [x] No deviations from expected results
 
 ### Task 7: [Final] Move plan to completed

@@ -68,11 +68,10 @@ func TestExecutionSpecWitness(t *testing.T) {
 	dir := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_zkevm", "fixtures", "blockchain_tests")
 	bt := new(testutil.TestMatcher)
 	bt.NoParallel = true
-	bt.Whitelist(`^for_amsterdam/amsterdam/eip8025_optional_proofs/witness_validation_state/validation_state_unsorted_but_complete\.json$`)
 
-	// Keep the corpus serial even for a single enabled fixture: the harness spins
-	// up fresh MDBX/state machinery per file, and we want the CI signal to reflect
-	// the fixture itself rather than parallel memory pressure.
+	// Run the full corpus serially. The harness spins up fresh MDBX/state
+	// machinery per file, and we want the CI signal to reflect the fixture
+	// itself rather than parallel memory pressure.
 	// All 93 fixtures fail on State node ordering and/or Codes ordering mismatches
 	// (tracked by #20442). Headers field was fixed by including the parent header
 	// and sorting ascending (#20534), but no fixture passes yet because every one
