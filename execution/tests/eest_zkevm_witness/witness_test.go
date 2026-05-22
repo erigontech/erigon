@@ -56,7 +56,12 @@ func TestExecutionSpecWitness(t *testing.T) {
 		statecfg.Schema = previousSchema
 	})
 
-	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests_zkevm")
+	// Fixtures are downloaded + sha256-verified + extracted by the lazy-download
+	// manifest machinery introduced in #21002: `make test-fixtures-zkevm` populates
+	// test-fixtures-cache/eest_zkevm/ (preserving the tarball's top-level
+	// `fixtures/blockchain_tests/...` layout). This replaces the prior submodule/LFS
+	// path under execution/tests/execution-spec-tests/.
+	dir := filepath.Join("..", "..", "..", "test-fixtures-cache", "eest_zkevm", "fixtures", "blockchain_tests")
 	bt := new(testutil.TestMatcher)
 	bt.NoParallel = true
 	bt.Whitelist(`^for_amsterdam/amsterdam/eip8025_optional_proofs/witness_validation_state/validation_state_unsorted_but_complete\.json$`)

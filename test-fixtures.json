@@ -15,6 +15,11 @@
     "sha256": "3e2b02d49fe903eda4fd8caca5cbf0d139c470e97e1de9a85299b1b034f97099",
     "size": 422845437
   },
+  "eest_zkevm": {
+    "url": "https://github.com/ethereum/execution-spec-tests/releases/download/zkevm%40v0.3.4/fixtures_zkevm.tar.gz",
+    "sha256": "b9e3ab70fe58d0ac9bcadf99beff7ca31e26c27aaa94087854bfd8e9b4dff32b",
+    "size": 231977945
+  },
   "cl_mainnet": {
     "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-alpha.7/mainnet.tar.gz",
     "sha256": "a96c52b503e1da5305df1c8c09974a2b95a09545cffeea63b440be803059f5d6",

@@ -63,6 +63,22 @@ jobs:
           build-cache-extra-key: ${{ matrix.test-group }}
           ramdisk: true
 
+      # The zkevm witness suite reads fixtures from the lazy-download cache
+      # populated by tools/test-fixtures.sh (introduced in #21002). Cache only
+      # the tarball; tools/test-fixtures.sh re-extracts on each run.
+      - name: Cache zkevm fixtures tarball
+        if: matrix.test-group == 'execution-eest-zkevm'
+        uses: actions/cache@v4
+        with:
+          path: test-fixtures-cache/eest_zkevm.tar.gz
+          key: test-fixtures-zkevm-${{ runner.os }}-${{ hashFiles('test-fixtures.json') }}
+          restore-keys: |
+            test-fixtures-zkevm-${{ runner.os }}-
+
+      - name: Download & extract zkevm fixtures
+        if: matrix.test-group == 'execution-eest-zkevm'
+        run: make test-fixtures-zkevm
+
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
