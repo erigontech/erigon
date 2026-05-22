@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -542,6 +543,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
+	endTxNum := info.EndTxNum
 	parentNum := info.ParentNum
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -679,7 +681,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return result, nil
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, accessed)
+	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
+		firstTxNumInBlock, endTxNum, blockNum, parentNum,
+		block.Root(), accessed)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -857,12 +866,69 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	return out
 }
 
-// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key, then generate the
-// witness trie and RLP-encode it. The pre-state root is verified against
-// expectedParentRoot before the encoded nodes are returned.
+// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
+// commitment for this block against a split reader (commitment from parent state,
+// plain state from end of block) and record every sibling path the trie collapses
+// through. The collected paths are returned so STEP 2 can touch them while building
+// the witness — without those touches, collapsed-sibling data would be missing from
+// the witness and stateless re-execution would diverge from the canonical root.
 //
-// Triggers SeekCommitment #3 (parent-state reader).
+// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
+// including the lupin012 seekBlockNum != parentNum guard.
+func detectCollapseSiblings(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	domains *execctx.SharedDomains,
+	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
+	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
+	expectedBlockRoot common.Hash,
+	accessed *accessedState,
+) (siblingPaths [][]byte, err error) {
+	// Set up split reader: commitment from block beginning, plain state from block end.
+	// withHistory=false so branch updates are written using PutBranch().
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
+	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
+	}
+	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
+	// parent block's committed state. Any other position means the history has been pruned
+	// for this block range.
+	if seekBlockNum != parentNum {
+		return nil, fmt.Errorf(
+			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
+				"commitment history may be pruned for this block range",
+			blockNum, seekBlockNum, parentNum)
+	}
+
+	accessed.touchAll(sdCtx)
+
+	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
+		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
+		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+	})
+
+	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	if err != nil {
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+	}
+
+	if common.Hash(computedRootHash) != expectedBlockRoot {
+		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
+	}
+
+	sdCtx.SetCollapseTracer(nil)
+	return siblingPaths, nil
+}
+
+// buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
+// against the parent-state reader, touch every accessed key plus the sibling
+// paths collected during collapse detection, then generate the witness trie and
+// RLP-encode it. The pre-state root is verified against expectedParentRoot
+// before the encoded nodes are returned.
+//
+// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -870,6 +936,7 @@ func buildWitnessTrie(
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
 	expectedParentRoot common.Hash,
+	siblingPaths [][]byte,
 	accessed *accessedState,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
@@ -880,6 +947,15 @@ func buildWitnessTrie(
 	}
 
 	accessed.touchAll(sdCtx)
+
+	if len(siblingPaths) > 0 {
+		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
+		for _, siblingPath := range siblingPaths {
+			compactSiblingPath := commitment.NibblesToString(siblingPath)
+			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
+			sdCtx.TouchHashedKey(siblingPath)
+		}
+	}
 
 	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
 	if err != nil {
