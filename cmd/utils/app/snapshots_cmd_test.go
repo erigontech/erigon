@@ -910,6 +910,24 @@ func TestDUDetectNodeType(t *testing.T) {
 		// MinimalPruneDistance=100_000 → no full classification → minimal.
 		require.Equal(t, "minimal", duDetectNodeType(files))
 	})
+
+	t.Run("genesis tx in [MinimalPruneDistance, DefaultPruneDistance] band not classified as blocks", func(t *testing.T) {
+		// maxBlock=200_000 sits between MinimalPruneDistance (100_000) and
+		// DefaultPruneDistance (262_144). At this height a full-mode node
+		// still has the genesis tx segment because distance pruning hasn't
+		// kicked in yet — gating "blocks" on MinimalPruneDistance would
+		// misclassify it. With the fullPruneDistance gate the genesis tx is
+		// not evidence of blocks here, and the next branch correctly
+		// classifies it as full via the segment whose To equals the minimal
+		// cutoff (100_000 == 200_000 - 100_000).
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Name: "0-100-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 100_000, Size: 200},
+			{Name: "100-200-transactions.seg", Category: duCatBlocks, IsState: false, From: 100_000, To: 200_000, Size: 200},
+		}
+		require.Equal(t, "full", duDetectNodeType(files))
+	})
 }
 
 func TestDUAggregateCategories(t *testing.T) {

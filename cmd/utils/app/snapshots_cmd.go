@@ -3861,11 +3861,15 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 // pruned it, so old state history files are absent. Among non-archive modes:
 //   - Blocks mode keeps all transaction segments (from genesis) but prunes
 //     state history. Detected by the presence of a tx segment with From=0
-//     on a chain mature enough for distance-pruning to have kicked in.
+//     on a chain past DefaultPruneDistance, where full would have pruned it.
 //   - Full prunes both state history and transaction segments older than
 //     DefaultPruneDistance.
 //   - Minimal does the same but at the smaller MinimalPruneDistance, so it
 //     keeps a narrower recent window than full.
+//
+// On chains between MinimalPruneDistance and DefaultPruneDistance, full and
+// blocks look identical on disk (full has not yet pruned tx); the detector
+// defaults the ambiguous case to full, the more common mode.
 func duDetectNodeType(files []duFileInfo) string {
 	hasOldStateHistory := false
 	hasGenesisTxSegment := false
@@ -3905,12 +3909,11 @@ func duDetectNodeType(files []duFileInfo) string {
 		return "archive"
 	}
 
-	// Blocks mode: tx segments from genesis are present (no distance-based tx
-	// pruning) but state history from step 0 is absent. Require maxBlock to
-	// exceed minimalPruneDistance so we don't misclassify a young minimal
-	// chain (which would still have tx from 0 simply because nothing has been
-	// pruned yet).
-	if hasGenesisTxSegment && maxBlock > minimalPruneDistance {
+	// Blocks mode: tx segments from genesis are present and the chain is past
+	// the point where full would have pruned them. Gate on fullPruneDistance —
+	// below that, full hasn't started pruning tx yet and a genesis tx segment
+	// is not evidence of blocks mode.
+	if hasGenesisTxSegment && maxBlock > fullPruneDistance {
 		return "blocks"
 	}
 
