@@ -358,9 +358,14 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 			return fmt.Errorf("commitment step [%d, %d): %w", fromStep, toStep, err)
 		}
 	case !blockSegAdvertisableForBlock(v.Inventory, info.BlockNum):
-		// Partial-block commitment above the horizon: pause until the
-		// matching block .seg is Advertisable for replay-verify. See
+		// Partial-block commitment above the horizon: the file itself
+		// can't reach Advertisable until its anchor block's .seg is
+		// Advertisable for replay-verify. Register the (step, block)
+		// binding first — block .seg lifecycle needs it to advance, and
+		// deferring it until the pause clears deadlocks the pair (see
+		// registerBinding). Then pause.
 		// docs/plans/20260510-partial-block-validation-model.md.
+		v.registerBinding(files[0].Name, toStep, info)
 		v.PausedCache.Put(files[0].Name, info)
 		return fmt.Errorf("partial-block commitment for block %d (txNum=%d, blockMaxTxNum=%d) — block .seg not yet Advertisable; pausing (step [%d, %d)): %w",
 			info.BlockNum, info.TxNum, info.BlockMaxTxNum, fromStep, toStep, validation.ErrPause)
@@ -368,17 +373,33 @@ func (v CommitmentDomainValidator) ValidateStep(ctx context.Context, files []*sn
 	// Validation passed — drop any prior pause-cache entry.
 	v.PausedCache.Forget(files[0].Name)
 
-	if v.Inventory != nil {
-		v.Inventory.RegisterStepBlockBoundary(toStep, info.BlockNum)
-		v.Inventory.SetAnchors(files[0].Name, snapshot.Anchors{
-			Root:           info.RootHash,
-			AtBlock:        info.BlockNum,
-			AtTxNum:        info.TxNum,
-			IsPartialBlock: info.PartialBlock(),
-		})
-	}
+	v.registerBinding(files[0].Name, toStep, info)
 	logBindingRegistered(v.Logger, "lifecycle", files[0].Name, toStep, &info.BlockNum)
 	return nil
+}
+
+// registerBinding records the (step, block) binding and per-file
+// anchors derived from a Phase-A-validated commitment record.
+//
+// Phase A alone is authoritative for the binding: info.BlockNum is the
+// anchor block whether or not the commitment file itself can reach
+// LifecycleAdvertisable. The binding is therefore registered even when
+// the partial-block defensive pause fires — block .seg lifecycle
+// (lifecycle.runBlockGroup) needs it to map a block range to a step
+// before the .seg can advance, and a partial-block commitment pauses
+// until that same .seg is Advertisable; deferring the binding until the
+// pause clears would deadlock the pair.
+func (v CommitmentDomainValidator) registerBinding(name string, toStep uint64, info integrity.CommitmentRootInfo) {
+	if v.Inventory == nil {
+		return
+	}
+	v.Inventory.RegisterStepBlockBoundary(toStep, info.BlockNum)
+	v.Inventory.SetAnchors(name, snapshot.Anchors{
+		Root:           info.RootHash,
+		AtBlock:        info.BlockNum,
+		AtTxNum:        info.TxNum,
+		IsPartialBlock: info.PartialBlock(),
+	})
 }
 
 // logBindingRegistered emits the canonical (step, block) binding log

@@ -208,3 +208,59 @@ func TestPausedCommitmentCache_NilSafe(t *testing.T) {
 	c.Put("any", integrity.CommitmentRootInfo{})
 	c.Forget("any")
 }
+
+// TestCommitmentDomainValidator_RegisterBindingBreaksDeadlock verifies
+// that registerBinding records the (step, block) binding from a Phase-A
+// commitment record alone — independent of whether the commitment file
+// itself reaches Advertisable.
+//
+// This is the deadlock break: a partial-block commitment pauses until
+// its anchor block's .seg is Advertisable, and that .seg needs this
+// binding to advance (lifecycle.runBlockGroup gates block-file advance
+// on BlockToStep). Deferring binding registration until the pause
+// clears locks the pair forever — observed on the sepolia publisher,
+// ~300k-block band of block .seg files stuck at Indexed.
+func TestCommitmentDomainValidator_RegisterBindingBreaksDeadlock(t *testing.T) {
+	t.Parallel()
+
+	inv := snapshot.NewInventory()
+	const name = "v2.0-commitment.2496-2512.kv"
+	require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+		Domain: snapshot.DomainCommitment, FromStep: 2496, ToStep: 2512, Name: name,
+	}))
+
+	v := CommitmentDomainValidator{Inventory: inv}
+	// Partial-block record: TxNum inside the anchor block, not at its
+	// boundary — this is the case that pauses in ValidateStep.
+	info := integrity.CommitmentRootInfo{
+		BlockNum:      10_883_292,
+		TxNum:         981_249_999,
+		BlockMinTxNum: 981_249_800,
+		BlockMaxTxNum: 981_250_135,
+	}
+	require.True(t, info.PartialBlock(), "fixture must be a partial-block record")
+
+	v.registerBinding(name, 2512, info)
+
+	step, ok := inv.BlockToStep(10_883_292)
+	require.True(t, ok, "partial-block commitment must register its binding even while paused")
+	require.Equal(t, uint64(2512), step)
+
+	var got *snapshot.FileEntry
+	for _, e := range inv.AllDomainFiles(snapshot.DomainCommitment) {
+		if e.Name == name {
+			got = e
+		}
+	}
+	require.NotNil(t, got)
+	require.True(t, got.Anchors.IsPartialBlock, "anchors stamped, marked partial-block")
+	require.Equal(t, uint64(10_883_292), got.Anchors.AtBlock)
+}
+
+// TestCommitmentDomainValidator_RegisterBindingNilInventory verifies the
+// helper no-ops when no inventory is wired (tools/tests may omit it).
+func TestCommitmentDomainValidator_RegisterBindingNilInventory(t *testing.T) {
+	t.Parallel()
+	v := CommitmentDomainValidator{}
+	v.registerBinding("v2.0-commitment.0-256.kv", 256, integrity.CommitmentRootInfo{BlockNum: 1})
+}
