@@ -77,6 +77,7 @@ func (ts *testServer) Send(m *remoteproto.SubscribeLogsReply) error {
 		return nil
 	}
 	ts.sent = append(ts.sent, m)
+
 	return nil
 }
 
