@@ -46,7 +46,7 @@ require (
 	github.com/felixge/fgprof v0.9.5
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
-	github.com/go-echarts/go-echarts/v2 v2.6.7
+	github.com/go-echarts/go-echarts/v2 v2.7.2
 	github.com/go-quicktest/qt v1.102.0
 	github.com/go-stack/stack v1.8.1
 	github.com/go-test/deep v1.1.1
