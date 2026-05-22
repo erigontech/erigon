@@ -127,7 +127,7 @@ func (k peerSidecarKind) label() string {
 	case sidecarV2Manifest:
 		return "chain.v2.<genID>.toml"
 	case sidecarUCAN:
-		return "chain.ucan.<genID>.bin"
+		return "chain.ucan.authority.<rev>.bin"
 	case sidecarContentUCAN:
 		return "chain.v2.<genID>.ucan"
 	}
@@ -140,7 +140,7 @@ func (k peerSidecarKind) parseName(name string) bool {
 		_, _, ok := dl.ParseChainTomlV2FileName(name)
 		return ok
 	case sidecarUCAN:
-		_, _, ok := dl.ParseChainUCANFileName(name)
+		_, _, ok := dl.ParseChainAuthorityUCANFileName(name)
 		return ok
 	case sidecarContentUCAN:
 		// The Content UCAN's filename is not enforced: it is fetched

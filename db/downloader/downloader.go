@@ -484,7 +484,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 			// is needed there — the storage-driven lifecycle populates
 			// the inventory but does not separately load .torrent
 			// files into the seeding client.
-			if name == ChainTomlFileName || strings.HasPrefix(name, "chain.v2.") || strings.HasSuffix(name, ".ucan.bin") {
+			if name == ChainTomlFileName || strings.HasPrefix(name, "chain.v2.") || strings.HasPrefix(name, "chain.ucan.") {
 				return nil
 			}
 			t, complete, new, err := d.addTorrentIfComplete(name)

@@ -65,10 +65,15 @@ import (
 // terminal for tool recognition (parsers, IDEs, etc).
 const ChainTomlV2BaseName = "chain.v2"
 
-// ChainUCANBaseName is the prefix every UCAN sidecar filename starts
-// with. Pairs with ChainTomlV2BaseName at the same <genID> so a peer's
-// (V2 manifest, UCAN attestation) is one logical generation.
-const ChainUCANBaseName = "chain.ucan"
+// ChainAuthorityUCANBaseName is the prefix every Authority UCAN sidecar
+// filename starts with. Unlike the per-generation manifest + Content
+// UCAN, the Authority UCAN is long-lived (it changes only when the
+// operator rotates the delegation) and is named by a content-addressed
+// <rev>, NOT a generation's <genID> — so a generation republish that
+// does not change the delegation reuses the exact same sidecar file,
+// torrent, and info-hash. That stability keeps a manifest's
+// AuthorityUCANHash from churning across generations.
+const ChainAuthorityUCANBaseName = "chain.ucan.authority"
 
 // GenIDLen is the byte length of a generation ID. The ID is derived
 // from the artefact's own content (see genIDFromContent), NOT a
@@ -83,9 +88,10 @@ const GenIDLen = 8
 // genIDFromContent).
 var chainTomlV2NameRE = regexp.MustCompile(`^chain\.v2\.([0-9a-f]{16})\.([0-9a-f]{16})\.toml$`)
 
-// chainUCANNameRE matches chain.ucan.<enr-fp>.<genID>.bin — the UCAN
-// sidecar shape paired with each V2 generation.
-var chainUCANNameRE = regexp.MustCompile(`^chain\.ucan\.([0-9a-f]{16})\.([0-9a-f]{16})\.bin$`)
+// chainAuthorityUCANNameRE matches chain.ucan.authority.<enr-fp>.<rev>.bin
+// — the long-lived Authority UCAN sidecar. <rev> is content-addressed
+// (see ChainAuthorityUCANFileName), not a generation <genID>.
+var chainAuthorityUCANNameRE = regexp.MustCompile(`^chain\.ucan\.authority\.([0-9a-f]{16})\.([0-9a-f]{16})\.bin$`)
 
 // chainV2ContentUCANNameRE matches chain.v2.<enr-fp>.<genID>.ucan — the
 // Content UCAN sidecar shape paired with each V2 generation.
@@ -122,10 +128,13 @@ func ChainTomlV2FileName(enrFP, genID string) string {
 	return fmt.Sprintf("%s.%s.%s.toml", ChainTomlV2BaseName, enrFP, genID)
 }
 
-// ChainUCANFileName formats the UCAN sidecar filename paired with the
-// V2 manifest at the same fingerprint + genID.
-func ChainUCANFileName(enrFP, genID string) string {
-	return fmt.Sprintf("%s.%s.%s.bin", ChainUCANBaseName, enrFP, genID)
+// ChainAuthorityUCANFileName formats the Authority UCAN sidecar filename
+// for the given ENR fingerprint and content-addressed revision:
+// chain.ucan.authority.<enr-fp>.<rev>.bin. <rev> is genIDFromContent of
+// the Authority UCAN bytes — so byte-identical delegations across
+// generations resolve to one shared file.
+func ChainAuthorityUCANFileName(enrFP, rev string) string {
+	return fmt.Sprintf("%s.%s.%s.bin", ChainAuthorityUCANBaseName, enrFP, rev)
 }
 
 // ChainV2ContentUCANFileName formats the Content UCAN sidecar filename
@@ -151,11 +160,11 @@ func ParseChainTomlV2FileName(name string) (enrFP, genID string, ok bool) {
 	return m[1], m[2], true
 }
 
-// ParseChainUCANFileName extracts the ENR fingerprint and generation
-// ID from a filename matching chain.ucan.<enr-fp>.<genID>.bin. ok=false
-// for any other shape.
-func ParseChainUCANFileName(name string) (enrFP, genID string, ok bool) {
-	m := chainUCANNameRE.FindStringSubmatch(name)
+// ParseChainAuthorityUCANFileName extracts the ENR fingerprint and
+// content-addressed revision from a filename matching
+// chain.ucan.authority.<enr-fp>.<rev>.bin. ok=false for any other shape.
+func ParseChainAuthorityUCANFileName(name string) (enrFP, rev string, ok bool) {
+	m := chainAuthorityUCANNameRE.FindStringSubmatch(name)
 	if m == nil {
 		return "", "", false
 	}
@@ -174,17 +183,18 @@ func ParseChainV2ContentUCANFileName(name string) (enrFP, genID string, ok bool)
 }
 
 // generationArtefactGenID returns the genID of a per-generation
-// artefact filename — the chain.v2.<fp>.<genID>.toml manifest, its
-// Content UCAN chain.v2.<fp>.<genID>.ucan, or the Authority UCAN
-// chain.ucan.<fp>.<genID>.bin. ok=false for anything else.
+// artefact filename — the chain.v2.<fp>.<genID>.toml manifest or its
+// Content UCAN chain.v2.<fp>.<genID>.ucan. ok=false for anything else.
+//
+// The Authority UCAN (chain.ucan.authority.<fp>.<rev>.bin) is NOT a
+// per-generation artefact — it is content-addressed and shared across
+// generations, so it is deliberately excluded here and handled
+// separately by ResumeSeeding.
 func generationArtefactGenID(name string) (genID string, ok bool) {
 	if _, genID, ok = ParseChainTomlV2FileName(name); ok {
 		return genID, true
 	}
 	if _, genID, ok = ParseChainV2ContentUCANFileName(name); ok {
-		return genID, true
-	}
-	if _, genID, ok = ParseChainUCANFileName(name); ok {
 		return genID, true
 	}
 	return "", false
@@ -451,12 +461,13 @@ func manifestFileNames(m *ChainTomlV2) map[string]struct{} {
 // trims the oldest retained generation if history is over cap.
 // enrUpdater receives the new generation's infohash.
 //
-// When a DelegationSource is configured, Publish ALSO writes
-// chain.ucan.<seq>.bin (the snapshotauth attestation paired with this
-// generation) and stamps the V2 manifest's AuthorityUCANHash field with the
-// UCAN torrent's infohash so consumers can fetch the sidecar by that
-// hash. The pair is registered, evicted, and cleaned up together —
-// they are one logical generation on disk.
+// When a DelegationSource is configured, Publish ALSO writes the
+// Authority UCAN sidecar (chain.ucan.authority.<fp>.<rev>.bin, the
+// snapshotauth attestation) and stamps the V2 manifest's
+// AuthorityUCANHash field with the UCAN torrent's infohash so consumers
+// can fetch the sidecar by that hash. The sidecar is content-addressed
+// by <rev>, so an unchanged delegation reuses the same file across
+// generations; it is not evicted or cleaned up with a generation.
 //
 // On error, partial state is best-effort cleaned up (file written may
 // stay; .torrent may be missing) — the caller should inspect snapDir
@@ -533,12 +544,13 @@ func (r *RollingV2Publisher) Publish(
 	// Write the Authority UCAN sidecar first when one is configured: its
 	// torrent info-hash is stamped into the manifest's AuthorityUCANHash,
 	// so the final manifest bytes can only be produced once the UCAN
-	// torrent exists. The sidecar shares the manifest's genID — they are
-	// one logical generation on disk, registered/evicted/cleaned up
-	// together.
+	// torrent exists. The sidecar is named by a content-addressed <rev>,
+	// not the manifest's genID — a generation republish that does not
+	// rotate the delegation reuses the exact same file/torrent/info-hash
+	// (the writes below are all idempotent for byte-identical content).
 	var ucanHashHex string
 	if len(ucanBytes) > 0 {
-		ucanName := ChainUCANFileName(enrFP, genID)
+		ucanName := ChainAuthorityUCANFileName(enrFP, genIDFromContent(ucanBytes))
 		ucanPath := filepath.Join(r.snapDir, ucanName)
 		if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
 			return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
@@ -738,37 +750,39 @@ func isSubsetOf(a, b map[string]struct{}) bool {
 }
 
 // evictGenerationLocked removes the V2 manifest + its paired Content
-// UCAN + the paired Authority UCAN sidecar for a single genID. The
-// UCAN files may not exist (delegation source / content minter unset
-// for that generation); RemoveFile on a missing path is a silent
-// no-op. Caller must hold r.mu.
+// UCAN for a single genID. The Content UCAN may not exist (content
+// minter unset for that generation); RemoveFile on a missing path is a
+// silent no-op. Caller must hold r.mu.
 //
-// Only the per-generation artefacts (.toml + .ucan + .bin + their
-// .torrent sidecars) are removed here. Unseeding orphan snapshot files
-// is done by evictInvalidLocked once the full set of evictions for
-// this Publish is known.
+// The Authority UCAN sidecar is deliberately NOT removed here — it is
+// content-addressed and shared across generations, so evicting one
+// generation must not delete an Authority UCAN another generation (or a
+// future republish) still references. Authority UCANs are long-lived;
+// they are not garbage-collected by the rolling buffer.
+//
+// Unseeding orphan snapshot files is done by evictInvalidLocked once
+// the full set of evictions for this Publish is known.
 func (r *RollingV2Publisher) evictGenerationLocked(enrFP, genID string) {
 	tomlName := ChainTomlV2FileName(enrFP, genID)
-	authorityUCANName := ChainUCANFileName(enrFP, genID)
 	contentUCANName := ChainV2ContentUCANFileName(enrFP, genID)
 	if r.downloader != nil {
 		r.downloader.DropTorrentByName(tomlName)
-		r.downloader.DropTorrentByName(authorityUCANName)
 		r.downloader.DropTorrentByName(contentUCANName)
 	}
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, tomlName+".torrent"))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, authorityUCANName))
-	_ = dir.RemoveFile(filepath.Join(r.snapDir, authorityUCANName+".torrent"))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName))
 	_ = dir.RemoveFile(filepath.Join(r.snapDir, contentUCANName+".torrent"))
 }
 
-// ResumeSeeding re-registers every retained generation's artefacts —
-// the chain.v2.<fp>.<genID>.toml manifest plus any Content UCAN
-// (.ucan) and Authority UCAN (.bin) sidecars on disk — with the
-// downloader, so a restarted publisher keeps seeding the generations
-// NewRollingV2Publisher recovered from disk.
+// ResumeSeeding re-registers, with the downloader, every retained
+// generation's artefacts — the chain.v2.<fp>.<genID>.toml manifest plus
+// any Content UCAN (.ucan) sidecar — AND every Authority UCAN
+// (chain.ucan.authority.<fp>.<rev>.bin) on disk, so a restarted
+// publisher keeps seeding the generations NewRollingV2Publisher
+// recovered from disk. Authority UCANs are re-seeded unconditionally:
+// they are content-addressed and shared across generations, so they are
+// not gated on the per-generation retained set.
 //
 // NewRollingV2Publisher's directory scan rebuilds history but does NOT
 // seed, and the downloader's general AddTorrentsFromDisk pass
@@ -804,25 +818,35 @@ func (r *RollingV2Publisher) ResumeSeeding(ctx context.Context) error {
 		if e.IsDir() {
 			continue
 		}
-		genID, ok := generationArtefactGenID(e.Name())
+		name := e.Name()
+		if _, _, ok := ParseChainAuthorityUCANFileName(name); ok {
+			if err := r.downloader.AddNewSeedableFile(ctx, name); err != nil {
+				errs = append(errs, fmt.Errorf("re-seed %s: %w", name, err))
+			}
+			continue
+		}
+		genID, ok := generationArtefactGenID(name)
 		if !ok {
 			continue
 		}
 		if _, kept := retained[genID]; !kept {
 			continue
 		}
-		if err := r.downloader.AddNewSeedableFile(ctx, e.Name()); err != nil {
-			errs = append(errs, fmt.Errorf("re-seed %s: %w", e.Name(), err))
+		if err := r.downloader.AddNewSeedableFile(ctx, name); err != nil {
+			errs = append(errs, fmt.Errorf("re-seed %s: %w", name, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
 // Cleanup removes any per-generation artefact (chain.v2.<genID>.toml,
-// its Content UCAN .ucan, the Authority UCAN chain.ucan.<genID>.bin,
-// and their .torrent sidecars) in snapDir whose genID is not in the
-// current history. Useful after a crash mid-publish (file written but
-// the genID never reached history). Idempotent.
+// its Content UCAN .ucan, and their .torrent sidecars) in snapDir whose
+// genID is not in the current history. Useful after a crash mid-publish
+// (file written but the genID never reached history). Idempotent.
+//
+// Authority UCAN sidecars (chain.ucan.authority.<fp>.<rev>.bin) are not
+// per-generation and are left untouched — they are long-lived and
+// content-deduped; the rolling buffer does not garbage-collect them.
 //
 // The current generations stay registered in the torrent client; only
 // orphans are removed.

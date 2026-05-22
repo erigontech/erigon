@@ -64,8 +64,9 @@ type AutoPublishOpts struct {
 	Publisher *dl.RollingV2Publisher
 
 	// DelegationSource, when non-nil, is wired onto the publisher so
-	// every Publish() emits a paired chain.ucan.<seq>.bin sidecar and
-	// stamps the V2 manifest's AuthorityUCANHash. Production callers populate
+	// every Publish() writes the Authority UCAN sidecar
+	// (chain.ucan.authority.<fp>.<rev>.bin) and stamps the V2 manifest's
+	// AuthorityUCANHash. Production callers populate
 	// this with snapshotauth.LoadOrGenerateDelegation(...) result —
 	// see node/components/snapshotauth.LoadOrGenerateDelegation for
 	// the JWT-style default-path resolution model.

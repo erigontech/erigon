@@ -29,19 +29,19 @@ import (
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// listUCANGenerations returns the genIDs of chain.ucan.<genID>.bin
-// files in snapDir (unordered — genID is opaque, not a counter).
-func listUCANGenerations(t *testing.T, snapDir string) []string {
+// listAuthorityUCANRevs returns the content-addressed <rev>s of
+// chain.ucan.authority.<fp>.<rev>.bin files in snapDir (unordered).
+func listAuthorityUCANRevs(t *testing.T, snapDir string) []string {
 	t.Helper()
 	entries, err := os.ReadDir(snapDir)
 	require.NoError(t, err)
-	var genIDs []string
+	var revs []string
 	for _, e := range entries {
-		if _, genID, ok := ParseChainUCANFileName(e.Name()); ok {
-			genIDs = append(genIDs, genID)
+		if _, rev, ok := ParseChainAuthorityUCANFileName(e.Name()); ok {
+			revs = append(revs, rev)
 		}
 	}
-	return genIDs
+	return revs
 }
 
 // TestRollingV2Publisher_NoDelegationSourceNoUCAN confirms the default
@@ -57,8 +57,8 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, listV2Generations(t, snapDir), 1)
-	require.Empty(t, listUCANGenerations(t, snapDir),
-		"no delegation source → no UCAN sidecar")
+	require.Empty(t, listAuthorityUCANRevs(t, snapDir),
+		"no delegation source → no Authority UCAN sidecar")
 
 	// The on-disk V2 manifest must carry an empty AuthorityUCANHash field.
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
@@ -69,8 +69,8 @@ func TestRollingV2Publisher_NoDelegationSourceNoUCAN(t *testing.T) {
 }
 
 // TestRollingV2Publisher_DelegationSourceWritesPair confirms that with
-// a delegation source configured, every Publish() writes the paired
-// (V2, UCAN) generation and the V2's AuthorityUCANHash matches the UCAN
+// a delegation source configured, Publish() writes the content-addressed
+// Authority UCAN sidecar and the V2's AuthorityUCANHash matches the UCAN
 // torrent's infohash.
 func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	snapDir := t.TempDir()
@@ -78,9 +78,6 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	// Distinctive bytes so the UCAN torrent has a stable, comparable
-	// infohash. Real UCANs are CBOR; we just need bytes-on-disk for
-	// the publisher mechanics.
 	ucanBytes := []byte("delegation-payload-v1")
 	pub.SetDelegationSource(func() ([]byte, error) { return ucanBytes, nil })
 
@@ -88,16 +85,19 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	require.NoError(t, err)
 	genID := pub.History()[0]
 
+	rev := genIDFromContent(ucanBytes)
+	ucanName := ChainAuthorityUCANFileName(testENRFP, rev)
+
 	require.Len(t, listV2Generations(t, snapDir), 1)
-	require.ElementsMatch(t, []string{genID}, listUCANGenerations(t, snapDir))
+	require.ElementsMatch(t, []string{rev}, listAuthorityUCANRevs(t, snapDir))
 
 	// UCAN file content matches what the source returned.
-	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)))
+	gotUCAN, err := os.ReadFile(filepath.Join(snapDir, ucanName))
 	require.NoError(t, err)
 	require.Equal(t, ucanBytes, gotUCAN)
 
 	// UCAN .torrent exists alongside.
-	_, err = os.Stat(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)+".torrent"))
+	_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
 	require.NoError(t, err)
 
 	// V2 manifest's AuthorityUCANHash matches the UCAN torrent's infohash.
@@ -108,7 +108,7 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 	require.NotEmpty(t, manifest.AuthorityUCANHash)
 
 	tf := NewAtomicTorrentFS(snapDir)
-	ucanSpec, err := tf.LoadByName(ChainUCANFileName(testENRFP, genID) + ".torrent")
+	ucanSpec, err := tf.LoadByName(ucanName + ".torrent")
 	require.NoError(t, err)
 	require.Equal(t, hex.EncodeToString(ucanSpec.InfoHash[:]), manifest.AuthorityUCANHash,
 		"V2.AuthorityUCANHash must equal hex(UCAN torrent infohash)")
@@ -116,7 +116,8 @@ func TestRollingV2Publisher_DelegationSourceWritesPair(t *testing.T) {
 
 // TestRollingV2Publisher_RotatingDelegation confirms the source is
 // consulted on every Publish — operator can rotate UCANs without
-// restarting the publisher.
+// restarting the publisher — and each distinct delegation lands under
+// its own content-addressed <rev>.
 func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
@@ -135,39 +136,89 @@ func TestRollingV2Publisher_RotatingDelegation(t *testing.T) {
 	}
 	require.Equal(t, 3, calls, "delegation source consulted once per Publish")
 
-	// Each generation's UCAN bytes match the rotation. History is in
-	// publish order, so History()[i] is the i-th generation's genID.
-	genIDs := pub.History()
-	require.Len(t, genIDs, 3)
-	for i, genID := range genIDs {
-		got, err := os.ReadFile(filepath.Join(snapDir, ChainUCANFileName(testENRFP, genID)))
-		require.NoError(t, err, "read gen %d UCAN", i)
-		require.Equal(t, []byte(fmt.Sprintf("ucan-gen-%d", i+1)), got,
-			"gen %d UCAN content reflects the rotation", i)
+	// Three distinct delegations → three Authority UCAN files, each at
+	// the <rev> derived from its own content.
+	require.Len(t, listAuthorityUCANRevs(t, snapDir), 3)
+	for i := 0; i < 3; i++ {
+		content := []byte(fmt.Sprintf("ucan-gen-%d", i+1))
+		got, err := os.ReadFile(filepath.Join(snapDir, ChainAuthorityUCANFileName(testENRFP, genIDFromContent(content))))
+		require.NoError(t, err, "read rotation %d UCAN", i)
+		require.Equal(t, content, got, "rotation %d UCAN content", i)
 	}
 }
 
-// TestRollingV2Publisher_UCANEvictedWithGeneration confirms eviction
-// removes both the V2 file and its paired UCAN sidecar (plus their
-// .torrent metafiles) when a generation goes invalid.
-func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
+// TestRollingV2Publisher_AuthorityUCANStableAcrossGenerations is the
+// stability guarantee: republishing with an unchanged delegation reuses
+// the exact same Authority UCAN file, torrent, and AuthorityUCANHash —
+// so a generation bump does not churn the UCAN advertisement.
+func TestRollingV2Publisher_AuthorityUCANStableAcrossGenerations(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
 	pub.SetENRFingerprint(testENRFP)
 
-	pub.SetDelegationSource(func() ([]byte, error) {
-		return []byte("u"), nil
-	})
+	pub.SetDelegationSource(func() ([]byte, error) { return []byte("stable-delegation"), nil })
 
-	// gen 0: lists accounts.0-1024 + storage.0-1024 (the default
-	// rolling test inventory).
+	// gen 0: the default inventory.
+	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x10), 0, nil)
+	require.NoError(t, err)
+
+	// gen 1: a strict superset (gen 0 stays valid → retained), same
+	// delegation.
+	inv1 := rollingTestInventory(t, 0x10)
+	inv1.AddFile(&snapshotinv.FileEntry{
+		Domain:      snapshotinv.DomainAccounts,
+		FromStep:    1024,
+		ToStep:      2048,
+		Name:        "v1.0-accounts.1024-2048.kv",
+		TorrentHash: [20]byte{0x10, 0xcc},
+		Local:       true,
+		Trust:       snapshotinv.TrustVerified,
+	})
+	_, err = pub.Publish(context.Background(), inv1, 0, nil)
+	require.NoError(t, err)
+
+	gens := pub.History()
+	require.Len(t, gens, 2, "both generations retained")
+
+	// One Authority UCAN file shared by both generations.
+	require.Len(t, listAuthorityUCANRevs(t, snapDir), 1,
+		"unchanged delegation must not produce a second Authority UCAN file")
+
+	// Both manifests carry the identical AuthorityUCANHash.
+	var hashes []string
+	for _, g := range gens {
+		tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, g)))
+		require.NoError(t, err)
+		manifest, err := ParseV2(tomlBytes)
+		require.NoError(t, err)
+		require.NotEmpty(t, manifest.AuthorityUCANHash)
+		hashes = append(hashes, manifest.AuthorityUCANHash)
+	}
+	require.Equal(t, hashes[0], hashes[1],
+		"AuthorityUCANHash must be stable across generations with an unchanged delegation")
+}
+
+// TestRollingV2Publisher_AuthorityUCANSurvivesEviction confirms that
+// evicting an invalid generation does NOT delete its Authority UCAN
+// sidecar — Authority UCANs are content-addressed and not per-generation.
+func TestRollingV2Publisher_AuthorityUCANSurvivesEviction(t *testing.T) {
+	snapDir := t.TempDir()
+	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
+	require.NoError(t, err)
+	pub.SetENRFingerprint(testENRFP)
+
+	ucan := []byte("u0")
+	pub.SetDelegationSource(func() ([]byte, error) { return ucan, nil })
+
+	// gen 0: accounts.0-1024 + storage.0-1024, delegation u0.
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x20), 0, nil)
 	require.NoError(t, err)
-	gen0ID := pub.History()[0]
+	gen0Rev := genIDFromContent([]byte("u0"))
 
-	// gen 1: retires both names — gen 0 is invalid, must be evicted
-	// along with its UCAN sidecar.
+	// gen 1: retires both names (gen 0 becomes invalid → evicted) under a
+	// rotated delegation u1.
+	ucan = []byte("u1")
 	inv2 := snapshotinv.NewInventory()
 	inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
@@ -180,22 +231,24 @@ func TestRollingV2Publisher_UCANEvictedWithGeneration(t *testing.T) {
 	})
 	_, err = pub.Publish(context.Background(), inv2, 0, nil)
 	require.NoError(t, err)
+	gen1Rev := genIDFromContent([]byte("u1"))
 
-	require.Len(t, listV2Generations(t, snapDir), 1)
-	require.Len(t, listUCANGenerations(t, snapDir), 1)
+	require.Len(t, listV2Generations(t, snapDir), 1, "gen 0 evicted")
 
-	// Evicted UCAN + .torrent metafiles are gone too.
-	ucanName := ChainUCANFileName(testENRFP, gen0ID)
-	_, err = os.Stat(filepath.Join(snapDir, ucanName))
-	require.True(t, os.IsNotExist(err), "evicted UCAN %s must be gone", ucanName)
-	_, err = os.Stat(filepath.Join(snapDir, ucanName+".torrent"))
-	require.True(t, os.IsNotExist(err), "evicted UCAN .torrent %s must be gone", ucanName)
+	// gen 0's Authority UCAN survives its generation's eviction, and
+	// gen 1's is present too.
+	require.ElementsMatch(t, []string{gen0Rev, gen1Rev}, listAuthorityUCANRevs(t, snapDir),
+		"an evicted generation's Authority UCAN must not be deleted")
+	for _, rev := range []string{gen0Rev, gen1Rev} {
+		_, err = os.Stat(filepath.Join(snapDir, ChainAuthorityUCANFileName(testENRFP, rev)))
+		require.NoError(t, err, "Authority UCAN %s must remain on disk", rev)
+	}
 }
 
-// TestRollingV2Publisher_CleanupHandlesOrphanUCAN confirms Cleanup()
-// also removes orphan chain.ucan.<genID>.bin files (and their torrents)
-// for genIDs not in current history.
-func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
+// TestRollingV2Publisher_CleanupLeavesAuthorityUCAN confirms Cleanup()
+// does not garbage-collect Authority UCAN sidecars — they are long-lived
+// and content-deduped, not per-generation orphans.
+func TestRollingV2Publisher_CleanupLeavesAuthorityUCAN(t *testing.T) {
 	snapDir := t.TempDir()
 	pub, err := NewRollingV2Publisher(snapDir, NewAtomicTorrentFS(snapDir), nil)
 	require.NoError(t, err)
@@ -205,18 +258,17 @@ func TestRollingV2Publisher_CleanupHandlesOrphanUCAN(t *testing.T) {
 	_, err = pub.Publish(context.Background(), rollingTestInventory(t, 0x30), 0, nil)
 	require.NoError(t, err)
 
-	// Drop a stray orphan pair under a valid-shape genID that no
-	// generation used (a hypothetical crash mid-publish).
-	orphanUCAN := ChainUCANFileName(testENRFP, "ffffffffffffffff")
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanUCAN), []byte("orphan"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(snapDir, orphanUCAN+".torrent"), []byte{}, 0o644))
+	// A stray Authority UCAN under a valid-shape <rev> that no generation
+	// references — Cleanup must leave it (Authority UCANs are not GC'd).
+	stray := ChainAuthorityUCANFileName(testENRFP, "ffffffffffffffff")
+	require.NoError(t, os.WriteFile(filepath.Join(snapDir, stray), []byte("stray"), 0o644))
 
 	require.NoError(t, pub.Cleanup())
 
-	require.Len(t, listUCANGenerations(t, snapDir), 1,
-		"Cleanup must drop orphan UCAN genIDs not in history")
-	_, err = os.Stat(filepath.Join(snapDir, orphanUCAN+".torrent"))
-	require.True(t, os.IsNotExist(err), "orphan UCAN .torrent must be cleaned up")
+	_, err = os.Stat(filepath.Join(snapDir, stray))
+	require.NoError(t, err, "Cleanup must not remove Authority UCAN sidecars")
+	require.Len(t, listAuthorityUCANRevs(t, snapDir), 2,
+		"both the published and the stray Authority UCAN remain")
 }
 
 // TestRollingV2Publisher_EmptyDelegationSkipsPair confirms a delegation
@@ -234,7 +286,7 @@ func TestRollingV2Publisher_EmptyDelegationSkipsPair(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Len(t, listV2Generations(t, snapDir), 1)
-	require.Empty(t, listUCANGenerations(t, snapDir))
+	require.Empty(t, listAuthorityUCANRevs(t, snapDir))
 
 	tomlBytes, err := os.ReadFile(filepath.Join(snapDir, ChainTomlV2FileName(testENRFP, pub.History()[0])))
 	require.NoError(t, err)
@@ -262,5 +314,5 @@ func TestRollingV2Publisher_DelegationErrorAbortsPublish(t *testing.T) {
 
 	// No artefacts written for the failed generation.
 	require.Empty(t, listV2Generations(t, snapDir))
-	require.Empty(t, listUCANGenerations(t, snapDir))
+	require.Empty(t, listAuthorityUCANRevs(t, snapDir))
 }
