@@ -13,7 +13,6 @@ import (
 func TestNewRPCTransaction_NullSignature(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
 
-	// v=r=s=0: unsigned transaction — V/R/S must be nil (JSON null), compatible with geth
 	tx := &types.LegacyTx{
 		CommonTx: types.CommonTx{
 			Nonce:    1,
@@ -47,7 +46,6 @@ func TestNewRPCTransaction_SignedLegacy(t *testing.T) {
 }
 
 func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
-	// yParity=0, r≠0, s≠0: valid EIP-1559 transaction — V must be "0x0", not nil
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	chainID := uint256.NewInt(1)
 
@@ -67,4 +65,48 @@ func TestNewRPCTransaction_EIP1559_YParityZero(t *testing.T) {
 	require.NotNil(t, result.R)
 	require.NotNil(t, result.S)
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
+}
+
+func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	chainID := uint256.NewInt(1)
+
+	tx := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce:    0,
+			GasLimit: 21000,
+			To:       &to,
+		},
+		ChainID: *chainID,
+	}
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	require.NotNil(t, result.V)
+	require.NotNil(t, result.R)
+	require.NotNil(t, result.S)
+	require.EqualValues(t, 0, result.V.ToInt().Int64())
+	require.EqualValues(t, 0, result.R.ToInt().Int64())
+	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	chainID := uint256.NewInt(1)
+
+	tx := &types.AccessListTx{
+		LegacyTx: types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    0,
+				GasLimit: 21000,
+				To:       &to,
+			},
+		},
+		ChainID: *chainID,
+	}
+	result := NewRPCTransaction(tx, common.Hash{}, 0, 0, 0, nil)
+	require.NotNil(t, result.V)
+	require.NotNil(t, result.R)
+	require.NotNil(t, result.S)
+	require.EqualValues(t, 0, result.V.ToInt().Int64())
+	require.EqualValues(t, 0, result.R.ToInt().Int64())
+	require.EqualValues(t, 0, result.S.ToInt().Int64())
 }
