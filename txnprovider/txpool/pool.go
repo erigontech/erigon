@@ -368,12 +368,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			"err", err)
 	}()
 
-	if assert.Enable {
-		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
-			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
-		}
-	}
-
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	if baseFeeChanged {
 		var pendingBaseFee256 uint256.Int

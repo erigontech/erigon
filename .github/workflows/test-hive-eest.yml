@@ -56,17 +56,24 @@ jobs:
             shard: rlp
             pool-size: 0
             fixtures-tarball: eest_stable
-          # Glamsterdam devnet: BAL EIPs against devnet fixtures
           - sim: consume-engine
-            sim-limit: ".*(8024|7708|7778|7843|7928|7954|8037).*"
+            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
             shard: glamsterdam-devnet
             pool-size: 24
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            # test_block_regular_gas_limit: error classification mismatch (GAS_USED_OVERFLOW vs GAS_ALLOWANCE_EXCEEDED)
-            # transitioning to bal-devnet-4
-            max-failures: 579
+            # EIP-7928 test_invalid_{pre,post}_fork_block_*_bal_hash_field
+            # expect -32602 InvalidParams (wrong test expectations), but the
+            # requests are well-formed V4/V5 newPayload — the only divergence
+            # is a blockHash computed over a wrong-fork-schema header. Spec
+            # convention is InvalidStatus + INVALID_BLOCK_HASH, which is what
+            # erigon returns. Testing team has been notified to rectify the
+            # expected exceptions.
+            # Two additional tests have been observed flaky in the merge queue:
+            #   - EIP-7954 test_max_initcode_size[fork_Amsterdam-...-over_max]
+            #   - EIP-7928 test_bal_invalid_extraneous_entries (various params)
+            max-failures: 4
     steps:
       - name: Clean docker system
         run: |

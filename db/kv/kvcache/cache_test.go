@@ -121,7 +121,6 @@ func TestEviction(t *testing.T) {
 
 	var id uint64
 	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
 		id = tx.ViewID()
 		var versionID [8]byte
 		binary.BigEndian.PutUint64(versionID[:], id)
@@ -154,7 +153,6 @@ func TestEviction(t *testing.T) {
 	require.Equal(1, c.stateEvict.Len())
 	require.Equal(c.roots[c.latestStateVersionID].cache.Len(), c.stateEvict.Len())
 	_ = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		_ = tx.Put(kv.PlainState, k1[:], []byte{1})
 		id = tx.ViewID()
 		cacheView, _ := c.View(ctx, tx)
 		var versionID [8]byte

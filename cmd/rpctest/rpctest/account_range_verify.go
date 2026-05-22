@@ -59,7 +59,9 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		return kv.TableCfg{accountDumpBucket: {}}
 	}
 	resultsKV := mdbx.New(dbcfg.ChainDB, logger).Path(tmpDataDir).WithTableCfg(bucketsCfg).MustOpen()
+	defer resultsKV.Close()
 	gethKV := mdbx.New(dbcfg.ChainDB, logger).Path(gethDataDir).WithTableCfg(bucketsCfg).MustOpen()
+	defer gethKV.Close()
 
 	var client = &http.Client{
 		Timeout: time.Minute * 60,

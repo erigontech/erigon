@@ -444,7 +444,18 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	case MVReadResultDependency:
 		valid = VersionInvalid
 	case MVReadResultNone:
-		if source != StorageRead {
+		if source == MapRead && !recursive &&
+			(path == BalancePath || path == NoncePath || path == CodeHashPath) {
+			// The recording side (versionedRead, MVReadResultNone branch) folds
+			// a sub-field read that has no dedicated versionMap cell onto the
+			// account record: it stamps the read with AddressPath's source and
+			// version. A created account, for example, writes AddressPath but
+			// not NoncePath, so a later tx's nonce read carries (AddressPath
+			// tx, MapRead). Mirror that fold here — the read is valid iff
+			// AddressPath at the recorded version still holds.
+			valid = vm.validateReadImpl(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+				version, nil, checkVersion, traceInvalid, tracePrefix, true)
+		} else if source != StorageRead {
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {

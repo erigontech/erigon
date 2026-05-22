@@ -1779,25 +1779,17 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				}
 			}
 
-			// Revival check: in the parallel executor a prior-tx SD's
-			// SelfDestructPath=true is undone by a later-tx Balance/Nonce/
-			// CodeHash write at a STRICTLY higher txIndex (this matches
-			// versionedStateReader.ReadAccountData's revival semantics —
-			// which is exactly why readAccount came back non-nil even though
-			// SelfDestructPath=true is present). Treat such an account as
-			// not-destructed so its current balance carries through into the
-			// new stateObject (matters for value-transfer-recreate plus
-			// later CREATE2: e.g. EEST test_recreate same-block scenarios).
-			if destructed && sdb.versionMap != nil {
-				if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
-					sdIdx := res.DepIdx()
-					for _, path := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
-						if hi, ok := sdb.versionMap.LatestTxIndex(addr, path, accounts.NilKey, sdb.txIndex); ok && hi > sdIdx {
-							destructed = false
-							break
-						}
-					}
-				}
+			// Honour same-block revival (issue #21319): a prior tx's
+			// self-destruct is overridden by a later tx that revived the
+			// account to a non-empty state — a value transfer leaving balance,
+			// nonce or code behind. A value-0 no-op transfer that leaves the
+			// account empty does NOT revive it (EIP-161 removes it again).
+			// account is the version-map-refreshed record, so its emptiness is
+			// the authoritative revival test. Without this, CreateAccount sees
+			// a revived account as still destroyed, keeps previous.selfdestructed
+			// set, and skips the balance carry below — losing the revived funds.
+			if destructed && sdb.versionMap != nil && !account.Empty() {
+				destructed = false
 			}
 
 			if previous == nil {
@@ -2389,41 +2381,6 @@ func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 	}
 }
 
-// SnapshotVersionedReadKeys returns the current set of read keys for addr.
-// Used with MarkNewReadsInternal to mark only reads added after the snapshot,
-// preserving pre-existing legitimate reads.
-func (sdb *IntraBlockState) SnapshotVersionedReadKeys(addr accounts.Address) map[AccountKey]struct{} {
-	if sdb.versionedReads == nil {
-		return nil
-	}
-	reads := sdb.versionedReads[addr]
-	if len(reads) == 0 {
-		return nil
-	}
-	snapshot := make(map[AccountKey]struct{}, len(reads))
-	for k := range reads {
-		snapshot[k] = struct{}{}
-	}
-	return snapshot
-}
-
-// MarkNewReadsInternal marks as internal only the reads for addr that were
-// added after the given snapshot. Use this when gas-calculation-only reads
-// were recorded on top of earlier legitimate reads — the legitimate ones
-// must remain non-internal so they appear in the block access list.
-func (sdb *IntraBlockState) MarkNewReadsInternal(addr accounts.Address, before map[AccountKey]struct{}) {
-	if sdb.versionedReads == nil {
-		return
-	}
-	for key, vr := range sdb.versionedReads[addr] {
-		if _, existed := before[key]; existed {
-			continue
-		}
-		vr.internal = true
-		sdb.versionedReads[addr][key] = vr
-	}
-}
-
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
@@ -2474,6 +2431,17 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 
 func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
 	sdb.MarkAddressAccess(addr, true)
+	if source == WriteSetRead {
+		// A synthetic read satisfied by the tx's own earlier write carries
+		// no cross-transaction dependency — it is internally consistent by
+		// construction. Recording it in the readSet would make the validator
+		// re-check it against the version map (which, floored below the tx's
+		// own writes, returns None) and wrongly invalidate the tx — e.g. a
+		// genesis alloc whose Constructor CREATEs the pre-funded account, so
+		// CreateAccount's synthetic BalancePath read sees its own funding
+		// write (issue #21319).
+		return
+	}
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}
