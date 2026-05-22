@@ -266,3 +266,21 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		downloader: d,
 	}
 }
+
+func TestShouldEmitV2Generation(t *testing.T) {
+	var zero [20]byte
+	set := [20]byte{1}
+
+	// V1 content changed → always emit, regardless of prior V2 state.
+	assert.True(t, shouldEmitV2Generation(true, zero))
+	assert.True(t, shouldEmitV2Generation(true, set))
+
+	// V1 unchanged but no V2 published yet → still emit. This is the
+	// first-publish case: on a restart the V1 manifest regenerates
+	// byte-identical, so gating on contentChanged alone would never
+	// produce an initial chain.v2.<seq>.toml.
+	assert.True(t, shouldEmitV2Generation(false, zero))
+
+	// V1 unchanged and a V2 generation already exists → no-op republish.
+	assert.False(t, shouldEmitV2Generation(false, set))
+}

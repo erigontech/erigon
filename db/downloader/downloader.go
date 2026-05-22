@@ -722,25 +722,40 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 	// info-hash so the ENR doesn't drift back to V1 (PublishChainToml
 	// above unconditionally pointed enrUpdater at V1).
 	if d.inventory != nil {
-		if contentChanged {
+		d.lock.RLock()
+		lastV2 := d.lastV2InfoHash
+		updater := d.enrUpdater
+		d.lock.RUnlock()
+		if shouldEmitV2Generation(contentChanged, lastV2) {
 			if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
 				d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
 			}
-		} else {
-			d.lock.RLock()
-			lastV2 := d.lastV2InfoHash
-			updater := d.enrUpdater
-			d.lock.RUnlock()
-			if updater != nil && lastV2 != ([20]byte{}) {
-				updater(enr.ChainToml{
-					AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
-					KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
-					InfoHash:            lastV2,
-				})
-			}
+		} else if updater != nil {
+			// No-op republish: re-assert the last V2 info-hash so the ENR
+			// doesn't drift back to V1 (PublishChainToml above
+			// unconditionally pointed enrUpdater at V1).
+			updater(enr.ChainToml{
+				AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
+				KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
+				InfoHash:            lastV2,
+			})
 		}
 	}
 	return nil
+}
+
+// shouldEmitV2Generation reports whether publishLocalChainTomlInner
+// should emit a fresh chain.v2.<seq>.toml generation.
+//
+// True when the V1 manifest content changed (the normal case), OR when
+// no V2 manifest has been published yet (lastV2InfoHash is the zero
+// value). The second clause is load-bearing: the first publish after
+// the first-publish gate opens regenerates a byte-identical V1 manifest
+// on a restart — the same files on disk produce identical output — so
+// gating the first V2 publish on V1 contentChanged alone would never
+// produce an initial chain.v2.<seq>.toml.
+func shouldEmitV2Generation(v1ContentChanged bool, lastV2InfoHash [20]byte) bool {
+	return v1ContentChanged || lastV2InfoHash == ([20]byte{})
 }
 
 // authoritativeBlocksFromCfg returns the chain config's ExpectBlocks
