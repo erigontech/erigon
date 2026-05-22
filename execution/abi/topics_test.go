@@ -22,6 +22,7 @@ package abi
 import (
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -402,6 +403,50 @@ func TestParseTopics(t *testing.T) {
 	}
 }
 
+func TestParseTopicsInvalidOutput(t *testing.T) {
+	int8Type, _ := NewType("int8", "", nil)
+	fields := Arguments{Argument{
+		Name:    "int8Value",
+		Type:    int8Type,
+		Indexed: true,
+	}}
+	topics := []common.Hash{{0}}
+
+	tests := []struct {
+		name    string
+		out     any
+		wantErr string
+	}{
+		{
+			name:    "missing struct field",
+			out:     &struct{ Other int8 }{},
+			wantErr: "can't be found",
+		},
+		{
+			name:    "incompatible struct field type",
+			out:     &struct{ Int8Value string }{},
+			wantErr: "cannot unmarshal int8 in to string",
+		},
+		{
+			name:    "non-pointer output",
+			out:     int8Struct{},
+			wantErr: "cannot unmarshal indexed event fields",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ParseTopics(tt.out, fields, topics)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseTopicsIntoMap(t *testing.T) {
 	tests := setupTopicsTests()
 
@@ -416,5 +461,21 @@ func TestParseTopicsIntoMap(t *testing.T) {
 				t.Errorf("parseTopicsIntoMap() = %v, want %v", outMap, resultMap)
 			}
 		})
+	}
+}
+
+func TestParseTopicsIntoMapNilMap(t *testing.T) {
+	int8Type, _ := NewType("int8", "", nil)
+	fields := Arguments{Argument{
+		Name:    "int8Value",
+		Type:    int8Type,
+		Indexed: true,
+	}}
+	err := ParseTopicsIntoMap(nil, fields, []common.Hash{{0}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if err.Error() != "abi: cannot unpack into a nil map" {
+		t.Fatalf("error = %v", err)
 	}
 }
