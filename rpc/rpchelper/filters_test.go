@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -967,5 +968,74 @@ func TestFilters_LateAppliedAckDoesNotSatisfyNextUpdate(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected second update to finish after matching applied ack")
+	}
+}
+
+// TestFilters_SubscribeLogsStaysActiveOnSendError checks that when the remote
+// filter-send fails (e.g. timeout waiting for ACK), the subscription channel
+// is NOT closed and logs are still distributed locally. Before the fix,
+// the failed send caused removeLogsFilter to be called, which closed the
+// channel; callers received a dead channel with no error.
+func TestFilters_SubscribeLogsStaysActiveOnSendError(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.logsRequestor.Store(func(_ *remoteproto.LogsFilterRequest) error {
+		return errors.New("injected send error")
+	})
+
+	ch, _ := f.SubscribeLogs(1, filters.FilterCriteria{})
+
+	// Channel must be open immediately after subscribe.
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			t.Fatal("SubscribeLogs returned a closed channel after a filter-send error")
+		}
+	default:
+	}
+
+	// Local distribution must still work even though the remote filter was not
+	// applied — the subscription is still registered in the aggregator.
+	f.OnNewLogs(createLog())
+	select {
+	case v := <-ch:
+		if v == nil {
+			t.Fatal("received nil log from subscription that should still be active")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected a log on the subscription channel, got nothing")
+	}
+}
+
+// TestFilters_SubscribeReceiptsStaysActiveOnSendError is the receipts analogue
+// of TestFilters_SubscribeLogsStaysActiveOnSendError.
+func TestFilters_SubscribeReceiptsStaysActiveOnSendError(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+	f.receiptsRequestor.Store(func(_ *remoteproto.ReceiptsFilterRequest) error {
+		return errors.New("injected send error")
+	})
+
+	ch, _ := f.SubscribeReceipts(1, filters.ReceiptsFilterCriteria{TransactionHashes: []common.Hash{}})
+
+	select {
+	case _, ok := <-ch:
+		if !ok {
+			t.Fatal("SubscribeReceipts returned a closed channel after a filter-send error")
+		}
+	default:
+	}
+
+	// Local distribution must still work.
+	f.OnReceipts(createReceipt(common.Hash{}))
+	select {
+	case v := <-ch:
+		if v == nil {
+			t.Fatal("received nil receipt from subscription that should still be active")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected a receipt on the subscription channel, got nothing")
 	}
 }
