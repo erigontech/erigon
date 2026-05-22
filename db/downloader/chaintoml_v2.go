@@ -27,52 +27,100 @@ import (
 
 // ChainTomlVersion is the format version for chain.toml.
 // V1 (implicit): flat key-value map of filename → torrent hash.
-// V2 (explicit): versioned format with [blocks], [meta], [domains.*] sections.
+// V2 (explicit): versioned format with [blocks], [meta], [salt],
+// [domains.*], [[caplin]] sections.
 const ChainTomlV2Version = 2
+
+// Wire-level kind names for DomainFileEntry.Kind. The on-disk format
+// always uses these explicit strings; an empty Kind from an older
+// publisher is normalized to KindKVName by the parser.
+const (
+	KindKVName      = "kv"
+	KindHistoryName = "history"
+	KindIdxName     = "idx"
+)
 
 // ChainTomlV2 is the structured representation of a V2 chain.toml manifest.
 type ChainTomlV2 struct {
 	Version int `toml:"version"`
 
+	// UCANHash is the torrent infohash of the snapshotauth delegation
+	// attestation paired with this manifest generation
+	// (chain.ucan.<seq>.bin). Hex-encoded 20 bytes; empty when this
+	// node is not running with attestation. Verifiers configured with
+	// a non-nil TrustConfig MUST reject peers whose manifest carries
+	// no UCANHash; trust-everyone deployments ignore the field.
+	UCANHash string `toml:"ucan_hash,omitempty"`
+
 	// Block snapshot files — deterministic, all nodes produce identical files.
 	Blocks map[string]string `toml:"blocks,omitempty"`
 
-	// Metadata files (erigondb.toml, salt files).
+	// Chain-config metadata files (erigondb.toml). Single flat map.
 	Meta map[string]string `toml:"meta,omitempty"`
 
-	// Per-domain state snapshot sections.
+	// Hash-derivation salts (salt-blocks.txt, salt-state.txt). Separated
+	// from meta because semantics differ — salts feed the deterministic
+	// rebuild of accessors, meta is human-edited config.
+	Salt map[string]string `toml:"salt,omitempty"`
+
+	// Per-domain state snapshot sections (covers kv + history + idx kinds).
 	Domains map[string]*DomainManifest `toml:"domains,omitempty"`
+
+	// Caplin beacon archive files (caplin/v*.seg).
+	Caplin []CaplinFileEntry `toml:"caplin,omitempty"`
 }
 
 // DomainManifest describes the available files for a single state domain.
+// Files may be of mixed kind (kv, history, idx); coverage is computed
+// from the kv kind only — that's the canonical primary that defines the
+// domain's step coverage.
 type DomainManifest struct {
-	// Coverage is the [from, to) step range covered by all files combined.
+	// Coverage is the [from, to) step range covered by kv files. Other
+	// kinds align to the same ranges but coverage is reported on kv.
 	Coverage [2]uint64 `toml:"coverage"`
 
-	// Files lists the individual snapshot files with their step ranges, hashes, and trust.
+	// Files lists the individual snapshot files with their step ranges,
+	// kinds, hashes, and trust.
 	Files []DomainFileEntry `toml:"files,omitempty"`
 }
 
 // DomainFileEntry is a single file in a domain manifest.
 type DomainFileEntry struct {
-	Name  string    `toml:"name"`
+	Name string `toml:"name"`
+	// Range is the [from, to) step range this file covers.
 	Range [2]uint64 `toml:"range"`
-	Hash  string    `toml:"hash"`
-	Trust string    `toml:"trust"`
+	// Kind is "kv" (default when empty for back-compat), "history" (.v),
+	// or "idx" (.ef).
+	Kind  string `toml:"kind,omitempty"`
+	Hash  string `toml:"hash"`
+	Trust string `toml:"trust"`
+}
+
+// CaplinFileEntry is a single caplin beacon-archive file. Same shape as
+// the (currently flat-map) Blocks section, promoted to a typed list so
+// it can grow a Kind field if blob/state archives appear.
+type CaplinFileEntry struct {
+	Name  string `toml:"name"`
+	Hash  string `toml:"hash"`
+	Trust string `toml:"trust,omitempty"`
 }
 
 // GenerateV2 builds a V2 chain.toml from a snapshot inventory.
 //
-// Only files that pass the IsCanonical check are included in the domains section.
-// Non-canonical files (merge backlog) are excluded — they'll appear in a future
-// publication once merges catch up.
+// Domain files are filtered by canonicity (power-of-2 aligned, see
+// isCanonicalFile). Non-canonical files (merge backlog) are excluded —
+// they'll appear in a future publication once merges catch up. The
+// canonicity filter applies to every kind; a non-canonical .v won't be
+// advertised even if the matching .kv is canonical.
 //
-// Block snapshot files and metadata are included as-is (they're deterministic).
+// Block, caplin, meta, and salt files are emitted as-is (no canonicity
+// filter — their alignment is implicit).
 func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 	manifest := &ChainTomlV2{
 		Version: ChainTomlV2Version,
 		Blocks:  make(map[string]string),
 		Meta:    make(map[string]string),
+		Salt:    make(map[string]string),
 		Domains: make(map[string]*DomainManifest),
 	}
 
@@ -83,25 +131,46 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 		}
 	}
 
-	// Domain files — only canonical files.
+	// Meta files (chain config).
+	for _, f := range inv.MetaFiles() {
+		if f.TorrentHash != [20]byte{} {
+			manifest.Meta[f.Name] = fmt.Sprintf("%x", f.TorrentHash)
+		}
+	}
+
+	// Salt files (hash-derivation seeds).
+	for _, f := range inv.SaltFiles() {
+		if f.TorrentHash != [20]byte{} {
+			manifest.Salt[f.Name] = fmt.Sprintf("%x", f.TorrentHash)
+		}
+	}
+
+	// Caplin beacon archive — sorted by name for deterministic output.
+	caplin := inv.CaplinFiles()
+	sort.Slice(caplin, func(i, j int) bool { return caplin[i].Name < caplin[j].Name })
+	for _, f := range caplin {
+		if f.TorrentHash == [20]byte{} {
+			continue
+		}
+		manifest.Caplin = append(manifest.Caplin, CaplinFileEntry{
+			Name:  f.Name,
+			Hash:  fmt.Sprintf("%x", f.TorrentHash),
+			Trust: f.Trust.String(),
+		})
+	}
+
+	// Domain files — kv + history + idx, all canonical.
 	for _, domain := range inv.Domains() {
 		files := inv.LocalFiles(domain)
 		if len(files) == 0 {
 			continue
 		}
 
-		// Build the layout from local files and check canonicity.
-		var layout snapshotinv.StepRanges
-		for _, f := range files {
-			layout = append(layout, f.Range())
-		}
-		layout = layout.Normalize()
-
 		dm := &DomainManifest{}
 
 		// Only include files at canonical boundaries with a torrent hash.
-		// Coverage is computed from what's actually listed, not from all
-		// local files — avoids advertising coverage for uncanonical/unhashed files.
+		// Coverage is computed from kv files only — that's the canonical
+		// primary defining the domain's step coverage.
 		for _, f := range files {
 			r := f.Range()
 			if !isCanonicalFile(r) {
@@ -110,25 +179,51 @@ func GenerateV2(inv *snapshotinv.Inventory) *ChainTomlV2 {
 			if f.TorrentHash == [20]byte{} {
 				continue // no torrent hash yet
 			}
+			// Always emit an explicit kind so the on-disk file is
+			// unambiguous; the parser still tolerates an empty kind
+			// from older publishers (defaults it to "kv").
+			kind := string(f.Kind)
+			if kind == "" {
+				kind = KindKVName
+			}
 			dm.Files = append(dm.Files, DomainFileEntry{
 				Name:  f.Name,
 				Range: [2]uint64{r.From, r.To},
+				Kind:  kind,
 				Hash:  fmt.Sprintf("%x", f.TorrentHash),
 				Trust: f.Trust.String(),
 			})
 		}
 
-		// Sort files by range for deterministic output.
+		// Sort files deterministically: by range[0], then range[1], then kind.
+		// Mixing kinds with overlapping ranges (kv + history + idx all on
+		// [0, 128)) needs a tiebreak so the output is byte-stable.
 		sort.Slice(dm.Files, func(i, j int) bool {
-			return dm.Files[i].Range[0] < dm.Files[j].Range[0]
+			a, b := dm.Files[i], dm.Files[j]
+			if a.Range[0] != b.Range[0] {
+				return a.Range[0] < b.Range[0]
+			}
+			if a.Range[1] != b.Range[1] {
+				return a.Range[1] < b.Range[1]
+			}
+			return a.Kind < b.Kind
 		})
 
-		// Compute coverage from the published file list (not all local files).
-		if len(dm.Files) > 0 {
-			dm.Coverage = [2]uint64{
-				dm.Files[0].Range[0],
-				dm.Files[len(dm.Files)-1].Range[1],
+		// Coverage from kv-kind entries only.
+		var kvFiles []DomainFileEntry
+		for _, f := range dm.Files {
+			if f.Kind == "" || f.Kind == KindKVName {
+				kvFiles = append(kvFiles, f)
 			}
+		}
+		if len(kvFiles) > 0 {
+			dm.Coverage = [2]uint64{
+				kvFiles[0].Range[0],
+				kvFiles[len(kvFiles)-1].Range[1],
+			}
+		}
+
+		if len(dm.Files) > 0 {
 			manifest.Domains[string(domain)] = dm
 		}
 	}
@@ -165,6 +260,10 @@ func MarshalV2(manifest *ChainTomlV2) ([]byte, error) {
 
 // ParseV2 parses V2 chain.toml bytes into the structured representation.
 // Returns an error if the version field is not 2.
+//
+// Tolerates older publishers that didn't emit per-file Kind by defaulting
+// empty Kind to KindKVName — the original V2 only carried kv files in
+// the domains section.
 func ParseV2(data []byte) (*ChainTomlV2, error) {
 	var manifest ChainTomlV2
 	if err := toml.Unmarshal(data, &manifest); err != nil {
@@ -172,6 +271,16 @@ func ParseV2(data []byte) (*ChainTomlV2, error) {
 	}
 	if manifest.Version != ChainTomlV2Version {
 		return nil, fmt.Errorf("expected chain.toml version %d, got %d", ChainTomlV2Version, manifest.Version)
+	}
+	for _, dm := range manifest.Domains {
+		if dm == nil {
+			continue
+		}
+		for i := range dm.Files {
+			if dm.Files[i].Kind == "" {
+				dm.Files[i].Kind = KindKVName
+			}
+		}
 	}
 	return &manifest, nil
 }

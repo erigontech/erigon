@@ -1042,6 +1042,18 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return peerInfo
 }
 
+// PeerNode returns the enode.Node for the peer with the given ID, or nil
+// if the peer is not present in the good-peers set. The enode.Node carries
+// the peer's signed ENR record, which callers can inspect for custom
+// entries (e.g. chain.toml advertisement).
+func (ss *GrpcServer) PeerNode(peerID [64]byte) *enode.Node {
+	pi := ss.getPeer(peerID)
+	if pi == nil {
+		return nil
+	}
+	return pi.peer.Node()
+}
+
 // getOrCreatePeer gets or creates PeerInfo
 func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()

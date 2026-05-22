@@ -31,16 +31,38 @@ const (
 	DomainCommitment Domain = "commitment"
 )
 
-// FileEntry represents a single snapshot file (block or domain) tracked by the inventory.
+// FileKind identifies what role a file plays in the snapshot archive. Empty
+// kind means a domain primary (.kv) when Domain is set, or a block primary
+// (.seg) when Domain is empty — preserves back-compat with callers that
+// don't set Kind.
+type FileKind string
+
+const (
+	KindKV      FileKind = ""        // domain primary (.kv) or block primary (.seg)
+	KindHistory FileKind = "history" // domain history primary (.v)
+	KindIdx     FileKind = "idx"     // domain inverted-index primary (.ef)
+	KindCaplin  FileKind = "caplin"  // caplin beacon archive (.seg)
+	KindMeta    FileKind = "meta"    // chain config (erigondb.toml)
+	KindSalt    FileKind = "salt"    // hash-derivation salt (salt-*.txt)
+)
+
+// FileEntry represents a single snapshot file (block, domain primary,
+// domain history/idx, caplin, meta, or salt) tracked by the inventory.
 type FileEntry struct {
-	// Domain this file belongs to. Empty for block snapshots.
+	// Domain this file belongs to. Empty for block, caplin, meta, salt files.
 	Domain Domain
 
-	// Step range [FromStep, ToStep) covered by this file. Zero for block snapshots.
+	// Kind tags the file's role. See FileKind for the categorisation. The
+	// zero value (empty string) means a primary file — .kv when Domain is
+	// set, .seg when Domain is empty.
+	Kind FileKind
+
+	// Step range [FromStep, ToStep) covered by this file. Zero for files
+	// that don't carry step semantics (caplin, meta, salt).
 	FromStep uint64
 	ToStep   uint64
 
-	// File name (relative to snapshots directory).
+	// File name (relative to snapshots directory; may include subdirs).
 	Name string
 
 	// Size in bytes on disk. Zero if the file is not local (peer-advertised only).
@@ -59,11 +81,32 @@ type FileEntry struct {
 
 	// Seeding is true if the file is currently being seeded via BitTorrent.
 	Seeding bool
+
+	// Advertisable is true once the producer-side validation chain has
+	// approved this file for inclusion in the published V2 manifest.
+	// The field is set but not yet read by GenerateV2 — the
+	// chain.v2.<seq>.toml output still derives from Local + canonicity
+	// today. Once the producer-side gate is fully hooked into the
+	// retire/build pipeline, GenerateV2 will tighten its filter to
+	// require Advertisable=true and the manifest's "advertised content
+	// == validated content" invariant becomes a structural guarantee
+	// rather than a procedural one.
+	//
+	// See feature-pluggable-validation-phase.md for the producer-side
+	// design.
+	Advertisable bool
 }
 
 // Range returns the StepRange for this file entry.
 func (f *FileEntry) Range() StepRange {
 	return StepRange{f.FromStep, f.ToStep}
+}
+
+// Clone returns a shallow copy of the FileEntry. All fields are value types,
+// so a shallow copy is a full copy.
+func (f *FileEntry) Clone() *FileEntry {
+	c := *f
+	return &c
 }
 
 // Inventory tracks all known snapshot files (local and remote) for a node,
@@ -76,8 +119,11 @@ func (f *FileEntry) Range() StepRange {
 // Thread-safe for concurrent reads and writes.
 type Inventory struct {
 	mu      sync.RWMutex
-	domains map[Domain][]*FileEntry
-	blocks  []*FileEntry // block snapshots (headers, bodies, etc.)
+	domains map[Domain][]*FileEntry // kv + history + idx, keyed by domain
+	blocks  []*FileEntry            // top-level block snapshots (.seg)
+	caplin  []*FileEntry            // caplin beacon archive (.seg)
+	meta    []*FileEntry            // erigondb.toml etc
+	salt    []*FileEntry            // salt-*.txt
 }
 
 // NewInventory creates an empty inventory.
@@ -89,23 +135,41 @@ func NewInventory() *Inventory {
 
 // AddFile adds a file entry to the inventory. If an entry with the same name
 // already exists, it is replaced (useful for trust promotion or re-scan).
+//
+// Routing:
+//   - Kind=meta/salt/caplin: stored in their respective flat slice.
+//   - Kind=kv (default), history, or idx: stored under entry.Domain when
+//     non-empty, or in the blocks slice when Domain is empty.
 func (inv *Inventory) AddFile(entry *FileEntry) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
-	if entry.Domain == "" {
-		inv.blocks = replaceOrAppend(inv.blocks, entry)
-	} else {
-		inv.domains[entry.Domain] = replaceOrAppend(inv.domains[entry.Domain], entry)
+	switch entry.Kind {
+	case KindCaplin:
+		inv.caplin = replaceOrAppend(inv.caplin, entry)
+	case KindMeta:
+		inv.meta = replaceOrAppend(inv.meta, entry)
+	case KindSalt:
+		inv.salt = replaceOrAppend(inv.salt, entry)
+	default:
+		if entry.Domain == "" {
+			inv.blocks = replaceOrAppend(inv.blocks, entry)
+		} else {
+			inv.domains[entry.Domain] = replaceOrAppend(inv.domains[entry.Domain], entry)
+		}
 	}
 }
 
-// RemoveFile removes a file entry by name.
+// RemoveFile removes a file entry by name. Scans every category since the
+// caller doesn't supply a kind hint.
 func (inv *Inventory) RemoveFile(name string) {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
 	inv.blocks = removeByName(inv.blocks, name)
+	inv.caplin = removeByName(inv.caplin, name)
+	inv.meta = removeByName(inv.meta, name)
+	inv.salt = removeByName(inv.salt, name)
 	for domain, entries := range inv.domains {
 		inv.domains[domain] = removeByName(entries, name)
 	}
@@ -229,7 +293,7 @@ func (inv *Inventory) AllDomainFiles(domain Domain) []*FileEntry {
 	return result
 }
 
-// BlockFiles returns all block snapshot files.
+// BlockFiles returns all top-level block snapshot files (.seg).
 func (inv *Inventory) BlockFiles() []*FileEntry {
 	inv.mu.RLock()
 	defer inv.mu.RUnlock()
@@ -237,6 +301,57 @@ func (inv *Inventory) BlockFiles() []*FileEntry {
 	result := make([]*FileEntry, len(inv.blocks))
 	copy(result, inv.blocks)
 	return result
+}
+
+// CaplinFiles returns all caplin beacon-archive files.
+func (inv *Inventory) CaplinFiles() []*FileEntry {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	result := make([]*FileEntry, len(inv.caplin))
+	copy(result, inv.caplin)
+	return result
+}
+
+// MetaFiles returns all chain-config metadata files (erigondb.toml etc).
+func (inv *Inventory) MetaFiles() []*FileEntry {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	result := make([]*FileEntry, len(inv.meta))
+	copy(result, inv.meta)
+	return result
+}
+
+// SaltFiles returns all hash-derivation salt files.
+func (inv *Inventory) SaltFiles() []*FileEntry {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	result := make([]*FileEntry, len(inv.salt))
+	copy(result, inv.salt)
+	return result
+}
+
+// CoverageOfKind returns the local step ranges covered by files of a
+// specific kind for a domain. Use for kind-aware gap detection — a
+// domain at [0, 128) with a .kv but no .v has full Coverage but a gap
+// in CoverageOfKind(domain, KindHistory).
+func (inv *Inventory) CoverageOfKind(domain Domain, kind FileKind) StepRanges {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+
+	var ranges StepRanges
+	for _, e := range inv.domains[domain] {
+		if e.Kind != kind {
+			continue
+		}
+		if !e.Local {
+			continue
+		}
+		ranges = append(ranges, e.Range())
+	}
+	return ranges.Normalize()
 }
 
 // Domains returns the list of domains that have any files.
@@ -254,18 +369,55 @@ func (inv *Inventory) Domains() []Domain {
 	return domains
 }
 
+// MarkAdvertisable flips a file's Advertisable flag to true. Returns
+// true if the flag was actually changed (false if the file was
+// already advertisable, or no file with that name is in the
+// inventory).
+//
+// Callers run the producer-side validation chain BEFORE invoking
+// this — the inventory itself doesn't enforce the gate, it just
+// records the verdict. validation.Producer is the recommended
+// caller; tests may flip the flag directly.
+func (inv *Inventory) MarkAdvertisable(name string) bool {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+
+	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
+		if e := findByName(slice, name); e != nil {
+			if !e.Advertisable {
+				e.Advertisable = true
+				return true
+			}
+			return false
+		}
+	}
+
+	for _, entries := range inv.domains {
+		if e := findByName(entries, name); e != nil {
+			if !e.Advertisable {
+				e.Advertisable = true
+				return true
+			}
+			return false
+		}
+	}
+	return false
+}
+
 // PromoteTrust promotes a file's trust level if the new level is higher.
 // Returns true if the trust was actually changed.
 func (inv *Inventory) PromoteTrust(name string, newTrust TrustLevel) bool {
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
 
-	if e := findByName(inv.blocks, name); e != nil {
-		if newTrust > e.Trust {
-			e.Trust = newTrust
-			return true
+	for _, slice := range [][]*FileEntry{inv.blocks, inv.caplin, inv.meta, inv.salt} {
+		if e := findByName(slice, name); e != nil {
+			if newTrust > e.Trust {
+				e.Trust = newTrust
+				return true
+			}
+			return false
 		}
-		return false
 	}
 
 	for _, entries := range inv.domains {

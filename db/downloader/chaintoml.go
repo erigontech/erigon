@@ -87,8 +87,13 @@ func GenerateChainToml(snapDir string) ([]byte, error) {
 // The file is chmod'd before writing because the torrent client may have
 // created it as read-only during download.
 func SaveChainToml(snapDir string, tomlBytes []byte) error {
-	path := ChainTomlPath(snapDir)
-	// Make writable if already exists (torrent client creates files read-only).
+	return saveChainTomlFile(ChainTomlPath(snapDir), tomlBytes)
+}
+
+// saveChainTomlFile is the shared implementation of SaveChainToml and
+// SaveChainTomlV2. The chmod avoids a write failure if the torrent client
+// previously created the file read-only during a peer download.
+func saveChainTomlFile(path string, tomlBytes []byte) error {
 	_ = os.Chmod(path, 0o644)
 	return dir.WriteFileWithFsync(path, tomlBytes, 0o644)
 }
@@ -112,25 +117,29 @@ func LoadChainToml(snapDir string) ([]byte, error) {
 // removed and a new one is created.
 // Returns the info-hash of the chain.toml torrent.
 func BuildChainTomlTorrent(snapDir string, torrentFS *AtomicTorrentFS) (metainfo.Hash, error) {
-	// Remove existing chain.toml torrent if present — the content has changed.
-	_ = torrentFS.Delete(ChainTomlFileName)
+	return buildChainTomlTorrentByName(ChainTomlFileName, snapDir, torrentFS)
+}
 
-	// Build new torrent from the chain.toml file.
-	ok, err := BuildTorrentIfNeed(context.Background(), ChainTomlFileName, snapDir, torrentFS)
+// buildChainTomlTorrentByName is the shared implementation of
+// BuildChainTomlTorrent (V1) and BuildChainTomlV2Torrent. It always
+// deletes the old .torrent first because the manifest content changes on
+// every regenerate — reusing a stale torrent would advertise the wrong
+// hash.
+func buildChainTomlTorrentByName(fileName, snapDir string, torrentFS *AtomicTorrentFS) (metainfo.Hash, error) {
+	_ = torrentFS.Delete(fileName)
+
+	ok, err := BuildTorrentIfNeed(context.Background(), fileName, snapDir, torrentFS)
 	if err != nil {
-		return metainfo.Hash{}, fmt.Errorf("building chain.toml torrent: %w", err)
+		return metainfo.Hash{}, fmt.Errorf("building %s torrent: %w", fileName, err)
 	}
 	if !ok {
-		// Should not happen since we deleted the old one, but handle gracefully.
-		return metainfo.Hash{}, fmt.Errorf("chain.toml torrent was not created")
+		return metainfo.Hash{}, fmt.Errorf("%s torrent was not created", fileName)
 	}
 
-	// Load the torrent spec to get the info-hash.
-	spec, err := torrentFS.LoadByName(ChainTomlFileName + ".torrent")
+	spec, err := torrentFS.LoadByName(fileName + ".torrent")
 	if err != nil {
-		return metainfo.Hash{}, fmt.Errorf("loading chain.toml torrent: %w", err)
+		return metainfo.Hash{}, fmt.Errorf("loading %s torrent: %w", fileName, err)
 	}
-
 	return spec.InfoHash, nil
 }
 

@@ -44,6 +44,7 @@ require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
 	github.com/felixge/fgprof v0.9.5
+	github.com/fxamacker/cbor/v2 v2.9.1
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
 	github.com/go-echarts/go-echarts/v2 v2.6.7
@@ -421,6 +422,7 @@ require (
 	github.com/uudashr/iface v1.4.2 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xen0n/gosmopolitan v1.3.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect

@@ -1,0 +1,89 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package snapshotauth
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Capability is a colon-namespaced authorisation token. The package
+// recognises a fixed set of snapshot capabilities; unrecognised values
+// are rejected at parse time so a typo in a delegation surfaces
+// immediately rather than at trust-evaluation time.
+type Capability string
+
+const (
+	// CapAdvertise authorises the audience to advertise V2 manifests
+	// the verifier should treat as trusted source claims.
+	CapAdvertise Capability = "snapshot:advertise"
+
+	// CapServe authorises the audience to serve snapshot file bytes
+	// to the verifier (i.e. be picked as a download source).
+	CapServe Capability = "snapshot:serve"
+
+	// CapDelegate authorises the audience to issue further
+	// delegations under a chain rooted at this delegation. Without
+	// this, the audience is a leaf authority — it can advertise/serve
+	// per its own caps but cannot pass authority on.
+	CapDelegate Capability = "snapshot:delegate"
+)
+
+// AllCapabilities is the canonical set the package recognises.
+var AllCapabilities = []Capability{
+	CapAdvertise,
+	CapServe,
+	CapDelegate,
+}
+
+// ParseCapabilities parses a comma-separated list of capability
+// strings, returning the canonical (sorted, de-duplicated) form. An
+// unrecognised value is reported as an error so a CLI typo is caught
+// at issue time rather than verify time.
+func ParseCapabilities(s string) ([]string, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, fmt.Errorf("capability list is empty")
+	}
+	known := make(map[string]struct{}, len(AllCapabilities))
+	for _, c := range AllCapabilities {
+		known[string(c)] = struct{}{}
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := known[p]; !ok {
+			return nil, fmt.Errorf("unknown capability %q (known: %s)", p, capabilityNamesJoined())
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("capability list resolved to empty after trimming")
+	}
+	return canonicalCapabilities(out), nil
+}
+
+func capabilityNamesJoined() string {
+	parts := make([]string, len(AllCapabilities))
+	for i, c := range AllCapabilities {
+		parts[i] = string(c)
+	}
+	return strings.Join(parts, ", ")
+}

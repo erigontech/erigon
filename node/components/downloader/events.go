@@ -25,6 +25,14 @@ package downloader
 // These types define the shared contract between the Downloader and its peers.
 // They flow through the node/app/event bus once the ComponentDomain is wired
 // into the startup path.
+//
+// Granularity note: the bulk DownloadRequested / SnapshotDownloadComplete here
+// are stage/RPC facing (a request batch, a batch completion). The snapshot
+// distribution flow — see node/components/storage/flow — uses per-file
+// events (flow.DownloadRequested, flow.DownloadComplete, flow.DownloadFailed)
+// with richer peer and range context. BindBus in bus.go subscribes the
+// Provider to the per-file flow events; the batch events remain for the
+// legacy stage/plugin call-sites until those are migrated.
 
 // --- Events the Downloader SUBSCRIBES to ---
 

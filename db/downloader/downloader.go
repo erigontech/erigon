@@ -127,6 +127,13 @@ type Downloader struct {
 	// peerManager synchronizes torrent peers with the DevP2P peer set.
 	peerManager *TorrentPeerManager
 
+	// staticPeers is a list of torrent peers applied to every new torrent
+	// the Downloader creates, in addition to DHT / tracker / TorrentPeerManager
+	// sources. Used by integration tests to wire known seeder/leecher pairs
+	// without waiting for the periodic TorrentPeerManager sync.
+	staticPeersMu sync.Mutex
+	staticPeers   []torrent.PeerInfo
+
 	// manifestReady is closed after the first successful P2P manifest discovery.
 	// Non-nil only when --snap.p2p-manifest is enabled.
 	manifestReady chan struct{}
@@ -1632,6 +1639,28 @@ func (d *Downloader) spawn(f func()) bool {
 	return true
 }
 
+// DropTorrentByName drops the torrent registered under name from the
+// torrent client and clears it from the Downloader's bookkeeping, but
+// leaves both the data file and the .torrent sidecar in place. Used by
+// callers that re-publish a manifest in place — chain.toml.v2 grows
+// over the lifetime of a node, and each republish swaps to a new
+// infohash for the same on-disk filename. Without dropping the old
+// registration first, addTorrent rejects the new infohash with
+// "snapshot already loaded with different infohash".
+//
+// No-op if no torrent is registered under name.
+func (d *Downloader) DropTorrentByName(name string) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	t, ok := d.torrentsByName[name]
+	if !ok {
+		return
+	}
+	t.Drop()
+	g.MustDelete(d.torrentsByName, name)
+	delete(d.downloads, t)
+}
+
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
 func (d *Downloader) Delete(name string) error {
 	d.lock.Lock()
@@ -1704,7 +1733,37 @@ func (d *Downloader) addTorrent(name string, infoHash metainfo.Hash) (t *torrent
 	t.SetDisplayName(name)
 	g.MakeMapIfNil(&d.torrentsByName)
 	g.MapMustAssignNew(d.torrentsByName, name, t)
+
+	// Apply any static peers configured via AddStaticPeer. Runs on every
+	// new torrent so late-added static peers reach new torrents too.
+	d.staticPeersMu.Lock()
+	if len(d.staticPeers) > 0 {
+		peers := make([]torrent.PeerInfo, len(d.staticPeers))
+		copy(peers, d.staticPeers)
+		d.staticPeersMu.Unlock()
+		t.AddPeers(peers)
+	} else {
+		d.staticPeersMu.Unlock()
+	}
 	return
+}
+
+// AddStaticPeer registers a torrent peer that will be added to every
+// torrent the Downloader creates, and immediately to all torrents it
+// currently has. Intended for integration tests and tightly-controlled
+// deployments where peer discovery (DHT, trackers, TorrentPeerManager)
+// is not usable.
+func (d *Downloader) AddStaticPeer(addr torrent.PeerInfo) {
+	d.staticPeersMu.Lock()
+	d.staticPeers = append(d.staticPeers, addr)
+	d.staticPeersMu.Unlock()
+
+	// Apply to all current torrents immediately. Protected by the
+	// torrent-client's own locking; no Downloader.lock needed because
+	// AddPeers is safe to call concurrently with other torrent ops.
+	for _, t := range d.torrentClient.Torrents() {
+		t.AddPeers([]torrent.PeerInfo{addr})
+	}
 }
 
 func (d *Downloader) makeAddTorrentOpts(
