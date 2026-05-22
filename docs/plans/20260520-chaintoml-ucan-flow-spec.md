@@ -199,13 +199,16 @@ two opposite insertion orders and pins byte-identical output and an identical
 The interim `.sig` sidecar is replaced entirely. Authentication flows through
 two UCANs at two cadences:
 
-- **Authority UCAN** — `chain.ucan.<enr-fp>.<genID>.bin` (the
-  `chain.ucan.authority.<enr-fp>.<rev>.bin` content-deduped rename is deferred,
-  Phase 4d — it blocks nothing, since the consumer fetches the Authority UCAN
-  by its `AuthorityUCANHash` info-hash, never by name). Root authority →
-  operator pubkey; capability `snapshot.publish:<chain>`; long-lived (months).
-  Loaded via `snapshotauth.LoadOrGenerateDelegation`. Its info-hash is carried
-  in the manifest field `AuthorityUCANHash`.
+- **Authority UCAN** — `chain.ucan.authority.<enr-fp>.<rev>.bin`, where
+  `<rev>` is content-addressed (the genID of the UCAN bytes). The filename,
+  its torrent, and the `AuthorityUCANHash` are therefore stable across
+  generations: the Authority UCAN is long-lived (months) and is *not*
+  per-generation evicted — a republish of unchanged authority bytes reuses
+  the same sidecar rather than minting a new one each generation. Root
+  authority → operator pubkey; capability `snapshot.publish:<chain>`. Loaded
+  via `snapshotauth.LoadOrGenerateDelegation`. Its info-hash is carried in
+  the manifest field `AuthorityUCANHash`; the consumer fetches it by that
+  info-hash, never by name.
 - **Content UCAN** — `chain.v2.<enr-fp>.<genID>.ucan`. Operator → self;
   capability `chain.v2:hash:<sha256_of_toml>`; short-lived (per-generation,
   expires at the next regeneration); `ParentHash` references the Authority
