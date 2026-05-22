@@ -633,46 +633,6 @@ func (c *Coherent) clearCaches(r *CoherentRoot) {
 	r.codeCache.Clear()
 }
 
-func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
-	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
-	view, err := cache.View(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	castedView, ok := view.(*CoherentView)
-	if !ok {
-		return 0, nil
-	}
-	casted, ok := cache.(*Coherent)
-	if !ok {
-		return 0, nil
-	}
-	checked := 0
-	casted.lock.Lock()
-	defer casted.lock.Unlock()
-	//log.Info("AssertCheckValues start", "db_id", tx.ViewID(), "mem_id", casted.id.Load(), "len", casted.cache.Len())
-	root, ok := casted.roots[castedView.stateVersionID]
-	if !ok {
-		return 0, nil
-	}
-	root.cache.Walk(func(items []*Element) bool {
-		for _, i := range items {
-			k, v := i.K, i.V
-			var dbV []byte
-			dbV, err = tx.GetOne(kv.PlainState, k)
-			if err != nil {
-				return false
-			}
-			if !bytes.Equal(dbV, v) {
-				err = fmt.Errorf("key: %x, has different values: %x != %x", k, v, dbV)
-				return false
-			}
-			checked++
-		}
-		return true
-	})
-	return checked, err
-}
 func (c *Coherent) evictRoots() {
 	if c.latestStateVersionID <= c.cfg.KeepViews {
 		return
