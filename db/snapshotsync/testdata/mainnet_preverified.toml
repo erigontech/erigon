@@ -1,0 +1,10 @@
+# Minimal mainnet preverified fixture for db/snapshotsync tests that depend on
+# MergeLimit / MergeStepsFromCfg returning Erigon2OldMergeLimit (500K) for the
+# 0..2.5M block range. Hashes are real-mainnet release/3.4 values but only the
+# segment filenames matter for the merge-limit decision (snapcfg consults
+# info.Name/From/To/Len).
+'v1.1-000000-000500-headers.seg' = 'fc55d608bd9dc67a24caa738dfb6622b63786509'
+'v1.1-000500-001000-headers.seg' = '23f0c91690b6f2472cc04ce23c3aae6fe7e287c9'
+'v1.1-001000-001500-headers.seg' = 'b1231c7d68877456078bd21607a73df523d89bb8'
+'v1.1-001500-002000-headers.seg' = '65716d377b6995b36ab8549335c5a6b46a2cb384'
+'v1.1-002000-002500-headers.seg' = '1890eb77ceded34fea3517325c4218f6948cd35c'
