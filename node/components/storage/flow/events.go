@@ -385,3 +385,25 @@ func BlockHeadersReadyChannel(bus event.BusSubscriber) (<-chan struct{}, func() 
 		return tip
 	}
 }
+
+// CanonicalHeadRewound signals that the node's consensus layer reorged
+// the canonical chain backward past blocks already retired into
+// snapshots — the rare deep-rewind case
+// (docs/plans/20260522-canonical-layer-revision.md §5). It is the
+// consensus→storage scope seam: this event is the input the
+// distribution layer reacts to; its production source (real reorg
+// detection / consensus wiring) is out of scope and is injected by the
+// harness in tests.
+//
+// The storage component responds by retiring every snapshot file whose
+// range is orphaned — unwinding COMPLETE files back to the first
+// well-defined boundary at or below ToBlock where the retained set has
+// complete good coverage — demoting the canonical view, dropping the
+// orphaned torrents, and (on a publisher) re-advertising the corrected
+// set. The EL's own un-retire is a separate, deferred concern.
+type CanonicalHeadRewound struct {
+	// ToBlock is the block the canonical head rewound to. The retained
+	// snapshot set must not cover any block above it; the storage
+	// component resolves the precise file/step boundary at or below it.
+	ToBlock uint64
+}
