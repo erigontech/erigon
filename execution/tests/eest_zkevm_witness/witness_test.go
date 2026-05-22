@@ -15,9 +15,11 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // Package eest_zkevm_witness_test validates Erigon's execution witness generation
-// (debug_executionWitness) against the 93 EIP-8025 fixtures from the ethereum/execution-spec-tests
-// zkevm@v0.3.3 release. Each fixture contains expected witness arrays (state MPT nodes,
-// bytecodes, block headers) that are compared element-by-element against Erigon's output.
+// (debug_executionWitness) against the EIP-8025 fixtures from
+// ethereum/execution-spec-tests. The exact fixture version is pinned via
+// test-fixtures.json (key eest_zkevm). Each fixture contains expected witness
+// arrays (state MPT nodes, bytecodes, block headers) that are compared
+// element-by-element against Erigon's output.
 package eest_zkevm_witness_test
 
 import (
@@ -85,34 +87,31 @@ func TestExecutionSpecWitness(t *testing.T) {
 		test.ExperimentalBAL = true
 
 		// Run the standard blockchain test: insert blocks, validate post-state.
-		// Block execution should always succeed — Fatal on failure.
-		if err := test.Run(t); err != nil {
+		// Block execution should always succeed — Fatal on failure. The returned
+		// tester's lifetime is bound to t via t.Cleanup; do NOT close it here.
+		m, err := test.RunWithTester(t)
+		if err != nil {
 			t.Fatalf("block execution failed: %v", err)
 		}
 
-		if test.M == nil {
-			t.Fatal("ExecModuleTester not set after BlockTest.Run")
-		}
-		defer test.M.Close()
-
-		// Set up the debug API using the test's ExecModuleTester.
+		// Set up the debug API using the returned ExecModuleTester.
 		base := jsonrpc.NewBaseApi(
 			nil,
-			test.M.StateCache,
-			test.M.BlockReader,
+			m.StateCache,
+			m.BlockReader,
 			false,
 			rpccfg.DefaultEvmCallTimeout,
-			test.M.Engine,
-			test.M.Dirs,
+			m.Engine,
+			m.Dirs,
 			nil, 0, 0,
 		)
-		api := jsonrpc.NewPrivateDebugAPI(base, test.M.DB, nil, 0, false)
+		api := jsonrpc.NewPrivateDebugAPI(base, m.DB, nil, 0, false)
 		ctx := context.Background()
 
 		// debug_executionWitness now reads the commitment-history flag from the
 		// DB (set by node/eth/backend on real startups). The test framework
 		// builds its DB from scratch, so write the flag explicitly here.
-		if err := test.M.DB.Update(ctx, func(tx kv.RwTx) error {
+		if err := m.DB.Update(ctx, func(tx kv.RwTx) error {
 			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
 		}); err != nil {
 			t.Fatalf("write commitment-history flag: %v", err)
