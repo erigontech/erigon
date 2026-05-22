@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/node/components/downloader"
 	"github.com/erigontech/erigon/node/components/manifest_exchange"
 	sentrycomp "github.com/erigontech/erigon/node/components/sentry"
+	storagecomp "github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/components/storage/flow"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -86,10 +88,11 @@ type P2PNode struct {
 	Orch       *flow.Orchestrator
 	Dirs       datadir.Dirs
 
-	// InitialStateReady is non-nil only for real-storage nodes (built
-	// via NewP2PNodeWithRealStorage). It closes when the orchestrator's
-	// minimal-state-domain set is downloaded + recorded — the signal
-	// production wiring feeds into OtterSync's wait gate.
+	// InitialStateReady is non-nil for real-storage nodes (built via
+	// NewP2PNodeWithRealStorage or NewP2PNodeWithStorageProvider). It
+	// closes when the orchestrator's minimal-state-domain set is
+	// downloaded + recorded — the signal production wiring feeds into
+	// OtterSync's wait gate.
 	InitialStateReady <-chan struct{}
 
 	dCore       *dl.Downloader
@@ -101,10 +104,31 @@ type P2PNode struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 
-	logger      log.Logger
-	realStorage bool
-	closeOnce   sync.Once
+	// storageProvider is non-nil only for storageModeProvider nodes: the
+	// real storage.Provider that owns the bus, orchestrator, lifecycle
+	// driver and initial-validation watcher.
+	storageProvider *storagecomp.Provider
+
+	logger    log.Logger
+	mode      storageMode
+	closeOnce sync.Once
 }
+
+// storageMode selects which storage backend a P2PNode's orchestrator
+// runs against.
+type storageMode int
+
+const (
+	// storageModeMock — the harness MockStorage stand-in.
+	storageModeMock storageMode = iota
+	// storageModeInventory — flow.InventoryStorage: real RecordFile +
+	// Stage-1 validation with files resolved on disk, but the
+	// orchestrator is still constructed by the harness.
+	storageModeInventory
+	// storageModeProvider — the real storage.Provider owns the bus,
+	// orchestrator, lifecycle driver and initial-validation watcher.
+	storageModeProvider
+)
 
 // LocalTorrentAddr returns the BT endpoint the underlying torrent client
 // is listening on, usable for AddStaticPeer on a peer node or for
@@ -240,7 +264,13 @@ func (n *P2PNode) Close() {
 		}
 		_ = n.Mx.UnbindBus()
 		_ = n.Downloader.UnbindAutoPublish()
-		_ = n.Orch.Close()
+		if n.storageProvider != nil {
+			// Provider.Stop closes the orchestrator, the lifecycle
+			// driver and the internal event pool it owns.
+			n.storageProvider.Stop()
+		} else {
+			_ = n.Orch.Close()
+		}
 		n.Downloader.Close()
 		_ = n.Sentry.Close()
 		if n.cfg != nil {
@@ -273,7 +303,7 @@ func (n *P2PNode) Close() {
 func (n *P2PNode) Restart() *P2PNode {
 	n.T.Helper()
 	n.Close()
-	return newP2PNodeAt(n.T, n.Dirs.DataDir, n.logger, n.realStorage)
+	return newP2PNodeAt(n.T, n.Dirs.DataDir, n.logger, n.mode)
 }
 
 // SeedFile writes real content to the node's snap directory, registers it
@@ -417,7 +447,20 @@ func NewP2PNode(t *testing.T, logger log.Logger) *P2PNode {
 // production does. The node's InitialStateReady channel is wired.
 func NewP2PNodeWithRealStorage(t *testing.T, logger log.Logger) *P2PNode {
 	t.Helper()
-	return newP2PNodeAt(t, t.TempDir(), logger, true)
+	return newP2PNodeAt(t, t.TempDir(), logger, storageModeInventory)
+}
+
+// NewP2PNodeWithStorageProvider builds a P2PNode whose bus, orchestrator,
+// lifecycle driver and initial-validation watcher are all owned by a real
+// storage.Provider — the same component production runs. Use this for
+// publisher-side scenarios that must exercise the Provider's own event
+// flow end-to-end (e.g. the first-publish gate). The Provider's E3 index
+// builds run against a mock aggregator, so synthetic fixtures don't have
+// to be real state files; meta/salt fixtures take the no-index
+// OnMetaReady path and reach Advertisable on their infohash check alone.
+func NewP2PNodeWithStorageProvider(t *testing.T, logger log.Logger) *P2PNode {
+	t.Helper()
+	return newP2PNodeAt(t, t.TempDir(), logger, storageModeProvider)
 }
 
 // NewP2PNodeAt is NewP2PNode with an explicit base directory. Use when
@@ -426,10 +469,10 @@ func NewP2PNodeWithRealStorage(t *testing.T, logger log.Logger) *P2PNode {
 // work for cheap content sharing across peers. Cleans up at test end
 // the same way TempDir does.
 func NewP2PNodeAt(t *testing.T, baseDir string, logger log.Logger) *P2PNode {
-	return newP2PNodeAt(t, baseDir, logger, false)
+	return newP2PNodeAt(t, baseDir, logger, storageModeMock)
 }
 
-func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage bool) *P2PNode {
+func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageMode) *P2PNode {
 	t.Helper()
 	if logger == nil {
 		logger = log.New()
@@ -468,28 +511,7 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage b
 	dlProvider := &downloader.Provider{Downloader: d, Client: client}
 	dlProvider.Configure(cfg, ethconfig.BlocksFreezing{}, dirs, logger, nil)
 
-	// --- Event bus and storage / orchestrator -----------------------------
-	workers := workerpool.New(perNodePoolSize)
-	pool := &testPool{workers: workers}
-	innerBus := event.NewEventBus(pool)
-	bus := NewCapturedBus(innerBus)
-
-	var mockStorage *MockStorage
-	var orchStorage flow.Storage
-	var inv *snapshot.Inventory
-	var initialStateReady <-chan struct{}
-	if realStorage {
-		inv = snapshot.NewInventory()
-		orchStorage = flow.NewInventoryStorage(inv, validation.DefaultStage1ChainWithDisk(dirs.Snap), dirs.Snap)
-		initialStateReady = flow.InitialStateReadyChannel(bus)
-	} else {
-		mockStorage = NewMockStorage()
-		orchStorage = mockStorage
-		inv = mockStorage.Inventory()
-	}
-	orch := flow.NewWithStorage(bus, orchStorage, logger)
-
-	// --- Chain stack for sentry -------------------------------------------
+	// --- Chain stack ------------------------------------------------------
 	chainDB := temporal.NewTestDB(t, dbcfg.ChainDB)
 	spec, err := chainspec.ChainSpecByName(networkname.Test)
 	require.NoError(t, err)
@@ -500,6 +522,59 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage b
 	// Empty snapshots registry — genesis-only state, no frozen files.
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+
+	// --- Event bus and storage / orchestrator -----------------------------
+	var (
+		mockStorage       *MockStorage
+		inv               *snapshot.Inventory
+		orch              *flow.Orchestrator
+		bus               *CapturedBus
+		initialStateReady <-chan struct{}
+		storageProvider   *storagecomp.Provider
+		workers           *workerpool.WorkerPool
+		pool              *testPool
+	)
+	if mode == storageModeProvider {
+		// The real Provider creates the bus + orchestrator + lifecycle
+		// driver + initial-validation watcher inside Initialize.
+		inv = snapshot.NewInventory()
+		storageProvider = &storagecomp.Provider{}
+		ethCfg := &ethconfig.Config{Dirs: dirs}
+		ethCfg.Snapshot.LifecycleDrivenByStorage = true
+		require.NoError(t, storageProvider.Initialize(storagecomp.Deps{
+			Ctx:              ctx,
+			ChainDB:          chainDB,
+			BlockReader:      blockReader,
+			BlockWriter:      blockio.NewBlockWriter(),
+			AllSnapshots:     allSnapshots,
+			ChainConfig:      spec.Config,
+			Genesis:          genesisBlock,
+			Config:           ethCfg,
+			DBEventNotifier:  noopDBEventNotifier{},
+			DownloaderClient: client,
+			Inventory:        inv,
+			Aggregator:       mockAggregator{},
+			Logger:           logger,
+		}))
+		bus = NewCapturedBus(storageProvider.Bus())
+		orch = storageProvider.Orchestrator
+		initialStateReady = storageProvider.InitialStateReady
+	} else {
+		workers = workerpool.New(perNodePoolSize)
+		pool = &testPool{workers: workers}
+		bus = NewCapturedBus(event.NewEventBus(pool))
+		var orchStorage flow.Storage
+		if mode == storageModeInventory {
+			inv = snapshot.NewInventory()
+			orchStorage = flow.NewInventoryStorage(inv, validation.DefaultStage1ChainWithDisk(dirs.Snap), dirs.Snap)
+			initialStateReady = flow.InitialStateReadyChannel(bus)
+		} else {
+			mockStorage = NewMockStorage()
+			orchStorage = mockStorage
+			inv = mockStorage.Inventory()
+		}
+		orch = flow.NewWithStorage(bus, orchStorage, logger)
+	}
 
 	// --- Sentry (real eth/68, ephemeral DevP2P listener) ------------------
 	privKey, err := crypto.GenerateKey()
@@ -555,7 +630,10 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage b
 	require.NoError(t, dlProvider.BindBus(ctx, bus))
 	mx := &manifest_exchange.Provider{}
 	require.NoError(t, mx.BindBus(ctx, bus, dlProvider, logger))
-	require.NoError(t, orch.Start(ctx))
+	// The Provider already started its own orchestrator inside Initialize.
+	if mode != storageModeProvider {
+		require.NoError(t, orch.Start(ctx))
+	}
 
 	n := &P2PNode{
 		T:                 t,
@@ -575,8 +653,9 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, realStorage b
 		unregPeer:         unregPeer,
 		ctx:               ctx,
 		cancel:            cancel,
+		storageProvider:   storageProvider,
 		logger:            logger,
-		realStorage:       realStorage,
+		mode:              mode,
 	}
 	t.Cleanup(n.Close)
 	return n
