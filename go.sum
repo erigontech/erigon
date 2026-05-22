@@ -336,8 +336,8 @@ github.com/elastic/go-freelru v0.16.0 h1:gG2HJ1WXN2tNl5/p40JS/l59HjvjRhjyAa+oFTR
 github.com/elastic/go-freelru v0.16.0/go.mod h1:bSdWT4M0lW79K8QbX6XY2heQYSCqD7THoYf82pT/H3I=
 github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc=
 github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20260505095143-9dd31a2190a1 h1:QXH5nIpbQr7b0P1XfeRKJlGukIywfzSRhBjhn60qaz4=
-github.com/erigontech/erigon-snapshot v1.3.1-0.20260505095143-9dd31a2190a1/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20260522023950-e98e9800e987 h1:alaA15t5byvuHbpweNm5eUbHITXGrjuZFjJ7Gb+69Hg=
+github.com/erigontech/erigon-snapshot v1.3.1-0.20260522023950-e98e9800e987/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2 h1:BoHriVEyPxNCO/gY+e0ZrGz0GSnAbXlXNQ7Skn907g8=
 github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2/go.mod h1:WQvAqmoairhdM5RFNFDKK9oT6dzuZEbWMJH+ZdRTjP0=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
