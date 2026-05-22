@@ -1712,6 +1712,18 @@ func (result *execResult) finalizeTxSimple(
 		}
 		allWrites = append(allWrites, w)
 	}
+	// The coinbase/burnt fee credits are implicit writes: the worker ran
+	// with shouldDelayFeeCalc=true and never produced them, so finalize
+	// authors them here. Stamp them at incarnation+1 — a distinct version
+	// from the worker's own pre-fee coinbase/burnt write. A later tx that
+	// speculatively read the coinbase/burnt before this finalize ran
+	// recorded the worker's version; the bumped version makes the MapRead
+	// checkVersion comparison fail, so that tx is invalidated and
+	// re-executed against the post-fee balance. Without the bump finalize
+	// reuses the worker's version and the version-only validator cannot
+	// tell the stale read apart.
+	feeVersion := task.Version()
+	feeVersion.Incarnation++
 	// Mirror the CollectorWrites emission above: emit the coinbase
 	// versionMap write either when balance actually changed OR when
 	// EIP-161 empty-removal will turn the empty coinbase into a delete.
@@ -1728,7 +1740,7 @@ func (result *execResult) finalizeTxSimple(
 				Address:             result.Coinbase,
 				Path:                state.BalancePath,
 				Val:                 newCoinbaseBalance,
-				Version:             task.Version(),
+				Version:             feeVersion,
 				BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 			})
 		}
@@ -1743,7 +1755,7 @@ func (result *execResult) finalizeTxSimple(
 				Address:             burntAddr,
 				Path:                state.BalancePath,
 				Val:                 newBurntBalance,
-				Version:             task.Version(),
+				Version:             feeVersion,
 				BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
 			})
 		}
