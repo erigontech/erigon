@@ -17,10 +17,12 @@
 package snapshotsync
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sync"
 	"time"
 
@@ -57,10 +59,13 @@ type canonicalEntry struct {
 // hash) pairs that accumulate quorum independently and both stay
 // canonical, so a merge transition needs no special handling.
 //
-// The view only grows by promotion; it never demotes. The single
-// exception is GC: an entry no verified publisher has advertised for
-// the GC window is dropped so a superseded merge form is not retained
-// forever. Genesis entries are never GC'd.
+// The view grows by promotion and shrinks two ways: GC drops an entry no
+// verified publisher has advertised for the GC window (a superseded merge
+// form leaving the swarm), and Demote drops entries on a consensus-driven
+// chain rewind (docs/plans/20260522-canonical-layer-revision.md §5).
+// Genesis entries are never GC'd or demoted. The view is therefore NOT
+// monotonic — Digest, not an ordered counter, is the notion of canonical
+// identity.
 //
 // All methods are safe for concurrent use.
 type CanonicalView struct {
@@ -199,12 +204,87 @@ func (v *CanonicalView) Canonical() snapcfg.PreverifiedItems {
 	return out
 }
 
-// Version returns the canonical version counter — genesis is v0, and
-// the counter advances once per Observe call that promotes new entries.
+// Version returns a local monotonic progress tag — it advances once per
+// Observe call that promotes new entries. It is NOT the canonical
+// identity: it is observation-order dependent (two nodes reach different
+// values for identical content) and demotion makes it non-monotonic in
+// meaning. Use Digest for canonical identity; Version is retained only as
+// a per-node tag (e.g. for staging-directory uniqueness).
 func (v *CanonicalView) Version() int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.version
+}
+
+// versionPrefixRE matches a snapshot file's "v<major>.<minor>-" version
+// prefix — the part stripped to derive a logical slot.
+var versionPrefixRE = regexp.MustCompile(`^v[0-9]+\.[0-9]+-`)
+
+// CanonicalSlot returns name's logical slot: the file name with its
+// "v<major>.<minor>-" version prefix stripped. Two snapshot files that
+// are version variants of the same logical file — a reversioning bump —
+// share a slot, and the canonical view holds both as variants of it. A
+// name with no version prefix (meta, salt, legacy) is its own slot.
+func CanonicalSlot(name string) string {
+	return versionPrefixRE.ReplaceAllString(name, "")
+}
+
+// CanonicalBySlot returns the canonical set grouped by logical slot.
+// A slot with more than one variant is a reversioning window — both the
+// old and new format are canonical, and holding either satisfies the
+// slot.
+func (v *CanonicalView) CanonicalBySlot() map[string]snapcfg.PreverifiedItems {
+	items := v.Canonical()
+	out := make(map[string]snapcfg.PreverifiedItems, len(items))
+	for _, it := range items {
+		s := CanonicalSlot(it.Name)
+		out[s] = append(out[s], it)
+	}
+	return out
+}
+
+// Demote drops every promoted (and observed) entry whose name shouldDrop
+// reports true, returning the number of canonical entries removed. It is
+// the consensus-driven rewind path: a chain reorg orphaned the blocks
+// these entries cover, so they are no longer canonical regardless of how
+// many publishers advertised them. Observations are dropped too, so a
+// stale re-Observe cannot re-promote an orphaned entry. Genesis is never
+// affected — it is older than any in-scope rewind.
+func (v *CanonicalView) Demote(shouldDrop func(name string) bool) int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	dropped := 0
+	for k := range v.observed {
+		if !shouldDrop(k.name) {
+			continue
+		}
+		delete(v.observed, k)
+		if _, wasCanonical := v.promoted[k]; wasCanonical {
+			delete(v.promoted, k)
+			dropped++
+		}
+	}
+	return dropped
+}
+
+// Digest is the canonical identity: a content hash over the sorted
+// canonical set. Same canonical content yields the same digest on every
+// node regardless of observation history, so "are you on canonical
+// <digest>?" is a sound equality check. It changes on promotion,
+// demotion and reversioning alike — there is no total order on canonical
+// states (a rewind moves it "backward"), so an identity, not a counter,
+// is the correct notion of version.
+func (v *CanonicalView) Digest() string {
+	items := v.Canonical() // sorted; takes the lock itself
+	h := sha256.New()
+	for _, it := range items {
+		h.Write([]byte(it.Name))
+		h.Write([]byte{0})
+		h.Write([]byte(it.Hash))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // canonicalViewState is the JSON-serialisable form of a CanonicalView's

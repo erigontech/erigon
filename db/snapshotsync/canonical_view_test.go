@@ -96,7 +96,7 @@ func TestCanonicalView_FractionRaisesQuorum(t *testing.T) {
 
 // TestCanonicalView_MonotonicNoDemote: an entry promoted at a low Q
 // stays canonical after Q rises past its issuer count.
-func TestCanonicalView_MonotonicNoDemote(t *testing.T) {
+func TestCanonicalView_PromotionSurvivesRisingQuorum(t *testing.T) {
 	v := NewCanonicalView(nil, snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
 
 	v.Observe(issuer(1), items("x.seg", "hx"), viewT0)
@@ -107,7 +107,8 @@ func TestCanonicalView_MonotonicNoDemote(t *testing.T) {
 	for i := 3; i <= 10; i++ {
 		v.Observe(issuer(i), items("y.seg", "hy"), viewT0)
 	}
-	require.True(t, canonicalHas(v, "x.seg", "hx"), "promotion is monotonic — never demoted")
+	require.True(t, canonicalHas(v, "x.seg", "hx"),
+		"Observe never demotes — a rising quorum does not un-promote; explicit Demote is the only demotion path")
 }
 
 // TestCanonicalView_GenesisAlwaysCanonical: genesis entries are
@@ -222,4 +223,77 @@ func TestCanonicalView_DedupGenesisAndPromoted(t *testing.T) {
 	v.Observe(issuer(1), items("g.seg", "gh"), viewT0)
 	v.Observe(issuer(2), items("g.seg", "gh"), viewT0)
 	require.Equal(t, 1, countName(v, "g.seg"), "genesis entry not duplicated by promotion")
+}
+
+// TestCanonicalSlot: a slot is the file name with its v<major>.<minor>-
+// version prefix stripped, so reversioning variants share a slot.
+func TestCanonicalSlot(t *testing.T) {
+	require.Equal(t, "accounts.0-2048.kv", CanonicalSlot("v1.0-accounts.0-2048.kv"))
+	require.Equal(t, CanonicalSlot("v1.0-accounts.0-2048.kv"), CanonicalSlot("v2.0-accounts.0-2048.kv"),
+		"version variants of the same logical file share a slot")
+	require.Equal(t, "000000-000500-headers.seg", CanonicalSlot("v1.1-000000-000500-headers.seg"))
+	require.Equal(t, "salt-state.txt", CanonicalSlot("salt-state.txt"), "no version prefix → own slot")
+}
+
+// TestCanonicalView_CanonicalBySlotReversioning: both version variants of
+// a logical file are canonical and group under one slot — the state of a
+// reversioning window.
+func TestCanonicalView_CanonicalBySlotReversioning(t *testing.T) {
+	v := NewCanonicalView(nil, snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	for i := 1; i <= 2; i++ {
+		v.Observe(issuer(i), items(
+			"v1.0-accounts.0-2048.kv", "h1",
+			"v2.0-accounts.0-2048.kv", "h2",
+		), viewT0)
+	}
+	variants := v.CanonicalBySlot()["accounts.0-2048.kv"]
+	require.Len(t, variants, 2, "both version variants are canonical under one slot")
+}
+
+// TestCanonicalView_Demote: a consensus-driven rewind drops the orphaned
+// entries; below-boundary entries and genesis are retained, and the
+// dropped entry's observations are cleared so a single stale
+// re-advertisement cannot revive it.
+func TestCanonicalView_Demote(t *testing.T) {
+	v := NewCanonicalView(items("v1.0-g.0-100.seg", "gh"), snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	for i := 1; i <= 2; i++ {
+		v.Observe(issuer(i), items(
+			"v1.0-x.100-200.seg", "hx",
+			"v1.0-y.200-300.seg", "hy",
+		), viewT0)
+	}
+	require.True(t, canonicalHas(v, "v1.0-x.100-200.seg", "hx"))
+	require.True(t, canonicalHas(v, "v1.0-y.200-300.seg", "hy"))
+
+	// A rewind orphans the range from block 200 up.
+	dropped := v.Demote(func(name string) bool { return name == "v1.0-y.200-300.seg" })
+	require.Equal(t, 1, dropped)
+	require.True(t, canonicalHas(v, "v1.0-x.100-200.seg", "hx"), "below-boundary entry retained")
+	require.False(t, canonicalHas(v, "v1.0-y.200-300.seg", "hy"), "orphaned entry demoted")
+	require.True(t, canonicalHas(v, "v1.0-g.0-100.seg", "gh"), "genesis never demoted")
+
+	// Observations were cleared — a single stale re-advertisement (below
+	// the QFloor of 2) does not revive the demoted entry.
+	v.Observe(issuer(1), items("v1.0-y.200-300.seg", "hy"), viewT0)
+	require.False(t, canonicalHas(v, "v1.0-y.200-300.seg", "hy"))
+}
+
+// TestCanonicalView_Digest: the digest is a content identity — equal for
+// equal canonical content regardless of observation order, and it changes
+// on demotion.
+func TestCanonicalView_Digest(t *testing.T) {
+	mk := func() *CanonicalView {
+		return NewCanonicalView(items("v1.0-g.0-100.seg", "gh"), snapcfg.QuorumConfig{F: 0.5, QFloor: 2})
+	}
+	a, b := mk(), mk()
+	a.Observe(issuer(1), items("v1.0-x.100-200.seg", "hx"), viewT0)
+	a.Observe(issuer(2), items("v1.0-x.100-200.seg", "hx"), viewT0)
+	// Same promotions on b, issuers observed in the opposite order.
+	b.Observe(issuer(2), items("v1.0-x.100-200.seg", "hx"), viewT0)
+	b.Observe(issuer(1), items("v1.0-x.100-200.seg", "hx"), viewT0)
+	require.Equal(t, a.Digest(), b.Digest(), "same canonical content → same digest, regardless of observation order")
+
+	before := a.Digest()
+	a.Demote(func(name string) bool { return name == "v1.0-x.100-200.seg" })
+	require.NotEqual(t, before, a.Digest(), "demotion changes the digest")
 }
