@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -212,7 +211,7 @@ type ExecutionModule interface {
 	// GetTD returns the total difficulty for the block identified by
 	// blockHash and/or blockNumber.  Pass nil for an unknown argument.
 	// Returns nil (no error) when the block is not found.
-	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*big.Int, error)
+	GetTD(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*uint256.Int, error)
 
 	// --- Module state -----------------------------------------------------
 

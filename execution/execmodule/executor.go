@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -134,13 +135,20 @@ func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCyc
 	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
 }
 
-// CommitCycleFn is called between hasMore iterations to persist accumulated
-// state and obtain a fresh tx for the next iteration. Implementations must
-// flush the SharedDomains, commit, and return a fresh kv.TemporalRwTx.
-type CommitCycleFn func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
+// CommitCycleFn is called after PruneFn to persist the iteration's writes
+// and refresh the loop's tx. Implementations typically open a fresh RwTx,
+// flush+clear the SharedDomains into it, commit, and re-open the read-side
+// tx. hasMore tells the impl whether another iteration follows — useful to
+// skip refreshing the tx on the final iter. May return (nil, nil) to leave
+// the loop's tx unchanged.
+type CommitCycleFn func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error)
 
-// ShouldBreakFn is called after each iteration (after prune, before commit)
-// to check whether the loop should stop early. Return true to break.
+// PruneFn replaces the in-loop pe.sync.RunPrune call. It is called after
+// pe.sync.Run and before CommitCycle. Implementations typically close the
+// read-side tx (if separate) and run pruning on a tx of their choosing.
+type PruneFn func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error
+
+// ShouldBreakFn is an optional callback to stop the loop early (return true).
 type ShouldBreakFn func(tx kv.TemporalRwTx) (bool, error)
 
 // PruneInitialCycleFn computes the initial-cycle flag passed to sync.RunPrune
@@ -167,31 +175,20 @@ type RunLoopConfig struct {
 	FirstCycle   bool
 	PruneTimeout time.Duration
 	CommitCycle  CommitCycleFn // required when hasMore
+	PruneFn      PruneFn       // required
 	ShouldBreak  ShouldBreakFn // optional early exit
 	// PruneInitialCycleFn picks the initial-cycle flag for sync.RunPrune. If
-	// nil, RunPrune is called with InitialCycle (legacy behaviour).
+	// nil, PruneFn is called with InitialCycle (legacy behaviour).
 	PruneInitialCycleFn PruneInitialCycleFn
 	AfterPrune          AfterPruneFn      // optional post-prune hook
 	BeforeIteration     BeforeIterationFn // optional per-iteration setup
 }
 
-// RunLoop executes the pipeline in a hasMore loop:
-//
-//	for hasMore {
-//	    [BeforeIteration] → sync.Run → RunPrune → [ShouldBreak] → if hasMore { CommitCycle }
-//	}
-//
-// RunPrune runs unconditionally on every iteration (including the last) to
-// match the original stageloop.ProcessFrozenBlocks behaviour. The loop
-// continues until Run returns hasMore=false, ShouldBreak returns true, or
-// an error occurs. The returned tx may differ from the input tx if
-// CommitCycle was called (which returns a fresh tx).
+// RunLoop runs sync.Run → PruneFn → ShouldBreak → CommitCycle in a hasMore loop.
+// Exits when Run returns hasMore=false, ShouldBreak returns true, or on error.
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
-	for hasMore := true; hasMore; {
-		if cfg.BeforeIteration != nil {
-			cfg.BeforeIteration(sd)
-		}
-
+	stop := false
+	for hasMore := true; hasMore && !stop; {
 		var err error
 		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
@@ -206,7 +203,7 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			}
 		}
 
-		if err := pe.sync.RunPrune(ctx, tx, pruneInitialCycle, cfg.PruneTimeout); err != nil {
+		if err := cfg.PruneFn(ctx, pruneInitialCycle, tx, sd); err != nil {
 			return tx, err
 		}
 
@@ -217,20 +214,17 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 		}
 
 		if cfg.ShouldBreak != nil {
-			stop, err := cfg.ShouldBreak(tx)
+			stop, err = cfg.ShouldBreak(tx)
 			if err != nil {
 				return tx, err
-			}
-			if stop {
-				break
 			}
 		}
 
-		if hasMore {
-			newTx, err := cfg.CommitCycle(ctx, sd)
-			if err != nil {
-				return tx, err
-			}
+		newTx, err := cfg.CommitCycle(ctx, hasMore, sd)
+		if err != nil {
+			return tx, err
+		}
+		if newTx != nil {
 			tx = newTx
 		}
 	}
@@ -246,7 +240,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	// Closure form: CommitCycle reassigns tx across iterations, so we need
+	// to roll back the current value at function exit, not the original.
+	defer func() { tx.Rollback() }()
 
 	// Run snapshots stage — downloads block files.
 	if err = pe.sync.RunSnapshots(nil, tx); err != nil {
@@ -287,19 +283,37 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		InitialCycle: true,
 		FirstCycle:   false,
 		PruneTimeout: 0,
+		PruneFn: func(ctx context.Context, pruneInitialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			return pe.sync.RunPrune(ctx, rwtx, pruneInitialCycle, 0)
+		},
 		PruneInitialCycleFn: func(curTx kv.TemporalRwTx) (bool, error) {
 			return stagedsync.IsInitialCycle(curTx, pe.sync.Cfg(), pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
 		AfterPrune: func(curTx kv.TemporalRwTx, _ bool) error {
 			return stagedsync.UpdateTipReached(curTx, pe.blockReader.FrozenBlocks(), pe.KnownTipHint())
 		},
-		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			if err := sd.Flush(ctx, tx); err != nil {
 				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
 			}
 			sd.ClearRam(true)
 			if err := tx.Commit(); err != nil {
 				return nil, err
+			}
+			// Prune runs via PruneFn (sync.RunPrune); kick file building so
+			// snapshot files advance as PFB processes frozen blocks.
+			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
+				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
+					toTxNum := agg.EndTxNumMinimax() + agg.StepSize()
+					if cap := agg.MaxCollationTxNum(); cap > 0 && toTxNum > cap {
+						toTxNum = cap
+					}
+					agg.BuildFilesInBackground(toTxNum)
+				}
+			}
+			// Last iter: skip BeginTemporalRw — no next iter will use it.
+			if !hasMore {
+				return nil, nil
 			}
 			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
@@ -322,14 +336,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	})
 	if err != nil {
 		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
-	}
-
-	if err := doms.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("ProcessFrozenBlocks: final flush: %w", err)
-	}
-	doms.ClearRam(true)
-	if err := tx.Commit(); err != nil {
-		return err
 	}
 
 	if hook != nil {

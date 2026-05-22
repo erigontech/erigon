@@ -27,8 +27,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tidwall/btree"
-
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -47,39 +45,17 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-
-	minimax := d.History.dirtyFilesEndTxNumMinimax()
-	if _max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return d.dirtyFiles.updateMinimax(d.History.dirtyFilesEndTxNumMinimax())
 }
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
-	var minimax uint64
-	if _max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return ii.dirtyFiles.EndTxNumMax()
 }
 func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 	if h.SnapshotsDisabled {
 		return math.MaxUint64
 	}
-	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
-	if _max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
-		}
-	}
-	return minimax
+	return h.dirtyFiles.updateMinimax(h.InvertedIndex.dirtyFilesEndTxNumMinimax())
 }
 
 type DomainRanges struct {
@@ -136,6 +112,13 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // Accounts/Storage/Commitment domain frontiers aligned. Files past it aren't yet
 // merge candidates — going further would let one entity drift ahead of the others.
 //
+// When the natural start (endTxNum minus the largest power-of-two step span)
+// falls strictly inside an existing visible file, the window is clipped so its
+// from aligns with that file's endTxNum boundary. Without this clip, on
+// non-power-of-2 step layouts (e.g. after a step-size rebase) the algorithm
+// would propose windows straddling an existing file, producing misnamed merged
+// files and/or overlapping coverage. See #20878.
+//
 // When superSetCheck is true (history & inverted index), a file matching the
 // candidate's from and reaching at least its to replaces the candidate's bounds
 // but resets needMerge to false, letting later smaller-but-still-mergeable files
@@ -146,7 +129,7 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		if item.endTxNum > maxEndTxNum {
 			continue
 		}
-		start := calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan)
+		start := clipMergeStartToFileBoundary(files, calculateMergeStartTxNum(item.endTxNum, stepSize, maxSpan))
 		if superSetCheck && r.from == item.startTxNum && item.endTxNum >= r.to {
 			r.needMerge = false
 			r.from = start
@@ -164,6 +147,24 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		r.to = item.endTxNum
 	}
 	return r
+}
+
+// clipMergeStartToFileBoundary bumps start up to the endTxNum of any visible
+// file that straddles it (startTxNum < start < endTxNum). visibleFiles are
+// non-overlapping, so at most one straddling file can exist; the loop returns
+// as soon as it is found. Files are sorted by endTxNum ascending, so the first
+// file with endTxNum > start is the only straddler candidate.
+func clipMergeStartToFileBoundary(files visibleFiles, start uint64) uint64 {
+	for _, f := range files {
+		if f.endTxNum <= start {
+			continue
+		}
+		if f.startTxNum < start {
+			return f.endTxNum
+		}
+		return start
+	}
+	return start
 }
 
 // findMergeRange
@@ -996,7 +997,7 @@ func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
+func garbage(dirtyFiles *DirtyFiles, visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
 	iter := dirtyFiles.Iter()

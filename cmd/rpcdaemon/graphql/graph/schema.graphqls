@@ -40,7 +40,7 @@ type Account {
 # Log is an Ethereum event log.
 type Log {
   # Index is the index of this log in the block.
-  index: Int!
+  index: Long!
   # Account is the account which generated this log - this will always
   # be a contract account.
   account(block: Long): Account!
@@ -66,7 +66,7 @@ type Transaction {
   nonce: BigInt!
   # Index is the index of this transaction in the parent block. This will
   # be null if the transaction has not yet been mined.
-  index: Int
+  index: Long
   # From is the account that sent this transaction - this will always be
   # an externally owned account.
   from(block: Long): Account!
@@ -130,6 +130,12 @@ type Transaction {
   # RawReceipt is the canonical encoding of the receipt. For post EIP-2718 typed transactions
   # this is equivalent to TxType || ReceiptEncoding.
   rawReceipt: Bytes!
+  # MaxFeePerBlobGas is the maximum fee per blob gas for EIP-4844 transactions.
+  maxFeePerBlobGas: BigInt
+  # BlobGasUsed is the gas used by blob data for EIP-4844 transactions.
+  blobGasUsed: Long
+  # BlobGasPrice is the price paid per unit of blob gas for EIP-4844 transactions.
+  blobGasPrice: BigInt
 }
 
 # BlockFilterCriteria encapsulates log filter criteria for a filter applied
@@ -166,7 +172,7 @@ type Block {
   transactionsRoot: Bytes32!
   # TransactionCount is the number of transactions in this block. if
   # transactions are not available for this block, this field will be null.
-  transactionCount: Int
+  transactionCount: Long
   # StateRoot is the keccak256 hash of the state trie after this block was processed.
   stateRoot: Bytes32!
   # ReceiptsRoot is the keccak256 hash of the trie of transaction receipts in this block.
@@ -192,9 +198,11 @@ type Block {
   mixHash: Bytes32!
   # Difficulty is a measure of the difficulty of mining this block.
   difficulty: BigInt!
+  # TotalDifficulty is the sum of all difficulty values up to and including this block.
+  totalDifficulty: BigInt!
   # OmmerCount is the number of ommers (AKA uncles) associated with this
   # block. If ommers are unavailable, this field will be null.
-  ommerCount: Int
+  ommerCount: Long
   # Ommers is a list of ommer (AKA uncle) blocks associated with this block.
   # If ommers are unavailable, this field will be null. Depending on your
   # node, the transactions, transactionAt, transactionCount, ommers,
@@ -226,6 +234,12 @@ type Block {
   rawHeader: Bytes!
   # Raw is the RLP encoding of the block.
   raw: Bytes!
+  # WithdrawalsRoot is the hash of the withdrawals trie root.
+  withdrawalsRoot: Bytes32
+  # BlobGasUsed is the total amount of blob gas used in the block (EIP-4844).
+  blobGasUsed: Long
+  # ExcessBlobGas is the running total of excess blob gas consumed in excess of the target (EIP-4844).
+  excessBlobGas: Long
   # Withdrawals is the withdrawals that occurred within the block.
   withdrawals: [Withdrawal!]
 }
@@ -299,7 +313,7 @@ type SyncState {
 # Pending represents the current pending state.
 type Pending {
   # TransactionCount is the number of transactions in the pending state.
-  transactionCount: Int!
+  transactionCount: Long!
   # Transactions is a list of transactions in the current pending state.
   transactions: [Transaction!]
   # Account fetches an Ethereum account for the pending state.
@@ -317,7 +331,7 @@ type Query {
   block(number: BlockNum, hash: Bytes32): Block
   # Blocks returns all the blocks between two numbers, inclusive. If
   # to is not supplied, it defaults to the most recent known block.
-  blocks(from: Long, to: Long): [Block!]!
+  blocks(from: Long!, to: Long): [Block!]!
   # Pending returns the current pending state.
   pending: Pending!
   # Transaction returns a transaction specified by its hash.
@@ -343,9 +357,9 @@ type Mutation {
 
 type Withdrawal {
   # Index is the index of the withdrawal.
-  index: Int!
+  index: Long!
   # Index is the index of the validator that received the withdrawal.
-  validator: Int!
+  validator: Long!
   # Address is the target address for withdrawn ether.
   address: Address!
   # Amount is the amount of the withdrawal.

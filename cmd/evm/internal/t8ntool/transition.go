@@ -209,7 +209,7 @@ func Main(ctx *cli.Context) error {
 		vmConfig.ExtraEips = extraEips
 	}
 	// Set the chain id
-	chainConfig.ChainID = big.NewInt(ctx.Int64(ChainIDFlag.Name))
+	chainConfig.ChainID = new(uint256.Int).SetUint64(ctx.Uint64(ChainIDFlag.Name))
 
 	var txsWithKeys []*txWithKey
 	if txStr != stdinSelector {

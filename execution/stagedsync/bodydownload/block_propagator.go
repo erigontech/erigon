@@ -18,9 +18,10 @@ package bodydownload
 
 import (
 	"context"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockPropagator func(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int)
+type BlockPropagator func(ctx context.Context, header *types.Header, body *types.RawBody, td uint256.Int)

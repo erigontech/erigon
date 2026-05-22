@@ -23,10 +23,13 @@ var globalCaplinConfig *clparams.CaplinConfig
 
 func init() {
 	// Initialize global config once for all tests
+	// Set GloasForkEpoch high to ensure tests run in Fulu mode
+	// (tests create Fulu-style sidecars with SignedBlockHeader)
 	globalBeaconConfig = &clparams.BeaconChainConfig{
 		NumberOfColumns:             4,
 		SlotsPerEpoch:               32,
 		MaxBlobCommittmentsPerBlock: 6,
+		GloasForkEpoch:              18446744073709551615, // Max uint64 - Gloas not activated
 	}
 	globalCaplinConfig = &clparams.CaplinConfig{}
 	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)

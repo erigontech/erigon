@@ -23,6 +23,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -144,7 +146,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	return h
 }
 
-func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *big.Int {
+func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash common.Hash, number uint64) *uint256.Int {
 	td, err := c.executionModule.GetTD(ctx, &hash, &number)
 	if err != nil {
 		log.Warn("[engine] GetTd", "err", err)

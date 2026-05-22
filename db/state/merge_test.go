@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -145,7 +144,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 			universalEntity := FromII(d.InvertedIndex.InvIdxCfg.Name)
 			checker.AddDependency(universalEntity, &DependentInfo{
 				entity: universalEntity,
-				filesGetter: func() *btree2.BTreeG[*FilesItem] {
+				filesGetter: func() *DirtyFiles {
 					return d.History.dirtyFiles
 				},
 				accessors: d.History.Accessors,
@@ -869,19 +868,11 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 	t.Run("partial_overlap_must_not_be_selected", func(t *testing.T) {
 		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1618), [1618, 1620), [1620, 1621), [1621, 1622) ->
 		// [0, 1024), [1024, 1536), [1536, 1600), [1600, 1618), [1618, 1620), [1620, 1622)
-		// CORRECT BEHAVIOR: the {1616, 1620} window proposed by [1618, 1620) straddles the
-		// pre-existing [1600, 1618) (its startTxNum 1600 < window's from 1616). Selecting that
-		// window would either drop coverage of [1616, 1618) or create an overlap once
-		// staticFilesInRange filters [1600, 1618) out. The algorithm should skip this unsafe
-		// window and instead pick the trailing pair's safe window {1620, 1622}.
-		//
-		// TODO(#20878): findMergeRangeInFiles currently picks {1616, 1620} regardless.
-		// The "Flexible merge ranges" proposal in https://github.com/erigontech/erigon/issues/20878
-		// fixes this by clipping the candidate window's `from` to the smallest visible
-		// startTxNum >= the natural from, so a window can never straddle an existing file.
-		// Once that lands, unskip this test.
-		t.Skip("known pathology: findMergeRangeInFiles selects a window straddling an existing file; see #20878")
-
+		// The {1616, 1620} window proposed by [1618, 1620) would straddle the pre-existing
+		// [1600, 1618) (its startTxNum 1600 < window's from 1616). clipMergeStartToFileBoundary
+		// bumps the start up to 1618; the resulting [1618, 1620) is then rejected as
+		// already-aligned, and the next iteration picks the safe trailing pair {1620, 1622}.
+		// See #20878.
 		files := visibleFiles{
 			f(0, 1024),
 			f(1024, 1536),
@@ -896,6 +887,62 @@ func TestFindMergeRangeInFiles(t *testing.T) {
 		assert.Equal(t, uint64(1620), mr.from,
 			"window must not straddle [1600, 1618); the safe candidate is the trailing pair")
 		assert.Equal(t, uint64(1622), mr.to)
+	})
+
+	t.Run("step_rebase_swallow", func(t *testing.T) {
+		// File boundaries here are not power-of-2 aligned: they're the original canonical
+		// boundaries (1024, 1536, ..., 2046, 2047) multiplied by 1000, as would result from
+		// a step-size rebase that changes one step into 1000 tx-nums. None of the resulting
+		// endTxNums (1024000, 1536000, ..., 2047000) sit on a power-of-2 boundary, so the
+		// merge algorithm's "largest aligned span ending at endTxNum" can fall strictly
+		// inside an existing file.
+		//
+		// Past 2047000, single-step files [N-1, N) accumulate. They merge cleanly among
+		// themselves whenever their endTxNum has a rightmost-set-bit span that fits inside
+		// the post-2047000 region — that gives the binary tree of files below.
+		//
+		// The interesting moment is N=2048000. Its natural span is 16384 (2048000 = 125 *
+		// 2^14, rightmost bit 2^14), giving natural start 2031616. That start lands inside
+		// [2016000, 2032000): selecting {2031616, 2048000} as a merge window would either
+		// drop coverage of [2016000, 2031616) or produce a file that overlaps [2016000,
+		// 2032000). The clip bumps start up to 2032000 — the next safe boundary — producing
+		// {2032000, 2048000}. That window cleanly absorbs the four trailing rebased files
+		// at and above 2032000, the eight post-2047000 files, and the three latest
+		// singletons (15 files into 1) without touching the still non-canonical
+		// [2016000, 2032000) on its left.
+		const maxSpan = uint64(1 << 20) // 1048576, large enough for the natural 16384 span
+		files := visibleFiles{
+			// Rebased canonical-step boundaries (×1000).
+			f(0, 1024000),
+			f(1024000, 1536000),
+			f(1536000, 1792000),
+			f(1792000, 1920000),
+			f(1920000, 1984000),
+			f(1984000, 2016000),
+			f(2016000, 2032000),
+			f(2032000, 2040000),
+			f(2040000, 2044000),
+			f(2044000, 2046000),
+			f(2046000, 2047000),
+			// Binary expansion of the post-2047000 region by N=2047996.
+			f(2047000, 2047488),
+			f(2047488, 2047744),
+			f(2047744, 2047872),
+			f(2047872, 2047936),
+			f(2047936, 2047968),
+			f(2047968, 2047984),
+			f(2047984, 2047992),
+			f(2047992, 2047996),
+			// Latest singletons added at N=2047997, 2047998, 2047999, 2048000.
+			f(2047996, 2047998),
+			f(2047998, 2047999),
+			f(2047999, 2048000),
+		}
+		mr := findMergeRangeInFiles(files, stepSize, 2048000, maxSpan, false)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, uint64(2032000), mr.from,
+			"natural start 2031616 must be clipped up to 2032000 to avoid straddling [2016000, 2032000)")
+		assert.Equal(t, uint64(2048000), mr.to)
 	})
 
 	// --- superSetCheck (history / inverted-index branch) ---
@@ -1086,7 +1133,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		checker := NewDependencyIntegrityChecker(log.New())
 		info := &DependentInfo{
 			entity: FromDomain(commitment.Name),
-			filesGetter: func() *btree2.BTreeG[*FilesItem] {
+			filesGetter: func() *DirtyFiles {
 				return commitment.dirtyFiles
 			},
 			accessors: commitment.Accessors,
