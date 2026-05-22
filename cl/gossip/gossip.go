@@ -33,6 +33,11 @@ const (
 	TopicNameLightClientFinalityUpdate   = "light_client_finality_update"
 	TopicNameLightClientOptimisticUpdate = "light_client_optimistic_update"
 
+	TopicNameExecutionPayload    = "execution_payload"
+	TopicNameExecutionPayloadBid = "execution_payload_bid"
+	TopicNamePayloadAttestation  = "payload_attestation_message"
+	TopicNameProposerPreferences = "proposer_preferences"
+
 	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d"
 	TopicNamePrefixBeaconAttestation = "beacon_attestation_%d"
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
@@ -70,16 +75,16 @@ func TopicNameDataColumnSidecar(d uint64) string {
 }
 
 func IsTopicBlobSidecar(d string) bool {
-	return strings.Contains(d, "blob_sidecar_")
+	return strings.HasPrefix(d, "blob_sidecar_")
 }
 
 func IsTopicDataColumnSidecar(d string) bool {
-	return strings.Contains(d, "data_column_sidecar_")
+	return strings.HasPrefix(d, "data_column_sidecar_")
 }
 
 func IsTopicSyncCommittee(d string) bool {
-	return strings.Contains(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
+	return strings.HasPrefix(d, "sync_committee_") && !strings.Contains(d, TopicNameSyncCommitteeContributionAndProof)
 }
 func IsTopicBeaconAttestation(d string) bool {
-	return strings.Contains(d, "beacon_attestation_")
+	return strings.HasPrefix(d, "beacon_attestation_")
 }

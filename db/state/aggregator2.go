@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -126,7 +127,61 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	return opts
 }
 
-// Getters
+type workersCfg struct {
+	mu              sync.Mutex
+	allowEditing    bool // false while a long op holds the lock; Preset* writes are no-ops
+	merge           int  // usually 1
+	collateAndBuild int
+}
+
+func (w *workersCfg) getMerge() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.merge
+}
+
+func (w *workersCfg) setMerge(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.merge = n
+	}
+}
+
+func (w *workersCfg) getCollateAndBuild() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.collateAndBuild
+}
+
+func (w *workersCfg) setCollateAndBuild(n int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		w.collateAndBuild = n
+	}
+}
+
+// trySet runs fn under mu only if allowEditing is true.
+func (w *workersCfg) trySet(fn func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.allowEditing {
+		fn()
+	}
+}
+
+func (w *workersCfg) lockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = false
+}
+
+func (w *workersCfg) unlockEditing() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.allowEditing = true
+}
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	directories := []string{
@@ -159,7 +214,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			msVs, ok := statecfg.SchemeMinSupportedVersions[fileInfo.TypeString]
 			if !ok {
-				//println("file type not supported", fileInfo.TypeString, name)
 				return nil
 			}
 			requiredVersion, ok := msVs[fileInfo.Ext]

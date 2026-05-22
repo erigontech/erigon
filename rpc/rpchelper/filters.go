@@ -607,7 +607,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	} else {
 		// Limit the number of topics
 		topicCount := 0
-		allowedTopics := [][]common.Hash{}
+		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
 		for _, topics := range criteria.Topics {
 			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
@@ -619,9 +619,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 					break
 				}
 			}
-			if len(allowedTopicsRow) > 0 {
-				allowedTopics = append(allowedTopics, allowedTopicsRow)
-			}
+			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
+			allowedTopics = append(allowedTopics, allowedTopicsRow)
 		}
 		f.topicsOriginal = allowedTopics
 	}

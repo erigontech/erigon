@@ -155,6 +155,71 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 	}
 }
 
+func TestFilters_SingleSubscription_TopicPositionWildcardIsPreserved(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+
+	topic0 := common.BytesToHash([]byte{10, 20})
+	topic2 := common.BytesToHash([]byte{30, 40})
+	criteria := filters.FilterCriteria{
+		Addresses: nil,
+		Topics:    [][]common.Hash{{topic0}, nil, {topic2}},
+	}
+
+	outChan, _ := f.SubscribeLogs(10, criteria)
+
+	matchingLog := createLog()
+	matchingLog.Topics = []*typesproto.H256{
+		gointerfaces.ConvertHashToH256(topic0),
+		gointerfaces.ConvertHashToH256(common.BytesToHash([]byte{50, 60})),
+		gointerfaces.ConvertHashToH256(topic2),
+	}
+	f.OnNewLogs(matchingLog)
+
+	if len(outChan) != 1 {
+		t.Error("expected wildcard middle topic to preserve positional matching")
+	}
+
+	nonMatchingLog := createLog()
+	nonMatchingLog.Topics = []*typesproto.H256{
+		gointerfaces.ConvertHashToH256(topic0),
+		gointerfaces.ConvertHashToH256(common.BytesToHash([]byte{50, 60})),
+		gointerfaces.ConvertHashToH256(common.BytesToHash([]byte{70, 80})),
+	}
+	f.OnNewLogs(nonMatchingLog)
+
+	if len(outChan) != 1 {
+		t.Error("expected non-matching topic at constrained position to be filtered out")
+	}
+}
+
+func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+
+	criteria := filters.FilterCriteria{
+		Addresses: nil,
+		Topics:    [][]common.Hash{nil},
+	}
+
+	outChan, _ := f.SubscribeLogs(10, criteria)
+
+	log1 := createLog()
+	f.OnNewLogs(log1)
+	if len(outChan) != 1 {
+		t.Error("expected wildcard-only topic row to match arbitrary topics")
+	}
+
+	log2 := createLog()
+	log2.Topics = []*typesproto.H256{gointerfaces.ConvertHashToH256(common.BytesToHash([]byte{1, 2, 3}))}
+	f.OnNewLogs(log2)
+	if len(outChan) != 2 {
+		t.Error("expected wildcard-only topic row to continue matching subsequent logs")
+	}
+}
+
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}

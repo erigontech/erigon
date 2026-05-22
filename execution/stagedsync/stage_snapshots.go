@@ -20,10 +20,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -41,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -258,6 +262,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
+		// After opening files: check for state/block snapshot misalignment.
+		if err := alignStateToBlockSnapshots(ctx, agg, cfg, s.LogPrefix(), logger); err != nil {
+			return fmt.Errorf("align state to block snapshots: %w", err)
+		}
+
 		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
 			return err
 		}
@@ -312,6 +321,26 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+	}
+
+	// In E3, the post-execution state is in domain files. After FillDBFromSnapshots,
+	// snapshot domain state may be ahead of the Execution stage progress (which is 0
+	// on a fresh node until ExecV3 runs and self-corrects via SeekCommitment). During
+	// that startup window the RPC layer can resolve `latest` to genesis (exec=0) while
+	// the cached state reader serves snapshot-tip state — a state-vs-rules mismatch
+	// that crashed eth_call on Gnosis with "invalid opcode: SHR" (#21066).
+	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
+	// consistent view immediately, matching what ExecV3 would set on its first run.
+	if commitBlock := readCommitmentBlockFromDB(ctx, cfg.db); commitBlock > 0 {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return fmt.Errorf("get Execution stage progress: %w", err)
+		}
+		if execProgress < commitBlock {
+			if err := stages.SaveStageProgress(tx, stages.Execution, commitBlock); err != nil {
+				return fmt.Errorf("advance Execution stage to snapshot commitment block: %w", err)
+			}
+		}
 	}
 
 	{
@@ -431,7 +460,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		return nil
 	}
 	freezingCfg := cfg.blockReader.FreezingCfg()
-	if freezingCfg.ProduceE2 {
+	if freezingCfg.ProduceE2 && !dbg.NoBackgroundMaintenance() {
 		//TODO: initialSync maybe save files progress here
 
 		var minBlockNumber uint64
@@ -534,4 +563,247 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
+}
+
+// alignStateToBlockSnapshots detects when state domain files imply a
+// commitment block past the current frozen block snapshots (for example due to
+// a preverified snapshot publication mismatch) and removes the highest state
+// files until the state view no longer extends beyond the block snapshots.
+// Without this, SeekCommitment can return a block number past what TxNums
+// covers, causing "behind commitment" errors.
+//
+// Algorithm: read the commitment block from the current state files (via the
+// already-open aggregator) and compare with cfg.blockReader.FrozenBlocks().
+// If ahead, remove the highest state files (all domains), de-register them
+// from the downloader, strip from preverified.toml, reopen, and repeat.
+func alignStateToBlockSnapshots(ctx context.Context, agg *state.Aggregator, cfg SnapshotsCfg, logPrefix string, logger log.Logger) error {
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if frozenBlocks == 0 {
+		return nil
+	}
+
+	// Only align on fresh start. If MDBX already has commitment data
+	// (written by execution, not by OtterSync indexing), the node
+	// previously executed past any snapshot misalignment.
+	// Re-running alignment on restart would remove snapshot files that
+	// the downloader re-downloaded, cascading until all state is gone.
+	if roTx, err := cfg.db.BeginRo(ctx); err == nil {
+		// Check if the commitment domain values table has any entries.
+		// This table is only populated by execution, not by OtterSync.
+		if cursor, cErr := roTx.Cursor(kv.TblCommitmentVals); cErr == nil {
+			k, _, _ := cursor.First()
+			cursor.Close()
+			roTx.Rollback()
+			if k != nil {
+				return nil // execution has run — skip alignment
+			}
+		} else {
+			roTx.Rollback()
+		}
+	}
+
+	dirs := cfg.dirs
+	totalRemoved := 0
+
+	for {
+		commitBlock := readCommitmentBlockFromDB(ctx, cfg.db)
+		logger.Debug(fmt.Sprintf("[%s] alignment check", logPrefix),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "totalRemoved", totalRemoved)
+
+		if commitBlock == 0 || commitBlock <= frozenBlocks {
+			if totalRemoved > 0 {
+				logger.Info(fmt.Sprintf("[%s] state/block snapshot alignment complete", logPrefix),
+					"commitBlock", commitBlock, "frozenBlocks", frozenBlocks, "filesRemoved", totalRemoved)
+			}
+			return nil
+		}
+
+		// Commitment past block boundary. Remove the highest state files.
+		highestStart, found := findHighestStateFileStartStep(dirs)
+		if !found {
+			logger.Warn(fmt.Sprintf("[%s] state files misaligned but no removable files found", logPrefix),
+				"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
+			return nil
+		}
+
+		logger.Info(fmt.Sprintf("[%s] state/block misalignment detected, removing step %d", logPrefix, highestStart),
+			"commitBlock", commitBlock, "frozenBlocks", frozenBlocks)
+
+		removedFiles := removeStateFilesFromStep(dirs, highestStart, logger, logPrefix)
+		totalRemoved += removedFiles.count
+		if removedFiles.count == 0 {
+			return nil
+		}
+
+		// Tell the downloader to de-register deleted files so the torrent
+		// client doesn't panic trying to serve them to peers.
+		if len(removedFiles.names) > 0 {
+			seeder := cfg.getSeederClient()
+			if err := seeder.Delete(ctx, removedFiles.names); err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to de-register deleted files from downloader", logPrefix), "err", err)
+			}
+		}
+
+		// Reopen aggregator files with the reduced set.
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
+	}
+}
+
+// readCommitmentBlockFromDB reads the commitment domain's "state" key via a
+// temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
+// need a separate temporal RO tx to read domain data from snapshot files.
+// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
+func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
+	roTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return 0
+	}
+	defer roTx.Rollback()
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+	if err != nil || len(v) < 16 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(v[8:16])
+}
+
+// findHighestStateFileStartStep finds the start step of the highest state
+// domain file. Returns (step, true) or (0, false) if no state files exist.
+func findHighestStateFileStartStep(dirs datadir.Dirs) (kv.Step, bool) {
+	var highest kv.Step
+	found := false
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	if err != nil {
+		return 0, false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".torrent") {
+			continue
+		}
+		if !isStateDomainFile(name) {
+			continue
+		}
+		startStep, _, ok := parseFileStepRange(name)
+		if !ok {
+			continue
+		}
+		if !found || startStep > highest {
+			highest = startStep
+			found = true
+		}
+	}
+	return highest, found
+}
+
+// isStateDomainFile returns true for state snapshot data files (accounts,
+// storage, code, commitment, receipt, rcache) and false for block snapshot
+// files (bodies, headers, transactions) to avoid accidentally deleting
+// block-level indices.
+func isStateDomainFile(name string) bool {
+	// State domain files contain these domain names in their filename.
+	domains := []string{"accounts", "storage", "code", "commitment", "receipt", "rcache",
+		"logaddrs", "logtopics", "tracesfrom", "tracesto"}
+	lower := strings.ToLower(name)
+	for _, d := range domains {
+		if strings.Contains(lower, d) {
+			return true
+		}
+	}
+	return false
+}
+
+type removedFilesResult struct {
+	count int
+	names []string // relative paths for downloader de-registration
+}
+
+// removeStateFilesFromStep removes all state files whose start step >= fromStep
+// and strips matching entries from preverified.toml so the downloader doesn't
+// re-download them.
+func removeStateFilesFromStep(dirs datadir.Dirs, fromStep kv.Step, logger log.Logger, logPrefix string) removedFilesResult {
+	result := removedFilesResult{}
+
+	for _, snapDir := range []string{dirs.SnapDomain, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(snapDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".torrent") {
+				continue
+			}
+			if !isStateDomainFile(name) {
+				continue
+			}
+			startStep, _, ok := parseFileStepRange(name)
+			if !ok || startStep < fromStep {
+				continue
+			}
+			dataPath := filepath.Join(snapDir, name)
+			torrentPath := dataPath + ".torrent"
+			if err := dir.RemoveFile(dataPath); err != nil && !os.IsNotExist(err) {
+				continue
+			}
+			dir.RemoveFile(torrentPath) //nolint:errcheck
+			relDir := filepath.Base(snapDir)
+			result.names = append(result.names, filepath.Join(relDir, name))
+			logger.Debug(fmt.Sprintf("[%s] removed misaligned file", logPrefix), "file", name, "startStep", startStep)
+			result.count++
+		}
+	}
+
+	// Strip removed step ranges from preverified.toml so the downloader
+	// doesn't re-fetch them on next startup.
+	pvPath := filepath.Join(dirs.Snap, "preverified.toml")
+	if data, err := os.ReadFile(pvPath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		var kept []string
+		stripped := 0
+		for _, line := range lines {
+			startStep, _, ok := parseFileStepRange(line)
+			if ok && startStep >= fromStep && isStateDomainFile(line) {
+				stripped++
+				continue
+			}
+			kept = append(kept, line)
+		}
+		if stripped > 0 {
+			if err := os.Chmod(pvPath, 0644); err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to chmod preverified.toml", logPrefix), "err", err)
+			} else if err := os.WriteFile(pvPath, []byte(strings.Join(kept, "\n")), 0644); err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to write preverified.toml", logPrefix), "err", err)
+			} else {
+				logger.Info(fmt.Sprintf("[%s] stripped %d entries from preverified.toml", logPrefix, stripped))
+			}
+		}
+	}
+
+	if result.count > 0 {
+		logger.Info(fmt.Sprintf("[%s] removed state files from step %d", logPrefix, fromStep), "removed", result.count)
+	}
+	return result
+}
+
+// parseFileStepRange extracts start and end steps from a state snapshot filename.
+// Filenames: "v2.0-accounts.8192-8704.kv" → start=8192, end=8704
+func parseFileStepRange(name string) (start, end kv.Step, ok bool) {
+	parts := strings.Split(name, ".")
+	for _, part := range parts {
+		if idx := strings.Index(part, "-"); idx > 0 {
+			var s, e uint64
+			if _, err := fmt.Sscanf(part, "%d-%d", &s, &e); err == nil && e > s {
+				return kv.Step(s), kv.Step(e), true
+			}
+		}
+	}
+	return 0, 0, false
 }

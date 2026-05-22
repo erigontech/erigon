@@ -210,13 +210,16 @@ func collectRenameList(domainPath string, re *regexp.Regexp, decr bool, factor u
 	})
 
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, fmt.Errorf("scanning %s: %w", domainPath, walkErr)
 	}
 	return renList, nil
 }
 
 // collectTorrentFiles walks given root and returns absolute paths to files ending with .torrent
 func collectTorrentFiles(root string) ([]string, error) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil, nil
+	}
 	list := make([]string, 0, 100)
 	walkErr := fs.WalkDir(os.DirFS(root), ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -231,7 +234,7 @@ func collectTorrentFiles(root string) ([]string, error) {
 		return nil
 	})
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, fmt.Errorf("scanning %s: %w", root, walkErr)
 	}
 	return list, nil
 }
