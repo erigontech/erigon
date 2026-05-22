@@ -222,8 +222,13 @@ func AnswerGetBlockAccessListsQuery(db kv.Tx, query GetBlockAccessListsPacket, b
 	return bals
 }
 
+// Using a struct keeps the ReceiptsGetter interface stable when new options are added.
+type ReceiptsOpts struct {
+	CommitmentHistoryEnabled bool
+}
+
 type ReceiptsGetter interface {
-	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error)
+	GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts ReceiptsOpts) (types.Receipts, error)
 	GetCachedReceipts(ctx context.Context, blockHash common.Hash) (types.Receipts, bool)
 }
 
@@ -372,6 +377,16 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		pendingIndex = cached.PendingIndex
 	}
 
+	// Only read the flag when there is work to do; full cache hits skip this DB lookup.
+	var receiptsOpts ReceiptsOpts
+	if pendingIndex < len(query) {
+		var err error
+		receiptsOpts.CommitmentHistoryEnabled, _, err = rawdb.ReadDBCommitmentHistoryEnabled(db)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+
 	for lookups := pendingIndex; lookups < len(query); lookups++ {
 		hash := query[lookups]
 		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
@@ -390,7 +405,7 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 			return nil, false, nil
 		}
 
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)
 		if err != nil {
 			return nil, false, err
 		}
