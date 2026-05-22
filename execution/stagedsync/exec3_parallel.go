@@ -1054,7 +1054,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.execFailed = append(executor.execFailed, 0)
 		executor.execAborted = append(executor.execAborted, 0)
 
-		executor.skipCheck[len(executor.tasks)-1] = false
 		executor.estimateDeps[len(executor.tasks)-1] = []int{}
 
 		executor.execTasks.pushPending(i)
@@ -1979,10 +1978,22 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// For a task that runs only after all of its preceding tasks have finished and passed validation,
-	// its result will be absolutely valid and therefore its validation could be skipped.
-	// This map stores the boolean value indicating whether a task satisfy this condition (absolutely valid).
-	skipCheck map[int]bool
+	// settledInput[tx]==true marks a task that was dispatched when every
+	// preceding task had already validated — so it executed against fully
+	// settled MVCC state, with no lower-indexed worker still in flight.
+	//
+	// It is set at dispatch time (scheduleExecution), which is the only point
+	// the "ran on settled input" property can be asserted: a result-time check
+	// would miss that the task may have executed speculatively, earlier, on
+	// state a since-validated predecessor has since changed.
+	//
+	// Used solely to classify a genuine (IsError) execution abort: an error
+	// raised against settled input is real invalid-block data, not a
+	// speculative-execution artifact, so the block can be rejected on the
+	// first such error instead of re-executing to the incarnation limit.
+	// It is NEVER consulted by the validator verdict — a result is committed
+	// only if validation explicitly passes it (issue #21319).
+	settledInput map[int]bool
 
 	// Execution tasks stores the state of each execution task
 	execTasks execStatusList
@@ -2089,7 +2100,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		begin:            time.Now(),
 		stats:            map[int]ExecutionStat{},
 		finalizedResults: map[int]*execResult{},
-		skipCheck:        map[int]bool{},
+		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
 		preValidated:     map[int]bool{},
 		blockIO:          &state.VersionedIO{},
@@ -2144,17 +2155,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	be.results[tx] = &execResult{res, nil}
 	if res.Err != nil {
 		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
-			if execErr.OriginError != nil && be.skipCheck[tx] {
-				// Worker hit a legitimate VM rejection (insufficient funds, wrong
-				// nonce, low gas limit, …). Surface the diagnosis through a
-				// blockResult so the apply loop counts the block as completed-
-				// as-invalid; returning (nil, err) here would race with the
-				// channel-close completeness check at the top of the apply loop
-				// and produce a doubled ErrInvalidBlock error chain.
-				version := res.Version()
-				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, version.TxIndex, version.TxNum, task.TxHash(), execErr.OriginError)), nil
-			}
-
 			if res.Version().Incarnation > len(be.tasks) {
 				// Parallel scheduler exhausted retries for this tx. Surface
 				// through blockResult.Err for the same reason as the other
@@ -2165,7 +2165,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// limit) is a separate investigation — see
 				// TestDeleteRecreateSlotsAcrossManyBlocks under
 				// GOMAXPROCS=2 -race for a stress repro.
-				if execErr.OriginError != nil {
+				if execErr.IsError() {
 					return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))), nil
 				}
 				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))), nil
@@ -2175,8 +2175,50 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
 			be.blockIO.RecordAccesses(res.Version(), res.AccessedAddresses)
-			var addedDependencies bool
-			if execErr.DependencyTxIndex >= 0 {
+
+			if execErr.IsError() {
+				// Genuine, non-dependency execution error (issue #21319).
+				// Classify it only when this task executed against fully
+				// settled input — settledInput[tx] means every predecessor had
+				// validated when it was dispatched. Validate the held result
+				// post-hoc against the current version map: that catches a
+				// predecessor re-validated since dispatch, and a clean verdict
+				// then confirms the error is genuinely caused by invalid block
+				// data — reject the block. Surface it through a blockResult so
+				// the apply loop counts the block as completed-as-invalid;
+				// returning (nil, err) would race with the channel-close
+				// completeness check and double the error chain.
+				//
+				// The settledInput gate also makes this cascade-safe: a task
+				// after a genuine error can never be settledInput, since its
+				// erroring predecessor never validates — so out of a cascade of
+				// speculative errors only the genuinely-first one is returned.
+				if be.settledInput[tx] {
+					txVersion := res.Version()
+					validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
+						func(readVersion, writtenVersion state.Version) state.VersionValidity {
+							if readVersion != writtenVersion {
+								return state.VersionInvalid
+							}
+							return state.VersionValid
+						}, false, "")
+					if validity == state.VersionValid {
+						return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), execErr.OriginError)), nil
+					}
+				}
+				// Not settled input, or a predecessor changed since dispatch —
+				// the error may be speculative. Defer for re-execution; the
+				// drain predicate re-dispatches it once every predecessor has
+				// validated, so the re-run is itself settledInput and a still-
+				// failing error is then returned by the branch above. (Some
+				// re-execution is wasted here — bounded and marginal.)
+				be.execTasks.clearInProgress(tx)
+				be.execTasks.pushDeferred(tx)
+				be.execAborted[tx]++
+				be.txIncarnations[tx]++
+				be.cntAbort++
+			} else {
+				// Dependency abort: re-execute against the named blocker.
 				dependency := execErr.DependencyTxIndex + 1
 
 				l := len(be.estimateDeps[tx])
@@ -2186,41 +2228,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					l--
 				}
 
-				addedDependencies = be.execTasks.addDependency(dependency, tx)
+				addedDependencies := be.execTasks.addDependency(dependency, tx)
 				be.execAborted[tx]++
 
 				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "dep", dependency, "err", execErr.OriginError)
 				}
-			} else {
-				estimate := 0
 
-				if len(be.estimateDeps[tx]) > 0 {
-					estimate = be.estimateDeps[tx][len(be.estimateDeps[tx])-1]
-				}
-				addedDependencies = be.execTasks.addDependency(estimate, tx)
-				newEstimate := estimate + (estimate+tx)/2
-				if newEstimate >= tx {
-					newEstimate = tx - 1
-				}
-				be.estimateDeps[tx] = append(be.estimateDeps[tx], newEstimate)
-				be.execAborted[tx]++
+				be.execTasks.clearInProgress(tx)
 
-				if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-					fmt.Println(be.blockNum, "ABORT", tx, be.txIncarnations[tx], be.execFailed[tx], be.execAborted[tx], "est dep", estimate, "err", execErr.OriginError)
+				if !addedDependencies {
+					// addDependency couldn't register a real wait (named blocker
+					// already complete). Defer — scheduleExecution's predicate
+					// gates retry on predecessor-validated + no-lower-IP.
+					be.execTasks.pushDeferred(tx)
 				}
+				be.txIncarnations[tx]++
+				be.cntAbort++
 			}
-
-			be.execTasks.clearInProgress(tx)
-
-			if !addedDependencies {
-				// addDependency couldn't register a real wait (named blocker
-				// already complete). Defer — scheduleExecution's predicate
-				// gates retry on predecessor-validated + no-lower-IP.
-				be.execTasks.pushDeferred(tx)
-			}
-			be.txIncarnations[tx]++
-			be.cntAbort++
 		} else {
 			return nil, fmt.Errorf("unexpected exec error: %w", res.Err)
 		}
@@ -2327,7 +2352,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			continue
 		}
 
-		valid := be.skipCheck[tx] || validity == state.VersionValid
+		// The validator verdict is the single source of truth (issue #21319):
+		// a result is committed only if validation explicitly passed it.
+		valid := validity == state.VersionValid
 
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -2857,10 +2884,12 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			pe.in.ReTry(tv)
 		}
 
-		// Commit side-effects only after successful enqueue.
-		if isNextValidated {
-			be.skipCheck[nextTx] = true
-		} else {
+		// Commit side-effects only after successful enqueue. Record whether
+		// this dispatch runs against fully settled input (every predecessor
+		// already validated) so a genuine error from it can be classified
+		// without re-execution — see the settledInput field doc.
+		be.settledInput[nextTx] = isNextValidated
+		if !isNextValidated {
 			be.cntSpecExec++
 		}
 
