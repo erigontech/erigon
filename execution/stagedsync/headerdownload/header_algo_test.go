@@ -56,7 +56,7 @@ func TestSideChainInsert(t *testing.T) {
 	defer tx.Rollback()
 
 	br := m.BlockReader
-	hi := headerdownload.NewHeaderInserter("headers", big.NewInt(0), 0, br)
+	hi := headerdownload.NewHeaderInserter("headers", uint256.NewInt(0), 0, br)
 
 	// Chain with higher initial difficulty
 	chain1 := createTestChain(3, genesis.Hash(), 2, []byte(""))
@@ -88,7 +88,7 @@ func TestSideChainInsert(t *testing.T) {
 		name         string
 		chain        []*types.Header
 		expectedHash common.Hash
-		expectedDiff int64
+		expectedDiff uint64
 	}{
 		{"normal initial insert", chain1, chain1[len(chain1)-1].Hash(), 6},
 		{"td(current) > td(incoming)", chain2, chain1[len(chain1)-1].Hash(), 6},
@@ -110,8 +110,8 @@ func TestSideChainInsert(t *testing.T) {
 		if hi.GetHighestHash() != tc.expectedHash {
 			t.Errorf("incorrect highest hash for %s, expected %s, got %s", tc.name, tc.expectedHash, hi.GetHighestHash())
 		}
-		if hi.GetLocalTd().Int64() != tc.expectedDiff {
-			t.Errorf("incorrect difficulty for %s, expected %d, got %d", tc.name, tc.expectedDiff, hi.GetLocalTd().Int64())
+		if hi.GetLocalTd().Uint64() != tc.expectedDiff {
+			t.Errorf("incorrect difficulty for %s, expected %d, got %d", tc.name, tc.expectedDiff, hi.GetLocalTd().Uint64())
 		}
 	}
 }

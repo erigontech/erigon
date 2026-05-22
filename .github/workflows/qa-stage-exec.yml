@@ -119,18 +119,18 @@ jobs:
           --runner ${{ runner.name }} \
           --db_version $db_version \
           --outcome $TEST_RESULT \
-          --result_file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json
+          --result-file ${{ github.workspace }}/result-$CHAIN-${{ matrix.mode_name }}.json
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: test-results-${{ matrix.mode_name }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}-${{ matrix.mode_name }}.json
 
     - name: Upload erigon logs
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: erigon-logs-${{ matrix.mode_name }}
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/

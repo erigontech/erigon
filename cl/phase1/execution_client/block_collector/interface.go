@@ -31,6 +31,8 @@ var batchSize = 1000
 
 type BlockCollector interface {
 	AddBlock(block *cltypes.BeaconBlock) error
+	// AddGloasBlock adds a GLOAS (EIP-7732) FULL block using its execution payload envelope.
+	AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	Flush(ctx context.Context) error
 	HasBlock(blockNumber uint64) bool
 }
@@ -61,12 +63,9 @@ func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRe
 	return utils.CompressSnappy(buf), nil
 }
 
-// payloadKey returns the key for the payload: number + payload.HashTreeRoot()
+// payloadKey returns the key for the payload: just the block number.
+// Using only the block number ensures that reorged blocks overwrite
+// the previous entry, keeping the collector in sync with the canonical chain.
 func payloadKey(payload *cltypes.Eth1Block) ([]byte, error) {
-	root, err := payload.HashSSZ()
-	if err != nil {
-		return nil, err
-	}
-	numberBytes := dbutils.EncodeBlockNumber(payload.BlockNumber)
-	return append(numberBytes, root[:]...), nil
+	return dbutils.EncodeBlockNumber(payload.BlockNumber), nil
 }

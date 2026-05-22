@@ -56,9 +56,10 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
-	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
+	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -78,7 +79,7 @@ var (
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers           = runtime.NumCPU() / 2
+	numWorkers           = runtime.NumCPU()
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 0) // 0 means "not set": online presets default to 1, offline presets use RAM/CPU estimates
@@ -129,22 +130,24 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool    { return discardCommitment }
-func NoPrune() bool              { return noPrune }
-func NoMerge() bool              { return noMerge }
-func NoMergeHistory() bool       { return noMergeHistory }
-func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
-func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
+func DiscardCommitment() bool       { return discardCommitment }
+func NoPrune() bool                 { return noPrune }
+func NoMerge() bool                 { return noMerge }
+func NoBackgroundMaintenance() bool { return noBackgroundE3Build }
+func NoMergeHistory() bool          { return noMergeHistory }
+func NoDeepMergeHistory() bool      { return noDeepMergeHistory }
+func PruneTotalDifficulty() bool    { return pruneTotalDifficulty }
 
 // CLI-override setters for the performance toggles that also have env-var
 // twins. The env var sets the initial value at package init; the CLI layer
 // calls these at node startup only when the user explicitly set the flag.
-func SetIgnoreBAL(b bool)     { IgnoreBAL = b }
-func SetUseStateCache(b bool) { UseStateCache = b }
-func SetReadAhead(b bool)     { ReadAhead = b }
-func SetExec3Workers(n int)   { Exec3Workers = n }
-func SetNoPrune(b bool)       { noPrune = b }
-func SetNoMerge(b bool)       { noMerge = b }
+func SetIgnoreBAL(b bool)               { IgnoreBAL = b }
+func SetUseStateCache(b bool)           { UseStateCache = b }
+func SetReadAhead(b bool)               { ReadAhead = b }
+func SetExec3Workers(n int)             { Exec3Workers = n }
+func SetNoPrune(b bool)                 { noPrune = b }
+func SetNoMerge(b bool)                 { noMerge = b }
+func SetNoBackgroundMaintenance(b bool) { noBackgroundE3Build = b }
 
 var (
 	dirtySace     uint64

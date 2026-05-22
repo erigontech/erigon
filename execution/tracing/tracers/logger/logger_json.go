@@ -52,15 +52,20 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 func (l *JSONLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
-			OnFault:   l.OnFault,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
+			OnFault:             l.OnFault,
 		},
 	}
 }
 
 func (l *JSONLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JSONLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -78,7 +83,7 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 		MemorySize:    len(memory),
 		Storage:       nil,
 		Depth:         depth,
-		RefundCounter: l.env.IntraBlockState.GetRefund().Total(),
+		RefundCounter: l.env.IntraBlockState.GetRefund(),
 		Err:           err,
 	}
 	if l.cfg.EnableMemory {

@@ -53,6 +53,9 @@ models:
   Account:
     model:
       - github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model.Account
+    fields:
+      storage:
+        resolver: true
   Int:
     model:
       - github.com/99designs/gqlgen/graphql.Int
@@ -82,6 +85,12 @@ models:
       transactionAt:
         resolver: true
       account:
+        resolver: true
+      call:
+        resolver: true
+      estimateGas:
+        resolver: true
+      logs:
         resolver: true
   Transaction:
     fields:

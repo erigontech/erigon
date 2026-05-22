@@ -355,6 +355,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
+		// Golang panics over 10K threads.
+		// RoTx doesn't create thread, but if user's goroutine facing PageFault in RoTx - such goroutine gets out of CPU-bounded-threads-pool (to unlimited-IO-bounded-threads-pool).
+		// So, 9K goroutines can produce 0 new threads (if no PageFaults) - or 9K io-threads (if read only cold data).
 		targetSemCount := int64(9_000)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}

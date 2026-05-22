@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -176,7 +176,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -310,11 +310,10 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
@@ -488,7 +487,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	} else {
 		if te.hooks.OnBlockStart != nil {
 			var b *types.Block
-			var td *big.Int
+			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
@@ -583,7 +582,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			if err != nil {
 				return err
 			}
-			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+			b, ok := te.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 			if b == nil || !ok {
 				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
 			}
@@ -672,10 +671,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
-			if !initialCycle || lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !dbg.DiscardCommitment() {
-				if blockLimit > 0 && blockNum-startBlockNum+1 >= blockLimit && blockNum != maxBlockNum {
-					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
-				}
+			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
+				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
 			var commitCh chan applyResult
 			if len(commitResults) > 0 {
@@ -769,21 +766,18 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	// Open a thread-local roTx for domain reads during commitment.
-	// The rwTx (applyTx) is only needed for stage updates above.
-	commitRoTx, err := cfg.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return false, times, fmt.Errorf("commitment: open roTx: %w", err)
-	}
-	defer commitRoTx.Rollback()
-
-	// Get current txNum from the block being committed
+	// Use applyTx, not a fresh BeginTemporalRo: Headers wrote MaxTxNum for
+	// header.Number to applyTx in this batch and a fresh RO snapshot would
+	// miss it, silently falling back to the previous block's max txNum via
+	// c.Last(). Pairing that stale txNum with header.Number in
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
+	// see issue #21171.
 	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
 	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
@@ -797,6 +791,45 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	}
 	return true, times, nil
 
+}
+
+// shouldMarkExhaustedAtBlock decides whether the per-cycle block-limit
+// has been crossed at the current block — which causes executeBlocks to
+// stamp the dispatched blockResult with `Exhausted` and break out of
+// its loop. The exec loop sees the Exhausted flag, fires its
+// partial-batch flush, and the apply loop returns ErrLoopExhausted so
+// the stage loop resumes from the next block.
+//
+// Two gates protect the initial cycle:
+//  1. !initialCycle — later cycles enforce blockLimit unconditionally.
+//  2. On initialCycle, only enforce when we have at least one frozen
+//     step worth of work AND we're not in DiscardCommitment debug mode
+//     (otherwise the partial-batch flush would lose the commitment
+//     that's still pending in sd.mem). See exec3.go's call site for
+//     the historical reasoning.
+//
+// blockNum != maxBlockNum guards against marking the goal block as
+// exhausted — the goal block already triggers a clean reachedMaxBlock
+// exit and shouldn't be relabeled as "more work pending".
+//
+// Pure function so the precedence is unit-testable. See
+// TestShouldMarkExhaustedAtBlock.
+func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenStep kv.Step, discardCommitment bool, blockLimit, blockNum, startBlockNum, maxBlockNum uint64) bool {
+	if initialCycle {
+		if !(lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !discardCommitment) {
+			return false
+		}
+	}
+	if blockLimit == 0 {
+		return false
+	}
+	if blockNum-startBlockNum+1 < blockLimit {
+		return false
+	}
+	if blockNum == maxBlockNum {
+		return false
+	}
+	return true
 }
 
 func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64) bool {

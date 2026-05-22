@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
 
@@ -71,6 +72,22 @@ func Test_SplitTagsFlag(t *testing.T) {
 	}
 }
 
+func TestCobraFlags_BoolDefaultsArePreserved(t *testing.T) {
+	cmd := &cobra.Command{Use: "test"}
+	trueFlag := cli.BoolFlag{Name: "feature.enabled", Usage: "test", Value: true}
+	falseFlag := cli.BoolFlag{Name: "feature.disabled", Usage: "test", Value: false}
+
+	CobraFlags(cmd, []cli.Flag{&trueFlag, &falseFlag})
+
+	gotTrue, err := cmd.PersistentFlags().GetBool(trueFlag.Name)
+	require.NoError(t, err)
+	require.True(t, gotTrue)
+
+	gotFalse, err := cmd.PersistentFlags().GetBool(falseFlag.Name)
+	require.NoError(t, err)
+	require.False(t, gotFalse)
+}
+
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string
@@ -111,6 +128,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 	origExec3Workers := dbg.Exec3Workers
 	origNoPrune := dbg.NoPrune()
 	origNoMerge := dbg.NoMerge()
+	origNoBackgroundMaintenance := dbg.NoBackgroundMaintenance()
 	t.Cleanup(func() {
 		dbg.SetIgnoreBAL(origIgnoreBAL)
 		dbg.SetReadAhead(origReadAhead)
@@ -118,6 +136,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetExec3Workers(origExec3Workers)
 		dbg.SetNoPrune(origNoPrune)
 		dbg.SetNoMerge(origNoMerge)
+		dbg.SetNoBackgroundMaintenance(origNoBackgroundMaintenance)
 	})
 
 	apply := func(ctx *cli.Context) error {
@@ -141,6 +160,9 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		if ctx.IsSet(ExecNoPruneFlag.Name) {
 			dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
 		}
+		if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
+			dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
+		}
 		return nil
 	}
 
@@ -148,7 +170,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		app := cli.NewApp()
 		app.Flags = []cli.Flag{
 			&ExecBatchedIOFlag, &ExecStateCacheFlag, &ExecWorkersFlag,
-			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag,
+			&ExecSerialFlag, &ExecNoMergeFlag, &ExecNoPruneFlag, &ExecNoBackgroundMaintenanceFlag,
 		}
 		app.Action = apply
 		require.NoError(t, app.Run(append([]string{"test"}, args...)))
@@ -161,6 +183,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		dbg.SetExec3Workers(42)
 		dbg.SetNoMerge(false)
 		dbg.SetNoPrune(false)
+		dbg.SetNoBackgroundMaintenance(false)
 		run()
 		require.Equal(t, false, dbg.IgnoreBAL)
 		require.Equal(t, true, dbg.ReadAhead)
@@ -168,6 +191,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		require.Equal(t, 42, dbg.Exec3Workers)
 		require.Equal(t, false, dbg.NoMerge())
 		require.Equal(t, false, dbg.NoPrune())
+		require.Equal(t, false, dbg.NoBackgroundMaintenance())
 	})
 
 	t.Run("batched-io=false disables read-ahead and sets IgnoreBAL", func(t *testing.T) {
@@ -224,5 +248,11 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 		run("--exec.no-merge=true", "--exec.no-prune=true")
 		require.True(t, dbg.NoMerge())
 		require.True(t, dbg.NoPrune())
+	})
+
+	t.Run("no-background-maintenance flips NoBackgroundMaintenance", func(t *testing.T) {
+		dbg.SetNoBackgroundMaintenance(false)
+		run("--exec.no-background-maintenance=true")
+		require.True(t, dbg.NoBackgroundMaintenance())
 	})
 }
