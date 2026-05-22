@@ -265,6 +265,34 @@ func (pi *PeerInfo) SetEthProtocol(version uint) {
 	pi.ethReadyOnce.Do(func() { close(pi.ethReady) })
 }
 
+// EthProtocol returns the negotiated eth protocol version, or 0 if the eth
+// handshake hasn't completed for this peer yet. Synchronised — pi.protocol
+// is written under pi.lock by SetEthProtocol; bare reads from other
+// goroutines (handshake racing with admin_peers / SimplePeerCount / etc.)
+// would be a data race.
+func (pi *PeerInfo) EthProtocol() uint {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.protocol
+}
+
+// SetWitProtocol stores the negotiated wit protocol version (called by
+// the wit Run once getOrCreatePeer returns). Mirrors SetEthProtocol's
+// locking discipline.
+func (pi *PeerInfo) SetWitProtocol(version uint) {
+	pi.lock.Lock()
+	pi.witProtocol = version
+	pi.lock.Unlock()
+}
+
+// WitProtocol returns the negotiated wit protocol version, or 0 if the
+// peer doesn't speak wit (or wit Run hasn't fired yet).
+func (pi *PeerInfo) WitProtocol() uint {
+	pi.lock.RLock()
+	defer pi.lock.RUnlock()
+	return pi.witProtocol
+}
+
 // WaitForEth blocks until the ETH handshake completes or returns a disconnect reason
 func (pi *PeerInfo) WaitForEth(ctx context.Context) *p2p.PeerError {
 	if !pi.peer.RunningProtocol(eth.ProtocolName) {
@@ -904,7 +932,9 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				peerInfo.SetBlockRange(minBlock, latestBlock)
 			}
 
-			peerInfo.protocol = protocol
+			// (Note: SetEthProtocol already stored protocol under pi.lock —
+			// the bare `peerInfo.protocol = protocol` that used to live here
+			// was a duplicate write outside the lock, removed.)
 			ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 			defer peerInfo.Close()
@@ -951,7 +981,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return err
 				}
 				peerInfo.SetWitRw(rw)
-				peerInfo.witProtocol = wit.ProtocolVersions[0]
+				peerInfo.SetWitProtocol(wit.ProtocolVersions[0])
 				// In shared-Server mode wit/0 is deduped to one sentry; if
 				// no eth Run ever fires on this sentry for this peer (which
 				// is the common case — wit lives on sentry[0], eth/* on the
@@ -1210,10 +1240,12 @@ func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*Pee
 		return peerInfo, nil
 	}
 
-	// allow one connection per protocol
+	// allow one connection per protocol — use the lock-protected accessors
+	// because the corresponding setters (SetEthProtocol, SetWitProtocol)
+	// write under pi.lock; a bare read here would race with a concurrent
+	// handshake on the same peer.
 	if protocolName == eth.ProtocolName {
-		existingVersion := existingPeerInfo.protocol
-		if existingVersion != 0 {
+		if existingPeerInfo.EthProtocol() != 0 {
 			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 		}
 
@@ -1221,8 +1253,7 @@ func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*Pee
 	}
 
 	if protocolName == wit.ProtocolName {
-		existingVersion := existingPeerInfo.witProtocol
-		if existingVersion != 0 {
+		if existingPeerInfo.WitProtocol() != 0 {
 			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 		}
 
@@ -1465,7 +1496,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 
 	msgcode, protocolVersions := ss.messageCode(inreq.Data.Id)
 	if protocolVersions.Cardinality() == 0 {
-		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.protocol)
+		return reply, fmt.Errorf("msgcode not found for message Id: %s (peer protocol %d)", inreq.Data.Id, peerInfo.EthProtocol())
 	}
 
 	ss.writePeer("[sentry] sendMessageById", peerInfo, inreq.Data.Id, msgcode, inreq.Data.Data, 0)
@@ -1513,7 +1544,7 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *sentryp
 
 	peerInfos := make([]*PeerInfo, 0, 100)
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if protocolVersions.Contains(peerInfo.protocol) {
+		if protocolVersions.Contains(peerInfo.EthProtocol()) {
 			peerInfos = append(peerInfos, peerInfo)
 		}
 		return true
@@ -1555,7 +1586,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if protocolVersions.Contains(peerInfo.protocol) {
+		if protocolVersions.Contains(peerInfo.EthProtocol()) {
 			ss.writePeer("[sentry] SendMessageToAll", peerInfo, req.Id, msgcode, req.Data, 0)
 			reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
 		}
@@ -1678,7 +1709,11 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 	myVersion := ss.ethProtocolVersion()
 	var reply sentryproto.PeersReply
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		if peerInfo.protocol == 0 || peerInfo.protocol != myVersion {
+		// Read once via the locked accessor — pi.protocol is written under
+		// pi.lock by SetEthProtocol, so a bare read here would race with
+		// the handshake goroutine.
+		pv := peerInfo.EthProtocol()
+		if pv == 0 || pv != myVersion {
 			return true
 		}
 		peer := peerInfo.peer.Info()
@@ -1708,11 +1743,13 @@ func (ss *GrpcServer) SimplePeerCount() map[uint]int {
 		// negotiated eth version matches its own. Mirrors Peers(). Without
 		// this filter the Provider's runPeerCountLogger would aggregate
 		// every peer once per sentry (shared PeerStore makes the map
-		// visible to all sentries).
-		if peerInfo.protocol == 0 || peerInfo.protocol != myVersion {
+		// visible to all sentries). Snapshot via the locked accessor and
+		// use the local for both filter and increment.
+		pv := peerInfo.EthProtocol()
+		if pv == 0 || pv != myVersion {
 			return true
 		}
-		counts[peerInfo.protocol]++
+		counts[pv]++
 		return true
 	})
 	return counts
