@@ -52,31 +52,33 @@ import (
 // It allows for the subscription and management of events such as new blocks, pending transactions,
 // logs, and other Ethereum-related activities.
 type Filters struct {
-	mu sync.RWMutex
-
-	ctx              context.Context
-	logsUpdateMu     sync.Mutex
-	receiptsUpdateMu sync.Mutex
+	mu  sync.RWMutex
+	ctx context.Context
 
 	pendingBlock *types.Block
 
-	headsSubs                  *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs            *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs           *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs             *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs                   *LogsFilterAggregator
-	logsRequestor              atomic.Value
-	logsFilterAppliedAck       chan struct{}
-	logsFilterAppliedCount     atomic.Uint64
-	logsFilterUpdateCount      atomic.Uint64
-	pendingLogsUpdate          atomic.Bool
+	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs   *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+
+	logsSubs               *LogsFilterAggregator
+	logsRequestor          atomic.Value
+	logsUpdateMu           sync.Mutex // serialises waitForFilterUpdateApplied for logs
+	logsFilterAppliedAck   chan struct{}
+	logsFilterAppliedCount atomic.Uint64
+	logsFilterUpdateCount  atomic.Uint64
+	pendingLogsUpdate      atomic.Bool
+
 	receiptsSubs               *ReceiptsFilterAggregator
 	receiptsRequestor          atomic.Value
+	receiptsUpdateMu           sync.Mutex // serialises waitForFilterUpdateApplied for receipts
 	receiptsFilterAppliedAck   chan struct{}
 	receiptsFilterAppliedCount atomic.Uint64
 	receiptsFilterUpdateCount  atomic.Uint64
 	pendingReceiptsUpdate      atomic.Bool
-	onNewSnapshot              func()
+
+	onNewSnapshot func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
