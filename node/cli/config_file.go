@@ -26,7 +26,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/urfave/cli/v2"
-	"gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v2"
 )
 
 func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
@@ -101,9 +101,25 @@ func flattenConfig(m map[string]any, prefix string) map[string]any {
 			for fk, fv := range flattenConfig(nested, key) {
 				result[fk] = fv
 			}
+		} else if nested, ok := v.(map[any]any); ok {
+			// gopkg.in/yaml.v2 unmarshals maps as map[interface{}]interface{}
+			converted := convertYAMLMap(nested)
+			for fk, fv := range flattenConfig(converted, key) {
+				result[fk] = fv
+			}
 		} else {
 			result[key] = v
 		}
+	}
+	return result
+}
+
+// convertYAMLMap converts a map[any]any (produced by gopkg.in/yaml.v2) to
+// map[string]any so it can be processed uniformly.
+func convertYAMLMap(m map[any]any) map[string]any {
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		result[fmt.Sprintf("%v", k)] = v
 	}
 	return result
 }

@@ -26,7 +26,7 @@ import (
 	"sort"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v2"
 
 	"github.com/c2h5oh/datasize"
 

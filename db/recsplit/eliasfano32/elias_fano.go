@@ -119,7 +119,7 @@ func fallocate(f *os.File, size int64) error {
 // NewEliasFanoOffHeap is like NewEliasFano but backs the data buffer with a
 // mmapped temp file. Use when the buffer would be too large for the Go heap
 // (multi-GB EFs during snapshot builds). Caller MUST Close() after Write.
-func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ *OffHeapBuilder, err error) {
+func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (*OffHeapBuilder, error) {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
 	}
@@ -138,24 +138,17 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	if err != nil {
 		return nil, fmt.Errorf("create ef tmp file %q: %w", tmpFilePath, err)
 	}
-	defer func() {
-		if err != nil {
-			f.Close()
-			dir.RemoveFile(f.Name())
-		}
-	}()
 	if err := fallocate(f, sizeBytes); err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
 	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
 	if err != nil {
+		f.Close()
+		dir.RemoveFile(f.Name())
 		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = m.Unmap() //nolint
-		}
-	}()
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&m[0])), totalWords)
 	ef.wordsUpperBits = ef.deriveFields()
 	return &OffHeapBuilder{EliasFano: ef, backingMmap: m, backingFile: f}, nil

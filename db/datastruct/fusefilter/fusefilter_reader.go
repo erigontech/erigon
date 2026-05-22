@@ -45,32 +45,27 @@ var (
 	MadvNormalByDefault   = dbg.EnvBool("FUSE_MADV_NORMAL", false)
 )
 
-func NewReader(filePath string) (_ *Reader, err error) {
+func NewReader(filePath string) (*Reader, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			_ = f.Close() //nolint
-		}
-	}()
 	st, err := f.Stat()
 	if err != nil {
+		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
+	var content []byte
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
+		_ = f.Close() //nolint
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			_ = m.Unmap() //nolint
-		}
-	}()
+	content = m
+
 	_, fileName := filepath.Split(filePath)
-	r, _, err := NewReaderOnBytes(m, fileName)
+	r, _, err := NewReaderOnBytes(content, fileName)
 	if err != nil {
 		return nil, err
 	}
@@ -207,33 +202,27 @@ type ReaderSharded struct {
 	shards    [256]Reader
 }
 
-func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
+func NewReaderSharded(filePath string) (*ReaderSharded, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			_ = f.Close() //nolint
-		}
-	}()
 	st, err := f.Stat()
 	if err != nil {
+		_ = f.Close() //nolint
 		return nil, err
 	}
 	sz := int(st.Size())
 	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
 	if err != nil {
+		_ = f.Close() //nolint
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			_ = m.Unmap() //nolint
-		}
-	}()
 	_, fileName := filepath.Split(filePath)
 	r, _, err := NewReaderShardedOnBytes(m, fileName)
 	if err != nil {
+		_ = m.Unmap() //nolint
+		_ = f.Close() //nolint
 		return nil, err
 	}
 	r.f = f

@@ -95,21 +95,14 @@ func WithRequestProfileHook(hook RequestProfileHook) EngineXTestRunnerOption {
 	}
 }
 
-func WithWarmupKzgCtxOnInit(warmup bool) EngineXTestRunnerOption {
-	return func(r *EngineXTestRunner) {
-		r.warmupKzgCtxOnInit = warmup
-	}
-}
-
 type EngineXTestRunner struct {
-	ctx                context.Context
-	logger             log.Logger
-	preAllocs          map[PreAllocHash]*PreAlloc
-	mu                 sync.Mutex
-	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
-	profileHook        RequestProfileHook
-	warmupKzgCtxOnInit bool
+	ctx         context.Context
+	logger      log.Logger
+	preAllocs   map[PreAllocHash]*PreAlloc
+	mu          sync.Mutex
+	testers     map[Fork]map[PreAllocHash]testerEntry
+	wg          sync.WaitGroup
+	profileHook RequestProfileHook
 }
 
 // RequestProfileHook is invoked immediately before each engine API request the
@@ -346,7 +339,6 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
-			config.WarmupKzgCtxOnInit = extr.warmupKzgCtxOnInit
 		},
 		DisableTxPool: true,
 		DisableSentry: true,

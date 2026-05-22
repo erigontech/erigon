@@ -134,10 +134,7 @@ func engineXTestCmd(cliCtx *cli.Context) error {
 		return nil
 	}
 
-	runnerOpts := []engineapitester.EngineXTestRunnerOption{
-		// needed for benchmarks, to reproduce real-life node startup
-		engineapitester.WithWarmupKzgCtxOnInit(true),
-	}
+	var runnerOpts []engineapitester.EngineXTestRunnerOption
 	if profilingEnabled {
 		if cpuProfileDir != "" {
 			err := os.MkdirAll(cpuProfileDir, 0o755)

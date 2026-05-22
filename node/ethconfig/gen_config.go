@@ -60,7 +60,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		FcuBackgroundCommit                 bool
 		MCPAddress                          string
 		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
-		WarmupKzgCtxOnInit                  bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -100,7 +99,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
 	enc.MCPAddress = c.MCPAddress
 	enc.ErigondbDomainStepsInFrozenFile = c.ErigondbDomainStepsInFrozenFile
-	enc.WarmupKzgCtxOnInit = c.WarmupKzgCtxOnInit
 	return &enc, nil
 }
 
@@ -144,7 +142,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		FcuBackgroundCommit                 *bool
 		MCPAddress                          *string
 		ErigondbDomainStepsInFrozenFile     *uint64 `toml:",omitempty"`
-		WarmupKzgCtxOnInit                  *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -260,9 +257,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.ErigondbDomainStepsInFrozenFile != nil {
 		c.ErigondbDomainStepsInFrozenFile = dec.ErigondbDomainStepsInFrozenFile
-	}
-	if dec.WarmupKzgCtxOnInit != nil {
-		c.WarmupKzgCtxOnInit = *dec.WarmupKzgCtxOnInit
 	}
 	return nil
 }

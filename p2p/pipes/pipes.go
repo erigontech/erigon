@@ -24,7 +24,7 @@ import (
 )
 
 // TCPPipe creates an in process full duplex pipe based on a localhost TCP socket
-func TCPPipe() (_ net.Conn, _ net.Conn, err error) {
+func TCPPipe() (net.Conn, net.Conn, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, nil, err
@@ -34,22 +34,18 @@ func TCPPipe() (_ net.Conn, _ net.Conn, err error) {
 	var aconn net.Conn
 	aerr := make(chan error, 1)
 	go func() {
-		var lErr error
-		aconn, lErr = l.Accept()
-		aerr <- lErr
+		var err error
+		aconn, err = l.Accept()
+		aerr <- err
 	}()
 
-	var dconn net.Conn
-	if dconn, err = net.Dial("tcp", l.Addr().String()); err != nil {
+	dconn, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
 		<-aerr
 		return nil, nil, err
 	}
-	defer func() {
-		if err != nil {
-			dconn.Close()
-		}
-	}()
-	if err = <-aerr; err != nil {
+	if err := <-aerr; err != nil {
+		dconn.Close()
 		return nil, nil, err
 	}
 	return aconn, dconn, nil

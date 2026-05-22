@@ -119,9 +119,9 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFilePath string) (_ *Index, err error) {
+func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	_, fName := filepath.Split(indexFilePath)
-	idx := &Index{
+	idx = &Index{
 		filePath: indexFilePath,
 		fileName: fName,
 	}
@@ -130,11 +130,6 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err != nil {
-			idx.Close()
-		}
-	}()
 	var stat os.FileInfo
 	if stat, err = idx.f.Stat(); err != nil {
 		return nil, err
@@ -146,7 +141,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err = idx.init(); err != nil {
+	if err := idx.init(); err != nil {
 		return nil, err
 	}
 

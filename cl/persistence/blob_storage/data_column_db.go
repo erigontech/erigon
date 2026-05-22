@@ -98,19 +98,19 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 	if err != nil {
 		return err
 	}
-	defer func() {
-		fh.Close()
-		if err != nil {
-			s.fs.Remove(filepath)
-		}
-	}()
 	// snappy of | length | ssz data |
-	if err = ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, columnData); err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
 		return err
 	}
-	if err = fh.Sync(); err != nil {
+	if err := fh.Sync(); err != nil {
+		fh.Close()
+		s.fs.Remove(filepath)
 		return err
 	}
+
+	fh.Close()
 	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
 	log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
