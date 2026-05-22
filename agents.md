@@ -42,6 +42,43 @@ Before committing, always verify changes with: `make lint && make erigon integra
 ./build/bin/erigon --datadir=dev --chain=dev --beacon.api=beacon,validator,node,config  # PoS dev mode
 ```
 
+## Test-Driven Development
+
+When fixing bugs or adding new features, follow the test-driven development (TDD) cycle: **Red → Green → Refactor**.
+
+1. **Red** — write a failing test that specifies the desired behavior. Confirm it fails *for the right reason* (the behavior is missing or wrong), not because of a typo, missing import, or wrong setup.
+2. **Green** — write the minimum production code needed to make the test pass. Do not write code the current failing test does not demand.
+3. **Refactor** — clean up code and tests with the suite staying green. Skipping this step is how technical debt accumulates.
+
+### For bug fixes
+
+Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.
+
+Never write the fix first and then "add a test for it" — that test only proves the code matches itself, not that it fixes the original defect. If the bug cannot be reproduced as a test, stop and either get more information or escalate; do not guess at a fix.
+
+### For new features
+
+- Drive the API shape from how the test wants to call it (outside-in).
+- Start with the simplest meaningful behavior, not the full design.
+- Add edge cases as separate Red → Green cycles, not bundled into one giant test.
+
+### Anti-patterns
+
+- **Test-after development**: writing code first, then "adding a test" — this is not TDD; the test merely echoes the code's existing behavior.
+- **Tests that pass on the first run**: means the test did not actually drive anything; either the behavior already existed or the assertion is wrong.
+- **Skipping the refactor step**: the suite is green but the design didn't improve.
+- **Bundling many behaviors into one test**: makes failures hard to localize and refactors brittle.
+- **Adding `t.Skip` instead of fixing a failing test**: forbidden for automated agents — see [Test skips](#test-skips) below.
+
+### When pragmatism applies
+
+TDD is the default for behavior changes (bug fixes, new logic, new endpoints). It applies less cleanly to:
+- Pure refactors with no behavior change — existing tests are the safety net; do not write new tests just to satisfy the cycle.
+- Exploratory spikes — throw the spike away and TDD the real implementation.
+- Mechanical changes — renames, generated code regeneration, dependency bumps.
+
+When skipping TDD for one of these reasons, say so explicitly in the PR description.
+
 ## Test skips
 
 These rules apply project-wide — to every contributor and to every automated agent (LLM coding assistants, CI bots, etc.) working in this repository.
