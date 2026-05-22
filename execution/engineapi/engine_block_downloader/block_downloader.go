@@ -108,13 +108,6 @@ func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidA
 	return true, entry.LastValidAncestor, entry.ValidationErr
 }
 
-func derefString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 func (e *EngineBlockDownloader) Status() Status {
 	return e.status.Load().(Status)
 }
@@ -173,7 +166,7 @@ func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDown
 		return nil
 	}
 	if status == execmodule.ExecutionStatusBadBlock {
-		e.ReportBadHeader(tip.Hash(), latestValidHash, derefString(validationErr))
+		e.ReportBadHeader(tip.Hash(), latestValidHash, common.Deref(validationErr))
 		return errors.New("block segments downloaded are invalid")
 	}
 	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
@@ -250,7 +243,7 @@ func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *
 	}
 	switch status {
 	case execmodule.ExecutionStatusBadBlock:
-		ve := derefString(validationErr)
+		ve := common.Deref(validationErr)
 		e.ReportBadHeader(block.Hash(), lastValidHash, ve)
 		e.ReportBadHeader(requested, lastValidHash, ve)
 		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)

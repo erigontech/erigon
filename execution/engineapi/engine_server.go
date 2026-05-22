@@ -1014,11 +1014,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if status == execmodule.ExecutionStatusBadBlock {
-		var ve string
-		if validationErr != nil {
-			ve = *validationErr
-		}
-		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, ve)
+		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
 	resp := &engine_types.PayloadStatus{
