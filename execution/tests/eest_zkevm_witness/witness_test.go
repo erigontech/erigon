@@ -86,11 +86,16 @@ func TestExecutionSpecWitness(t *testing.T) {
 		test.ExperimentalBAL = true
 
 		// Run the standard blockchain test: insert blocks, validate post-state.
-		// Block execution should always succeed — Fatal on failure. The returned
+		// Block-execution failures are routed through bt.CheckFailure so the
+		// suite-wide bt.Fails(...) absorbs EIP-implementation gaps the same way
+		// it absorbs documented witness-comparison gaps below. The returned
 		// tester's lifetime is bound to t via t.Cleanup; do NOT close it here.
 		m, err := test.RunWithTester(t)
 		if err != nil {
-			t.Fatalf("block execution failed: %v", err)
+			if cferr := bt.CheckFailure(t, fmt.Errorf("block execution failed: %w", err)); cferr != nil {
+				t.Error(cferr)
+			}
+			return
 		}
 
 		// Set up the debug API using the returned ExecModuleTester.
