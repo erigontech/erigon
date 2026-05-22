@@ -700,15 +700,28 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
+	// Deduplicate sibling paths and log depth distribution.
+	uniqueSiblings := make(map[string]struct{}, len(siblingPaths))
+	for _, sp := range siblingPaths {
+		uniqueSiblings[string(sp)] = struct{}{}
+	}
 	log.Info("[debug_executionWitness] witness stats",
 		"block", blockNum,
 		"accounts", len(accessed.Addresses),
 		"storageSlots", storageCount,
 		"siblingPaths", len(siblingPaths),
+		"siblingPathsUnique", len(uniqueSiblings),
 		"codes", len(accessed.SortedCodes),
 	)
+	for sp := range uniqueSiblings {
+		log.Info("[debug_executionWitness] sibling unique",
+			"block", blockNum,
+			"nibbles", len(sp),
+			"path", commitment.NibblesToString([]byte(sp)),
+		)
+	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, blockNum, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -960,6 +973,7 @@ func buildWitnessTrie(
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
+	blockNum uint64,
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
@@ -973,11 +987,16 @@ func buildWitnessTrie(
 
 	accessed.touchAll(sdCtx)
 
+	// Generate witness after primary touches only, to measure baseline node count.
+	primaryTrie, _, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_primary_only")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate primary-only witness: %w", err)
+	}
+	primaryNodes, _ := primaryTrie.RLPEncode()
+	log.Info("[debug_executionWitness] primary nodes (before siblings)", "block", blockNum, "nodes", len(primaryNodes))
+
 	if len(siblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
 		for _, siblingPath := range siblingPaths {
-			compactSiblingPath := commitment.NibblesToString(siblingPath)
-			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}
