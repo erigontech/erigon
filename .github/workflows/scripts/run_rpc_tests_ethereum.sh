@@ -49,15 +49,6 @@ DISABLED_TEST_LIST=(
   # For debug_traceTransaction, the issue is under analysis.
   eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json
-  # disable temporray for this branch to make debug single test
-  debug_executionWitness/test_01.json
-  debug_executionWitness/test_02.json
-  debug_executionWitness/test_04.json
-  debug_executionWitness/test_05.json
-  debug_executionWitness/test_06.json
-  debug_executionWitness/test_08.json
-  debug_executionWitness/test_09.json
-  debug_executionWitness/test_10.json
 )
 
 # Transform the array into a comma-separated string
