@@ -7,7 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260402120223-7bb412bc89cd
 	github.com/erigontech/go-libdeflate v0.1.0
-	github.com/erigontech/mdbx-go v0.39.17
+	github.com/erigontech/mdbx-go v0.40.1
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 )
 
@@ -123,7 +123,6 @@ require (
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	sigs.k8s.io/yaml v1.6.0
 )
