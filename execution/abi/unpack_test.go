@@ -106,13 +106,13 @@ var unpackTests = []unpackTest{
 		err:  "abi: cannot unmarshal uint32 in to uint16",
 	},
 	{
-		def:  `[{"type": "uint17"}]`,
+		def:  `[{"type": "uint72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: uint16(0),
 		err:  "abi: cannot unmarshal *big.Int in to uint16",
 	},
 	{
-		def:  `[{"type": "uint17"}]`,
+		def:  `[{"type": "uint72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: big.NewInt(1),
 	},
@@ -128,7 +128,7 @@ var unpackTests = []unpackTest{
 		err:  "abi: cannot unmarshal int32 in to int16",
 	},
 	{
-		def:  `[{"type": "int17"}]`,
+		def:  `[{"type": "int72"}]`,
 		enc:  "0000000000000000000000000000000000000000000000000000000000000001",
 		want: int16(0),
 		err:  "abi: cannot unmarshal *big.Int in to int16",
@@ -851,7 +851,7 @@ func TestUnpackTuple(t *testing.T) {
 			},
 		},
 		FieldT: T{
-			big.NewInt(0), big.NewInt(1),
+			big.NewInt(0).SetBits([]big.Word{}), big.NewInt(1),
 		},
 		A: big.NewInt(1),
 	}
@@ -860,7 +860,7 @@ func TestUnpackTuple(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if reflect.DeepEqual(ret, expected) {
+	if !reflect.DeepEqual(ret, expected) {
 		t.Error("unexpected unpack value")
 	}
 }

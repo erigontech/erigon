@@ -106,7 +106,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "SetNonce",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.SetNonce(addr, uint64(a.args[0]))
+				s.SetNonce(addr, uint64(a.args[0]), tracing.NonceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
@@ -126,7 +126,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 				code := make([]byte, 16)
 				binary.BigEndian.PutUint64(code, uint64(a.args[0]))
 				binary.BigEndian.PutUint64(code[8:], uint64(a.args[1]))
-				s.SetCode(addr, code)
+				s.SetCode(addr, code, tracing.CodeChangeUnspecified)
 			},
 			args: make([]int64, 2),
 		},
@@ -915,37 +915,37 @@ func TestApplyVersionedWrites(t *testing.T) {
 	// Tx1 write
 	states[1].SetState(addr1, key2, val2)
 	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[1].SetNonce(addr1, 1)
+	states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
 	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key2, val2)
 	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 1)
+	sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[1].VersionedWrites(true))
 
 	// Tx2 write
 	states[2].SetState(addr1, key1, val2)
 	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[2].SetNonce(addr1, 2)
+	states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
 	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(true), true, "")
 
 	sSingleProcess.SetState(addr1, key1, val2)
 	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 2)
+	sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[2].VersionedWrites(true))
 
 	// Tx3 write
 	states[3].Selfdestruct(addr2)
-	states[3].SetCode(addr1, code)
+	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(true), true, "")
 
 	sSingleProcess.Selfdestruct(addr2)
-	sSingleProcess.SetCode(addr1, code)
+	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
 
 	sClean.ApplyVersionedWrites(states[3].VersionedWrites(true))
 }

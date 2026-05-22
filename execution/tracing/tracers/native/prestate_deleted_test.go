@@ -24,10 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var _ tracing.IntraBlockState = (*postTxIBS)(nil)
 
 // postTxIBS simulates the IntraBlockState *after* a transaction where deletedAddr
 // no longer exists (GetCodeHash returns NilCodeHash) and all other accounts are
@@ -39,17 +40,17 @@ type postTxIBS struct {
 func (m *postTxIBS) GetBalance(accounts.Address) (uint256.Int, error) { return uint256.Int{}, nil }
 func (m *postTxIBS) GetNonce(accounts.Address) (uint64, error)        { return 0, nil }
 func (m *postTxIBS) GetCode(accounts.Address) ([]byte, error)         { return nil, nil }
-func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
-	return uint256.Int{}, nil
-}
-func (m *postTxIBS) Exist(accounts.Address) (bool, error) { return false, nil }
-func (m *postTxIBS) GetRefund() mdgas.MdGas               { return mdgas.MdGas{} }
 func (m *postTxIBS) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	if addr == m.deletedAddr {
 		return accounts.NilCodeHash, nil
 	}
 	return accounts.EmptyCodeHash, nil
 }
+func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
+	return uint256.Int{}, nil
+}
+func (m *postTxIBS) Exist(accounts.Address) (bool, error) { return false, nil }
+func (m *postTxIBS) GetRefund() uint64                    { return 0 }
 
 // TestPrestateTracerDiffModeDeletedAccount verifies that an account deleted during
 // a tx appears in the diff-mode post state with codeHash == 0x000...000.
@@ -64,7 +65,6 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 		deleted: make(map[accounts.Address]bool),
 	}
 
-	// Pre-tx: codeless account — no CodeHash set, balance = 0.
 	tr.pre[deletedAddr] = &account{Balance: big.NewInt(0)}
 
 	tr.env = &tracing.VMContext{

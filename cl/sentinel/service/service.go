@@ -17,6 +17,7 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -284,6 +286,27 @@ func (r ResponseCode) ErrorMessage(resp *http.Response) string {
 	if r == 0 || r == 1 {
 		return ""
 	}
-	errBody, _ := io.ReadAll(resp.Body)
-	return string(errBody)
+	// Error response bodies are Snappy-compressed per the ETH2 req/resp spec.
+	// First read the varint-encoded length prefix, then decompress the payload.
+	rawReader := bufio.NewReader(resp.Body)
+	// Read and discard the varint length prefix (uncompressed length).
+	for {
+		b, err := rawReader.ReadByte()
+		if err != nil {
+			// Fallback: read raw body if varint parsing fails.
+			remaining, _ := io.ReadAll(rawReader)
+			return string(remaining)
+		}
+		if b&0x80 == 0 {
+			break // last byte of varint
+		}
+	}
+	sr := snappy.NewReader(rawReader)
+	decoded, err := io.ReadAll(sr)
+	if err != nil {
+		// Fallback: if snappy decode fails, read raw remaining bytes.
+		remaining, _ := io.ReadAll(rawReader)
+		return string(remaining)
+	}
+	return string(decoded)
 }

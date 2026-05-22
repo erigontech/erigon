@@ -706,7 +706,7 @@ var (
 	}
 	SnapSkipStateSnapshotDownloadFlag = cli.BoolFlag{
 		Name:  "snap.skip-state-snapshot-download",
-		Usage: "Skip state download and start from genesis block",
+		Usage: "Skip state snapshot download and re-execute from genesis to build state. Unlike --prune.mode=blocks which downloads state snapshots then prunes history, this flag skips the download entirely.",
 		Value: false,
 	}
 	SnapP2PManifestFlag = cli.BoolFlag{
@@ -875,6 +875,11 @@ var (
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
 		Usage: "Enable NAT porting for Caplin",
+		Value: false,
+	}
+	CaplinLocalDiscoveryFlag = cli.BoolFlag{
+		Name:  "caplin.local-discovery",
+		Usage: "Enable to also attempt to find peers over private IPs. Turning this on may cause issues with hosts such as Hetzner",
 		Value: false,
 	}
 	CaplinNATFlag = cli.StringFlag{
@@ -1177,7 +1182,12 @@ var (
 	}
 	ExecNoPruneFlag = cli.BoolFlag{
 		Name:  "exec.no-prune",
-		Usage: "Disable state-aggregator pruning of historical steps (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Usage: "Disable all DB pruning: state-aggregator (Domain/InvertedIndex/forkable) plus stage-level pruning (Execution: ChangeSets3/BlockAccessList; TxLookup; WitnessProcessing; Snapshots: PruneAncientBlocks/canonical markers/retirement) (equivalent to NO_PRUNE=true). Diagnostic / perf-comparison use only.",
+		Value: false,
+	}
+	ExecNoBackgroundMaintenanceFlag = cli.BoolFlag{
+		Name:  "exec.no-background-maintenance",
+		Usage: "Suppress background state-aggregator (Domain/Hist/II + forkable) file build/merge and E2 block-snapshot retirement goroutines so execution is not perturbed by housekeeping work (legacy env var: NO_BACKGROUND_E3_BUILD=true). Diagnostic / focused-performance-testing use only — NOT an operational setting.",
 		Value: false,
 	}
 )
@@ -1913,6 +1923,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
 	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
+	cfg.CaplinConfig.LocalDiscovery = ctx.Bool(CaplinLocalDiscoveryFlag.Name)
 	cfg.CaplinConfig.CaplinNAT = ctx.String(CaplinNATFlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
@@ -1990,7 +2001,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.
 	// Otherwise env vars (IGNORE_BAL, USE_STATE_CACHE, EXEC3_WORKERS,
-	// NO_MERGE, NO_PRUNE) remain the source of truth.
+	// NO_MERGE, NO_PRUNE, NO_BACKGROUND_E3_BUILD) remain the source of truth.
 	if ctx.IsSet(ExecBatchedIOFlag.Name) {
 		// --exec.batched-io toggles two BAL-driven optimisations together:
 		// read-ahead pre-warming (ReadAhead) and version-map pre-population
@@ -2018,6 +2029,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 	if ctx.IsSet(ExecNoPruneFlag.Name) {
 		dbg.SetNoPrune(ctx.Bool(ExecNoPruneFlag.Name))
+	}
+	if ctx.IsSet(ExecNoBackgroundMaintenanceFlag.Name) {
+		dbg.SetNoBackgroundMaintenance(ctx.Bool(ExecNoBackgroundMaintenanceFlag.Name))
 	}
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -2085,7 +2099,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 				Balance: big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(common.Ether)),
 			}
 		}
-		cfg.Genesis.Config.TerminalTotalDifficulty = big.NewInt(0)
+		cfg.Genesis.Config.TerminalTotalDifficulty = uint256.NewInt(0)
 		cfg.Genesis.Config.TerminalTotalDifficultyPassed = true
 		zero := uint64(0)
 		cfg.Genesis.Config.ShanghaiTime = &zero
@@ -2333,7 +2347,7 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 				}
 				flags.StringSlice(f.Name, val, f.Usage)
 			case *cli.BoolFlag:
-				flags.Bool(f.Name, false, f.Usage)
+				flags.Bool(f.Name, f.Value, f.Usage)
 			default:
 				panic(fmt.Errorf("unexpected type: %T", flag))
 			}

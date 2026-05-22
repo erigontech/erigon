@@ -26,11 +26,47 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
 )
+
+// NewGatedRoDB wraps an RoDB so every View() call acquires gate.RLock() for
+// the duration of the tx. Purpose: serialize background read txs (e.g.
+// snapshot retirement reading chaindata) against a writer that briefly holds
+// gate.Lock() during commit. Without the gate, a concurrent reader pins the
+// MDBX freelist and prevents page reclamation at commit time.
+//
+// BeginRo is passed through ungated — gating open-ended Tx lifetimes has
+// ambiguous scope. Callers that need gating must use the View closure idiom.
+func NewGatedRoDB(inner RoDB, gate *sync.RWMutex) RoDB {
+	if gate == nil {
+		return inner
+	}
+	return &gatedRoDB{inner: inner, gate: gate}
+}
+
+type gatedRoDB struct {
+	inner RoDB
+	gate  *sync.RWMutex
+}
+
+func (g *gatedRoDB) Close()                                  { g.inner.Close() }
+func (g *gatedRoDB) BeginRo(ctx context.Context) (Tx, error) { return g.inner.BeginRo(ctx) }
+func (g *gatedRoDB) ReadOnly() bool                          { return g.inner.ReadOnly() }
+func (g *gatedRoDB) AllTables() TableCfg                     { return g.inner.AllTables() }
+func (g *gatedRoDB) PageSize() datasize.ByteSize             { return g.inner.PageSize() }
+func (g *gatedRoDB) CHandle() unsafe.Pointer                 { return g.inner.CHandle() }
+func (g *gatedRoDB) Path() string                            { return g.inner.Path() }
+func (g *gatedRoDB) View(ctx context.Context, f func(tx Tx) error) error {
+	g.gate.RLock()
+	defer g.gate.RUnlock()
+	return g.inner.View(ctx, f)
+}
 
 // Adapts an RoDB to the RwDB interface (invoking write operations results in error)
 type RwWrapper struct {

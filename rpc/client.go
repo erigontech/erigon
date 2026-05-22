@@ -347,8 +347,10 @@ func (c *Client) CallContext(ctx context.Context, result any, method string, arg
 // BatchCall sends all given requests as a single batch and waits for the server
 // to return a response for all of them.
 //
-// In contrast to Call, BatchCall only returns I/O errors. Any error specific to
-// a request is reported through the Error field of the corresponding BatchElem.
+// In contrast to Call, BatchCall only returns I/O errors, with one exception:
+// an empty batch is rejected with an invalid-request error (-32600) before any
+// send. Any error specific to a request is reported through the Error field of
+// the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCall(b []BatchElem) error {
@@ -361,11 +363,16 @@ func (c *Client) BatchCall(b []BatchElem) error {
 // context's deadline.
 //
 // In contrast to CallContext, BatchCallContext only returns errors that have occurred
-// while sending the request. Any error specific to a request is reported through the
-// Error field of the corresponding BatchElem.
+// while sending the request, with one exception: an empty batch is rejected with
+// an invalid-request error (-32600) before any send. Any error specific to a
+// request is reported through the Error field of the corresponding BatchElem.
 //
 // Note that batch calls may not be executed atomically on the server side.
 func (c *Client) BatchCallContext(ctx context.Context, b []BatchElem) error {
+	if len(b) == 0 {
+		return &invalidRequestError{"empty batch"}
+	}
+
 	var (
 		msgs = make([]*jsonrpcMessage, len(b))
 		byID = make(map[string]int, len(b))
@@ -608,9 +615,12 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 
 		case err := <-c.readErr:
 			conn.handler.logger.Trace("RPC connection read error", "err", err)
-			// A read error is fatal for the connection, and all pending requests must be cancelled, including any
-			// that might still be considered in-flight.
-			conn.close(err, lastOp)
+			// A read error is fatal for the connection, and all pending requests must be cancelled,
+			// including any that might still be considered in-flight. Once the resp channel is closed
+			// here, a later reconnect must not re-register this op (sending on a closed channel would
+			// panic), so clear lastOp too.
+			conn.close(err, nil)
+			lastOp = nil
 			reading = false
 
 		// Reconnect:
@@ -629,7 +639,10 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			reading = true
 			conn = c.newClientConn(newcodec, connCtx)
 			// Re-register the in-flight request on the new handler because that's where it will be sent.
-			conn.handler.addRequestOp(lastOp)
+			// lastOp is nil if a fatal read error already cancelled the op — nothing to transfer then.
+			if lastOp != nil {
+				conn.handler.addRequestOp(lastOp)
+			}
 
 		// Send path:
 		case op := <-reqInitLock:
@@ -639,9 +652,11 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			conn.handler.addRequestOp(op)
 
 		case err := <-c.reqSent:
-			if err != nil {
+			if err != nil && lastOp != nil {
 				// Remove response handlers for the last send. When the read loop
 				// goes down, it will signal all other current operations.
+				// lastOp can be nil if a fatal read error fired first and already
+				// cancelled the in-flight op.
 				conn.handler.removeRequestOp(lastOp)
 			}
 			// Let the next request in.

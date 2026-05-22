@@ -209,6 +209,18 @@ func NewBlockRetire(
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
 func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
 
+// SetCommitGate wraps the retirement's chain DB reads with the given gate so
+// each db.View acquires RLock, serializing against a writer (Aggregator
+// commit+prune path) that briefly holds Lock during MDBX commit. Prevents a
+// retirement RO tx from pinning the freelist and blocking page reclamation.
+// Safe to call with nil — no-op. Must be called before retirement starts.
+func (br *BlockRetire) SetCommitGate(gate *sync.RWMutex) {
+	if gate == nil {
+		return
+	}
+	br.db = kv.NewGatedRoDB(br.db, gate)
+}
+
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
 }
@@ -226,7 +238,7 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
+	var keep uint64 = dbg.MaxReorgDepth
 	if curBlockNum <= keep {
 		return
 	}
@@ -1033,13 +1045,15 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	view := s.View()
 	defer view.Close()
 
+	// header is hoisted: walker must not retain &header beyond its callback.
+	var header types.Header
+
 	for _, sn := range view.Headers() {
 		if err := sn.Src().WithReadAhead(func() error {
 			g := sn.Src().MakeGetter()
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
-				var header types.Header
-				if err := rlp.DecodeBytes(word[1:], &header); err != nil {
+				if err := types.DecodeHeader(word[1:], &header); err != nil {
 					return fmt.Errorf("%w, file=%s, record=%d", err, sn.Src().FileName(), i)
 				}
 				if err := walker(&header); err != nil {
