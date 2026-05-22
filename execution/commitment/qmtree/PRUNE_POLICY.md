@@ -40,6 +40,7 @@ in `db/kv/prune/` applies:
 ```
 --prune.mode=archive    → keep all qmtree entries (full proof history)
 --prune.mode=full       → keep entries within DefaultPruneDistance (262,144 blocks)
+--prune.mode=blocks     → keep entries within DefaultPruneDistance (matches full for qmtree)
 --prune.mode=minimal    → keep entries within MinimalPruneDistance (100,000 blocks)
 ```
 
@@ -62,6 +63,7 @@ entries (~67 steps); minimal keeps ~10M entries (~26 steps).
 |----------------|----------------|----------------|-----------------|
 | `archive` | all | all | full historical proofs |
 | `full` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
+| `blocks` | last 262K blocks (~67 steps, ~6.5 GB) | all | proofs within window |
 | `minimal` | last 100K blocks (~26 steps, ~2.5 GB) | all | proofs within window |
 
 QMTree entry files are step-aligned, so the block-based distance is converted
