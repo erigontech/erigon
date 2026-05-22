@@ -143,7 +143,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentVerbosityFlag,
 	&utils.ListenPortFlag,
 	&utils.P2pProtocolVersionFlag,
-	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
 	&utils.DiscoveryV4Flag,
