@@ -681,17 +681,38 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return result, nil
 	}
 
+	storageCount := 0
+	for _, slots := range accessed.Storage {
+		storageCount += len(slots)
+	}
+	for addr := range accessed.Addresses {
+		_, reallyChanged := recordingState.ReallyChangedAccounts[addr]
+		_, hasStorage := accessed.Storage[addr]
+		log.Info("[debug_executionWitness] accessed account",
+			"block", blockNum, "addr", addr,
+			"reallyChanged", reallyChanged, "hasStorage", hasStorage,
+		)
+	}
+
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
 		block.Root(), accessed)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("[debug_executionWitness] witness stats",
+		"block", blockNum,
+		"accounts", len(accessed.Addresses),
+		"storageSlots", storageCount,
+		"siblingPaths", len(siblingPaths),
+		"codes", len(accessed.SortedCodes),
+	)
 
 	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("[debug_executionWitness] witness built", "block", blockNum, "nodes", len(nodes))
 	result.State = nodes
 
 	headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
@@ -905,8 +926,12 @@ func detectCollapseSiblings(
 	accessed.touchAll(sdCtx)
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
+		log.Info("[debug_executionWitness] sibling collapse",
+			"block", blockNum,
+			"nibbles", len(hashedKeyPath),
+			"path", commitment.NibblesToString(hashedKeyPath),
+		)
 	})
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
