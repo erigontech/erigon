@@ -412,6 +412,14 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 	cfg.Protocols = protocols
 	srv := &p2p.Server{Config: *cfg}
 
+	// Validate first so we don't leave half-injected state if a later
+	// GrpcServer rejects the inject.
+	for i, ss := range p.Servers {
+		if ss.GetP2PServer() != nil {
+			return fmt.Errorf("sentry provider: GrpcServer[%d] already has a p2p.Server; cannot share", i)
+		}
+	}
+
 	// Wire the shared PeerStore + Server reference into every GrpcServer
 	// BEFORE srv.Start. Once the listener is up peers can connect and
 	// Protocol.Run fires immediately; if SetSharedPeerStore happened later

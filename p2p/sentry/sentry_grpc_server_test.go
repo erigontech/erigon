@@ -890,18 +890,19 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	srv := minimalP2PServer(t)
 	ss := &GrpcServer{
 		statusReady: make(chan struct{}),
-		peers:       NewPeerStore(),
-		// Pretend this sentry handles eth/68. ethProtocolVersion picks the
-		// first eth Protocol entry, so just set the slice directly.
-		Protocols: []p2p.Protocol{{Name: eth.ProtocolName, Version: direct.ETH68}},
+		ethVersion:  direct.ETH68,
+		Protocols:   []p2p.Protocol{{Name: eth.ProtocolName, Version: direct.ETH68}},
 	}
+	ss.peers.Store(NewPeerStore())
 	require.NoError(t, ss.SetP2PServer(srv))
+
+	store := ss.peers.Load()
 
 	// Owned-by-this-sentry: protocol matches.
 	owned, _ := newTestPeerInfoWithEth(t)
 	var ownedKey [64]byte
 	ownedKey[0] = 0x42
-	ss.peers.peers[ownedKey] = owned
+	store.peers[ownedKey] = owned
 
 	// Ghost: no protocol set anywhere yet (RLPx-only / in-flight handshake).
 	ghost, _ := newTestPeerInfoWithEth(t)
@@ -909,7 +910,7 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	ghost.witProtocol = 0
 	var ghostKey [64]byte
 	ghostKey[0] = 0x43
-	ss.peers.peers[ghostKey] = ghost
+	store.peers[ghostKey] = ghost
 
 	// Owned-by-another-sentry: eth Run for a different version populated
 	// this PeerInfo (shared PeerStore in shared-Server mode).
@@ -917,7 +918,7 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 	otherVersion.protocol = direct.ETH69
 	var otherKey [64]byte
 	otherKey[0] = 0x44
-	ss.peers.peers[otherKey] = otherVersion
+	store.peers[otherKey] = otherVersion
 
 	reply, err := ss.Peers(context.Background(), nil)
 	require.NoError(t, err)
@@ -932,15 +933,18 @@ func TestGrpcServer_PeersFiltersByProtocol(t *testing.T) {
 // PeerInfo's protocol field.
 func TestGrpcServer_SharedPeerStore_VisibleToEthAndWit(t *testing.T) {
 	shared := NewPeerStore()
-	ethSentry := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
-	witSentry := &GrpcServer{statusReady: make(chan struct{}), peers: NewPeerStore()}
+	ethSentry := &GrpcServer{statusReady: make(chan struct{})}
+	ethSentry.peers.Store(NewPeerStore())
+	witSentry := &GrpcServer{statusReady: make(chan struct{})}
+	witSentry.peers.Store(NewPeerStore())
 	ethSentry.SetSharedPeerStore(shared)
 	witSentry.SetSharedPeerStore(shared)
 
 	pi, peerID := newTestPeerInfoWithEth(t)
-	ethSentry.peers.mu.Lock()
-	ethSentry.peers.peers[peerID] = pi
-	ethSentry.peers.mu.Unlock()
+	store := ethSentry.peers.Load()
+	store.mu.Lock()
+	store.peers[peerID] = pi
+	store.mu.Unlock()
 
 	// witSentry shares the same store, so the entry placed via ethSentry
 	// must be visible through witSentry too.

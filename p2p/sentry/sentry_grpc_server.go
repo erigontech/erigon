@@ -31,6 +31,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -862,12 +863,13 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		p2p:                   cfg,
 		peersStreams:          NewPeersStreams(),
 		logger:                logger,
-		peers:                 NewPeerStore(),
+		ethVersion:            protocol,
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
 		bootnodes:             bootnodes,
 		dnsNetwork:            dnsNetwork,
 		statusReady:           make(chan struct{}),
 	}
+	ss.peers.Store(NewPeerStore())
 
 	var disc enode.Iterator
 	if dialCandidates != nil {
@@ -1079,9 +1081,16 @@ func NewPeerStore() *PeerStore {
 
 type GrpcServer struct {
 	sentryproto.UnimplementedSentryServer
-	ctx           context.Context
-	Protocols     []p2p.Protocol
-	peers         *PeerStore
+	ctx       context.Context
+	Protocols []p2p.Protocol
+	// ethVersion is the eth protocol version this sentry was constructed for.
+	// Used by Peers / SimplePeerCount to filter the shared PeerStore down to
+	// the peers this sentry actually owns. Set once in NewGrpcServer.
+	ethVersion uint
+	// peers is swapped to a coordinator-supplied store by SetSharedPeerStore;
+	// the atomic.Pointer makes that swap race-free with concurrent readers
+	// even though the documented contract is "swap before srv.Start".
+	peers         atomic.Pointer[PeerStore]
 	p2pServer     *p2p.Server
 	p2pServerLock sync.RWMutex
 	// external is true when p2pServer was injected by an outer coordinator
@@ -1126,7 +1135,7 @@ func (ss *GrpcServer) SetSharedPeerStore(s *PeerStore) {
 	if s == nil {
 		return
 	}
-	ss.peers = s
+	ss.peers.Store(s)
 }
 
 // SetP2PServer injects an externally-managed p2p.Server into this GrpcServer
@@ -1198,9 +1207,10 @@ func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool 
 }
 
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
-	ss.peers.mu.RLock()
-	defer ss.peers.mu.RUnlock()
-	for _, peerInfo := range ss.peers.peers {
+	store := ss.peers.Load()
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	for _, peerInfo := range store.peers {
 		if peerInfo == nil {
 			continue
 		}
@@ -1212,9 +1222,10 @@ func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
 }
 
 func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
-	ss.peers.mu.RLock()
-	peerInfo, ok := ss.peers.peers[peerID]
-	ss.peers.mu.RUnlock()
+	store := ss.peers.Load()
+	store.mu.RLock()
+	peerInfo, ok := store.peers[peerID]
+	store.mu.RUnlock()
 	if ok && peerInfo == nil {
 		go func() {
 			ss.deletePeer(peerID)
@@ -1230,13 +1241,14 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
-	ss.peers.mu.Lock()
-	defer ss.peers.mu.Unlock()
+	store := ss.peers.Load()
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
-	existingPeerInfo := ss.peers.peers[peerID]
+	existingPeerInfo := store.peers[peerID]
 	if existingPeerInfo == nil {
 		peerInfo := NewPeerInfo(peer)
-		ss.peers.peers[peerID] = peerInfo
+		store.peers[peerID] = peerInfo
 		return peerInfo, nil
 	}
 
@@ -1272,19 +1284,21 @@ func (ss *GrpcServer) removePeer(peerID [64]byte, reason *p2p.PeerError) {
 }
 
 func (ss *GrpcServer) loadAndDeletePeer(peerID [64]byte) (*PeerInfo, bool) {
-	ss.peers.mu.Lock()
-	defer ss.peers.mu.Unlock()
-	peerInfo, ok := ss.peers.peers[peerID]
+	store := ss.peers.Load()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	peerInfo, ok := store.peers[peerID]
 	if ok {
-		delete(ss.peers.peers, peerID)
+		delete(store.peers, peerID)
 	}
 	return peerInfo, ok
 }
 
 func (ss *GrpcServer) deletePeer(peerID [64]byte) {
-	ss.peers.mu.Lock()
-	defer ss.peers.mu.Unlock()
-	delete(ss.peers.peers, peerID)
+	store := ss.peers.Load()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	delete(store.peers, peerID)
 }
 
 // writePeer sends a message to a peer over the correct RLPx subprotocol
@@ -1327,6 +1341,9 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 			// belongs to. Common case: a wit broadcast aimed at every
 			// good peer, some of which negotiated only eth. Treat as a
 			// successful no-op rather than disconnecting.
+			ss.logger.Trace("[sentry] writePeer drop: subprotocol rw not attached",
+				"protocol", protocolName, "msgID", msgID.String(),
+				"peerID", peerInfo.peer.ID().String())
 			return
 		}
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
@@ -1706,14 +1723,13 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 	// what lets the multi-sentry router map each peer to the correct
 	// sentry's gRPC client. protocol==0 is also dropped (RLPx-only,
 	// wit-only, or in-flight handshake entries).
-	myVersion := ss.ethProtocolVersion()
 	var reply sentryproto.PeersReply
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		// Read once via the locked accessor — pi.protocol is written under
 		// pi.lock by SetEthProtocol, so a bare read here would race with
 		// the handshake goroutine.
 		pv := peerInfo.EthProtocol()
-		if pv == 0 || pv != myVersion {
+		if pv == 0 || pv != ss.ethVersion {
 			return true
 		}
 		peer := peerInfo.peer.Info()
@@ -1736,7 +1752,6 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
-	myVersion := ss.ethProtocolVersion()
 	counts := map[uint]int{}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		// Per-sentry counting: each sentry reports only the peers whose
@@ -1746,26 +1761,13 @@ func (ss *GrpcServer) SimplePeerCount() map[uint]int {
 		// visible to all sentries). Snapshot via the locked accessor and
 		// use the local for both filter and increment.
 		pv := peerInfo.EthProtocol()
-		if pv == 0 || pv != myVersion {
+		if pv == 0 || pv != ss.ethVersion {
 			return true
 		}
 		counts[pv]++
 		return true
 	})
 	return counts
-}
-
-// ethProtocolVersion returns the eth protocol version this GrpcServer was
-// constructed for. NewGrpcServer appends the eth Protocol first, so
-// Protocols[0] is the eth entry. A zero return means the eth Protocol
-// hasn't been registered yet (only possible during construction).
-func (ss *GrpcServer) ethProtocolVersion() uint {
-	for i := range ss.Protocols {
-		if ss.Protocols[i].Name == eth.ProtocolName {
-			return ss.Protocols[i].Version
-		}
-	}
-	return 0
 }
 
 func (ss *GrpcServer) PeerCount(_ context.Context, req *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
