@@ -180,7 +180,7 @@ func TestSanitizeBlocksEqualToBase(t *testing.T) {
 // ─── sanitizeCall tests ──────────────────────────────────────────────────────
 
 // newTestSimulator creates a simulator with just the chain config needed for sanitizeCall tests.
-func newTestSimulator(chainID *big.Int) *simulator {
+func newTestSimulator(chainID *uint256.Int) *simulator {
 	return &simulator{
 		chainConfig: &chain.Config{ChainID: chainID},
 	}
@@ -200,7 +200,7 @@ func blockCtx(gasLimit uint64) evmtypes.BlockContext {
 // TestSanitizeCallGasDefaultsToRemainingBlock verifies that when Gas is nil,
 // it defaults to remaining block gas (blockGasLimit - gasUsed), capped by globalGasCap.
 func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -213,7 +213,7 @@ func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
 // TestSanitizeCallGasDefaultsCappedByGasCap verifies that when Gas is nil and
 // remaining block gas exceeds globalGasCap, the gas is capped to globalGasCap.
 func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(100_000_000)
 
@@ -226,7 +226,7 @@ func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
 // TestSanitizeCallGasDefaultsNoCap verifies that when globalGasCap is 0 (unlimited),
 // remaining block gas is capped by MaxUint64/2.
 func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -238,7 +238,7 @@ func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
 
 // TestSanitizeCallUserGasRespected verifies that user-specified gas is used when within limits.
 func TestSanitizeCallUserGasRespected(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(5_000_000)
 	args.Gas = &userGas
@@ -252,7 +252,7 @@ func TestSanitizeCallUserGasRespected(t *testing.T) {
 // TestSanitizeCallUserGasCappedByGlobalCap verifies that user-specified gas exceeding
 // globalGasCap is capped down.
 func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(100_000_000)
 	args.Gas = &userGas
@@ -265,7 +265,7 @@ func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
 
 // TestSanitizeCallUserGasNoCap verifies that when globalGasCap is 0, user gas is not capped.
 func TestSanitizeCallUserGasNoCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(100_000_000)
 	args.Gas = &userGas
@@ -279,7 +279,7 @@ func TestSanitizeCallUserGasNoCap(t *testing.T) {
 
 // TestSanitizeCallBlockGasLimitExceeded verifies that gas + gasUsed exceeding block gas limit is rejected.
 func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(20_000_001)
 	args.Gas = &userGas
@@ -295,7 +295,7 @@ func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
 
 // TestSanitizeCallBlockGasLimitExact verifies that gas + gasUsed exactly at block gas limit succeeds.
 func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	userGas := hexutil.Uint64(20_000_000)
 	args.Gas = &userGas
@@ -308,7 +308,7 @@ func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
 // TestSanitizeCallChainIDDefaultCopied verifies that the default chain ID is a copy,
 // not a reference to the live chainConfig (preventing aliasing bugs).
 func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
-	originalID := big.NewInt(1)
+	originalID := uint256.NewInt(1)
 	sim := newTestSimulator(originalID)
 	args := callArgs()
 	bc := blockCtx(30_000_000)
@@ -317,15 +317,15 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
-	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID))
+	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID.ToBig()))
 	// But it must be a different pointer — mutating args.ChainID must not affect chainConfig.
 	(*big.Int)(args.ChainID).SetInt64(999)
-	assert.Equal(t, int64(1), originalID.Int64(), "mutating args.ChainID must not affect chainConfig.ChainID")
+	assert.Equal(t, uint64(1), originalID.Uint64(), "mutating args.ChainID must not affect chainConfig.ChainID")
 }
 
 // TestSanitizeCallChainIDMismatch verifies that a mismatched chain ID in args is rejected.
 func TestSanitizeCallChainIDMismatch(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	args.ChainID = (*hexutil.Big)(big.NewInt(999))
 	bc := blockCtx(30_000_000)
@@ -337,7 +337,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 
 // TestSanitizeCallChainIDMatch verifies that a matching chain ID in args is accepted.
 func TestSanitizeCallChainIDMatch(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(42))
+	sim := newTestSimulator(uint256.NewInt(42))
 	args := callArgs()
 	args.ChainID = (*hexutil.Big)(big.NewInt(42))
 	bc := blockCtx(30_000_000)
@@ -349,7 +349,7 @@ func TestSanitizeCallChainIDMatch(t *testing.T) {
 // TestSanitizeCallBaseFeeNil verifies that when baseFee is nil (pre-London),
 // GasPrice is set if not provided.
 func TestSanitizeCallBaseFeeNil(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -362,7 +362,7 @@ func TestSanitizeCallBaseFeeNil(t *testing.T) {
 // TestSanitizeCallBaseFeeSet verifies that when baseFee is provided (post-London),
 // MaxFeePerGas and MaxPriorityFeePerGas are set if not provided.
 func TestSanitizeCallBaseFeeSet(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 	baseFee := uint256.NewInt(1_000_000_000) // 1 gwei
@@ -376,7 +376,7 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 
 // TestSanitizeCallBlobGas verifies that MaxFeePerBlobGas is set when BlobVersionedHashes is provided.
 func TestSanitizeCallBlobGas(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	args.BlobVersionedHashes = []common.Hash{{1}}
 	bc := blockCtx(30_000_000)
@@ -389,7 +389,7 @@ func TestSanitizeCallBlobGas(t *testing.T) {
 // TestSanitizeCallBlobGasNotSetWithoutHashes verifies that MaxFeePerBlobGas is not auto-set
 // when BlobVersionedHashes is nil.
 func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
@@ -401,7 +401,7 @@ func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
 // TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap tests that with globalGasCap=0
 // and a very large block gas limit, the gas is capped at MaxUint64/2.
 func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T) {
-	sim := newTestSimulator(big.NewInt(1))
+	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
 	// Use a block gas limit larger than MaxUint64/2 to trigger the cap.
 	hugeGasLimit := uint64(math.MaxUint64/2) + 1000
@@ -469,7 +469,7 @@ func TestRepairLogsEmpty(t *testing.T) {
 func TestNewSimulatorGasPool(t *testing.T) {
 	req := &SimulationRequest{TraceTransfers: true, Validation: true, ReturnFullTransactions: true}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	cfg := &chain.Config{ChainID: big.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 50_000_000, 1024, 0, false)
 	assert.Equal(t, uint64(50_000_000), sim.gasPool.Gas())
@@ -481,7 +481,7 @@ func TestNewSimulatorGasPool(t *testing.T) {
 func TestNewSimulatorZeroGasCap(t *testing.T) {
 	req := &SimulationRequest{}
 	header := &types.Header{Number: *uint256.NewInt(1)}
-	cfg := &chain.Config{ChainID: big.NewInt(1)}
+	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
 	assert.Equal(t, uint64(0), sim.gasPool.Gas())

@@ -568,6 +568,7 @@ type TemporalMemBatch interface {
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 	SetInMemHistoryReads(v bool)
+	InMemHistoryReads() bool
 }
 
 type WithFreezeInfo interface {

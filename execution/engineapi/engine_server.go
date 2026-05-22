@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -142,6 +141,7 @@ func (e *EngineServer) Start(
 ) error {
 	e.filters = filters
 	e.events = events
+	cli.AuthenticatedEngineRESTHandler = e.SSZRESTHandler()
 
 	var eg errgroup.Group
 	if !e.internalCL {
@@ -347,8 +347,13 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		if len(req.BlockAccessList) == 0 {
-			blockAccessList = nil
-			header.BlockAccessListHash = &empty.BlockAccessListHash
+			blockAccessList = make(types.BlockAccessList, 0)
+			hash := empty.BlockAccessListHash
+			header.BlockAccessListHash = &hash
+			blockAccessListBytes, err = types.EncodeBlockAccessListBytes(blockAccessList)
+			if err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("encode empty blockAccessList: %v", err)}
+			}
 		} else {
 			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
@@ -515,7 +520,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
-	var td *big.Int
+	var td *uint256.Int
 	if newPayload {
 		parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
 		td = s.chainRW.GetTd(ctx, parentHash, blockNumber-1)
@@ -1079,6 +1084,9 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		ep.SlotNumber = &sn
 	}
 	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
+		// EIP-7928: encode even when br.BlockAccessList is empty — an empty
+		// BAL serializes to 0xc0 via standard RLP rules. A nil BAL means
+		// the data is missing/not-populated and should not be emitted.
 		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
 		if encErr == nil {
 			ep.BlockAccessList = encoded

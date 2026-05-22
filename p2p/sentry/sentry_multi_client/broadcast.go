@@ -19,9 +19,9 @@ package sentry_multi_client
 import (
 	"context"
 	"errors"
-	"math/big"
 	"syscall"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -64,7 +64,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 	}
 }
 
-func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
+func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td uint256.Int) {
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 
 	if err != nil {
