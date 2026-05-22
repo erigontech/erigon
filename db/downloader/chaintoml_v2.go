@@ -20,12 +20,17 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
+	"strings"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/chain"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -48,6 +53,22 @@ const (
 // ChainTomlV2 is the structured representation of a V2 chain.toml manifest.
 type ChainTomlV2 struct {
 	Version int `toml:"version"`
+
+	// GenesisFork is hex(CRC32(genesis_hash)) — the identity-tree anchor
+	// shared by a chain and every fork of it. The live EIP-2124 fork ID
+	// is derived from GenesisFork + Forks; it is not stored as a scalar.
+	// Empty for back-compat on manifests produced before Phase-1 fork
+	// identification landed; a consumer with a populated local
+	// GenesisFork rejects peers whose value differs.
+	// See erigon-documents/.../fork-spec.md § Identification.
+	GenesisFork string `toml:"genesis-fork,omitempty"`
+
+	// Forks is the activated continuous (non-contentious) fork schedule.
+	// Each entry pins where its fork activated (block height or
+	// timestamp) so a consumer can map any file to its fork epoch and
+	// derive the chain's EIP-2124 fork ID. A contentious fork is NOT an
+	// entry here — it is a separate manifest with a [view] section.
+	Forks []ForkActivation `toml:"forks,omitempty"`
 
 	// AuthorityUCANHash is the torrent infohash of the Authority UCAN
 	// (chain.ucan.authority.<enr-fp>.<rev>.bin) — the long-lived
@@ -135,6 +156,88 @@ type CaplinFileEntry struct {
 	Name  string `toml:"name"`
 	Hash  string `toml:"hash"`
 	Trust string `toml:"trust,omitempty"`
+}
+
+// ForkActivation is one entry in the manifest's activated continuous fork
+// schedule. Exactly one of Block or Time is set: height-based forks
+// (pre-Merge upgrades) set Block; time-based forks (post-Merge upgrades,
+// e.g. Shanghai/Cancun) set Time. Name is the chain.Config field name
+// (e.g. "ShanghaiTime", "CancunTime") — informational and not
+// load-bearing for fork-ID derivation, which depends only on the sorted
+// activation values.
+type ForkActivation struct {
+	Name  string `toml:"name,omitempty"`
+	Block uint64 `toml:"block,omitempty"`
+	Time  uint64 `toml:"time,omitempty"`
+}
+
+// BuildChainIdentity computes the manifest's identity fields for the
+// given chain configuration. It returns:
+//
+//   - genesisFork: hex(CRC32(genesisHash)), the identity-tree anchor —
+//     equal to the EIP-2124 FORK_HASH with zero forks applied.
+//   - forks: the activated continuous fork schedule.
+//
+// Activation values come from p2p/forkid.GatherForks — the same source
+// the devp2p stack uses to compute the live EIP-2124 fork ID, so the
+// derived fork ID from (genesisHash, forks) matches forkid.NewIDFromForks
+// for any head position. Each entry's Name is the chain.Config field
+// name that holds its activation value (e.g. "ShanghaiTime"), looked up
+// via parallel reflection. Names are informational; values that have no
+// resolvable field name (a few special-case Aura/Bor entries that
+// GatherForks adds outside the *uint64 field pattern) keep Name empty.
+//
+// genesisFork is always populated. cfg may be nil for a chain config we
+// cannot resolve; in that case forks is nil but genesisFork is still
+// computed from genesisHash.
+func BuildChainIdentity(cfg *chain.Config, genesisHash common.Hash, genesisTime uint64) (genesisFork string, forks []ForkActivation) {
+	zeroID := forkid.NewIDFromForks(nil, nil, genesisHash, 0, 0)
+	genesisFork = hex.EncodeToString(zeroID.Hash[:])
+	if cfg == nil {
+		return genesisFork, nil
+	}
+	heightForks, timeForks := forkid.GatherForks(cfg, genesisTime)
+	if len(heightForks) == 0 && len(timeForks) == 0 {
+		return genesisFork, nil
+	}
+	heightName, timeName := chainConfigForkFieldNames(cfg)
+	forks = make([]ForkActivation, 0, len(heightForks)+len(timeForks))
+	for _, v := range heightForks {
+		forks = append(forks, ForkActivation{Name: heightName[v], Block: v})
+	}
+	for _, v := range timeForks {
+		forks = append(forks, ForkActivation{Name: timeName[v], Time: v})
+	}
+	return genesisFork, forks
+}
+
+// chainConfigForkFieldNames returns two maps from activation value to
+// the chain.Config field name that holds it: one for *Block fields
+// (height activations) and one for *Time fields (time activations).
+// Mirrors forkid.GatherForks's reflection so a value the gatherer
+// produced can be labeled with the field it came from.
+func chainConfigForkFieldNames(cfg *chain.Config) (heightName, timeName map[uint64]string) {
+	heightName = map[uint64]string{}
+	timeName = map[uint64]string{}
+	kind := reflect.TypeFor[chain.Config]()
+	conf := reflect.ValueOf(cfg).Elem()
+	for i := 0; i < kind.NumField(); i++ {
+		field := kind.Field(i)
+		if field.Type != reflect.TypeFor[*uint64]() {
+			continue
+		}
+		rule := conf.Field(i).Interface().(*uint64)
+		if rule == nil {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(field.Name, "Block"):
+			heightName[*rule] = field.Name
+		case strings.HasSuffix(field.Name, "Time"):
+			timeName[*rule] = field.Name
+		}
+	}
+	return heightName, timeName
 }
 
 // GenerateV2 builds a V2 chain.toml from a snapshot inventory.

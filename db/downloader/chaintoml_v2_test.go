@@ -25,7 +25,10 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
+	"github.com/erigontech/erigon/p2p/forkid"
 )
 
 // newCommitmentEntry builds the commitment-domain FileEntry used
@@ -707,4 +710,70 @@ func TestGenerateV2_PreverifiedAccessorsSurvive(t *testing.T) {
 		require.True(t, srcAccessors[name],
 			"manifest accessor %q is not in the source preverified set", name)
 	}
+}
+
+func TestBuildChainIdentity(t *testing.T) {
+	genesis := common.Hash{0x01, 0x02, 0x03}
+	london := uint64(12965000)
+	shanghai := uint64(1681338455)
+	cfg := &chain.Config{
+		LondonBlock:  &london,
+		ShanghaiTime: &shanghai,
+	}
+
+	gf, forks := BuildChainIdentity(cfg, genesis, 0)
+
+	// genesis-fork is hex(forkid.NewIDFromForks(nil,nil,genesis,0,0).Hash).
+	expectZero := forkid.NewIDFromForks(nil, nil, genesis, 0, 0)
+	require.Equal(t, hex.EncodeToString(expectZero.Hash[:]), gf)
+
+	// Fork list has both activations, each labeled by its config field name.
+	require.Len(t, forks, 2)
+	var sawLondon, sawShanghai bool
+	for _, f := range forks {
+		switch {
+		case f.Block == london:
+			sawLondon = true
+			require.Equal(t, "LondonBlock", f.Name)
+			require.Zero(t, f.Time)
+		case f.Time == shanghai:
+			sawShanghai = true
+			require.Equal(t, "ShanghaiTime", f.Name)
+			require.Zero(t, f.Block)
+		}
+	}
+	require.True(t, sawLondon, "London should appear as a Block entry")
+	require.True(t, sawShanghai, "Shanghai should appear as a Time entry")
+
+	// The derived fork ID from the manifest's (genesisHash, forks) must
+	// match what p2p/forkid produces directly from the same chain config
+	// — the contract that makes the manifest's identity load-bearing.
+	heights, times := forkid.GatherForks(cfg, 0)
+	expectID := forkid.NewIDFromForks(heights, times, genesis, london, shanghai)
+	var ourHeights, ourTimes []uint64
+	for _, f := range forks {
+		if f.Block != 0 {
+			ourHeights = append(ourHeights, f.Block)
+		}
+		if f.Time != 0 {
+			ourTimes = append(ourTimes, f.Time)
+		}
+	}
+	derived := forkid.NewIDFromForks(ourHeights, ourTimes, genesis, london, shanghai)
+	require.Equal(t, expectID, derived)
+}
+
+func TestBuildChainIdentity_NilConfig(t *testing.T) {
+	genesis := common.Hash{0xab, 0xcd}
+	gf, forks := BuildChainIdentity(nil, genesis, 0)
+	require.NotEmpty(t, gf, "genesis-fork must be computed even without a chain config")
+	require.Nil(t, forks)
+}
+
+func TestBuildChainIdentity_NoForks(t *testing.T) {
+	genesis := common.Hash{0x42}
+	cfg := &chain.Config{}
+	gf, forks := BuildChainIdentity(cfg, genesis, 0)
+	require.NotEmpty(t, gf)
+	require.Empty(t, forks)
 }
