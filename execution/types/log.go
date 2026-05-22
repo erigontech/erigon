@@ -270,43 +270,42 @@ func ToRPCTransactionLog(log *Log, header *Header, txHash common.Hash, txIndex u
 	}
 }
 
-func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
+// BuildTopicMap converts a slice-of-alternatives representation of topics into a
+// pre-built lookup map suitable for repeated calls to FilterWithTopicMap.
+func BuildTopicMap(topics [][]common.Hash) []map[common.Hash]struct{} {
 	topicMap := make([]map[common.Hash]struct{}, len(topics))
-
-	//populate topic map
 	for idx, v := range topics {
-		topicMap[idx] = make(map[common.Hash]struct{})
-		for _, vv := range v {
-			topicMap[idx][vv] = struct{}{}
+		if len(v) == 0 {
+			continue // nil entry = wildcard; FilterWithTopicMap treats len(nil)==0 as match-all
+		}
+		topicMap[idx] = make(map[common.Hash]struct{}, len(v))
+		for _, h := range v {
+			topicMap[idx][h] = struct{}{}
 		}
 	}
+	return topicMap
+}
 
+// FilterWithTopicMap filters logs using a pre-built topic map. Use this when filtering
+// in a loop with the same topics to avoid rebuilding the map on every call.
+func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, maxLogs uint64) Logs {
 	o := make(Logs, 0, len(logs))
-	logCount := uint64(0)
+	var logCount uint64
 	for _, v := range logs {
-		// check address if addrMap is not empty
 		if len(addrMap) != 0 {
 			if _, ok := addrMap[v.Address]; !ok {
-				// not there? skip this log
 				continue
 			}
 		}
-
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(v.Topics) {
+		if len(topicMap) > len(v.Topics) {
 			continue
 		}
-		// the default state is to include the log
 		found := true
-		// if there are no topics provided, then match all
 		for idx, topicSet := range topicMap {
-			// if the topicSet is empty, match all as wildcard
 			if len(topicSet) == 0 {
 				continue
 			}
-			// the topicSet isnt empty, so the topic must be included.
 			if _, ok := topicSet[v.Topics[idx]]; !ok {
-				// the topic wasn't found, so we should skip this log
 				found = false
 				break
 			}
@@ -314,13 +313,16 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 		if found {
 			o = append(o, v)
 		}
-
-		logCount += 1
+		logCount++
 		if maxLogs != 0 && logCount >= maxLogs {
 			break
 		}
 	}
 	return o
+}
+
+func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.Hash, maxLogs uint64) Logs {
+	return logs.FilterWithTopicMap(addrMap, BuildTopicMap(topics), maxLogs)
 }
 
 func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap map[common.Hash]struct{}, maxLogs uint64) Logs {

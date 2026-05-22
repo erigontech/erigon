@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"math/big"
 	"testing"
 	"time"
 
@@ -124,7 +123,7 @@ func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) 
 func (s *stubExecutionModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	return nil, nil
 }
-func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*big.Int, error) {
+func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
 func (s *stubExecutionModule) Ready(_ context.Context) (bool, error) { return true, nil }
@@ -140,7 +139,7 @@ func (s *stubExecutionModule) FrozenBlocks(_ context.Context) (uint64, bool, err
 // Prague, Osaka, Amsterdam) are activated at timestamp 0.
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
-		ChainID:                       big.NewInt(1337),
+		ChainID:                       uint256.NewInt(1337),
 		HomesteadBlock:                common.NewUint64(0),
 		TangerineWhistleBlock:         common.NewUint64(0),
 		SpuriousDragonBlock:           common.NewUint64(0),
@@ -153,7 +152,7 @@ func allForksChainConfig() *chain.Config {
 		LondonBlock:                   common.NewUint64(0),
 		ArrowGlacierBlock:             common.NewUint64(0),
 		GrayGlacierBlock:              common.NewUint64(0),
-		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficulty:       uint256.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  common.NewUint64(0),
 		CancunTime:                    common.NewUint64(0),
@@ -1009,6 +1008,99 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		Withdrawals:           nil, // invalid: Shanghai timestamp requires non-nil withdrawals
 	}, clparams.CapellaVersion)
+	require.Nil(t, resp)
+	require.Error(t, err)
+	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+}
+
+// TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing pins the
+// engine API spec rule that the "Extend point (8)" checks added by
+// engine_forkchoiceUpdatedV3 (cancun.md) — including the
+// `parentBeaconBlockRoot != null` requirement — only run when the head is
+// VALID. The hive `engine-cancun / Invalid PayloadAttributes, Missing
+// BeaconRoot, Syncing=True` test exercises exactly this: CLMocker sends
+// fcuV3 with nil parentBeaconBlockRoot to a head the EL hasn't seen, and
+// expects {payloadStatus: SYNCING} with no JSON-RPC error.
+func TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	stub := &stubExecutionModule{} // GetForkChoice/GetHeaderByHash stubs -> SYNCING
+	cfg := allForksChainConfig()
+	srv := NewEngineServer(
+		log.New(),
+		cfg,
+		stub,
+		engine_block_downloader.NewEngineBlockDownloader(
+			context.Background(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil,
+		),
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+	srv.test = true // avoid invoking downloader.StartDownloading on the SYNCING path
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: nil, // V3 attrs MUST carry it, but head is unknown -> SYNCING wins
+	}, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
+	require.Nil(t, resp.PayloadId)
+}
+
+// TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid pins the other
+// half of the spec rule: when the head IS VALID, fcuV3 with a nil
+// parentBeaconBlockRoot MUST return -38003 (cancun.md point 8.1).
+func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
+	t.Parallel()
+
+	forkchoiceState := &engine_types.ForkChoiceState{
+		HeadHash:           common.Hash{0x1},
+		SafeBlockHash:      common.Hash{0x2},
+		FinalizedBlockHash: common.Hash{0x3},
+	}
+	srv := NewEngineServer(
+		log.New(),
+		allForksChainConfig(),
+		&stubExecutionModule{
+			getForkChoiceFunc: func(_ context.Context) (execmodule.ForkChoiceState, error) {
+				return execmodule.ForkChoiceState{
+					HeadHash:      forkchoiceState.HeadHash,
+					SafeHash:      forkchoiceState.SafeBlockHash,
+					FinalizedHash: forkchoiceState.FinalizedBlockHash,
+				}, nil
+			},
+		},
+		nil,
+		false,
+		false,
+		false,
+		true,
+		nil,
+		0,
+		0,
+	)
+
+	resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+		Timestamp:             hexutil.Uint64(1001),
+		PrevRandao:            common.Hash{0xaa},
+		SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: nil,
+	}, clparams.DenebVersion)
 	require.Nil(t, resp)
 	require.Error(t, err)
 	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())

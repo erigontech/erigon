@@ -261,7 +261,7 @@ func ExecuteAATransaction(
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = ibs.SetNonce(tx.SenderAddress, nonce+1); err != nil {
+	if err = ibs.SetNonce(tx.SenderAddress, nonce+1, tracing.NonceChangeEoACall); err != nil {
 		return 0, 0, err
 	}
 

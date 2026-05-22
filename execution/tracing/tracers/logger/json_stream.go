@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -65,14 +66,19 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.
 func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: l.OnTxStart,
-			OnExit:    l.OnExit,
-			OnOpcode:  l.OnOpcode,
+			OnTxStart:           l.OnTxStart,
+			OnSystemCallStartV2: l.OnSystemCallStartV2,
+			OnExit:              l.OnExit,
+			OnOpcode:            l.OnOpcode,
 		},
 	}
 }
 
 func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
+	l.env = env
+}
+
+func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
@@ -173,10 +179,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
-	if refund.Total() != 0 {
+	if refund != 0 {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(l.env.IntraBlockState.GetRefund().Total())
+		l.stream.WriteUint64(refund)
 	}
 
 	if err != nil {
@@ -196,7 +202,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		}
 		l.stream.WriteArrayEnd()
 	}
-	if !l.cfg.DisableMemory {
+	if l.cfg.EnableMemory {
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
@@ -211,6 +217,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			l.writeMemoryWordRaw(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
+	}
+	if l.cfg.EnableReturnData && len(rData) > 0 {
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("returnData")
+		l.stream.WriteString(hexutil.Encode(rData))
 	}
 	if outputStorage {
 		l.stream.WriteMore()

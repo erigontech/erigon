@@ -230,16 +230,20 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	}
 
 	indicies := []uint64{}
+	commitments := block.Block.Body.GetBlobKzgCommitments()
+	if commitments == nil {
+		commitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)
+	}
 	if versionedHashes == nil {
 		// take all blobs
-		indicies = make([]uint64, block.Block.Body.BlobKzgCommitments.Len())
+		indicies = make([]uint64, commitments.Len())
 		for i := range indicies {
 			indicies[i] = uint64(i)
 		}
 	} else {
 		// take the blobs by the versioned hashes
 		versionedHashesToIndex := make(map[common.Hash]uint64)
-		block.Block.Body.BlobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
+		commitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 			hash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
 			if err != nil {
 				return false

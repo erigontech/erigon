@@ -109,16 +109,22 @@ func (s *CaplinSnapshots) LS() {
 	view := s.View()
 	defer view.Close()
 
+	var stats seg.Stats
+	lsSeg := func(d *seg.Decompressor) {
+		log.Info("[agg] ", "f", d.FileName(), "words", d.Count(), "dictOnDisk", common.ByteCount(d.SerializedTotalDictSize()), "dictMem", common.ByteCount(d.DictMemSize()))
+		stats.Add(d)
+	}
 	if view.BeaconBlockRotx != nil {
-		for _, seg := range view.BeaconBlockRotx.Segments {
-			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
+		for _, sn := range view.BeaconBlockRotx.Segments {
+			lsSeg(sn.Src().Decompressor)
 		}
 	}
 	if view.BlobSidecarRotx != nil {
-		for _, seg := range view.BlobSidecarRotx.Segments {
-			log.Info("[agg] ", "f", seg.Src().Decompressor.FileName(), "words", seg.Src().Decompressor.Count())
+		for _, sn := range view.BlobSidecarRotx.Segments {
+			lsSeg(sn.Src().Decompressor)
 		}
 	}
+	log.Info("[agg] total", "words", stats.Words, "dictOnDisk", common.ByteCount(stats.Dict), "dictMem", common.ByteCount(stats.DictMem))
 }
 
 func (s *CaplinSnapshots) SegFileNames(from, to uint64) []string {
@@ -672,7 +678,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	return s.OpenFolder()
 }
 
-func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Sprintf("ReadHeader(%d), %s, %s\n", slot, rec, dbg.Stack()))
@@ -717,7 +723,37 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
+	header, elBlockNumber, elBlockHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
+	if err != nil {
+		return nil, 0, common.Hash{}, err
+	}
+
+	// [New in Gloas:EIP7732] The beacon block snapshot for GLOAS contains no ExecutionPayload,
+	// so ReadBlockHeaderFromSnapshotWithExecutionData returns 0/zero for the execution indices.
+	// For FULL blocks the indices were written to KV by WriteExecutionPayloadEnvelopeIndicies
+	// when the envelope arrived; fall back to reading them here if a transaction is provided.
+	if tx != nil && header != nil && elBlockNumber == 0 && elBlockHash == (common.Hash{}) {
+		epoch := slot / s.beaconCfg.SlotsPerEpoch
+		if s.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
+			blockRoot, err := header.Header.HashSSZ()
+			if err != nil {
+				return nil, 0, common.Hash{}, err
+			}
+			n, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
+			if err != nil {
+				return nil, 0, common.Hash{}, err
+			}
+			if n != nil {
+				elBlockNumber = *n
+			}
+			elBlockHash, err = beacon_indicies.ReadExecutionBlockHash(tx, blockRoot)
+			if err != nil {
+				return nil, 0, common.Hash{}, err
+			}
+		}
+	}
+
+	return header, elBlockNumber, elBlockHash, nil
 }
 
 func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {

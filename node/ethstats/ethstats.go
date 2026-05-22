@@ -549,9 +549,9 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 
 // assembleBlockStats retrieves any required metadata to report a single block
 // and assembles the block stats. If block is nil, the current head is processed.
-func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
+func (s *Service) assembleBlockStats(block *types.Block, td *uint256.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = new(uint256.Int)
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
