@@ -244,6 +244,32 @@ but the *network* must still converge, and the manifest + download process
 being rewind-capable is exactly what keeps the network alive independent of any
 one node's EL gap.
 
+### 5.7 Retirement ordering — unadvertise first
+
+Retiring a snapshot file — whether merge-superseded, rewind-orphaned (§5.5), or
+rolled below the minimal-mode retention horizon — proceeds in a fixed order:
+
+1. **Unadvertise.** Remove the file from the publisher's inventory and republish
+   the manifest without it; evict any rolling generation that still lists it.
+   After this step no current manifest points at the file.
+2. **Remove locally.** Drop the torrent, then delete the data file and its
+   `.torrent` sidecar from disk.
+
+Unadvertise is *first*, and is a distinct step. Removing the file (step 2)
+before unadvertising leaves a window where the advertised manifest points
+consumers at a file the publisher no longer has or seeds — failed fetches and
+swarm noise, violating the stable-manifest requirement.
+
+Between the two steps the file may stay seedable for a short grace window, so a
+consumer download already in flight against the prior manifest can complete
+before the local delete.
+
+All three retirement triggers (merge, rewind, minimal-horizon roll) share this
+ordering; the retire mechanism (`RetireFiles`) implements it once. Note: the
+existing merge `onDel` path already does inventory-removal + republish before
+the torrent drop — incidentally correct — but the ordering was never explicit;
+this section makes it a requirement.
+
 ## 6. Genesis pinning
 
 Canonical genesis (`v0`) is a pinned `preverified.toml` snapshot — the content
