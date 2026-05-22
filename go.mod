@@ -5,7 +5,7 @@ go 1.25.7
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20260505095143-9dd31a2190a1
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20260522023950-e98e9800e987
 	github.com/erigontech/mdbx-go v0.39.17
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 )
