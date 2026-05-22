@@ -28,9 +28,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -325,4 +328,70 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedAmount, *txCount)
+}
+
+func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+
+	const chainSize = 20
+	const pruneDistance = uint64(10)
+
+	setup := func(t *testing.T, pm prune.Mode) *APIImpl {
+		t.Helper()
+		m := execmoduletester.New(t, execmoduletester.WithPruneMode(pm))
+		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(_ int, _ *blockgen.BlockGen) {})
+		require.NoError(t, err)
+		require.NoError(t, m.InsertChain(c))
+
+		ctx := t.Context()
+		tx, err := m.DB.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		_, err = prune.EnsureNotChanged(tx, pm)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit())
+
+		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	}
+
+	fullMode := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(pruneDistance),
+		Blocks:      prune.DefaultBlocksPruneMode,
+	}
+	minimalMode := prune.Mode{
+		Initialised: true,
+		History:     prune.Distance(pruneDistance),
+		Blocks:      prune.Distance(pruneDistance),
+	}
+
+	// In full mode, block bodies are in snapshots and DefaultBlocksPruneMode means no block-body
+	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
+	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
+		t.Parallel()
+		api := setup(t, fullMode)
+		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+	})
+
+	// In minimal mode, Blocks=Distance(pruneDistance) gates access: block 0 < head-pruneDistance.
+	t.Run("minimal_mode_old_block_pruned", func(t *testing.T) {
+		t.Parallel()
+		api := setup(t, minimalMode)
+		_, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
+		require.ErrorIs(t, err, state.PrunedError)
+	})
+
+	// Recent blocks (within the prune window) must always be accessible.
+	t.Run("minimal_mode_recent_block_accessible", func(t *testing.T) {
+		t.Parallel()
+		api := setup(t, minimalMode)
+		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(chainSize), false)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+	})
 }

@@ -263,17 +263,16 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
-	// warmup kzg init so first block doesn't suffer. kzgWarmupDone is closed
-	// when the goroutine finishes; Stop waits on it so the trailing log can
-	// never fire after the owning scope (e.g. a test) has torn down — a log
-	// from a goroutine after a test completes panics the test runner.
-	kzgWarmupDone := make(chan struct{})
-	go func() {
-		defer close(kzgWarmupDone)
-		t := time.Now()
-		kzg.InitKZGCtx()
-		logger.Info("KZG crypto context ready", "took", time.Since(t))
-	}()
+	var kzgWarmupDone chan struct{}
+	if config.WarmupKzgCtxOnInit {
+		kzgWarmupDone = make(chan struct{})
+		go func() {
+			defer close(kzgWarmupDone)
+			t := time.Now()
+			kzg.InitKZGCtx()
+			logger.Info("KZG crypto context ready", "took", time.Since(t))
+		}()
+	}
 
 	dirs := stack.Config().Dirs
 
