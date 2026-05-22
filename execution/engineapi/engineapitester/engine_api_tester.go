@@ -271,7 +271,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 			NoDiscovery:     true,
 			NoDial:          true,
 			ProtocolVersion: []uint{direct.ETH68},
-			AllowedPorts:    []uint{0},
 			PrivateKey:      nodeKey,
 		},
 		MdbxDBSizeLimit: mdbxDBSizeLimit,
