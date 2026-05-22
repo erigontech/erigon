@@ -19,11 +19,11 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -58,11 +58,12 @@ type RecordingState struct {
 	codeOverlay    map[common.Address][]byte
 
 	// Write tracking
-	ModifiedAccounts map[common.Address]struct{}
-	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
-	ModifiedCode     map[common.Address][]byte
-	DeletedAccounts  map[common.Address]struct{}
-	CreatedContracts map[common.Address]struct{}
+	ModifiedAccounts      map[common.Address]struct{}
+	ReallyChangedAccounts map[common.Address]struct{} // subset of ModifiedAccounts where actual state (nonce/balance/code) changed
+	ModifiedStorage       map[common.Address]map[common.Hash]struct{}
+	ModifiedCode          map[common.Address][]byte
+	DeletedAccounts       map[common.Address]struct{}
+	CreatedContracts      map[common.Address]struct{}
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -71,19 +72,20 @@ type RecordingState struct {
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
 func NewRecordingState(inner state.StateReader) *RecordingState {
 	return &RecordingState{
-		inner:            inner,
-		AccessedAccounts: make(map[common.Address]struct{}),
-		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		AccessedCode:     make(map[common.Address][]byte),
-		PreStateCode:     make(map[common.Address][]byte),
-		accountOverlay:   make(map[common.Address]*accounts.Account),
-		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
-		codeOverlay:      make(map[common.Address][]byte),
-		ModifiedAccounts: make(map[common.Address]struct{}),
-		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		ModifiedCode:     make(map[common.Address][]byte),
-		DeletedAccounts:  make(map[common.Address]struct{}),
-		CreatedContracts: make(map[common.Address]struct{}),
+		inner:                 inner,
+		AccessedAccounts:      make(map[common.Address]struct{}),
+		AccessedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		AccessedCode:          make(map[common.Address][]byte),
+		PreStateCode:          make(map[common.Address][]byte),
+		accountOverlay:        make(map[common.Address]*accounts.Account),
+		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
+		codeOverlay:           make(map[common.Address][]byte),
+		ModifiedAccounts:      make(map[common.Address]struct{}),
+		ReallyChangedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:          make(map[common.Address][]byte),
+		DeletedAccounts:       make(map[common.Address]struct{}),
+		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
 
@@ -307,6 +309,9 @@ func (s *RecordingState) TracePrefix() string {
 func (s *RecordingState) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
+	if original == nil || account.Nonce != original.Nonce || !account.Balance.Eq(&original.Balance) || account.CodeHash != original.CodeHash {
+		s.ReallyChangedAccounts[addr] = struct{}{}
+	}
 	// Store a copy in the overlay
 	acctCopy := *account
 	s.accountOverlay[addr] = &acctCopy
@@ -461,20 +466,12 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 
 	// Geth always emits these optional fields as null when absent.
 	nullFields := []string{
-		"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
+		"baseFeePerGas", "blobGasUsed", "blockAccessListHash", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
 
 	for _, field := range nullFields {
 		if _, ok := m[field]; !ok {
 			m[field] = nil
 		}
-	}
-
-	// Geth uses "balHash" instead of Erigon's "blockAccessListHash".
-	if v, ok := m["blockAccessListHash"]; ok {
-		m["balHash"] = v
-		delete(m, "blockAccessListHash")
-	} else {
-		m["balHash"] = nil
 	}
 	delete(m, "size")
 
@@ -545,7 +542,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
-	endTxNum := info.EndTxNum
 	parentNum := info.ParentNum
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -683,14 +679,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return result, nil
 	}
 
-	siblingPaths, err := detectCollapseSiblings(ctx, tx, domains, sdCtx,
-		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed)
-	if err != nil {
-		return nil, err
-	}
-
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -793,6 +782,18 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		}
 	}
 
+	// Per EIP-7928, the system address (0xff...fe) must not appear in the witness
+	// unless it has actual state changes. It is touched as msg.sender on every
+	// block's system call but that alone does not constitute a state access.
+	sysAddr := common.Address(params.SystemAddress.Value())
+	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
+		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
+		hasStorage := len(out.Storage[sysAddr]) > 0
+		if !reallyChanged && !hasStorage {
+			delete(out.Addresses, sysAddr)
+		}
+	}
+
 	sortedKeys := make([]hexutil.Bytes, 0, len(out.Addresses))
 	for addr := range out.Addresses {
 		sortedKeys = append(sortedKeys, addr.Bytes())
@@ -856,69 +857,12 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	return out
 }
 
-// detectCollapseSiblings runs STEP 1 of witness construction: compute the full
-// commitment for this block against a split reader (commitment from parent state,
-// plain state from end of block) and record every sibling path the trie collapses
-// through. The collected paths are returned so STEP 2 can touch them while building
-// the witness — without those touches, collapsed-sibling data would be missing from
-// the witness and stateless re-execution would diverge from the canonical root.
-//
-// Triggers SeekCommitment #2 (split history reader). Preserves pre-refactor behavior
-// including the lupin012 seekBlockNum != parentNum guard.
-func detectCollapseSiblings(
-	ctx context.Context,
-	tx kv.TemporalTx,
-	domains *execctx.SharedDomains,
-	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
-	firstTxNumInBlock, endTxNum, blockNum, parentNum uint64,
-	expectedBlockRoot common.Hash,
-	accessed *accessedState,
-) (siblingPaths [][]byte, err error) {
-	// Set up split reader: commitment from block beginning, plain state from block end.
-	// withHistory=false so branch updates are written using PutBranch().
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false /* withHistory */)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
-	}
-	// With commitment history enabled, SeekCommitment at firstTxNumInBlock must land on the
-	// parent block's committed state. Any other position means the history has been pruned
-	// for this block range.
-	if seekBlockNum != parentNum {
-		return nil, fmt.Errorf(
-			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
-				"commitment history may be pruned for this block range",
-			blockNum, seekBlockNum, parentNum)
-	}
-
-	accessed.touchAll(sdCtx)
-
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
-		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
-	})
-
-	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
-	}
-
-	if common.Hash(computedRootHash) != expectedBlockRoot {
-		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
-	}
-
-	sdCtx.SetCollapseTracer(nil)
-	return siblingPaths, nil
-}
-
 // buildWitnessTrie runs STEP 2 of witness construction: re-seek the commitment
-// against the parent-state reader, touch every accessed key plus the sibling
-// paths collected during collapse detection, then generate the witness trie and
-// RLP-encode it. The pre-state root is verified against expectedParentRoot
-// before the encoded nodes are returned.
+// against the parent-state reader, touch every accessed key, then generate the
+// witness trie and RLP-encode it. The pre-state root is verified against
+// expectedParentRoot before the encoded nodes are returned.
 //
-// Triggers SeekCommitment #3 (parent-state reader). Preserves pre-refactor behavior.
+// Triggers SeekCommitment #3 (parent-state reader).
 func buildWitnessTrie(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -926,7 +870,6 @@ func buildWitnessTrie(
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
 	firstTxNumInBlock uint64,
 	expectedParentRoot common.Hash,
-	siblingPaths [][]byte,
 	accessed *accessedState,
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
@@ -937,15 +880,6 @@ func buildWitnessTrie(
 	}
 
 	accessed.touchAll(sdCtx)
-
-	if len(siblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
-		for _, siblingPath := range siblingPaths {
-			compactSiblingPath := commitment.NibblesToString(siblingPath)
-			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
-			sdCtx.TouchHashedKey(siblingPath)
-		}
-	}
 
 	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, accessed.CodeReads, "debug_executionWitness_witness_construction")
 	if err != nil {
