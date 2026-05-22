@@ -183,6 +183,37 @@ func TestInventoryBlockFiles(t *testing.T) {
 	require.Len(t, blocks, 2)
 }
 
+// TestInventoryViewBlockFilesIncludesAccessors is the regression for the
+// publisher wedge where InitialStateReady hung forever: InventoryView.
+// BlockFiles filtered to KindKV, dropping block .idx accessors. The
+// lifecycle Sweep iterates view.BlockFiles, so it never dispatched the
+// accessors, they never reached LifecycleIndexed, and the orchestrator's
+// tryFireInitialStateReady (which waits on every phase-1 file, accessors
+// included) blocked permanently.
+func TestInventoryViewBlockFilesIncludesAccessors(t *testing.T) {
+	inv := NewInventory()
+	inv.AddFile(&FileEntry{Name: "v1.0-000000-000500-headers.seg", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Name: "v2.0-000000-000500-headers.idx", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+
+	// Precondition: the .idx is classified as a block accessor.
+	idx, ok := inv.GetByName("v2.0-000000-000500-headers.idx")
+	require.True(t, ok)
+	require.Equal(t, KindAccessor, idx.Kind)
+	require.Equal(t, Domain(""), idx.Domain)
+
+	view := inv.View()
+	defer view.Close()
+
+	names := make([]string, 0, 2)
+	for _, e := range view.BlockFiles() {
+		names = append(names, e.Name)
+	}
+	require.ElementsMatch(t,
+		[]string{"v1.0-000000-000500-headers.seg", "v2.0-000000-000500-headers.idx"},
+		names, "view.BlockFiles must include the block .idx accessor, not just the .seg primary; meta stays excluded")
+}
+
 // TestInventoryNonKVKinds covers the new caplin/meta/salt slices. Each kind
 // routes to its own slice via AddFile and is returned by its accessor.
 // History + idx kinds stay under the domain map alongside kv but distinct

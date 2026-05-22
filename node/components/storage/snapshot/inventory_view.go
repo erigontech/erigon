@@ -122,13 +122,20 @@ func (v *InventoryView) Files(domain Domain) []*FileEntry {
 	return out
 }
 
-// BlockFiles implements HeldView.
+// BlockFiles implements HeldView. It mirrors the inv.blocks bucket
+// (AddFile's default branch with Domain==""): block primaries (.seg,
+// KindKV) AND block accessors (.idx, KindAccessor). Meta/salt/caplin
+// also carry Domain=="" but live in their own buckets with their own
+// dispatch paths, so they are excluded here. Filtering to KindKV alone
+// dropped block .idx accessors — the lifecycle Sweep never dispatched
+// them, they never reached LifecycleIndexed, and InitialStateReady (which
+// waits on every phase-1 file, accessors included) hung forever.
 func (v *InventoryView) BlockFiles() []*FileEntry {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	out := make([]*FileEntry, 0, len(v.captured))
 	for _, e := range v.captured {
-		if e.Domain == "" && e.Kind == KindKV {
+		if e.Domain == "" && e.Kind != KindMeta && e.Kind != KindSalt && e.Kind != KindCaplin {
 			out = append(out, e)
 		}
 	}
