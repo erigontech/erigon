@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -173,7 +174,7 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
@@ -183,7 +184,25 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 		}
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. juts leave progress as 0.
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Wiping the commitment table leaves the aggregator's in-memory branchCache
+	// referencing trie nodes that no longer exist on disk. A subsequent from-0
+	// re-exec then reads those stale nodes when computing block 0's commitment
+	// and produces a wrong trie root (parallel-exec failure mode of #21138).
+	// Drop the cache so it repopulates from the freshly-wiped table.
+	if hasAgg, ok := db.(dbstate.HasAgg); ok {
+		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			aggTx := agg.BeginFilesRo()
+			if bc := aggTx.BranchCache(); bc != nil {
+				bc.Clear()
+			}
+			aggTx.Close()
+		}
+	}
+	return nil
 }
 
 func ResetTxLookup(tx kv.RwTx) error {
