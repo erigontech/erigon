@@ -149,15 +149,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to flush shared domains: %w", err)
 	}
 
-	// SetHead unwinds commitment history but the BranchCache (aggregator-
-	// scope, shared across SDs) still holds entries from the pre-unwind
-	// state — notably KeyCommitmentState pointing at the original head
-	// blockNum. The next FCU's NewSharedDomains.SeekCommitment would hit
-	// the cache, see the original-head blockNum, and trip
-	// ErrBehindCommitment against the now-truncated TxNums index. Clear
-	// the cache so subsequent reads see the post-unwind MDBX state.
-	sd.ClearBranchCache()
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
