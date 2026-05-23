@@ -6,13 +6,13 @@ the upstream Ethereum consensus specifications, not only against local tests.
 Primary references:
 
 - Consensus specs repository: https://github.com/ethereum/consensus-specs
-- Phase0 fork choice: https://ethereum.github.io/consensus-specs/specs/phase0/fork-choice/
-- Bellatrix fork choice: https://ethereum.github.io/consensus-specs/specs/bellatrix/fork-choice/
-- Deneb fork choice: https://ethereum.github.io/consensus-specs/specs/deneb/fork-choice/
+- Phase0 fork choice: https://ethereum.github.io/consensus-specs/phase0/fork-choice/
+- Bellatrix fork choice: https://ethereum.github.io/consensus-specs/bellatrix/fork-choice/
+- Deneb fork choice: https://ethereum.github.io/consensus-specs/deneb/fork-choice/
 - Electra fork choice changes are inherited through Bellatrix/Deneb `on_block`
   execution-request plumbing and beacon-chain state transition rules.
-- Fulu fork choice: https://ethereum.github.io/consensus-specs/specs/fulu/fork-choice/
-- Gloas fork choice: https://ethereum.github.io/consensus-specs/specs/gloas/fork-choice/
+- Fulu fork choice: https://ethereum.github.io/consensus-specs/fulu/fork-choice/
+- Gloas fork choice: https://ethereum.github.io/consensus-specs/gloas/fork-choice/
 
 ## Forkchoice Spec Map
 
@@ -29,7 +29,7 @@ verified against the Go code in this repository.
 | `get_head.go`: `getFilteredBlockTree`, `getFilterBlockTree` | Phase0 `get_filtered_block_tree`, `filter_block_tree`, `get_voting_source`; Gloas inherits filtered-tree viability |
 | `weight_store.go`, `weight_store_indexed.go`: `GetWeight`, `GetAttestationScore`, `GetProposerScore`, `ShouldApplyProposerBoost`, `IndexVote`, `RemoveVote` | Phase0 `get_weight`, `get_attestation_score`, `get_proposer_score`; Gloas modified `get_weight`, `get_attestation_score`, `should_apply_proposer_boost`, `LatestMessage` indexing |
 | `payload_vote.go`: `notifyPtcMessages`, `applyPayloadAttestationVote` | Gloas `notify_ptc_messages`, `on_payload_attestation_message` vote application |
-| `payload_vote.go`: `isPayloadTimely`, `isPayloadDataAvailable` | Gloas `is_payload_timely`, `is_payload_data_available`; requires local envelope availability plus independent PTC majorities |
+| `payload_vote.go`: `isPayloadTimely`, `isPayloadDataAvailable` | Gloas `payload_timeliness`, `payload_data_availability`; requires local envelope availability plus independent PTC majorities |
 | `payload_vote.go`: `getParentPayloadStatus`, `isParentNodeFull`, `isSupportingVote` | Gloas `get_parent_payload_status`, `is_parent_node_full`, `is_supporting_vote` |
 | `payload_vote.go`: `ShouldExtendPayload`, `getPayloadStatusTiebreaker`, `getNodeChildren`, `validateParentPayloadPath` | Gloas `should_extend_payload`, `get_payload_status_tiebreaker`, `get_node_children`, modified `on_block` parent payload path checks |
 | `timing.go`: `getAttestationDueMs`, `getAggregateDueMs`, `getSyncMessageDueMs`, `getContributionDueMs`, `getPayloadAttestationDueMs` | Phase0 timing helpers; Gloas modified timing helpers and `get_payload_attestation_due_ms` |
