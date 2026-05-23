@@ -618,6 +618,31 @@ var snapshotCommand = cli.Command{
 			},
 		},
 		{
+			Name:        "verify",
+			Description: "verify snapshot downloads against .torrent files and preverified.toml; findings are written as JSON lines to stdout",
+			Action: func(cliCtx *cli.Context) (err error) {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				workers := cliCtx.Int("workers")
+				summary, err := downloader.VerifySnapshotDownloads(cliCtx.Context, dirs, workers, os.Stdout)
+				if err != nil {
+					return fmt.Errorf("verify snapshot downloads: %w", err)
+				}
+				log.Root().Info("[snapshots verify] done",
+					"snapshots", summary.Total,
+					"errors", summary.Errors,
+					"warnings", summary.Warnings,
+				)
+				if summary.Errors > 0 {
+					return fmt.Errorf("%d error(s) found during snapshot verification", summary.Errors)
+				}
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.IntFlag{Name: "workers", Value: 0, Usage: "parallel workers for torrent verification (0 = GOMAXPROCS/2)"},
+			}),
+		},
+		{
 			Name: "preverified",
 			Action: func(cliCtx *cli.Context) (err error) {
 				var dataDir string

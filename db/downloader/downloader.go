@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"iter"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -1419,6 +1420,18 @@ func openMdbx(
 	return dbCfg.Open(ctx)
 }
 
+// newSnapStorage creates the file storage client used for snapshot torrents.
+// Part-file-only piece completion is used: this requires hashing incomplete files at start-up,
+// but the expectation is that files should not be partial.
+// See also: https://github.com/erigontech/erigon/pull/10074
+func newSnapStorage(snapDir string, logger *slog.Logger) storage.ClientImplCloser {
+	return storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir: snapDir,
+		UsePartFiles:  g.Some(true),
+		Logger:        logger,
+	})
+}
+
 // This used to return the MDBX database. Instead, that's opened separately now and should be passed
 // in if it's revived.
 func newTorrentClient(
@@ -1430,17 +1443,7 @@ func newTorrentClient(
 	torrentClient *torrent.Client,
 	err error,
 ) {
-	// Possibly File storage needs more optimization for handles, will test. Should reduce GC
-	// pressure and improve scheduler handling.
-	// See also: https://github.com/erigontech/erigon/pull/10074
-	// We're using part-file-only piece completion. This requires hashing incomplete files at
-	// start-up, but the expectation is that files should not be partial. Also managing separate
-	// piece completion complicates user management of snapshots.
-	m = storage.NewFileOpts(storage.NewFileClientOpts{
-		ClientBaseDir: snapDir,
-		UsePartFiles:  g.Some(true),
-		Logger:        cfg.Slogger.With("names", "storage"),
-	})
+	m = newSnapStorage(snapDir, cfg.Slogger.With("names", "storage"))
 	cfg.DefaultStorage = m
 
 	defer func() {
