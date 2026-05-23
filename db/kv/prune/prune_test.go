@@ -495,6 +495,343 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 	t.Logf("survivors=%d", len(got))
 }
 
+// ── DefaultStorageMode / PrefixValStorageMode fast-path tests ───────────────
+//
+// These two modes share the L407 fast path: dup-value byte-prefix is
+// txnum_BE (DefaultStorageMode: val == txnum_BE; PrefixValStorageMode:
+// val[0:8] == txnum_BE). The merge-fix in this branch corrected the
+// `stat.MinTxNum` source from a stale `txNum` reference to `minTxNum`.
+// These tests exercise that fast path with partial-overlap dups so the
+// renamed reference is the one used at runtime.
+
+// encodeTxNumBE returns the 8-byte BE encoding of a txnum — the value
+// layout for DefaultStorageMode dups.
+func encodeTxNumBE(txn uint64) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, txn)
+	return b
+}
+
+// encodePrefixVal builds the value bytes for PrefixValStorageMode:
+//
+//	value = txnum_BE (u64) || actualValue
+func encodePrefixVal(txn uint64, val []byte) []byte {
+	buf := make([]byte, 8+len(val))
+	binary.BigEndian.PutUint64(buf[:8], txn)
+	copy(buf[8:], val)
+	return buf
+}
+
+// TestTableScanningPrune_DefaultMode_PartialOverlapFastPath exercises the
+// L407 range-del fast path under DefaultStorageMode (val = txnum_BE) with
+// dups on both sides of the txTo boundary. After the merge-fix this also
+// verifies that stat.MinTxNum picks up the lowest-deleted txnum for the
+// current key (was the source of the undefined-`txNum` build break).
+func TestTableScanningPrune_DefaultMode_PartialOverlapFastPath(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// 30 user-keys; each carries two dups: one with txnum=10 (in range) and
+	// one with txnum=100 (out of range for txTo=50). The mixed layout
+	// forces the partial-overlap branch.
+	const N = 30
+	const inRangeTxNum uint64 = 10
+	const outOfRangeTxNum uint64 = 100
+	const txTo uint64 = 50
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(inRangeTxNum)))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(outOfRangeTxNum)))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "default",
+		0, txTo, 0, 0 /*stepSize unused*/, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, N, stat.PruneCountValues, "all N in-range dups deleted")
+	require.EqualValues(t, inRangeTxNum, stat.MinTxNum, "MinTxNum tracks lowest deleted dup")
+	require.EqualValues(t, txTo-1, stat.MaxTxNum, "MaxTxNum is upper-bounded by txTo-1")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, N, keys, "all keys remain (out-of-range dup survives)")
+	require.Equal(t, N, dups, "exactly N out-of-range dups remain")
+}
+
+// TestTableScanningPrune_PrefixValMode_PartialOverlapFastPath mirrors the
+// DefaultMode test for PrefixValStorageMode (val = txnum_BE || actualValue).
+// Same L407 fast path; verifies it works when extra payload follows the
+// txnum prefix.
+func TestTableScanningPrune_PrefixValMode_PartialOverlapFastPath(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 30
+	const inRangeTxNum uint64 = 7
+	const outOfRangeTxNum uint64 = 200
+	const txTo uint64 = 50
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodePrefixVal(inRangeTxNum, []byte{byte(i), 0x01})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodePrefixVal(outOfRangeTxNum, []byte{byte(i), 0x02})))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "prefixval",
+		0, txTo, 0, 0, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.PrefixValStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, N, stat.PruneCountValues, "all N in-range dups deleted")
+	require.EqualValues(t, inRangeTxNum, stat.MinTxNum, "MinTxNum tracks lowest deleted dup")
+	require.EqualValues(t, txTo-1, stat.MaxTxNum, "MaxTxNum upper-bounded by txTo-1")
+
+	// Verify survivors carry the out-of-range txnum AND their payload byte.
+	c, err := tx.CursorDupSort(testDupSortTable)
+	require.NoError(t, err)
+	defer c.Close()
+	survivors := 0
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		require.NoError(t, err)
+		txn := binary.BigEndian.Uint64(v[:8])
+		require.EqualValues(t, outOfRangeTxNum, txn, "only out-of-range dups should survive")
+		require.Len(t, v, 10, "PrefixVal layout: 8-byte txnum + 2-byte payload preserved")
+		survivors++
+		_ = k
+	}
+	require.Equal(t, N, survivors)
+}
+
+// TestTableScanningPrune_DefaultMode_AllInRange covers the bulk-delete
+// branch (L388) under DefaultStorageMode: every dup of every key is
+// in [txFrom, txTo). DeleteCurrentDuplicates wipes them all in one MDBX call.
+func TestTableScanningPrune_DefaultMode_AllInRange(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 40
+	const txTo uint64 = 100
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		// Three dups per key, all txnums in [10, 30) — well below txTo.
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(10)))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(20)))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(29)))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "default-allinrange",
+		0, txTo, 0, 0, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 3*N, stat.PruneCountValues, "all 3N dups deleted")
+	require.EqualValues(t, 10, stat.MinTxNum, "MinTxNum = lowest dup txnum")
+	require.EqualValues(t, 29, stat.MaxTxNum, "MaxTxNum = highest dup txnum in bulk-delete branch")
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, 0, keys)
+	require.Equal(t, 0, dups)
+}
+
+// TestTableScanningPrune_DefaultMode_AllOutOfRange verifies the skip-key
+// branch (L382): keys whose dups all sit outside [txFrom, txTo) are
+// untouched, stats stay at zero.
+func TestTableScanningPrune_DefaultMode_AllOutOfRange(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 25
+	// Every dup has txnum >= 200 — all out of range for txTo=100.
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeTxNumBE(200+i)))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "default-outofrange",
+		0, 100, 0, 0, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.DefaultStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 0, stat.PruneCountValues)
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, N, keys)
+	require.Equal(t, N, dups)
+}
+
+// TestTableScanningPrune_StepValueMode_PartialOverlap_Stats asserts the
+// stat fields after the merge-fix that replaced `lastDupTxNum` with
+// `minTxNum` in the L435 fast path. The existing _MixedDupsPartialRange
+// covers the file-state but does not pin stat.MinTxNum / MaxTxNum.
+func TestTableScanningPrune_StepValueMode_PartialOverlap_Stats(t *testing.T) {
+	db := openTestDupSortDB(t)
+	defer db.Close()
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const N = 20
+	const stepSize uint64 = 16
+	// Each key has dups at steps 0, 2 (in-range, txnums 0 and 32) and at
+	// step 6 (out-of-range, txnum 96). txTo=64 → stepThreshold=4 → delete
+	// dups with step < 4.
+	for i := uint64(0); i < N; i++ {
+		k := userKey(i)
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(0, []byte{0xa})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0xb})))
+		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(6, []byte{0xc})))
+	}
+
+	logEvery := time.NewTicker(time.Hour)
+	defer logEvery.Stop()
+	cur := openDupSortPseudoCursor(t, tx)
+	defer cur.Close()
+
+	stat, err := prune.TableScanningPrune(
+		t.Context(), "test", "stepvalue-partial",
+		0, 64, 0, stepSize, logEvery, log.New(),
+		nil, cur, false, &prune.Stat{}, prune.StepValueStorageMode,
+	)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.ValueProgress)
+	require.EqualValues(t, 2*N, stat.PruneCountValues, "step-0 and step-2 dups deleted")
+	// minTxNum for each key is step 0 → txNum 0. Fast path records that as
+	// stat.MinTxNum.
+	require.EqualValues(t, 0, stat.MinTxNum, "MinTxNum reflects lowest-deleted dup (step 0)")
+	// MaxTxNum is reported as (stepThreshold-1)*stepSize = 3*16 = 48 by the
+	// fast path. We don't tighten this — only check that it's <= txTo-1.
+	require.LessOrEqual(t, stat.MaxTxNum, uint64(63))
+
+	keys, dups := countDupSortTable(t, tx)
+	require.Equal(t, N, keys, "all keys keep their step-6 dup")
+	require.Equal(t, N, dups, "exactly N step-6 dups remain")
+}
+
+// TestTableScanningPrune_AllModes_BasicRoundTrip is a table-driven sanity
+// check: for every value-side storage mode, populate a few in-range and
+// out-of-range dups, run a single scan, and verify the expected number
+// of dups survives. This guards against silently broken txNumGetter
+// dispatch for any mode.
+func TestTableScanningPrune_AllModes_BasicRoundTrip(t *testing.T) {
+	const stepSize uint64 = 16
+	type enc func(txn uint64, payload byte) []byte
+	cases := []struct {
+		name string
+		mode prune.StorageMode
+		enc  enc
+		// For modes whose txnum is derived from a step, encode by step.
+		stepEncode bool
+	}{
+		{
+			name: "DefaultStorageMode",
+			mode: prune.DefaultStorageMode,
+			enc:  func(txn uint64, _ byte) []byte { return encodeTxNumBE(txn) },
+		},
+		{
+			name: "PrefixValStorageMode",
+			mode: prune.PrefixValStorageMode,
+			enc:  func(txn uint64, p byte) []byte { return encodePrefixVal(txn, []byte{p}) },
+		},
+		{
+			name:       "StepValueStorageMode",
+			mode:       prune.StepValueStorageMode,
+			enc:        func(step uint64, p byte) []byte { return encodeStepVal(step, []byte{p}) },
+			stepEncode: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTestDupSortDB(t)
+			defer db.Close()
+
+			tx, err := db.BeginRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			const N = 10
+			// Two dups per key: one in-range, one out-of-range relative
+			// to txTo. Encoded either by txnum (Default/PrefixVal) or by
+			// step (StepValue → txnum = step * stepSize).
+			const txTo uint64 = 64
+			var inRangeArg, outOfRangeArg uint64
+			if tc.stepEncode {
+				inRangeArg = 1    // txnum 16
+				outOfRangeArg = 5 // txnum 80
+			} else {
+				inRangeArg = 5 // txnum 5
+				outOfRangeArg = 200
+			}
+			for i := uint64(0); i < N; i++ {
+				k := userKey(i)
+				require.NoError(t, tx.Put(testDupSortTable, k, tc.enc(inRangeArg, 0xa)))
+				require.NoError(t, tx.Put(testDupSortTable, k, tc.enc(outOfRangeArg, 0xb)))
+			}
+
+			logEvery := time.NewTicker(time.Hour)
+			defer logEvery.Stop()
+			cur := openDupSortPseudoCursor(t, tx)
+			defer cur.Close()
+
+			stat, err := prune.TableScanningPrune(
+				t.Context(), "test", tc.name,
+				0, txTo, 0, stepSize, logEvery, log.New(),
+				nil, cur, false, &prune.Stat{}, tc.mode,
+			)
+			require.NoError(t, err)
+			require.Equal(t, prune.Done, stat.ValueProgress)
+			require.EqualValues(t, N, stat.PruneCountValues, "all N in-range dups deleted")
+
+			keys, dups := countDupSortTable(t, tx)
+			require.Equal(t, N, keys, "every key keeps its out-of-range dup")
+			require.Equal(t, N, dups, "exactly N dups remain")
+		})
+	}
+}
+
 func BenchmarkTableScanningPrune(b *testing.B) {
 	db := openTestDB(b)
 	defer db.Close()
