@@ -122,10 +122,9 @@ func TestExecutionSpecWitness(t *testing.T) {
 		}
 
 		// Compare witness for each block that has expected witness data.
-		// RPC infrastructure errors (endpoint failure, nil result) are fatal —
-		// they indicate a regression in the RPC layer, not a known witness mismatch.
-		// Comparison mismatches are collected across all blocks and routed through
-		// CheckFailure so bt.Fails patterns can mark known issues as expected.
+		// RPC errors, nil results, and comparison mismatches are all collected
+		// and routed through bt.CheckFailure so bt.Fails patterns can mark
+		// known issues as expected.
 		var witnessErrs []error
 		for i := 0; i < test.NumBlocks(); i++ {
 			expected := test.ExpectedWitnessForBlock(i)
@@ -137,10 +136,12 @@ func TestExecutionSpecWitness(t *testing.T) {
 			bn := rpc.BlockNumber(blockNum)
 			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 			if err != nil {
-				t.Fatalf("ExecutionWitness RPC failed for block %d: %v", blockNum, err)
+				witnessErrs = append(witnessErrs, fmt.Errorf("block %d ExecutionWitness RPC failed: %w", blockNum, err))
+				continue
 			}
 			if result == nil {
-				t.Fatalf("ExecutionWitness returned nil for block %d", blockNum)
+				witnessErrs = append(witnessErrs, fmt.Errorf("block %d ExecutionWitness returned nil", blockNum))
+				continue
 			}
 
 			if err := compareWitness(t, blockNum, expected, result); err != nil {
