@@ -164,8 +164,18 @@ func (k peerSidecarKind) parseName(name string) bool {
 // least one way to reach the seeder — tests pass both via
 // AddStaticPeer and via this call.
 func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash [20]byte, peerIP net.IP, peerPort uint16, kind peerSidecarKind) ([]byte, error) {
-	if p == nil || p.Downloader == nil {
-		return nil, fmt.Errorf("downloader.fetchPeerSidecar(%s): provider or downloader nil", kind.label())
+	if p == nil {
+		return nil, fmt.Errorf("downloader.fetchPeerSidecar(%s): provider nil", kind.label())
+	}
+	// Capture the Downloader pointer once. Provider.Close clears p.Downloader
+	// concurrently with no synchronization; if we re-read on every access a
+	// late-starting fetch can pass the nil check and then segfault inside
+	// TorrentClient() once Close races through. The captured d stays valid
+	// even after Close calls d.Close() — torrent.Client.Close returns errors
+	// rather than freeing the pointer.
+	d := p.Downloader
+	if d == nil {
+		return nil, fmt.Errorf("downloader.fetchPeerSidecar(%s): downloader nil", kind.label())
 	}
 
 	// Deduplicate by infohash. anacrolix keys torrents by infohash, so
@@ -193,7 +203,7 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 		p.peerManifestInflight.Delete(infoHash)
 	}()
 
-	client := p.Downloader.TorrentClient()
+	client := d.TorrentClient()
 	if client == nil {
 		fetch.err = fmt.Errorf("downloader.fetchPeerSidecar(%s): torrent client nil", kind.label())
 		return nil, fetch.err
@@ -242,7 +252,7 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 
 	var addedPeers []anatorrent.PeerInfo
 	if peerIP != nil && peerPort != 0 {
-		for _, dialIP := range dl.PeerDialIPs(peerIP, p.Downloader.SelfIP()) {
+		for _, dialIP := range dl.PeerDialIPs(peerIP, d.SelfIP()) {
 			addedPeers = append(addedPeers, anatorrent.PeerInfo{
 				Addr:    &net.TCPAddr{IP: dialIP, Port: int(peerPort)},
 				Trusted: true,

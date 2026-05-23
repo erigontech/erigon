@@ -79,10 +79,17 @@ func (p *Provider) FetchCanonicalBatch(ctx context.Context, gen string, files []
 	if len(files) == 0 {
 		return nil, fmt.Errorf("FetchCanonicalBatch: empty batch")
 	}
-	if p == nil || p.Downloader == nil {
-		return nil, fmt.Errorf("FetchCanonicalBatch: provider or downloader nil")
+	if p == nil {
+		return nil, fmt.Errorf("FetchCanonicalBatch: provider nil")
 	}
-	client := p.Downloader.TorrentClient()
+	// Capture the Downloader pointer once — Provider.Close clears
+	// p.Downloader without synchronization, so reading on each access can
+	// race a shutdown after the initial nil check.
+	d := p.Downloader
+	if d == nil {
+		return nil, fmt.Errorf("FetchCanonicalBatch: downloader nil")
+	}
+	client := d.TorrentClient()
 	if client == nil {
 		return nil, fmt.Errorf("FetchCanonicalBatch: torrent client nil")
 	}
@@ -111,9 +118,13 @@ func (p *Provider) FetchCanonicalBatch(ctx context.Context, gen string, files []
 		p.logger.Info("[downloader] staging canonical batch", "gen", gen, "files", len(files), "dir", stagingDir)
 	}
 
+	// Snapshot the configured static peers once from the captured Downloader
+	// so a concurrent Provider.Close cannot race the per-file call.
+	staticPeers := d.StaticPeers()
+
 	staged := make([]StagedFile, 0, len(files))
 	for _, cf := range files {
-		sf, err := p.fetchOneCanonical(ctx, client, storage, stagingDir, cf)
+		sf, err := p.fetchOneCanonical(ctx, staticPeers, client, storage, stagingDir, cf)
 		if err != nil {
 			return nil, fmt.Errorf("FetchCanonicalBatch: staging %s: %w", cf.Name, err)
 		}
@@ -128,7 +139,7 @@ func (p *Provider) FetchCanonicalBatch(ctx context.Context, gen string, files []
 // the batch's scoped staging storage and returns its on-disk location.
 // The torrent is dropped once complete — the bytes remain on disk; 7c
 // re-registers them with the live downloader after the cutover rename.
-func (p *Provider) fetchOneCanonical(ctx context.Context, client *anatorrent.Client, storage anastorage.ClientImplCloser, stagingDir string, cf CanonicalFile) (StagedFile, error) {
+func (p *Provider) fetchOneCanonical(ctx context.Context, staticPeers []anatorrent.PeerInfo, client *anatorrent.Client, storage anastorage.ClientImplCloser, stagingDir string, cf CanonicalFile) (StagedFile, error) {
 	// A canonical info-hash already known to the live client would mean
 	// AddTorrentOpt returns that torrent and silently ignores the staging
 	// storage — the bytes would land in the live snap dir, not staging.
@@ -148,8 +159,8 @@ func (p *Provider) fetchOneCanonical(ctx context.Context, client *anatorrent.Cli
 	// A torrent added directly to the client (bypassing Downloader.
 	// addTorrent) does not inherit the configured static peers; apply
 	// them so the swarm seeders are reachable when DHT is unavailable.
-	if peers := p.Downloader.StaticPeers(); len(peers) > 0 {
-		t.AddPeers(peers)
+	if len(staticPeers) > 0 {
+		t.AddPeers(staticPeers)
 	}
 
 	select {
