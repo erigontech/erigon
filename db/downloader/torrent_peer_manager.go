@@ -121,22 +121,26 @@ func (m *TorrentPeerManager) sync() {
 
 		m.mu.Lock()
 		_, already := m.knownPeers[id]
+		// Always (re-)compute addrs so a late SetSelfIP propagates to peers
+		// discovered before it landed — otherwise same-host peers stay stuck
+		// without the 127.0.0.1 fallback forever once cached.
+		dialIPs := PeerDialIPs(ip, m.selfIP)
+		addrs := make([]torrent.PeerInfo, 0, len(dialIPs))
+		for _, dialIP := range dialIPs {
+			addrs = append(addrs, torrent.PeerInfo{
+				Addr:    ipPortAddr{IP: dialIP, Port: int(bt)},
+				Trusted: true,
+			})
+		}
+		m.knownPeers[id] = btPeerInfo{addrs: addrs}
+		m.mu.Unlock()
+
 		if !already {
-			dialIPs := PeerDialIPs(ip, m.selfIP)
-			addrs := make([]torrent.PeerInfo, 0, len(dialIPs))
-			for _, dialIP := range dialIPs {
-				addrs = append(addrs, torrent.PeerInfo{
-					Addr:    ipPortAddr{IP: dialIP, Port: int(bt)},
-					Trusted: true,
-				})
-			}
-			m.knownPeers[id] = btPeerInfo{addrs: addrs}
 			m.logger.Debug("[bt-peers] added torrent peer from ENR",
 				"node", id.TerminalString(),
 				"addr", fmt.Sprintf("%s:%d", ip, bt),
 				"candidates", len(addrs))
 		}
-		m.mu.Unlock()
 	}
 
 	// Remove peers that are no longer in the DevP2P peer set.

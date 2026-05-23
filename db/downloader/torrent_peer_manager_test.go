@@ -58,6 +58,50 @@ func TestTorrentPeerManager_AddAndRemove(t *testing.T) {
 	assert.Equal(t, 1, m.PeerCount(), "peer should be re-added when it rejoins DevP2P")
 }
 
+// TestTorrentPeerManager_LateSetSelfIPUpgradesAddrs pins Bug D's fix: a
+// peer discovered before SetSelfIP arrives only carries its ENR-IP in
+// addrs (no 127.0.0.1 loopback fallback). On a subsequent sync after
+// SetSelfIP records a matching self-IP, the peer's addrs must be
+// recomputed and grow the loopback candidate — otherwise the same-host
+// case (two erigon instances on one box, no hairpin NAT) never
+// recovers.
+func TestTorrentPeerManager_LateSetSelfIPUpgradesAddrs(t *testing.T) {
+	cfg := torrent.NewDefaultClientConfig()
+	cfg.DataDir = t.TempDir()
+	cfg.ListenPort = 0
+	cfg.NoDHT = true
+	client, err := torrent.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	peerIP := []byte{198, 51, 100, 7} // a non-loopback IP
+	key, _ := crypto.GenerateKey()
+	peer := makeNodeWithBT(t, key, peerIP,
+		&enr.ChainToml{KnownBlocks: 100}, enr.BT(42069))
+	source := &mockNodeSource{nodes: []*enode.Node{peer}}
+
+	m := NewTorrentPeerManager(client, func() NodeSource { return source }, log.New())
+
+	// Discovery sync runs BEFORE SetSelfIP — addrs has just the peer IP.
+	m.sync()
+	assert.Equal(t, 1, m.PeerCount())
+	m.mu.Lock()
+	got := m.knownPeers[peer.ID()].addrs
+	m.mu.Unlock()
+	assert.Len(t, got, 1, "pre-SetSelfIP: addrs should contain only the ENR-IP")
+
+	// SetSelfIP arrives late with a matching self-IP. Next sync must
+	// recompute addrs and add the 127.0.0.1 fallback.
+	m.SetSelfIP(peerIP)
+	m.sync()
+	m.mu.Lock()
+	got = m.knownPeers[peer.ID()].addrs
+	m.mu.Unlock()
+	assert.Len(t, got, 2, "post-SetSelfIP: addrs should contain ENR-IP plus 127.0.0.1 fallback")
+}
+
 func TestTorrentPeerManager_NilNodeSource(t *testing.T) {
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = t.TempDir()
