@@ -696,6 +696,7 @@ func (d *Downloader) PublishLocalChainToml() error {
 func (d *Downloader) publishLocalChainTomlInner() error {
 	d.lock.RLock()
 	updater := d.enrUpdater
+	inv := d.inventory
 	d.lock.RUnlock()
 
 	// Capture before-state so we can log a positive "regenerated"
@@ -715,7 +716,16 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 		servable[t.InfoHash()] = struct{}{}
 	}
 
-	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, servable, updater); err != nil {
+	// In V2-enabled mode (inv != nil) only the V2 path writes the ENR's
+	// chain-toml entry — pass nil so PublishChainToml does not point peers
+	// at the V1 info-hash. Otherwise a restart's first publish (V1
+	// byte-stable on disk) would set V1 in the ENR and no later regeneration
+	// would overwrite it until the V2 manifest's content actually changed.
+	publishUpdater := updater
+	if inv != nil {
+		publishUpdater = nil
+	}
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, d.cfg.ChainName, d.cfg.BootstrapFromPreverified, servable, publishUpdater); err != nil {
 		return err
 	}
 
@@ -740,22 +750,19 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 	// changed (RollingV2Publisher.Publish writes a fresh
 	// chain.v2.<seq>.toml every call — firing on every no-op
 	// PublishLocalChainToml churns ENR seq and degrades discv5
-	// propagation). On no-op republishes re-assert the last V2
-	// info-hash so the ENR doesn't drift back to V1 (PublishChainToml
-	// above unconditionally pointed enrUpdater at V1).
-	if d.inventory != nil {
+	// propagation).
+	if inv != nil {
 		d.lock.RLock()
 		lastV2 := d.lastV2InfoHash
-		updater := d.enrUpdater
 		d.lock.RUnlock()
 		if shouldEmitV2Generation(contentChanged, lastV2) {
-			if err := d.PublishLocalChainTomlV2(d.inventory); err != nil {
+			if err := d.PublishLocalChainTomlV2(inv); err != nil {
 				d.logger.Warn("[chaintoml] V2 publish failed", "err", err)
 			}
 		} else if updater != nil {
-			// No-op republish: re-assert the last V2 info-hash so the ENR
-			// doesn't drift back to V1 (PublishChainToml above
-			// unconditionally pointed enrUpdater at V1).
+			// Defensive re-assert so the ENR keeps pointing at the last V2
+			// info-hash. Normally a no-op, since PublishChainToml above
+			// runs with a nil updater in V2 mode.
 			updater(enr.ChainToml{
 				AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
 				KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
