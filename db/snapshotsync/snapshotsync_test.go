@@ -127,7 +127,7 @@ func TestBlackListForPruning_BlocksModeKeepsAllTransactions(t *testing.T) {
 
 // TestDownloadFilteringApplies covers the predicate that gates the slow
 // getMinimumBlocksToDownload + buildBlackListForPruning call. Of particular
-// interest is the {DefaultBlocksPruneMode, DefaultBlocksPruneMode} hybrid
+// interest is the {KeepPostMergeBlocksPruneMode, KeepPostMergeBlocksPruneMode} hybrid
 // produced by `--prune.mode=archive --prune.distance.blocks=18446744073709551615`:
 // neither field's Enabled() is true, but the operator opted into
 // chain-history-expiry, so filtering must apply when MergeHeight is set.
@@ -149,19 +149,19 @@ func TestDownloadFilteringApplies(t *testing.T) {
 		{"blocks", prune.BlocksMode, ccMainnet, true},
 		{
 			name: "archive+blocks-override chain-history-expiry (mainnet)",
-			mode: prune.Mode{Initialised: true, History: prune.DefaultBlocksPruneMode, Blocks: prune.DefaultBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
 			cc:   ccMainnet,
 			want: true, // pre-merge tx must still be filtered
 		},
 		{
 			name: "archive+blocks-override chain-history-expiry (no MergeHeight)",
-			mode: prune.Mode{Initialised: true, History: prune.DefaultBlocksPruneMode, Blocks: prune.DefaultBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
 			cc:   ccNoMerge,
 			want: false, // no MergeHeight → nothing to filter
 		},
 		{
 			name: "legacy full {DefaultBlocks, Distance}",
-			mode: prune.Mode{Initialised: true, History: prune.Distance(100_000), Blocks: prune.DefaultBlocksPruneMode},
+			mode: prune.Mode{Initialised: true, History: prune.Distance(100_000), Blocks: prune.KeepPostMergeBlocksPruneMode},
 			cc:   ccMainnet,
 			want: true,
 		},
@@ -176,7 +176,7 @@ func TestDownloadFilteringApplies(t *testing.T) {
 }
 
 // TestBlackListForPruning_ChainHistoryExpiry covers the case absorbed from
-// the former isTransactionsSegmentExpired: when Blocks=DefaultBlocksPruneMode
+// the former isTransactionsSegmentExpired: when Blocks=KeepPostMergeBlocksPruneMode
 // and the chain has a MergeHeight, pre-merge transaction segments must be
 // blacklisted at download time while post-merge segments stay downloadable.
 func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
@@ -193,7 +193,7 @@ func TestBlackListForPruning_ChainHistoryExpiry(t *testing.T) {
 	legacyFull := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(100_000),
-		Blocks:      prune.DefaultBlocksPruneMode,
+		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 
 	blackList, err := buildBlackListForPruning(legacyFull, cc, 64, 100_000, 0, preverified)

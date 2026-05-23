@@ -52,16 +52,16 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 }
 
 func TestModeString_LegacyShapes(t *testing.T) {
-	// Pre-EIP-8252 full mode persisted as {Blocks: DefaultBlocksPruneMode,
+	// Pre-EIP-8252 full mode persisted as {Blocks: KeepPostMergeBlocksPruneMode,
 	// History: Distance(100_000)}. Before the recognition logic, this rendered
 	// as "archive --prune.distance=100000 --prune.distance.blocks=18446744073709551615"
 	// — accurate but misleading. It now renders as "full(legacy)".
-	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy) --prune.distance=100000", legacyFull.String())
 
 	// Pre-EIP-8252 full with the current default history distance (262_144) —
 	// label as plain "full(legacy)" with no override clause.
-	legacyFullCurrentHistory := Mode{Initialised: true, History: Distance(262_144), Blocks: DefaultBlocksPruneMode}
+	legacyFullCurrentHistory := Mode{Initialised: true, History: Distance(262_144), Blocks: KeepPostMergeBlocksPruneMode}
 	assert.Equal(t, "full(legacy)", legacyFullCurrentHistory.String())
 
 	// Pre-EIP-8252 blocks mode persisted as {Blocks: KeepAllBlocksPruneMode,
@@ -192,15 +192,15 @@ func TestIsRetentionWindowChange(t *testing.T) {
 			want:      true,
 		},
 		{
-			name:      "blocks DefaultBlocksPruneMode→finite (full mode EIP-8252 upgrade)",
-			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode},
+			name:      "blocks KeepPostMergeBlocksPruneMode→finite (full mode EIP-8252 upgrade)",
+			persisted: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode},
 			requested: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
 			want:      true,
 		},
 		{
-			name:      "blocks finite→DefaultBlocksPruneMode (revert after auto-upgrade)",
+			name:      "blocks finite→KeepPostMergeBlocksPruneMode (revert after auto-upgrade)",
 			persisted: Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)},
-			requested: Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode},
+			requested: Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode},
 			want:      true,
 		},
 		{
@@ -272,14 +272,14 @@ func TestEnsureNotChanged_BlocksHistoryBumpRewritesDB(t *testing.T) {
 }
 
 func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
-	// Pre-rescope full mode: {DefaultBlocksPruneMode (sentinel), Distance(100_000)}.
+	// Pre-rescope full mode: {KeepPostMergeBlocksPruneMode (sentinel), Distance(100_000)}.
 	// New FullMode has Blocks=Distance(262_144). The shim treats this specific
-	// one-way DefaultBlocksPruneMode→finite transition on Blocks as a
+	// one-way KeepPostMergeBlocksPruneMode→finite transition on Blocks as a
 	// retention-window change so existing full nodes upgrade without operator
 	// intervention. (Frozen .seg files won't actually be deleted until #21306
 	// lands; the config-level transition is still recorded.)
 	_, tx := memdb.NewTestTx(t)
-	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	legacyFull := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	initStoredMode(t, tx, legacyFull)
 
 	got, err := EnsureNotChanged(tx, FullMode)
@@ -293,7 +293,7 @@ func TestEnsureNotChanged_FullSentinelToFiniteAccepted(t *testing.T) {
 
 func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
 	// Operator passes --prune.distance.blocks=18446744073709551615 (the
-	// DefaultBlocksPruneMode magic number) after the auto-upgrade already
+	// KeepPostMergeBlocksPruneMode magic number) after the auto-upgrade already
 	// rewrote Blocks to a finite distance. The shim accepts this reverse
 	// transition so the chain-history-expiry policy can be restored without
 	// manual DB intervention or a re-sync.
@@ -301,7 +301,7 @@ func TestEnsureNotChanged_BlocksFiniteToDefaultAccepted(t *testing.T) {
 	persisted := Mode{Initialised: true, History: Distance(262_144), Blocks: Distance(262_144)}
 	initStoredMode(t, tx, persisted)
 
-	requested := Mode{Initialised: true, History: Distance(100_000), Blocks: DefaultBlocksPruneMode}
+	requested := Mode{Initialised: true, History: Distance(100_000), Blocks: KeepPostMergeBlocksPruneMode}
 	got, err := EnsureNotChanged(tx, requested)
 	require.NoError(t, err)
 	assert.Equal(t, requested, got)
@@ -353,10 +353,10 @@ func TestEnsureNotChanged_ArbitraryDistanceChangeAccepted(t *testing.T) {
 
 func TestEnsureNotChanged_ArchiveDefaultBumpCompat(t *testing.T) {
 	// Pre-existing compat path: archive nodes initialized when Blocks defaulted
-	// to DefaultBlocksPruneMode must still start under the current ArchiveMode
+	// to KeepPostMergeBlocksPruneMode must still start under the current ArchiveMode
 	// (which uses KeepAllBlocksPruneMode for Blocks).
 	_, tx := memdb.NewTestTx(t)
-	legacyArchive := Mode{Initialised: true, History: DefaultBlocksPruneMode, Blocks: DefaultBlocksPruneMode}
+	legacyArchive := Mode{Initialised: true, History: KeepPostMergeBlocksPruneMode, Blocks: KeepPostMergeBlocksPruneMode}
 	initStoredMode(t, tx, legacyArchive)
 
 	got, err := EnsureNotChanged(tx, ArchiveMode)

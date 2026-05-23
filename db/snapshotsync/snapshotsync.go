@@ -109,7 +109,7 @@ func canSnapshotBePruned(name string) bool {
 //     reaches their To and pruneMode.History is enabled.
 //   - transaction segments: blacklisted by distance when pruneMode.Blocks is a
 //     finite Distance (res.To <= blockPrune), or by chain history-expiry when
-//     pruneMode.Blocks is DefaultBlocksPruneMode and cc has MergeHeight set
+//     pruneMode.Blocks is KeepPostMergeBlocksPruneMode and cc has MergeHeight set
 //     (cc.IsPreMerge(res.From)). KeepAllBlocksPruneMode leaves tx segments alone.
 //   - bodies, headers, rcache files: never blacklisted here
 //     (canSnapshotBePruned filters them out).
@@ -124,13 +124,9 @@ func buildBlackListForPruning(
 
 	historyEnabled := pruneMode.History.Enabled()
 	blocksEnabled := pruneMode.Blocks.Enabled()
-	// preMergeCutoff is non-zero only when Blocks=DefaultBlocksPruneMode and
-	// the chain has a MergeHeight; passing head=0 to blocksRetentionCutoff
-	// suppresses the finite-distance branch (which we handle via blockPrune
-	// below) and keeps just the chain-history-expiry value.
-	preMergeCutoff := blocksRetentionCutoff(pruneMode, cc, 0)
+	applyChainHistoryExpiry := pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 
-	if !historyEnabled && !blocksEnabled && preMergeCutoff == 0 {
+	if !historyEnabled && !blocksEnabled && !applyChainHistoryExpiry {
 		return blackList, nil
 	}
 
@@ -172,8 +168,8 @@ func buildBlackListForPruning(
 			if blockPrune >= res.To {
 				blackList[name] = struct{}{}
 			}
-		case preMergeCutoff > 0:
-			if res.From < preMergeCutoff {
+		case applyChainHistoryExpiry:
+			if cc.IsPreMerge(res.From) {
 				blackList[name] = struct{}{}
 			}
 		}
@@ -282,15 +278,15 @@ func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune 
 //
 //	--prune.mode=archive --prune.distance.blocks=18446744073709551615
 //
-// produces {Blocks: DefaultBlocksPruneMode, History: DefaultBlocksPruneMode}
+// produces {Blocks: KeepPostMergeBlocksPruneMode, History: KeepPostMergeBlocksPruneMode}
 // — neither field's Enabled() is true, but the operator opted into
-// chain-history-expiry for blocks. The DefaultBlocksPruneMode + MergeHeight
+// chain-history-expiry for blocks. The KeepPostMergeBlocksPruneMode + MergeHeight
 // branch covers that.
 func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
 	if pruneMode.History.Enabled() || pruneMode.Blocks.Enabled() {
 		return true
 	}
-	return pruneMode.Blocks == prune.DefaultBlocksPruneMode && cc != nil && cc.MergeHeight != nil
+	return pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && cc != nil && cc.MergeHeight != nil
 }
 
 // blocksRetentionCutoff returns the block height below which block-data
@@ -298,9 +294,9 @@ func downloadFilteringApplies(pruneMode prune.Mode, cc *chain.Config) bool {
 // under pruneMode:
 //   - finite Distance (full/minimal): head - distance, the EIP-8252-style
 //     window.
-//   - DefaultBlocksPruneMode with a chain MergeHeight: the merge height
+//   - KeepPostMergeBlocksPruneMode with a chain MergeHeight: the merge height
 //     (chain history-expiry policy — pre-merge data is expired).
-//   - Otherwise (KeepAllBlocksPruneMode, or DefaultBlocksPruneMode without a
+//   - Otherwise (KeepAllBlocksPruneMode, or KeepPostMergeBlocksPruneMode without a
 //     merge height): 0, meaning "nothing is expired".
 //
 // Both the transaction-segment blacklist and the receipts-segment filter use
@@ -309,7 +305,7 @@ func blocksRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64) 
 	switch pruneMode.Blocks {
 	case prune.KeepAllBlocksPruneMode:
 		return 0
-	case prune.DefaultBlocksPruneMode:
+	case prune.KeepPostMergeBlocksPruneMode:
 		if cc != nil && cc.MergeHeight != nil {
 			return *cc.MergeHeight
 		}

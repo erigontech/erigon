@@ -106,7 +106,7 @@ func (m Mode) String() string {
 	// surface on first start of a pre-EIP-8252 datadir under the new binary
 	// (the compat shim in EnsureNotChanged rewrites the persisted value, so
 	// the legacy label only appears briefly in the upgrade-time warning).
-	if m.Blocks == DefaultBlocksPruneMode && m.History.Enabled() {
+	if m.Blocks == KeepPostMergeBlocksPruneMode && m.History.Enabled() {
 		// Pre-EIP-8252 full mode: chain-history-expiry for blocks + finite
 		// state history. Render as "full(legacy)" + the finite history.
 		var sb strings.Builder
@@ -129,7 +129,7 @@ func (m Mode) String() string {
 
 	// Fallback: archive + overrides. Preserves the historical rendering for
 	// "archive with custom distances" and for any shape we don't special-case
-	// above (e.g., legacy archive {DefaultBlocksPruneMode, DefaultBlocksPruneMode}
+	// above (e.g., legacy archive {KeepPostMergeBlocksPruneMode, KeepPostMergeBlocksPruneMode}
 	// before the archive-default-bump compat rewrites it).
 	var sb strings.Builder
 	sb.WriteString(archiveModeStr)
@@ -194,8 +194,8 @@ func Get(db kv.Getter) (Mode, error) {
 }
 
 const (
-	DefaultBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
-	KeepAllBlocksPruneMode = Distance(math.MaxUint64 - 1) // Keep all history
+	KeepPostMergeBlocksPruneMode = Distance(math.MaxUint64)     // Use chain-specific history pruning (aka. history-expiry)
+	KeepAllBlocksPruneMode       = Distance(math.MaxUint64 - 1) // Keep all history
 )
 
 type BlockAmount interface {
@@ -216,10 +216,10 @@ type Distance uint64
 
 // Enabled reports whether p actively drives distance-based pruning. It is
 // false for the two sentinel values that select a different policy shape
-// (DefaultBlocksPruneMode → chain history-expiry; KeepAllBlocksPruneMode →
+// (KeepPostMergeBlocksPruneMode → chain history-expiry; KeepAllBlocksPruneMode →
 // retain forever) and true for every finite Distance.
 func (p Distance) Enabled() bool {
-	return p != DefaultBlocksPruneMode && p != KeepAllBlocksPruneMode
+	return p != KeepPostMergeBlocksPruneMode && p != KeepAllBlocksPruneMode
 }
 func (p Distance) toValue() uint64 { return uint64(p) }
 func (p Distance) dbType() []byte  { return kv.PruneTypeOlder }
@@ -244,9 +244,9 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 
 	if pruneMode.Initialised {
 		// Little initial design flaw: we used maxUint64 as default value for prune distance so history expiry was not accounted for.
-		// We need to use because we are changing defaults in archive node from DefaultBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
-		if (pm.History == DefaultBlocksPruneMode && pruneMode.History == DefaultBlocksPruneMode) &&
-			(pm.Blocks == DefaultBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
+		// We need to use because we are changing defaults in archive node from KeepPostMergeBlocksPruneMode to KeepAllBlocksPruneMode which is a different value so it would fail if we are running --prune.mode=archive.
+		if (pm.History == KeepPostMergeBlocksPruneMode && pruneMode.History == KeepPostMergeBlocksPruneMode) &&
+			(pm.Blocks == KeepPostMergeBlocksPruneMode && pruneMode.Blocks == KeepAllBlocksPruneMode) {
 			return pruneMode, nil
 		}
 		// Retention-window changes (e.g., the EIP-8252 default bump from 100k
@@ -255,7 +255,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 		// state but is operationally fine going forward, and narrowing just
 		// causes the next prune pass to delete more. On Blocks specifically
 		// the shim also accepts either-direction transitions between a finite
-		// Distance and DefaultBlocksPruneMode (chain-history-expiry policy)
+		// Distance and KeepPostMergeBlocksPruneMode (chain-history-expiry policy)
 		// so that existing full-mode datadirs can adopt the EIP-8252 default
 		// without operator intervention, and operators can revert if needed
 		// even after the auto-upgrade rewrites the persisted value. Accept
@@ -283,12 +283,12 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 // in the size of their block-retention windows.
 //
 // For History: only finite↔finite transitions are accepted (any direction).
-// Toggling between archive (DefaultBlocksPruneMode sentinel) and a finite
+// Toggling between archive (KeepPostMergeBlocksPruneMode sentinel) and a finite
 // retention is a mode-shape change that should remain explicit.
 //
 // For Blocks: finite↔finite, plus either-direction transitions between a
-// finite Distance and DefaultBlocksPruneMode (the chain-history-expiry
-// sentinel) are accepted. DefaultBlocksPruneMode → finite is the EIP-8252
+// finite Distance and KeepPostMergeBlocksPruneMode (the chain-history-expiry
+// sentinel) are accepted. KeepPostMergeBlocksPruneMode → finite is the EIP-8252
 // upgrade path; the reverse lets operators revert to chain-history-expiry
 // even after the auto-upgrade has rewritten the persisted value. Any
 // transition involving KeepAllBlocksPruneMode remains a mode-shape change.
@@ -305,11 +305,11 @@ func isRetentionWindowChange(persisted, requested Mode) bool {
 
 // isBlocksRetentionPolicy reports whether b expresses a block-data retention
 // policy that the shim will let operators move between. Finite Distance values
-// and DefaultBlocksPruneMode (chain-history-expiry) both qualify;
+// and KeepPostMergeBlocksPruneMode (chain-history-expiry) both qualify;
 // KeepAllBlocksPruneMode (keep all blocks forever) does not — narrowing from
 // "keep all" to anything is a destructive transition that we keep explicit.
 func isBlocksRetentionPolicy(b BlockAmount) bool {
-	if b == DefaultBlocksPruneMode {
+	if b == KeepPostMergeBlocksPruneMode {
 		return true
 	}
 	return isFiniteDistance(b)
@@ -323,7 +323,7 @@ func isFiniteDistance(b BlockAmount) bool {
 	if !ok {
 		return false
 	}
-	return d != KeepAllBlocksPruneMode && d != DefaultBlocksPruneMode
+	return d != KeepAllBlocksPruneMode && d != KeepPostMergeBlocksPruneMode
 }
 
 // writeBlockAmount stores one BlockAmount under the given key, replacing any

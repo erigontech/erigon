@@ -51,7 +51,7 @@ const deleteStrategyWindow = "window"
 // Currently only the "window" type is defined: the node keeps a sliding
 // window of RetentionBlocks blocks and discards everything older.
 // The field is omitted when data is kept indefinitely (archive nodes, or
-// DefaultBlocksPruneMode which uses chain-specific history expiry).
+// KeepPostMergeBlocksPruneMode which uses chain-specific history expiry).
 type DeleteStrategy struct {
 	Type            string `json:"type"`
 	RetentionBlocks uint64 `json:"retentionBlocks"`
@@ -124,7 +124,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
-		if d, ok := dist.(prune.Distance); ok && d != prune.DefaultBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
 			rb := uint64(d)
 			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: rb}
 		}
@@ -132,15 +132,15 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	}
 
 	// PruneTo returns 0 for both KeepAllBlocksPruneMode (MaxUint64-1, keep all) and
-	// DefaultBlocksPruneMode (MaxUint64, chain-specific history expiry) because their
-	// distances exceed headBlock. For DefaultBlocksPruneMode the true oldest is then
+	// KeepPostMergeBlocksPruneMode (MaxUint64, chain-specific history expiry) because their
+	// distances exceed headBlock. For KeepPostMergeBlocksPruneMode the true oldest is then
 	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
-	// DefaultBlocksPruneMode uses chain-specific history expiry: on chains that have
+	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains that have
 	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
 	// never downloaded, so the oldest available block is the merge point, not 0.
-	if pruneMode.Blocks == prune.DefaultBlocksPruneMode && chainConfig.MergeHeight != nil {
+	if pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && chainConfig.MergeHeight != nil {
 		blocksOldest = *chainConfig.MergeHeight
 	}
 

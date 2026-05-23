@@ -360,7 +360,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 	fullMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(pruneDistance),
-		Blocks:      prune.DefaultBlocksPruneMode,
+		Blocks:      prune.KeepPostMergeBlocksPruneMode,
 	}
 	minimalMode := prune.Mode{
 		Initialised: true,
@@ -368,7 +368,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 		Blocks:      prune.Distance(pruneDistance),
 	}
 
-	// In full mode, block bodies are in snapshots and DefaultBlocksPruneMode means no block-body
+	// In full mode, block bodies are in snapshots and KeepPostMergeBlocksPruneMode means no block-body
 	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
 	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
 		t.Parallel()

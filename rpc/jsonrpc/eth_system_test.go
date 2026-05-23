@@ -57,7 +57,7 @@ func TestCapabilities(t *testing.T) {
 	testFullMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
-		Blocks:      prune.DefaultBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
+		Blocks:      prune.KeepPostMergeBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
 	}
 	// Mirrors the post-#21342 production FullMode shape: both History and Blocks are finite
 	// distances. Exercises the EIP-8252 retention window where block bodies and log indexes
@@ -212,7 +212,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.State))
 		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		require.Equal(t, testPruneDistance, window(t, result.Receipts))
-		// DefaultBlocksPruneMode: no explicit window; oldest depends on chain history expiry
+		// KeepPostMergeBlocksPruneMode: no explicit window; oldest depends on chain history expiry
 		// (here 0 because the test chain has no MergeHeight)
 		require.Equal(t, uint64(0), oldest(t, result.Tx))
 		require.Equal(t, uint64(0), oldest(t, result.Blocks))
@@ -275,7 +275,7 @@ func TestCapabilities(t *testing.T) {
 	})
 
 	// Post-#21342 production FullMode: Blocks is a finite Distance (EIP-8252 retention window),
-	// not the DefaultBlocksPruneMode sentinel. Without --persist.receipts, receipts/logs are
+	// not the KeepPostMergeBlocksPruneMode sentinel. Without --persist.receipts, receipts/logs are
 	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
 	t.Run("full_eip8252_no_persist", func(t *testing.T) {
 		t.Parallel()
@@ -350,7 +350,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, uint64(chainSize)-testPruneDistance, oldest(t, result.State))
 	})
 
-	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (DefaultBlocksPruneMode)
+	// When MergeHeight > head-pruneDistance, pre-merge blocks are absent (KeepPostMergeBlocksPruneMode)
 	// so receipts.oldestBlock and logs.oldestBlock must be clamped to the merge point.
 	t.Run("full_merge_height_receipts_seam", func(t *testing.T) {
 		t.Parallel()
