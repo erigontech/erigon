@@ -25,91 +25,60 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 
-func TestResolveCommitmentHistorySteps(t *testing.T) {
-	cases := []struct {
-		name        string
-		mode        string
-		customSteps uint64
-		want        uint64
-		wantErr     bool
-	}{
-		{"default empty", "", 0, 0, false},
-		{"archive", CommitmentHistoryArchiveMode, 0, 0, false},
-		{"archive-with-custom-override", CommitmentHistoryArchiveMode, 13, 13, false},
-		{"recent", CommitmentHistoryRecentMode, 0, CommitmentHistoryRecentSteps, false},
-		{"medium", CommitmentHistoryMediumMode, 0, CommitmentHistoryMediumSteps, false},
-		{"custom-with-value", CommitmentHistoryCustomMode, 42, 42, false},
-		{"custom-without-value-rejected", CommitmentHistoryCustomMode, 0, 0, true},
-		{"unknown-mode-rejected", "garbage", 0, 0, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResolveCommitmentHistorySteps(tc.mode, tc.customSteps)
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestEnsureCommitmentHistoryDistanceCompatible(t *testing.T) {
-	t.Run("first-set-archive", func(t *testing.T) {
+func TestEnsureCommitmentHistoryOlderCompatible(t *testing.T) {
+	t.Run("first-set-unlimited", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		got, err := EnsureCommitmentHistoryDistanceCompatible(tx, 0)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 0)
 		require.NoError(t, err)
 		assert.EqualValues(t, 0, got)
 	})
 
 	t.Run("first-set-bounded", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		got, err := EnsureCommitmentHistoryDistanceCompatible(tx, 8)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
 		require.NoError(t, err)
-		assert.EqualValues(t, 8, got)
+		assert.EqualValues(t, 100_000, got)
 		// Re-running with the same value should be a no-op.
-		got2, err := EnsureCommitmentHistoryDistanceCompatible(tx, 8)
+		got2, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
 		require.NoError(t, err)
-		assert.EqualValues(t, 8, got2)
+		assert.EqualValues(t, 100_000, got2)
 	})
 
 	t.Run("shrink-allowed", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryDistanceCompatible(tx, 16)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 200_000)
 		require.NoError(t, err)
 
-		got, err := EnsureCommitmentHistoryDistanceCompatible(tx, 4)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
 		require.NoError(t, err)
-		assert.EqualValues(t, 4, got)
+		assert.EqualValues(t, 50_000, got)
 	})
 
 	t.Run("expand-rejected", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryDistanceCompatible(tx, 4)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
 		require.NoError(t, err)
 
-		_, err = EnsureCommitmentHistoryDistanceCompatible(tx, 16)
+		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 200_000)
 		require.Error(t, err)
 	})
 
 	t.Run("bounded-to-unlimited-rejected", func(t *testing.T) {
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryDistanceCompatible(tx, 4)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 50_000)
 		require.NoError(t, err)
 
-		_, err = EnsureCommitmentHistoryDistanceCompatible(tx, 0)
+		_, err = EnsureCommitmentHistoryOlderCompatible(tx, 0)
 		require.Error(t, err)
 	})
 
 	t.Run("unlimited-to-bounded-allowed", func(t *testing.T) {
-		// We had everything; constraining future downloads is fine.
 		_, tx := memdb.NewTestTx(t)
-		_, err := EnsureCommitmentHistoryDistanceCompatible(tx, 0)
+		_, err := EnsureCommitmentHistoryOlderCompatible(tx, 0)
 		require.NoError(t, err)
 
-		got, err := EnsureCommitmentHistoryDistanceCompatible(tx, 8)
+		got, err := EnsureCommitmentHistoryOlderCompatible(tx, 100_000)
 		require.NoError(t, err)
-		assert.EqualValues(t, 8, got)
+		assert.EqualValues(t, 100_000, got)
 	})
 }

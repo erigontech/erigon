@@ -235,6 +235,23 @@ func getMaxStepRangeInSnapshots(preverified snapcfg.Preverified) (uint64, error)
 	return maxTo, nil
 }
 
+// getMaxBlockInSnapshots returns the highest block number "to" across all
+// block-numbered preverified segments (headers/bodies/transactions). State
+// (domain/history/idx) segments are ignored.
+func getMaxBlockInSnapshots(preverified snapcfg.Preverified) uint64 {
+	var maxTo uint64
+	for _, p := range preverified.Items {
+		info, stateFile, ok := snaptype.ParseFileName("", p.Name)
+		if !ok || stateFile {
+			continue
+		}
+		if info.To > maxTo {
+			maxTo = info.To
+		}
+	}
+	return maxTo
+}
+
 func computeBlocksToPrune(blockReader blockReader, p prune.Mode) (blocksToPrune uint64, historyToPrune uint64) {
 	frozenBlocks := blockReader.Snapshots().SegmentsMax()
 	return p.Blocks.PruneTo(frozenBlocks), p.History.PruneTo(frozenBlocks)
@@ -289,6 +306,17 @@ func commitmentHistoryMinStep(maxStateStep, distanceSteps uint64) uint64 {
 		return 0
 	}
 	return maxStateStep - distanceSteps
+}
+
+// blocksToStepDistance converts a "last N blocks" window into a step-count
+// distance using the blocks-per-step ratio observed in the preverified set:
+// stepDistance = olderBlocks * maxStateStep / maxBlock. Returns 0 when the
+// ratio is undefined (no blocks/no steps), which disables filtering.
+func blocksToStepDistance(olderBlocks, maxStateStep, maxBlock uint64) uint64 {
+	if olderBlocks == 0 || maxStateStep == 0 || maxBlock == 0 {
+		return 0
+	}
+	return olderBlocks * maxStateStep / maxBlock
 }
 
 // shouldSkipCommitmentHistorySegment reports whether the given preverified file
@@ -411,19 +439,23 @@ func SyncSnapshots(
 		wantToPrune := prune.Blocks.Enabled() || prune.History.Enabled()
 
 		// Pre-compute the minimum commitment-history step from the configured
-		// step distance and the maximum state step in the preverified set, so
+		// block distance and the maximum state step in the preverified set, so
 		// that segments below this boundary are skipped in the download loop.
 		var commitmentHistoryMinStepBound uint64
-		if !headerchain && syncCfg.KeepExecutionProofs && syncCfg.CommitmentHistoryDistanceSteps > 0 {
+		if !headerchain && syncCfg.KeepExecutionProofs && syncCfg.CommitmentHistoryOlder > 0 {
 			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
 			if err != nil {
 				return err
 			}
-			commitmentHistoryMinStepBound = commitmentHistoryMinStep(maxStateStep, syncCfg.CommitmentHistoryDistanceSteps)
+			maxBlock := getMaxBlockInSnapshots(preverifiedBlockSnapshots)
+			distanceSteps := blocksToStepDistance(syncCfg.CommitmentHistoryOlder, maxStateStep, maxBlock)
+			commitmentHistoryMinStepBound = commitmentHistoryMinStep(maxStateStep, distanceSteps)
 			if commitmentHistoryMinStepBound > 0 {
 				log.Info(fmt.Sprintf("[%s] Filtering old commitment-history segments", logPrefix),
 					"maxStateStep", maxStateStep,
-					"distanceSteps", syncCfg.CommitmentHistoryDistanceSteps,
+					"maxBlock", maxBlock,
+					"olderBlocks", syncCfg.CommitmentHistoryOlder,
+					"distanceSteps", distanceSteps,
 					"minStep", commitmentHistoryMinStepBound)
 			}
 		}

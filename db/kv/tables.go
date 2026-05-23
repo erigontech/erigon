@@ -285,10 +285,10 @@ var (
 	// ExperimentalGetProofsLayout is used to keep track whether we store indices to facilitate eth_getProof
 	CommitmentLayoutFlagKey = []byte("CommitmentLayouFlag")
 
-	PruneTypeOlder               = []byte("older")
-	PruneHistory                 = []byte("pruneHistory")
-	PruneBlocks                  = []byte("pruneBlocks")
-	PruneCommitmentHistoryBlocks = []byte("pruneCommitmentHistoryBlocks")
+	PruneTypeOlder         = []byte("older")
+	PruneHistory           = []byte("pruneHistory")
+	PruneBlocks            = []byte("pruneBlocks")
+	PruneCommitmentHistory = []byte("pruneCommitmentHistory")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")

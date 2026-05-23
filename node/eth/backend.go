@@ -312,7 +312,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return err
 		}
 
-		config.CommitmentHistoryDistanceSteps, err = prune.EnsureCommitmentHistoryDistanceCompatible(tx, config.CommitmentHistoryDistanceSteps)
+		config.CommitmentHistoryOlder, err = prune.EnsureCommitmentHistoryOlderCompatible(tx, config.CommitmentHistoryOlder)
 		if err != nil {
 			return err
 		}

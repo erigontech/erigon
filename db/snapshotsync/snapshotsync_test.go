@@ -86,6 +86,31 @@ func TestCommitmentHistoryMinStep(t *testing.T) {
 	}
 }
 
+func TestBlocksToStepDistance(t *testing.T) {
+	cases := []struct {
+		name         string
+		olderBlocks  uint64
+		maxStateStep uint64
+		maxBlock     uint64
+		want         uint64
+	}{
+		{"zero-blocks-disables", 0, 100, 1_000_000, 0},
+		{"zero-maxStep-disables", 50_000, 0, 1_000_000, 0},
+		{"zero-maxBlock-disables", 50_000, 100, 0, 0},
+		// 100k blocks * 100 steps / 1M blocks = 10 steps
+		{"mainnet-like-100k-blocks-1M-chain", 100_000, 100, 1_000_000, 10},
+		// 100k blocks * 5 steps / 50k blocks = 10 steps (chain too young, but math is well-defined)
+		{"young-chain-blocks-exceed-maxBlock", 100_000, 5, 50_000, 10},
+		// 50k * 100 / 1M = 5 steps
+		{"half-window", 50_000, 100, 1_000_000, 5},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, blocksToStepDistance(tc.olderBlocks, tc.maxStateStep, tc.maxBlock))
+		})
+	}
+}
+
 func TestShouldSkipCommitmentHistorySegment(t *testing.T) {
 	cases := []struct {
 		name    string

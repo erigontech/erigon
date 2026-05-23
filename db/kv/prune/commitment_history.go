@@ -17,59 +17,16 @@
 package prune
 
 import (
+	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
 )
 
-// Named modes for --prune.commitment-history.mode. They map to step counts via
-// ResolveCommitmentHistorySteps. The step size is configurable (via erigondb.toml);
-// these constants only describe the *number* of most-recent steps to keep.
-const (
-	CommitmentHistoryArchiveMode = "archive"
-	CommitmentHistoryRecentMode  = "recent"
-	CommitmentHistoryMediumMode  = "medium"
-	CommitmentHistoryCustomMode  = "custom"
-
-	CommitmentHistoryRecentSteps uint64 = 1
-	CommitmentHistoryMediumSteps uint64 = 8
-)
-
-var ErrUnknownCommitmentHistoryMode = fmt.Errorf(
-	"--prune.commitment-history.mode must be one of %q, %q, %q, %q",
-	CommitmentHistoryArchiveMode, CommitmentHistoryRecentMode,
-	CommitmentHistoryMediumMode, CommitmentHistoryCustomMode,
-)
-
-// ResolveCommitmentHistorySteps turns (mode, customSteps) from the CLI into the
-// raw step distance stored in ethconfig.Sync.CommitmentHistoryDistanceSteps.
-// A return of 0 means "unlimited" (archive).
-func ResolveCommitmentHistorySteps(mode string, customSteps uint64) (uint64, error) {
-	switch mode {
-	case "", CommitmentHistoryArchiveMode:
-		// Even in archive mode, allow a custom override if the user only passed --steps.
-		if customSteps > 0 {
-			return customSteps, nil
-		}
-		return 0, nil
-	case CommitmentHistoryRecentMode:
-		return CommitmentHistoryRecentSteps, nil
-	case CommitmentHistoryMediumMode:
-		return CommitmentHistoryMediumSteps, nil
-	case CommitmentHistoryCustomMode:
-		if customSteps == 0 {
-			return 0, errors.New("--prune.commitment-history.mode=custom requires --prune.commitment-history.steps > 0")
-		}
-		return customSteps, nil
-	default:
-		return 0, ErrUnknownCommitmentHistoryMode
-	}
-}
-
-// EnsureCommitmentHistoryDistanceCompatible checks that the configured step
-// distance is compatible with what was previously persisted in kv.DatabaseInfo.
+// EnsureCommitmentHistoryOlderCompatible checks that the configured
+// --prune.commitment-history.older value (in blocks; 0 = unlimited) is
+// compatible with what was previously persisted in kv.DatabaseInfo.
 //
 // Rules:
 //   - First-time set: always allowed.
@@ -79,41 +36,41 @@ func ResolveCommitmentHistorySteps(mode string, customSteps uint64) (uint64, err
 //
 // On allowed transitions the new value is persisted. The function returns the
 // effective value (whatever the caller should use afterwards).
-func EnsureCommitmentHistoryDistanceCompatible(tx kv.GetPut, configured uint64) (uint64, error) {
-	stored, ok, err := getCommitmentHistoryDistance(tx)
+func EnsureCommitmentHistoryOlderCompatible(tx kv.GetPut, configuredBlocks uint64) (uint64, error) {
+	stored, ok, err := getCommitmentHistoryOlder(tx)
 	if err != nil {
-		return configured, err
+		return configuredBlocks, err
 	}
 	if !ok {
-		if err := setCommitmentHistoryDistance(tx, configured); err != nil {
-			return configured, err
+		if err := setCommitmentHistoryOlder(tx, configuredBlocks); err != nil {
+			return configuredBlocks, err
 		}
-		return configured, nil
+		return configuredBlocks, nil
 	}
 
 	switch {
 	case stored == 0:
 		// We had everything before; any value (including a tighter bound) is fine.
-	case configured == 0:
+	case configuredBlocks == 0:
 		return stored, fmt.Errorf(
-			"--prune.commitment-history is being expanded from %d step(s) to unlimited; previously filtered files would need to be re-downloaded. delete the chaindata folder to start over",
+			"--prune.commitment-history.older is being expanded from %d block(s) to unlimited; previously filtered files would need to be re-downloaded. delete the chaindata folder to start over",
 			stored)
-	case configured > stored:
+	case configuredBlocks > stored:
 		return stored, fmt.Errorf(
-			"--prune.commitment-history is being expanded from %d to %d step(s); previously filtered files would need to be re-downloaded. delete the chaindata folder to start over",
-			stored, configured)
+			"--prune.commitment-history.older is being expanded from %d to %d block(s); previously filtered files would need to be re-downloaded. delete the chaindata folder to start over",
+			stored, configuredBlocks)
 	}
 
-	if configured != stored {
-		if err := setCommitmentHistoryDistance(tx, configured); err != nil {
-			return configured, err
+	if configuredBlocks != stored {
+		if err := setCommitmentHistoryOlder(tx, configuredBlocks); err != nil {
+			return configuredBlocks, err
 		}
 	}
-	return configured, nil
+	return configuredBlocks, nil
 }
 
-func getCommitmentHistoryDistance(tx kv.Getter) (uint64, bool, error) {
-	v, err := tx.GetOne(kv.DatabaseInfo, kv.PruneCommitmentHistoryBlocks)
+func getCommitmentHistoryOlder(tx kv.Getter) (uint64, bool, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.PruneCommitmentHistory)
 	if err != nil {
 		return 0, false, err
 	}
@@ -121,13 +78,24 @@ func getCommitmentHistoryDistance(tx kv.Getter) (uint64, bool, error) {
 		return 0, false, nil
 	}
 	if len(v) != 8 {
-		return 0, false, fmt.Errorf("unexpected value length %d for %s", len(v), string(kv.PruneCommitmentHistoryBlocks))
+		return 0, false, fmt.Errorf("unexpected value length %d for %s", len(v), string(kv.PruneCommitmentHistory))
+	}
+	typ, err := tx.GetOne(kv.DatabaseInfo, keyType(kv.PruneCommitmentHistory))
+	if err != nil {
+		return 0, false, err
+	}
+	if !bytes.Equal(typ, kv.PruneTypeOlder) {
+		return 0, false, fmt.Errorf("unexpected type %q for %s (expected %q)",
+			string(typ), string(kv.PruneCommitmentHistory), string(kv.PruneTypeOlder))
 	}
 	return binary.BigEndian.Uint64(v), true, nil
 }
 
-func setCommitmentHistoryDistance(tx kv.GetPut, value uint64) error {
+func setCommitmentHistoryOlder(tx kv.GetPut, value uint64) error {
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], value)
-	return tx.Put(kv.DatabaseInfo, kv.PruneCommitmentHistoryBlocks, buf[:])
+	if err := tx.Put(kv.DatabaseInfo, kv.PruneCommitmentHistory, buf[:]); err != nil {
+		return err
+	}
+	return tx.Put(kv.DatabaseInfo, keyType(kv.PruneCommitmentHistory), kv.PruneTypeOlder)
 }
