@@ -407,3 +407,40 @@ type CanonicalHeadRewound struct {
 	// component resolves the precise file/step boundary at or below it.
 	ToBlock uint64
 }
+
+// RestartBegin signals that the storage Provider is about to drain its
+// inventory and rescan disk — typically because an external mutation
+// (adoption cutover renamed files into place; fork-from utility
+// populated a new datadir; offline tooling injected snapshot bytes) is
+// not visible to in-memory readers without a refresh.
+//
+// SYNCHRONOUS SUBSCRIBER CONTRACT: components that hold open file
+// handles into the snapshot directory (db/state Aggregator's
+// OpenFolder readers, db/snapshotsync/freezeblocks segment handles,
+// any cache keyed by file identity) MUST subscribe via Subscribe (not
+// SubscribeAsync) and quiesce their state inline. By the time
+// Publish(RestartBegin) returns, every synchronous subscriber has run;
+// the Provider then calls WaitAsync to drain any async subscribers
+// before proceeding to drain the inventory.
+//
+// The subscriber's quiesce step is typically: close OpenFolder readers
+// + drop file-keyed caches. Do NOT release the Inventory pointer — it
+// is preserved across the restart; existing ChangeSet subscriptions
+// continue working without reconnection.
+//
+// Reason is a free-form short string for diagnostics (e.g.
+// "adoption-cutover", "fork-from-bootstrap"). Not load-bearing for any
+// gating; logs only.
+type RestartBegin struct {
+	Reason string
+}
+
+// RestartEnd signals that the storage Provider has finished its drain +
+// rescan cycle. Subscribers that quiesced on RestartBegin re-open
+// their readers (OpenFolder) against the now-current file set.
+//
+// Same synchronous-subscriber contract as RestartBegin: by the time
+// Publish(RestartEnd) returns, every synchronous subscriber has
+// re-opened; the Provider's Restart call then returns. Async
+// subscribers are drained via WaitAsync before the call returns.
+type RestartEnd struct{}

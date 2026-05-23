@@ -303,3 +303,69 @@ func TestSetTorrentHash_AllBuckets(t *testing.T) {
 	check(inv.SaltFiles(), "salt-blocks.txt")
 	check(inv.SaltFiles(), "salt-state.txt")
 }
+
+// TestInventory_DrainClearsAllCategoriesPreservesPointerAndSubscribers
+// pins Drain's contract for Provider.Restart: every category-list goes
+// empty, the *Inventory pointer is preserved, the subscriber channel
+// stays open, and a single ChangeSet covers every removed name.
+func TestInventory_DrainClearsAllCategoriesPreservesPointerAndSubscribers(t *testing.T) {
+	inv := NewInventory()
+	inv.AddFile(&FileEntry{
+		Name: "v1.1-010895-010896-headers.seg", Local: true, Trust: TrustVerified,
+	})
+	inv.AddFile(&FileEntry{
+		Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified,
+	})
+	inv.AddFile(&FileEntry{Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
+	inv.AddFile(&FileEntry{
+		Domain: DomainAccounts, FromStep: 0, ToStep: 2048,
+		Name: "v1.0-accounts.0-2048.kv", Local: true, Trust: TrustVerified,
+	})
+
+	// Subscribe BEFORE Drain — must survive the drain.
+	sub, unsub := inv.Subscribe()
+	defer unsub()
+
+	originalPtr := inv
+	drained := inv.Drain()
+	require.Same(t, originalPtr, inv, "Drain must preserve the *Inventory pointer")
+
+	// Categories all empty.
+	require.Empty(t, inv.BlockFiles(), "blocks must be empty after Drain")
+	require.Empty(t, inv.CaplinFiles(), "caplin must be empty after Drain")
+	require.Empty(t, inv.MetaFiles(), "meta must be empty after Drain")
+	require.Empty(t, inv.SaltFiles(), "salt must be empty after Drain")
+	require.Empty(t, inv.AllDomainFiles(DomainAccounts), "domain must be empty after Drain")
+	require.Len(t, drained, 5, "Drain returns every removed name")
+
+	// Subscriber sees one ChangeSet carrying every drained name.
+	select {
+	case cs := <-sub:
+		require.ElementsMatch(t, drained, cs.Files,
+			"subscriber's ChangeSet lists every drained name")
+	default:
+		t.Fatal("subscriber did not receive a ChangeSet")
+	}
+
+	// Re-add post-Drain to confirm the inventory is functional again.
+	inv.AddFile(&FileEntry{Name: "post-drain.seg", Local: true, Trust: TrustVerified})
+	require.Len(t, inv.BlockFiles(), 1, "post-Drain AddFile works normally")
+}
+
+// TestInventory_DrainOnEmptyIsNoOp confirms Drain on an empty inventory
+// is a no-op — no ChangeSet fires, no panic, returns nil.
+func TestInventory_DrainOnEmptyIsNoOp(t *testing.T) {
+	inv := NewInventory()
+	sub, unsub := inv.Subscribe()
+	defer unsub()
+
+	drained := inv.Drain()
+	require.Nil(t, drained, "empty Drain returns nil")
+
+	select {
+	case <-sub:
+		t.Fatal("empty Drain must not fire a ChangeSet")
+	default:
+	}
+}

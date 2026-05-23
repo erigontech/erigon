@@ -1367,6 +1367,85 @@ func (a execPoolAdapter) QueueSize() int   { return a.wp.WaitingQueueSize() }
 // InitialStateReady can fire on real peer events.
 func (p *Provider) Bus() event.EventBus { return p.eventBus }
 
+// RestartOpts configures a Provider.Restart cycle. Reason is a
+// short free-form diagnostic string carried in the RestartBegin
+// event (e.g. "adoption-cutover", "fork-from-bootstrap").
+type RestartOpts struct {
+	Reason string
+}
+
+// Restart drains the in-memory Inventory in place, re-scans the snap
+// dir, and notifies external components via the bus so they can close
+// + reopen any cached file handles. Used when an out-of-band mutation
+// (adoption cutover renamed files; fork-from utility populated the
+// dir; offline tooling injected snapshot bytes) made the on-disk
+// state diverge from what the in-memory model holds.
+//
+// Sequence:
+//  1. Validate state — fails fast if the Provider isn't running its
+//     own lifecycle (Inventory + LifecycleDriver + eventBus all
+//     required).
+//  2. Publish RestartBegin synchronously. By the time Publish returns,
+//     every synchronous subscriber has quiesced (closed OpenFolder
+//     readers, dropped file-keyed caches). WaitAsync drains async
+//     subscribers too.
+//  3. Stop the lifecycle driver so an in-flight Sweep doesn't race
+//     the drain.
+//  4. Drain the Inventory — preserves the pointer, fires a single
+//     ChangeSet for the removals so existing subscribers see them.
+//  5. Re-scan disk via Sweep so the inventory reflects current
+//     on-disk state.
+//  6. Restart the lifecycle driver.
+//  7. Publish RestartEnd synchronously. Subscribers re-open against
+//     the new file set. WaitAsync drains async subscribers.
+//
+// Multi-call safe but serialised via the lifecycle driver's
+// Stop/Start sequencing; concurrent callers will run one at a time.
+// Callers (orchestrator adoption-cutover, future fork-from bootstrap)
+// hold a reference to the same *Inventory pointer across the call —
+// it is the same object, drained and repopulated in place.
+func (p *Provider) Restart(ctx context.Context, opts RestartOpts) error {
+	if p == nil {
+		return fmt.Errorf("storage.Provider.Restart: nil provider")
+	}
+	if p.Inventory == nil {
+		return fmt.Errorf("storage.Provider.Restart: no inventory (provider not running its own lifecycle)")
+	}
+	if p.LifecycleDriver == nil {
+		return fmt.Errorf("storage.Provider.Restart: no lifecycle driver")
+	}
+	if p.eventBus == nil {
+		return fmt.Errorf("storage.Provider.Restart: no event bus")
+	}
+
+	p.eventBus.Publish(flow.RestartBegin{Reason: opts.Reason})
+	p.eventBus.WaitAsync()
+
+	p.LifecycleDriver.Stop()
+
+	drained := p.Inventory.Drain()
+	if p.logger != nil {
+		p.logger.Info("[storage] restart: drained inventory", "reason", opts.Reason, "entries", len(drained))
+	}
+
+	// Re-scan disk before restarting the driver so the inventory is
+	// repopulated synchronously — the RestartEnd subscribers can read
+	// a complete view rather than racing the first post-restart Sweep.
+	p.LifecycleDriver.Sweep(ctx, p.logger)
+
+	if err := p.LifecycleDriver.Start(ctx); err != nil {
+		// Driver failed to restart — the inventory has been rescanned,
+		// but ongoing sweeps won't happen. Surface as an error so the
+		// caller can decide what to do; do NOT publish RestartEnd
+		// because subscribers shouldn't reopen against a stopped driver.
+		return fmt.Errorf("storage.Provider.Restart: lifecycle driver failed to restart: %w", err)
+	}
+
+	p.eventBus.Publish(flow.RestartEnd{})
+	p.eventBus.WaitAsync()
+	return nil
+}
+
 // Stop releases the storage component's runtime resources. The
 // lifecycle driver and the flow orchestrator both need explicit
 // shutdown; other resources (DB, BlockRetire, etc.) follow the

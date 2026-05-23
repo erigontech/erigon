@@ -347,6 +347,58 @@ func (inv *Inventory) RemoveFile(name string) {
 	inv.notify(ChangeSet{Files: []string{name}})
 }
 
+// Drain clears every file entry from the inventory while preserving
+// the pointer + subscriber list + held-view machinery. Used by
+// Provider.Restart to reset the in-memory model in place before a
+// disk rescan repopulates it; existing ChangeSet subscribers stay
+// connected and see the removals as one notification.
+//
+// Returns the names that were drained, ordered by category (blocks →
+// caplin → meta → salt → domain entries) for callers that want to log
+// what disappeared. Names referenced by held views are moved into
+// pendingDeletes the same way RemoveFile handles in-flight readers;
+// the views continue to read their captured clones until close.
+//
+// Subscribers receive a single ChangeSet listing every drained name.
+// timings are cleared for names not held by a live view.
+func (inv *Inventory) Drain() []string {
+	inv.mu.Lock()
+	var names []string
+	collect := func(entries []*FileEntry) {
+		for _, e := range entries {
+			names = append(names, e.Name)
+		}
+	}
+	collect(inv.blocks)
+	collect(inv.caplin)
+	collect(inv.meta)
+	collect(inv.salt)
+	for _, entries := range inv.domains {
+		collect(entries)
+	}
+	for _, name := range names {
+		if inv.refcount[name] > 0 {
+			if e := inv.findByNameLocked(name); e != nil {
+				inv.pendingDeletes[name] = e.Clone()
+			}
+		} else {
+			delete(inv.timings, name)
+		}
+	}
+	inv.blocks = nil
+	inv.caplin = nil
+	inv.meta = nil
+	inv.salt = nil
+	for d := range inv.domains {
+		inv.domains[d] = nil
+	}
+	inv.mu.Unlock()
+	if len(names) > 0 {
+		inv.notify(ChangeSet{Files: names})
+	}
+	return names
+}
+
 // ReplaceWithMerge atomically replaces multiple small files with a single merged file.
 // Returns false if the merged file doesn't cover all replaced ranges.
 //
