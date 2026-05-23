@@ -28,15 +28,21 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-func TestDiscoverNewFiles_AddsPrimariesAtDownloaded(t *testing.T) {
+func TestDiscoverNewFiles_AddsPrimariesAndAccessorsAtDownloaded(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{
+		// primaries
 		"v1.0-headers.0-500.seg",
 		"v1.0-accounts.0-256.kv",
 		"v1.0-history.0-256.v",
-		"v1.0-headers.0-500.idx",  // accessor — must be skipped
-		"v1.0-accounts.0-256.kvi", // accessor — must be skipped
-		"random.txt",              // unknown — must be skipped
+		// accessors — also picked up by the disk scan (the post-build
+		// OnFilesChange wire fires with nil file paths for missed-accessor
+		// builds, so the scan is the only reliable path into Inventory)
+		"v1.0-headers.0-500.idx",
+		"v1.0-accounts.0-256.kvi",
+		"v1.0-accounts.0-256.bt",
+		// unknown extension — still skipped
+		"random.txt",
 	} {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte{}, 0644))
 	}
@@ -45,25 +51,22 @@ func TestDiscoverNewFiles_AddsPrimariesAtDownloaded(t *testing.T) {
 	d := &Driver{Inv: inv, SnapDir: dir}
 	d.Sweep(context.Background(), nil)
 
-	for _, primary := range []string{
+	for _, name := range []string{
 		"v1.0-headers.0-500.seg",
 		"v1.0-accounts.0-256.kv",
 		"v1.0-history.0-256.v",
-	} {
-		state, ok := inv.LifecycleState(primary)
-		require.True(t, ok, "primary %s must be discovered", primary)
-		require.Equal(t, snapshot.LifecycleDownloaded, state,
-			"primary %s must land at Downloaded; got %s", primary, state)
-	}
-
-	for _, skip := range []string{
 		"v1.0-headers.0-500.idx",
 		"v1.0-accounts.0-256.kvi",
-		"random.txt",
+		"v1.0-accounts.0-256.bt",
 	} {
-		_, ok := inv.LifecycleState(skip)
-		require.False(t, ok, "non-primary %s must be skipped", skip)
+		state, ok := inv.LifecycleState(name)
+		require.True(t, ok, "%s must be discovered", name)
+		require.Equal(t, snapshot.LifecycleDownloaded, state,
+			"%s must land at Downloaded; got %s", name, state)
 	}
+
+	_, ok := inv.LifecycleState("random.txt")
+	require.False(t, ok, "unknown-extension random.txt must be skipped")
 }
 
 func TestDiscoverNewFiles_PreservesExistingState(t *testing.T) {

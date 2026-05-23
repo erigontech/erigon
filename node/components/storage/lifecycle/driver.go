@@ -297,16 +297,30 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	}
 }
 
-// snapshotPrimaryExts is the set of file extensions the disk-scan path
-// treats as "primary" — files whose presence triggers an Indexing
-// transition. Accessor files (.idx, .kvi, .ef, .efi) are picked up via
-// the post-recalc OnFilesChange wire, not the disk scan, because they
-// always follow a primary file's index build.
-var snapshotPrimaryExts = map[string]struct{}{
-	".seg": {},
-	".kv":  {},
-	".v":   {},
-	".ef":  {},
+// snapshotScannableExts is the set of file extensions the disk-scan
+// path picks up into Inventory. Includes both primaries (.seg, .kv, .v,
+// .ef) and accessors (.idx, .kvi, .kvei, .vi, .efi, .bt).
+//
+// Accessors are scanned despite the original design that "they arrive
+// via the post-build OnFilesChange wire" because that wire is unreliable
+// for locally-built missed accessors: db/state/aggregator.go fires
+// a.onFilesChange(nil) (no file paths) from FilesWithMissedAccessors,
+// IntegrateDirtyFiles, and the buildFilesInBackground loops — only
+// IntegrateMergedDirtyFiles passes real names. Without scanning, a
+// freshly-built transactions-to-block.idx or .kvi sits on disk outside
+// the Inventory, leaves phase-1 indexing undercounted, and blocks
+// InitialStateReady (observed on consumer-side soak runs 2026-05-23).
+var snapshotScannableExts = map[string]struct{}{
+	".seg":  {},
+	".kv":   {},
+	".v":    {},
+	".ef":   {},
+	".idx":  {},
+	".kvi":  {},
+	".kvei": {},
+	".vi":   {},
+	".efi":  {},
+	".bt":   {},
 }
 
 // discoverNewFiles scans SnapDir + Erigon's state subdirs (domain/,
@@ -373,7 +387,7 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 			// recognised by name, not extension, because plain
 			// .txt/.toml aren't snapshot-primary in general.
 			isPrimary := false
-			if _, ok := snapshotPrimaryExts[ext]; ok {
+			if _, ok := snapshotScannableExts[ext]; ok {
 				isPrimary = true
 			}
 			isConfigTopLevel := sd.prefix == "" && (e.Name() == "erigondb.toml" ||
