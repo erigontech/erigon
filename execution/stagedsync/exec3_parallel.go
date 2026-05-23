@@ -2297,7 +2297,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.cntAbort++
 			}
 		} else {
-			return nil, fmt.Errorf("unexpected exec error: %w", res.Err)
+			// Non-ErrExecAbortError from the worker (e.g. raw error from
+			// TxTask.Reset: TxMessage rejection, signer rejection, EIP-7702
+			// empty authorization list). Surface it as a block-validity
+			// failure through blockResult.Err so the apply loop returns
+			// ErrInvalidBlock the same way the other invalidBlockResult
+			// sites do. Returning (nil, err) instead silently exits the
+			// exec loop with no blockResult ever reaching the apply loop;
+			// the apply-channel-closed branch then sees blks=0 and
+			// fabricates ErrLoopExhausted, which the stage loop reports as
+			// "unexpected state step has more work" — engine API
+			// mis-categorises that as a state-machine error rather than the
+			// real block-validation failure (eest fork_Prague
+			// test_empty_authorization_list).
+			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
 		txVersion := res.Version()
