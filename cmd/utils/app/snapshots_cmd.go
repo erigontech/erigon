@@ -1747,7 +1747,7 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		return 0, err
 	}
 	defer roTx.Rollback()
-	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
+	blockNum, err := findBlockNumByTxNum(ctx, roTx, txNumsReader, aggMax)
 	if err != nil {
 		return 0, err
 	}
@@ -1763,6 +1763,29 @@ func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3
 		blockNum = execProgress
 	}
 	return blockNum, nil
+}
+
+func findBlockNumByTxNum(ctx context.Context, tx kv.Tx, txNumsReader rawdbv3.TxNumsReader, txNum uint64) (uint64, error) {
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
+	if err != nil {
+		return 0, fmt.Errorf("find block num for tx num %d: %w", txNum, err)
+	}
+	if ok {
+		return blockNum, nil
+	}
+
+	firstBlockNum, firstTxNum, err := txNumsReader.First(tx)
+	if err != nil {
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read txnum index lower bound: %w", txNum, err)
+	}
+	lastBlockNum, lastTxNum, err := txNumsReader.Last(tx)
+	if err != nil {
+		return 0, fmt.Errorf("find block num for tx num %d: not found; read txnum index upper bound: %w", txNum, err)
+	}
+	return 0, fmt.Errorf(
+		"find block num for tx num %d: not found (txnum index bounds: first block=%d txnum=%d, last block=%d txnum=%d)",
+		txNum, firstBlockNum, firstTxNum, lastBlockNum, lastTxNum,
+	)
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
@@ -2265,6 +2288,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		if info.IsDir() {
 			return nil
 		}
+		if filepath.Ext(info.Name()) == ".tmp" {
+			return nil
+		}
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
@@ -2368,6 +2394,9 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			return err
 		}
 		if info.IsDir() {
+			return nil
+		}
+		if filepath.Ext(info.Name()) == ".tmp" {
 			return nil
 		}
 
@@ -2996,8 +3025,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
-			return histBlockNumProgress, err
+			return findBlockNumByTxNum(ctx, tx, blockReader.TxnumReader(), endTxNumMinimax)
 		})
 		return nil
 	})
