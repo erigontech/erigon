@@ -218,6 +218,17 @@ func testNameFromContext(ctx context.Context) string {
 }
 
 func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefinition) error {
+	// DIAGNOSTIC PROBE (#21380): always evict the cached tester so each
+	// test runs against a fresh node — confirms whether tester reuse
+	// (cache from test N polluting test N+1's genesis→block-1 boundary)
+	// is the source of the 22 EEST `wrong trie root of block 1` failures.
+	// NOT THE FINAL FIX. If green, the proper fix is an in-place
+	// cache-reset between tests that keeps caching for the SAME test's
+	// payload sequence (where it provides the performance win) without
+	// disabling it.
+	if err := extr.Evict(test.Fork, test.PreAllocHash); err != nil {
+		return err
+	}
 	tester, err := extr.getOrCreateTester(test.Fork, test.PreAllocHash)
 	if err != nil {
 		return err
