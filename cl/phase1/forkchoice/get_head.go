@@ -323,18 +323,15 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	}
 	// Leaf node — viability per spec filter_block_tree.
 
-	// Spec get_voting_source: pick unrealized only for prior-epoch blocks
-	// (pull-up justification view); current/future-epoch blocks use the
-	// block's realized state checkpoint.
-	blockEpoch := f.computeEpochAtSlot(header.Slot)
+	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
+	// Fall back to realized checkpoints if unrealized not available
 	var votingSource solid.Checkpoint
-	if currentEpoch > blockEpoch {
-		votingSource, has = f.getUnrealizedJustification(blockRoot)
-	} else {
-		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
-	}
+	votingSource, has = f.getUnrealizedJustification(blockRoot)
 	if !has {
-		return false
+		votingSource, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		if !has {
+			return false
+		}
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
