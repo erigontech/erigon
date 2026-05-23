@@ -277,9 +277,7 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 	isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 	if *inserted >= p.syncBackLoop {
 		if isForkchoiceNeeded {
-			// DenebVersion maps to ForkchoiceUpdatedV3 which is valid for Deneb through Fulu.
-			// The block collector only runs during initial sync, not for Gloas+ (Amsterdam) blocks yet.
-			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, clparams.DenebVersion); err != nil {
+			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil); err != nil {
 				p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 			}
 		}
