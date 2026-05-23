@@ -235,9 +235,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
 				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
 					toTxNum := agg.EndTxNumMinimax() + agg.StepSize()
-					if cap := agg.MaxCollationTxNum(); cap > 0 && toTxNum > cap {
-						toTxNum = cap
-					}
 					agg.BuildFilesInBackground(toTxNum)
 				}
 			}

@@ -136,19 +136,6 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		// Cap collation to the max txNum covered by block files.
-		// Without this, collation creates domain files past the block
-		// file boundary, causing "behind commitment" errors.
-		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
-			agg.SetMaxCollationTxNum(maxTxNum)
-		}
-		// Background collation removed from exec code — collation is now managed
-		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
-		// This avoids background collation db.View() txs overlapping with
-		// commit+prune, which prevented MDBX GC page reclamation.
-	}
-
 	var (
 		inputTxNum               uint64
 		offsetFromBlockBeginning uint64

@@ -211,13 +211,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		// Collate+prune OLD data (its own RwTx).
 		if a, ok := db.(state.HasAgg); ok {
 			agg := a.Agg().(*state.Aggregator)
-			if capRoTx, capErr := db.BeginTemporalRo(ctx); capErr == nil {
-				if maxTxNum, e := rawdbv3.TxNums.Max(ctx, capRoTx, blockReader.FrozenBlocks()); e == nil && maxTxNum > 0 {
-					stepSize := agg.StepSize()
-					agg.SetMaxCollationTxNum((maxTxNum / stepSize) * stepSize)
-				}
-				capRoTx.Rollback()
-			}
 			if err := agg.CollateAndPrune(ctx, db, func(pruneTx kv.TemporalRwTx) error {
 				return sync.RunPrune(ctx, pruneTx, initialCycle, 0)
 			}, logger); err != nil {
