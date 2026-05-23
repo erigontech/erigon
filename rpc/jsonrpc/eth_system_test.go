@@ -54,19 +54,14 @@ func TestCapabilities(t *testing.T) {
 	const chainSize = 20
 	const testPruneDistance = uint64(10)
 
-	testFullMode := prune.Mode{
+	testLegacyFull := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
 		Blocks:      prune.KeepPostMergeBlocksPruneMode, // chain-specific history expiry (pre-merge blocks not kept on merge chains)
 	}
-	// Mirrors the post-#21342 production FullMode shape: both History and Blocks are finite
-	// distances. Exercises the EIP-8252 retention window where block bodies and log indexes
-	// follow the same finite cutoff as state history.
-	testFullModeEIP8252 := prune.Mode{
-		Initialised: true,
-		History:     prune.Distance(testPruneDistance),
-		Blocks:      prune.Distance(testPruneDistance),
-	}
+	// Both History and Blocks finite — stands in for both the post-#21342
+	// production FullMode shape and MinimalMode at test scale (the production
+	// distances differ but the per-subtest assertions don't care which).
 	testMinimalMode := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(testPruneDistance),
@@ -146,7 +141,7 @@ func TestCapabilities(t *testing.T) {
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer dbTx.Rollback()
-		_, err = prune.EnsureNotChanged(dbTx, testFullMode)
+		_, err = prune.EnsureNotChanged(dbTx, testLegacyFull)
 		require.NoError(t, err)
 		require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(dbTx, false))
 		if persistReceipts {
@@ -201,7 +196,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_no_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, false, false)
+		api, head := setupAPI(t, testLegacyFull, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -223,7 +218,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_persist_receipts", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, false, true)
+		api, head := setupAPI(t, testLegacyFull, false, true)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -238,7 +233,7 @@ func TestCapabilities(t *testing.T) {
 
 	t.Run("full_with_commitment", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullMode, true, false)
+		api, head := setupAPI(t, testLegacyFull, true, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, head-testPruneDistance, oldest(t, result.StateProofs))
@@ -279,7 +274,7 @@ func TestCapabilities(t *testing.T) {
 	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
 	t.Run("full_eip8252_no_persist", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullModeEIP8252, false, false)
+		api, head := setupAPI(t, testMinimalMode, false, false)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
@@ -301,7 +296,7 @@ func TestCapabilities(t *testing.T) {
 	// case a routing layer would misroute if oldestBlock were reported as 0.
 	t.Run("full_eip8252_persist_receipts", func(t *testing.T) {
 		t.Parallel()
-		api, head := setupAPI(t, testFullModeEIP8252, false, true)
+		api, head := setupAPI(t, testMinimalMode, false, true)
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance

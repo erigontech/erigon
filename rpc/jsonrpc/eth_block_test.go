@@ -357,7 +357,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 		return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	}
 
-	fullMode := prune.Mode{
+	legacyFull := prune.Mode{
 		Initialised: true,
 		History:     prune.Distance(pruneDistance),
 		Blocks:      prune.KeepPostMergeBlocksPruneMode,
@@ -372,7 +372,7 @@ func TestGetBlockByNumber_BlockPruneGating(t *testing.T) {
 	// gate — GetBlockByNumber must succeed even for blocks older than the state-history window.
 	t.Run("full_mode_old_block_accessible", func(t *testing.T) {
 		t.Parallel()
-		api := setup(t, fullMode)
+		api := setup(t, legacyFull)
 		b, err := api.GetBlockByNumber(t.Context(), rpc.BlockNumber(0), false)
 		require.NoError(t, err)
 		require.NotNil(t, b)
