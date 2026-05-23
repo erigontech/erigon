@@ -892,34 +892,36 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	if blockNum == 15537394 {
+	// Touch accounts and code as-is.
+	for addr := range accessed.Addresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr := range accessed.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+	// Touch storage, skipping zero→zero no-ops: slots that had zero value both
+	// before and after the block never affect the trie structure. Including them
+	// causes DeleteUpdate calls on absent keys which corrupt the in-flight afterMap
+	// and trigger spurious CollapseTracer fires.
+	{
 		preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-		var diagStepSize uint64 = 100_000
-		for addr, slots := range accessed.Storage {
-			for slot := range slots {
-				plainKey := append(addr.Bytes(), slot.Bytes()...)
-				enc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, diagStepSize)
-				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, diagStepSize)
-				if len(enc) == 0 {
-					fmt.Printf("[WITNESS_DIAG] STORAGE_DELETE block=%d addr=%x slot=%x preVal=%x\n", blockNum, addr, slot, preEnc)
+		stepSize := domains.StepSize()
+		for addr, keys := range accessed.Storage {
+			for key := range keys {
+				plainKey := append(addr.Bytes(), key.Bytes()...)
+				postEnc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(postEnc) == 0 {
+					preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
+					if len(preEnc) == 0 {
+						continue
+					}
 				}
-			}
-		}
-		for addr := range accessed.Addresses {
-			enc, _, _ := splitStateReader.Read(kv.AccountsDomain, addr.Bytes(), diagStepSize)
-			preEnc, _, _ := preReader.Read(kv.AccountsDomain, addr.Bytes(), diagStepSize)
-			if len(enc) == 0 {
-				fmt.Printf("[WITNESS_DIAG] ACCOUNT_DELETE block=%d addr=%x preVal=%x\n", blockNum, addr, preEnc)
+				sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
 			}
 		}
 	}
 
-	accessed.touchAll(sdCtx)
-
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		if blockNum == 15537394 {
-			fmt.Printf("[WITNESS_DIAG] COLLAPSE_SIBLING block=%d path=%x len=%d\n", blockNum, hashedKeyPath, len(hashedKeyPath))
-		}
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
