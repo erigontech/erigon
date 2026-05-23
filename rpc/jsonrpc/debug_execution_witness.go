@@ -892,10 +892,34 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
+	if blockNum == 15537394 {
+		preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+		var diagStepSize uint64 = 100_000
+		for addr, slots := range accessed.Storage {
+			for slot := range slots {
+				plainKey := append(addr.Bytes(), slot.Bytes()...)
+				enc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, diagStepSize)
+				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, diagStepSize)
+				if len(enc) == 0 {
+					fmt.Printf("[WITNESS_DIAG] STORAGE_DELETE block=%d addr=%x slot=%x preVal=%x\n", blockNum, addr, slot, preEnc)
+				}
+			}
+		}
+		for addr := range accessed.Addresses {
+			enc, _, _ := splitStateReader.Read(kv.AccountsDomain, addr.Bytes(), diagStepSize)
+			preEnc, _, _ := preReader.Read(kv.AccountsDomain, addr.Bytes(), diagStepSize)
+			if len(enc) == 0 {
+				fmt.Printf("[WITNESS_DIAG] ACCOUNT_DELETE block=%d addr=%x preVal=%x\n", blockNum, addr, preEnc)
+			}
+		}
+	}
+
 	accessed.touchAll(sdCtx)
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		log.Debug("[debug_executionWitness] node collapse detected", "path", commitment.NibblesToString(hashedKeyPath), "len", len(hashedKeyPath))
+		if blockNum == 15537394 {
+			fmt.Printf("[WITNESS_DIAG] COLLAPSE_SIBLING block=%d path=%x len=%d\n", blockNum, hashedKeyPath, len(hashedKeyPath))
+		}
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
