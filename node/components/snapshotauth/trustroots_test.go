@@ -120,3 +120,54 @@ func TestParseTrustRoots_Errors(t *testing.T) {
 		})
 	}
 }
+
+// TestParseTrustRoots_DIDKeyMalformed pins each rejection branch inside
+// parseDIDKeyRoot. The existing TestParseTrustRoots_Errors covers the
+// outer dispatcher (did:web, did:example) but not the inner fences:
+//   - wrong multibase prefix (q, k, ...) inside did:key
+//   - valid prefix but malformed base58 payload
+//   - valid base58 but the decoded bytes don't carry the secp256k1
+//     multicodec prefix
+//   - valid prefix + secp256k1 multicodec but trailing pubkey wrong length
+func TestParseTrustRoots_DIDKeyMalformed(t *testing.T) {
+	cases := map[string]struct {
+		spec    string
+		errFrag string
+	}{
+		"wrong multibase":                 {"did:key:qABCDEF", "base58btc multibase"},
+		"bad base58 after z":              {"did:key:z!!!notbase58!!!", "base58 decode"},
+		"valid base58, no secp prefix":    {"did:key:zABC", "not a secp256k1 key"},
+		"secp prefix, short pubkey":       {didKeyWithCustomPubBytes(t, []byte{0x01, 0x02, 0x03}), "33 bytes"},
+		"secp prefix, wrong-length 32 b":  {didKeyWithCustomPubBytes(t, bytesN(32)), "33 bytes"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseTrustRoots(tc.spec)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.errFrag)
+		})
+	}
+}
+
+// didKeyWithCustomPubBytes builds a did:key string with the secp256k1
+// multicodec prefix followed by the caller's pubkey bytes. Used to
+// drive the post-prefix validateCompressedPubkey rejection branches.
+func didKeyWithCustomPubBytes(t *testing.T, pub []byte) string {
+	t.Helper()
+	payload := append([]byte{}, didKeySecp256k1Prefix...)
+	payload = append(payload, pub...)
+	return "did:key:z" + base58Encode(payload)
+}
+
+func bytesN(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(i + 1)
+	}
+	return b
+}
+
+// base58Encode is a thin wrapper so the test reads naturally. Uses the
+// same btcsuite base58 the production parser uses, so a round-trip
+// through the same library is guaranteed.
+func base58Encode(b []byte) string { return base58.Encode(b) }

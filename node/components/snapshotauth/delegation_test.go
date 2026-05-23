@@ -218,6 +218,106 @@ func TestParseCapabilities(t *testing.T) {
 	}
 }
 
+// TestNew_NilIssuerPubkey pins the nil-input fence at construction
+// time. compressedPubKey rejects a nil ecdsa.PublicKey (or one with
+// nil X / Y); New wraps that as "issuer pubkey".
+func TestNew_NilIssuerPubkey(t *testing.T) {
+	audience := newKey(t)
+	_, err := New(
+		nil, &audience.PublicKey,
+		[]string{string(CapAdvertise)},
+		time.Time{}, time.Time{}, 0, nil,
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "issuer pubkey")
+}
+
+// TestNew_NilAudiencePubkey is the audience counterpart of
+// TestNew_NilIssuerPubkey.
+func TestNew_NilAudiencePubkey(t *testing.T) {
+	issuer := newKey(t)
+	_, err := New(
+		&issuer.PublicKey, nil,
+		[]string{string(CapAdvertise)},
+		time.Time{}, time.Time{}, 0, nil,
+	)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audience pubkey")
+}
+
+// TestDecode_RejectsUnsupportedVersion pins the schema fence: Decode
+// MUST reject any version other than CurrentVersion. v1 in particular
+// existed before the ParentHash migration; loading a v1 byte stream
+// under the v2 shape would silently misinterpret fields.
+func TestDecode_RejectsUnsupportedVersion(t *testing.T) {
+	issuer := newKey(t)
+	audience := newKey(t)
+	d, err := New(
+		&issuer.PublicKey, &audience.PublicKey,
+		[]string{string(CapAdvertise)},
+		time.Time{}, time.Time{}, 0, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, d.Sign(issuer))
+
+	// Re-encode with a doctored version to bypass New()'s stamp.
+	d.Version = 1
+	encoded, err := d.Encode()
+	require.NoError(t, err)
+
+	_, err = Decode(encoded)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported delegation version")
+}
+
+// TestDecode_RejectsShortIssuerPubkey pins the CBOR-shape fence: an
+// issuer field of the wrong length is rejected before any signature
+// verification. Defence against malformed CBOR where the issuer slot is
+// truncated or padded.
+func TestDecode_RejectsShortIssuerPubkey(t *testing.T) {
+	issuer := newKey(t)
+	audience := newKey(t)
+	d, err := New(
+		&issuer.PublicKey, &audience.PublicKey,
+		[]string{string(CapAdvertise)},
+		time.Time{}, time.Time{}, 0, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, d.Sign(issuer))
+
+	// Truncate Issuer to PubKeyLen-1 bytes and re-encode.
+	d.Issuer = d.Issuer[:PubKeyLen-1]
+	encoded, err := d.Encode()
+	require.NoError(t, err)
+
+	_, err = Decode(encoded)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "issuer pubkey length")
+}
+
+// TestDecode_RejectsShortAudiencePubkey is the audience counterpart of
+// the issuer-length fence. Caught at decode before the chain walker
+// ever examines audience continuity.
+func TestDecode_RejectsShortAudiencePubkey(t *testing.T) {
+	issuer := newKey(t)
+	audience := newKey(t)
+	d, err := New(
+		&issuer.PublicKey, &audience.PublicKey,
+		[]string{string(CapAdvertise)},
+		time.Time{}, time.Time{}, 0, nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, d.Sign(issuer))
+
+	d.Audience = d.Audience[:PubKeyLen-1]
+	encoded, err := d.Encode()
+	require.NoError(t, err)
+
+	_, err = Decode(encoded)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "audience pubkey length")
+}
+
 func newKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
 	k, err := crypto.GenerateKey()

@@ -341,6 +341,187 @@ func TestVerify_NoRootsConfigured(t *testing.T) {
 	require.Contains(t, err.Error(), "no trust roots configured")
 }
 
+// TestVerify_ParentHashNotResolvable pins the rejection path when a
+// non-root leaf carries a ParentHash that the supplied ParentResolver
+// can't resolve — e.g. a peer references a parent UCAN the consumer
+// has not fetched. Verify must fail at parent resolution, not silently
+// proceed.
+func TestVerify_ParentHashNotResolvable(t *testing.T) {
+	keys := newChainKeys(t)
+	now := time.Now()
+
+	// Mid delegation references a root we never register with the resolver.
+	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	rootEnc := mustEncoded(t, rootDel)
+	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
+		[]string{string(CapAdvertise)}, 1, rootEnc)
+	leafCBOR := mustEncoded(t, midDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
+	_, err := v.Verify(leafCBOR, compressed(t, keys.leaf),
+		[]string{string(CapAdvertise)}, now,
+		// Empty resolver — knows about no parents.
+		parentResolver())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "resolve parent")
+}
+
+// TestVerify_ResolvedParentHashMismatch pins the rejection path when a
+// resolver returns CBOR that does not hash to the child's ParentHash —
+// the defense against a resolver substituting a different parent. The
+// Verify code re-hashes the returned bytes and rejects on mismatch.
+func TestVerify_ResolvedParentHashMismatch(t *testing.T) {
+	keys := newChainKeys(t)
+	now := time.Now()
+
+	// Real root + mid chain.
+	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	rootEnc := mustEncoded(t, rootDel)
+	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
+		[]string{string(CapAdvertise)}, 1, rootEnc)
+	leafCBOR := mustEncoded(t, midDel)
+
+	// Build a substitute parent — a totally different delegation that
+	// happens to be well-formed. The resolver returns it for the hash
+	// the child actually references.
+	otherKey := newKey(t)
+	otherDel := mustSignedDelegation(t, otherKey, keys.mid,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	otherEnc := mustEncoded(t, otherDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
+	_, err := v.Verify(leafCBOR, compressed(t, keys.leaf),
+		[]string{string(CapAdvertise)}, now,
+		// Resolver returns otherEnc bytes regardless of the requested hash —
+		// a tampered/substituting resolver.
+		func(_ []byte) ([]byte, error) { return otherEnc, nil })
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not hash to")
+}
+
+// TestVerify_NonRootWithNilResolver pins the rejection path when a
+// non-root leaf is presented but no ParentResolver is supplied. Verify
+// cannot follow the chain without one — silently treating the leaf as
+// root would let a non-root leaf escape root-issuer matching.
+func TestVerify_NonRootWithNilResolver(t *testing.T) {
+	keys := newChainKeys(t)
+	now := time.Now()
+
+	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	rootEnc := mustEncoded(t, rootDel)
+	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
+		[]string{string(CapAdvertise)}, 1, rootEnc)
+	leafCBOR := mustEncoded(t, midDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
+	_, err := v.Verify(leafCBOR, compressed(t, keys.leaf),
+		[]string{string(CapAdvertise)}, now, nil) // nil resolver
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no ParentResolver")
+}
+
+// TestVerify_ChainDepthExceeded pins the rejection path when a chain
+// presents more than maxChainDepth links. Defense against unbounded or
+// cyclic parent references in malicious artefacts.
+func TestVerify_ChainDepthExceeded(t *testing.T) {
+	now := time.Now()
+
+	// Build a chain of (maxChainDepth + 1) links so the walker's
+	// len(chainLeafFirst) >= maxChainDepth check trips before reaching
+	// the root. numKeys = numLinks + 1; each link sits between two
+	// adjacent keys.
+	numLinks := maxChainDepth + 1
+	keysPath := make([]*ecdsa.PrivateKey, numLinks+1)
+	for i := range keysPath {
+		keysPath[i] = newKey(t)
+	}
+
+	var parentEnc []byte
+	parents := []([]byte){}
+	// Root's DepthCap covers the whole chain; each link decrements by 1.
+	rootCap := uint16(numLinks + 2)
+	for i := 0; i < numLinks; i++ {
+		dc := rootCap - uint16(i)
+		d := mustSignedDelegation(t, keysPath[i], keysPath[i+1],
+			[]string{string(CapAdvertise), string(CapDelegate)},
+			dc, parentEnc)
+		enc := mustEncoded(t, d)
+		parents = append(parents, enc)
+		parentEnc = enc
+	}
+	leafCBOR := parentEnc
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keysPath[0])}})
+	_, err := v.Verify(leafCBOR, compressed(t, keysPath[numLinks]),
+		[]string{string(CapAdvertise)}, now, parentResolver(parents...))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "max depth")
+}
+
+// TestVerify_ParentDepthCapZero pins the leaf-cannot-re-delegate fence
+// (chain.go's `parent.DepthCap == 0` check). A parent with DepthCap=0
+// is a leaf authority — any child claiming to chain from it must be
+// rejected even if the parent has CapDelegate and the child's own
+// DepthCap is also 0 (which would otherwise pass the depth-attenuation
+// check via uint16 underflow).
+func TestVerify_ParentDepthCapZero(t *testing.T) {
+	keys := newChainKeys(t)
+
+	// Root has CapDelegate (so the lacks-delegate check passes) but
+	// DepthCap=0 — it cannot re-delegate.
+	rootDel := mustSignedDelegation(t, keys.root, keys.mid,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 0, nil)
+	rootEnc := mustEncoded(t, rootDel)
+	midDel := mustSignedDelegation(t, keys.mid, keys.leaf,
+		[]string{string(CapAdvertise)}, 0, rootEnc)
+	enc := mustEncoded(t, midDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, keys.root)}})
+	_, err := v.Verify(enc, compressed(t, keys.leaf),
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(rootEnc))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "is a leaf")
+}
+
+// TestVerify_LeafNotSelfIssued documents the responsibility boundary:
+// snapshotauth's Verify checks signature + chain-integrity
+// (parent.Audience == child.Issuer) but does NOT enforce that a leaf is
+// self-issued (issuer == audience). Content UCANs in the V2 manifest
+// flow are minted self-issued by MintContentUCAN, but that invariant
+// is established at mint time, not policed by the chain verifier — any
+// consumer that interprets a leaf's audience as the publisher identity
+// must verify self-issue itself.
+//
+// Pins current behavior. If a future change adds self-issue enforcement
+// inside snapshotauth Verify, update this test to assert rejection.
+func TestVerify_LeafNotSelfIssued(t *testing.T) {
+	rootKey := newKey(t)
+	operatorA := newKey(t)
+	operatorB := newKey(t)
+
+	// Authority: root → operatorA, with CapDelegate so operatorA can
+	// re-issue. CapAdvertise present so the leaf can chain it (subset).
+	authority := mustSignedDelegation(t, rootKey, operatorA,
+		[]string{string(CapAdvertise), string(CapDelegate)}, 2, nil)
+	authorityEnc := mustEncoded(t, authority)
+
+	// Leaf: issued by operatorA, audience = operatorB (NOT self-issued).
+	// Only CapAdvertise so capability attenuation passes.
+	leafDel := mustSignedDelegation(t, operatorA, operatorB,
+		[]string{string(CapAdvertise)}, 0, authorityEnc)
+	leafEnc := mustEncoded(t, leafDel)
+
+	v := NewVerifier([]TrustRoot{{Kind: RootENR, Pubkey: compressed(t, rootKey)}})
+	res, err := v.Verify(leafEnc, compressed(t, operatorB),
+		[]string{string(CapAdvertise)}, time.Now(), parentResolver(authorityEnc))
+	require.NoError(t, err, "snapshotauth does NOT enforce leaf self-issue; this is a caller invariant")
+	require.NotEqual(t, res.Leaf.Issuer, res.Leaf.Audience,
+		"leaf is not self-issued — caller must check this if it relies on it")
+}
+
 func mustSignedDelegation(t *testing.T, issuerKey, audienceKey *ecdsa.PrivateKey, caps []string, depth uint16, parent []byte) *Delegation {
 	t.Helper()
 	d, err := New(&issuerKey.PublicKey, &audienceKey.PublicKey,
