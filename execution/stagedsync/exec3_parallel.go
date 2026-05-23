@@ -319,6 +319,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// would hang forever.
 		rootResultsClosed := false
 
+		// deferredRootErr stashes ErrWrongTrieRoot from the calculator so a
+		// later blockResult's post-execution validator (bad gas used, bad
+		// receipts, bad bloom, etc.) can supersede it. Block-validation
+		// errors take precedence over trie-root mismatches: a tx returning
+		// the wrong error category here breaks eest's validation taxonomy
+		// (the test expects the specific block-level error, not the
+		// downstream trie consequence). Surfaced only after applyResults
+		// closes and no block-validation error fired.
+		var deferredRootErr error
+
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
 		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
 		// separate entries).  This differs from the old StateUpdates count which
@@ -356,6 +366,28 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			return nil
 		}
 
+		// processCommit runs handleCommitResult and defers ErrWrongTrieRoot
+		// instead of returning it. Other commitment errors stay fast-fail.
+		// The deferred root error is surfaced only after applyResults
+		// closes, so any block-validation error that fires for the same or
+		// a later block first returns from the applyResults branch with
+		// ErrInvalidBlock — matching serial's "validation precedes
+		// commitment" ordering and keeping eest's error categorisation
+		// honest.
+		processCommit := func(cr commitmentResult) error {
+			err := handleCommitResult(cr)
+			if err == nil {
+				return nil
+			}
+			if errors.Is(err, ErrWrongTrieRoot) {
+				if deferredRootErr == nil {
+					deferredRootErr = err
+				}
+				return nil
+			}
+			return err
+		}
+
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
 		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
 		// loop owns shutdown sequencing. Adding context checks here causes
@@ -372,7 +404,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// channel hangs forever).
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := handleCommitResult(cr); err != nil {
+							if err := processCommit(cr); err != nil {
 								return err
 							}
 						}
@@ -411,6 +443,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+					}
+					// Surface the deferred trie-root error here: no
+					// block-validation error fired during the drain, so
+					// the wrong-root stands.
+					if deferredRootErr != nil {
+						return deferredRootErr
 					}
 					if pe.reachedMaxBlock.Load() {
 						return nil
@@ -598,7 +636,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					rootResultsClosed = true
 					continue
 				}
-				if err := handleCommitResult(cr); err != nil {
+				if err := processCommit(cr); err != nil {
 					return err
 				}
 			case <-logEvery.C:
