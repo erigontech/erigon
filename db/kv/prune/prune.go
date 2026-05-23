@@ -417,7 +417,7 @@ func tableScanningPrune(
 				return nil, fmt.Errorf("range-del dups for %s: %w", filenameBase, err)
 			}
 			if deleted > 0 {
-				stat.MinTxNum = min(stat.MinTxNum, txNum)
+				stat.MinTxNum = min(stat.MinTxNum, minTxNum)
 				stat.MaxTxNum = max(stat.MaxTxNum, txTo-1)
 				stat.PruneCountValues += deleted
 				if deleted > 1 {
@@ -452,7 +452,7 @@ func tableScanningPrune(
 					return nil, fmt.Errorf("range-del-after dups for %s: %w", filenameBase, err)
 				}
 				if deleted > 0 {
-					stat.MinTxNum = min(stat.MinTxNum, lastDupTxNum)
+					stat.MinTxNum = min(stat.MinTxNum, minTxNum)
 					stat.MaxTxNum = max(stat.MaxTxNum, (stepThreshold-1)*stepSize)
 					stat.PruneCountValues += deleted
 					if deleted > 1 {
