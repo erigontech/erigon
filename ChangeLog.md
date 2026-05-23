@@ -1,8 +1,33 @@
 # Changelog
 
-## [3.5.0] – 2026-04-25
+## [3.5.0] – TBD
 
 ### Breaking Changes
+
+#### Single p2p listener: `--p2p.allowed-ports` removed, all eth versions multiplex on `--port`
+
+Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments — per-protocol Servers each signed an ENR under the same Node ID, and only the highest-`seq` one survived in the DHT, so peers dialed the wrong listener (#21335).
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| Inbound peer ports | `30303`, `30304`, `30305`, … (one per eth version) | `30303` only |
+| `--p2p.allowed-ports` flag | Picked one port per protocol from this list | **Removed** — passing it now errors |
+| `--maxpeers` semantics | Per-protocol cap; actual ceiling ≈ N × maxpeers | Honest total cap |
+| Default `--maxpeers` | `32` | `64` (compensates for the now-honest cap) |
+| Enode database directory | `<datadir>/nodes/eth68`, `<datadir>/nodes/eth69`, … | `<datadir>/nodes/eth` |
+
+**Migration:**
+
+- Remove `--p2p.allowed-ports=...` from CLI args / config files; it is no longer recognised.
+- Firewall, Kubernetes Service, and monitoring rules that explicitly opened 30304/30305 can drop those entries — only `--port` is bound now.
+- If you previously lowered `--maxpeers` because you knew the per-protocol multiplication inflated the real ceiling, raise it back to the target total (the cap is now what the flag says).
+- First run after upgrade loses the warm peer cache in `nodes/eth{68,69,…}` — nothing on disk is deleted, the directories are simply no longer read; discovery rebuilds the peer set from bootnodes within a few minutes.
+
+Standalone `sentry` binary (`cmd/sentry`) and `--sentry.api.addr` (remote sentry over gRPC) are unaffected — neither had the bug.
+
+---
 
 #### `debug_trace*` RPC: `enableMemory` / `enableReturnData` replace `disableMemory` / `disableReturnData`
 
