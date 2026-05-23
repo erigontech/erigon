@@ -243,6 +243,14 @@ type mockGraphQLAPI struct {
 	callResult   *jsonrpc.GraphQLCallResult
 	callErr      error
 
+	estimateGasBlockNum rpc.BlockNumber
+	estimateGasArgs     ethapi.CallArgs
+	estimateGasResult   uint64
+	estimateGasErr      error
+
+	gasPriceResult string
+	gasPriceErr    error
+
 	sendRawTx     hexutil.Bytes
 	sendRawResult common.Hash
 	sendRawErr    error
@@ -273,6 +281,14 @@ func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, ar
 	m.callBlockNum = blockNumber
 	m.callArgs = args
 	return m.callResult, m.callErr
+}
+func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
+	m.estimateGasBlockNum = blockNumber
+	m.estimateGasArgs = args
+	return m.estimateGasResult, m.estimateGasErr
+}
+func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
+	return m.gasPriceResult, m.gasPriceErr
 }
 func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	m.getLogsCrit = crit
@@ -513,6 +529,124 @@ func TestMutationResolver_SendRawTransaction(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+func TestBlockResolver_EstimateGas(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	t.Run("success — block number and args forwarded", func(t *testing.T) {
+		mock := &mockGraphQLAPI{estimateGasResult: 42000}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.EstimateGas(context.Background(), &model.Block{Number: 7}, model.CallData{To: &toAddr})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != 42000 {
+			t.Errorf("gas: want 42000, got %d", got)
+		}
+		if mock.estimateGasBlockNum != 7 {
+			t.Errorf("block number not forwarded: got %d", mock.estimateGasBlockNum)
+		}
+		if mock.estimateGasArgs.To == nil || *mock.estimateGasArgs.To != common.HexToAddress(toAddr) {
+			t.Errorf("To address not forwarded: %v", mock.estimateGasArgs.To)
+		}
+	})
+
+	t.Run("error from EstimateGas propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{estimateGasErr: errors.New("out of gas")}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.EstimateGas(context.Background(), &model.Block{Number: 1}, model.CallData{})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid calldata returns error before API call", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
+		bad := "not-an-address"
+		_, err := r.EstimateGas(context.Background(), &model.Block{Number: 1}, model.CallData{To: &bad})
+		if err == nil {
+			t.Fatal("expected error for invalid to address, got nil")
+		}
+		if mock.estimateGasBlockNum != 0 {
+			t.Error("API should not be called when calldata is invalid")
+		}
+	})
+}
+
+func TestQueryResolver_GasPrice(t *testing.T) {
+	t.Run("success — returns price string", func(t *testing.T) {
+		mock := &mockGraphQLAPI{gasPriceResult: "0x3b9aca00"}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		got, err := r.GasPrice(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "0x3b9aca00" {
+			t.Errorf("gasPrice: want %q, got %q", "0x3b9aca00", got)
+		}
+	})
+
+	t.Run("error from GasPrice propagates", func(t *testing.T) {
+		mock := &mockGraphQLAPI{gasPriceErr: errors.New("node not ready")}
+		r := &queryResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.GasPrice(context.Background())
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+func TestAccountResolver_Storage(t *testing.T) {
+	validAddr := "0x1234567890123456789012345678901234567890"
+	validSlot := "0x" + strings.Repeat("ab", 32)
+
+	t.Run("success", func(t *testing.T) {
+		mock := &mockGraphQLAPI{}
+		r := &accountResolver{&Resolver{GraphQLAPI: mock}}
+		_, err := r.Storage(context.Background(), &model.Account{Address: validAddr}, validSlot)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	invalidAddrs := []struct {
+		name string
+		addr string
+	}{
+		{"empty", ""},
+		{"not hex", "not-an-address"},
+		{"too short", "0x1234"},
+	}
+	for _, tt := range invalidAddrs {
+		t.Run("invalid address — "+tt.name, func(t *testing.T) {
+			r := &accountResolver{&Resolver{}}
+			_, err := r.Storage(context.Background(), &model.Account{Address: tt.addr}, validSlot)
+			if err == nil {
+				t.Fatalf("address %q: expected error, got nil", tt.addr)
+			}
+		})
+	}
+
+	invalidSlots := []struct {
+		name string
+		slot string
+	}{
+		{"no 0x prefix", strings.Repeat("ab", 32)},
+		{"too short", "0xabcd"},
+		{"too long", "0x" + strings.Repeat("ab", 33)},
+		{"decimal string", "12345"},
+	}
+	for _, tt := range invalidSlots {
+		t.Run("invalid slot — "+tt.name, func(t *testing.T) {
+			r := &accountResolver{&Resolver{}}
+			_, err := r.Storage(context.Background(), &model.Account{Address: validAddr}, tt.slot)
+			if err == nil {
+				t.Fatalf("slot %q: expected error, got nil", tt.slot)
+			}
+		})
+	}
 }
 
 func TestQueryResolver_Transaction_InvalidHash(t *testing.T) {
