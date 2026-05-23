@@ -590,10 +590,10 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 	return nil, e.err
 }
 
-// KeyCommitmentState is the commitment-domain key under which the latest
-// root hash and tree state are stored. Single definition lives in the
-// commitment package so BranchCache can exclude it by construction.
-var KeyCommitmentState = commitment.KeyCommitmentState
+// by that key stored latest root hash and tree state
+const keyCommitmentStateS = "state"
+
+var KeyCommitmentState = []byte(keyCommitmentStateS)
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
