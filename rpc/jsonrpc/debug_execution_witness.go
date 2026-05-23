@@ -461,7 +461,7 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 
 	// Geth always emits these optional fields as null when absent.
 	nullFields := []string{
-		"blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
+		"blockAccessListHash", "blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
 
 	for _, field := range nullFields {
 		if _, ok := m[field]; !ok {
@@ -469,13 +469,6 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 		}
 	}
 
-	// Geth uses "balHash" instead of Erigon's "blockAccessListHash".
-	if v, ok := m["blockAccessListHash"]; ok {
-		m["balHash"] = v
-		delete(m, "blockAccessListHash")
-	} else {
-		m["balHash"] = nil
-	}
 	delete(m, "size")
 
 	return m
@@ -892,36 +885,66 @@ func detectCollapseSiblings(
 			blockNum, seekBlockNum, parentNum)
 	}
 
-	// Touch accounts and code as-is.
+	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	stepSize := domains.StepSize()
+
+	// Touch accounts, logging zero→zero empties for diagnosis.
+	var acctSkipped int
 	for addr := range accessed.Addresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+		plainKey := addr.Bytes()
+		postEnc, _, _ := splitStateReader.Read(kv.AccountsDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := preReader.Read(kv.AccountsDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				acctSkipped++
+				log.Warn("[debug_executionWitness] account zero→zero", "block", blockNum, "addr", addr)
+				continue
+			}
+		}
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
 	}
+	log.Warn("[debug_executionWitness] account touch stats", "block", blockNum,
+		"total", len(accessed.Addresses), "skipped", acctSkipped, "touched", len(accessed.Addresses)-acctSkipped)
+
 	for addr := range accessed.CodeAddrs {
 		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
 	}
+
 	// Touch storage, skipping zero→zero no-ops: slots that had zero value both
 	// before and after the block never affect the trie structure. Including them
 	// causes DeleteUpdate calls on absent keys which corrupt the in-flight afterMap
 	// and trigger spurious CollapseTracer fires.
-	{
-		preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-		stepSize := domains.StepSize()
-		for addr, keys := range accessed.Storage {
-			for key := range keys {
-				plainKey := append(addr.Bytes(), key.Bytes()...)
-				postEnc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, stepSize)
-				if len(postEnc) == 0 {
-					preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
-					if len(preEnc) == 0 {
-						continue
-					}
+	var storSkipped int
+	for addr, keys := range accessed.Storage {
+		for key := range keys {
+			plainKey := append(addr.Bytes(), key.Bytes()...)
+			postEnc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, stepSize)
+			if len(postEnc) == 0 {
+				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(preEnc) == 0 {
+					storSkipped++
+					continue
 				}
-				sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
 			}
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
 		}
 	}
+	log.Warn("[debug_executionWitness] storage touch stats", "block", blockNum,
+		"totalSlots", func() int {
+			n := 0
+			for _, ks := range accessed.Storage {
+				n += len(ks)
+			}
+			return n
+		}(),
+		"skipped", storSkipped)
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
+		kind := "account"
+		if len(hashedKeyPath) > 64 {
+			kind = "storage"
+		}
+		log.Warn("[debug_executionWitness] collapse fire", "block", blockNum, "kind", kind, "pathLen", len(hashedKeyPath), "path", fmt.Sprintf("%x", hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -929,6 +952,8 @@ func detectCollapseSiblings(
 	if err != nil {
 		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
+
+	log.Warn("[debug_executionWitness] collapse detection done", "block", blockNum, "totalFires", len(siblingPaths))
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
