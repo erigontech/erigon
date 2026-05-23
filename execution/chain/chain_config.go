@@ -127,6 +127,15 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// Fork lineage — populated only for a derived (shadow-fork) chain.
+	// The three together pin the cut deterministically: which parent chain,
+	// at which block, against which exact V2 manifest snapshot. A non-empty
+	// Parent makes this Config a fork; nil/empty means a root chain.
+	// See docs/plans/20260522-fork-identification-impl.md § Phase 2.
+	Parent             string   `json:"parent,omitempty"`             // parent chain name (e.g. "mainnet", "sepolia")
+	CutBlock           uint64   `json:"cutBlock,omitempty"`           // post-merge EL block at which the fork diverged
+	ParentManifestHash [20]byte `json:"parentManifestHash,omitempty"` // sha256-truncated info-hash of parent's V2 manifest at cut time
 }
 
 // IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.

@@ -67,8 +67,18 @@ type ChainTomlV2 struct {
 	// Each entry pins where its fork activated (block height or
 	// timestamp) so a consumer can map any file to its fork epoch and
 	// derive the chain's EIP-2124 fork ID. A contentious fork is NOT an
-	// entry here — it is a separate manifest with a [view] section.
+	// entry here — it is a separate manifest with a [parent] section.
 	Forks []ForkActivation `toml:"forks,omitempty"`
+
+	// Parent is populated only on a fork manifest. It records the
+	// derived chain's lineage so a fork-follower can wire both EL and
+	// CL halves at bootstrap: which parent chain, where the cut
+	// happened, against which parent V2 manifest, and the CL details
+	// (genesis-validators-root + fork-version + config name) needed to
+	// stand up the fork's Caplin alongside the EL. Absent on a root
+	// chain. See docs/plans/20260522-fork-identification-impl.md
+	// § Phase 2.
+	Parent *ParentSection `toml:"parent,omitempty"`
 
 	// AuthorityUCANHash is the torrent infohash of the Authority UCAN
 	// (chain.ucan.authority.<enr-fp>.<rev>.bin) — the long-lived
@@ -169,6 +179,64 @@ type ForkActivation struct {
 	Name  string `toml:"name,omitempty"`
 	Block uint64 `toml:"block,omitempty"`
 	Time  uint64 `toml:"time,omitempty"`
+}
+
+// ParentSection records a fork chain's lineage. Present only on a
+// derived (shadow-fork) manifest. EL fields come from the producer
+// chain.Config (Parent + CutBlock + ParentManifestHash); CL fields
+// are needed so a fork-follower can stand up the fork's Caplin
+// alongside the EL — post-merge update processing is driven by the
+// CL via Engine API, so a fork that omits CL identity cannot advance
+// past the cut block.
+//
+// Hex-encoded strings are lower-case without `0x` prefix.
+type ParentSection struct {
+	// Chain is the parent chain's name (e.g. "mainnet", "sepolia").
+	Chain string `toml:"chain"`
+
+	// ManifestHash is hex(20-byte info-hash) of the parent's V2 manifest
+	// at the time the fork was created — the content-addressed pin.
+	ManifestHash string `toml:"manifest_hash"`
+
+	// CutBlock is the EL block number at which the fork diverged.
+	// Must resolve to a post-merge block; pre-merge cuts are rejected
+	// at fork-from time (we don't support PoW processing).
+	CutBlock uint64 `toml:"cut_block"`
+
+	// CutTxNum is the post-cut starting txnum (parent block's max
+	// txnum + 1, or the cut block's first txnum). Aligns state-domain
+	// boundaries with the EL block boundary.
+	CutTxNum uint64 `toml:"cut_tx_num"`
+
+	// CutBlockHash is hex(32-byte) of the parent block at CutBlock.
+	// Cross-references the EL block header so a fork-follower can
+	// independently confirm the cut point.
+	CutBlockHash string `toml:"cut_block_hash"`
+
+	// Name is the fork's human-readable identifier
+	// (e.g. "mainnet-fork-23760000", "fusaka-msf-0"). Used by tooling
+	// for display; not load-bearing for verification.
+	Name string `toml:"name,omitempty"`
+
+	// NetworkID is the fork's p2p network identity. Distinct from the
+	// chain.Config.ChainID (which stays = parent for EL replay
+	// protection); NetworkID makes the fork's p2p network
+	// distinguishable from the parent's. Matches ethpandaops shadow-fork
+	// `shadowfork_network_id`.
+	NetworkID uint64 `toml:"network_id"`
+
+	// CLGenesisValidatorsRoot is hex(32-byte) of the fork CL's
+	// genesis_validators_root. A fork-follower's Caplin uses this as
+	// the trust anchor for the fork's CL state.
+	CLGenesisValidatorsRoot string `toml:"cl_genesis_validators_root"`
+
+	// CLForkVersion is hex(4-byte) of the fork CL's GENESIS_FORK_VERSION.
+	// Distinct from parent's to keep gossip topics and signatures
+	// disjoint.
+	CLForkVersion string `toml:"cl_fork_version"`
+
+	// CLConfigName is the fork CL's CONFIG_NAME (e.g. "msf-0").
+	CLConfigName string `toml:"cl_config_name,omitempty"`
 }
 
 // BuildChainIdentity computes the manifest's identity fields for the

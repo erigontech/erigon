@@ -777,3 +777,51 @@ func TestBuildChainIdentity_NoForks(t *testing.T) {
 	require.NotEmpty(t, gf)
 	require.Empty(t, forks)
 }
+
+// TestParentSection_RoundTrip pins the V2 manifest's [parent] section
+// — populated only on a fork (shadow-fork) manifest. Round-trip must
+// preserve every field including the CL identity fields that let a
+// fork-follower stand up Caplin alongside the EL.
+func TestParentSection_RoundTrip(t *testing.T) {
+	original := &ChainTomlV2{
+		Version:     2,
+		GenesisFork: "deadbeef",
+		Parent: &ParentSection{
+			Chain:                   "mainnet",
+			ManifestHash:            "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:                23760000,
+			CutTxNum:                987654321,
+			CutBlockHash:            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			Name:                    "mainnet-fork-23760000",
+			NetworkID:               23760000,
+			CLGenesisValidatorsRoot: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+			CLForkVersion:           "10000001",
+			CLConfigName:            "msf-0",
+		},
+	}
+
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "[parent]",
+		"section header must be emitted as `[parent]`")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent, "Parent section must round-trip")
+	require.Equal(t, original.Parent, parsed.Parent)
+}
+
+// TestParentSection_OmittedOnRootChain confirms a root-chain manifest
+// (no fork) emits NO `[parent]` section — back-compat preserved for
+// every chain that exists today.
+func TestParentSection_OmittedOnRootChain(t *testing.T) {
+	original := &ChainTomlV2{Version: 2, GenesisFork: "deadbeef"}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "[parent]",
+		"root chain must not emit a [parent] section")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.Nil(t, parsed.Parent)
+}
