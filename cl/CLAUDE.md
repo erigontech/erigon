@@ -22,7 +22,7 @@ verified against the Go code in this repository.
 | Go file/function | Spec section |
 | --- | --- |
 | `forkchoice.go`: `NewForkChoiceStore` | Phase0 `get_forkchoice_store`; Gloas `get_forkchoice_store` and extended `Store` fields |
-| `forkchoice.go`: `GetRecentExecutionPayloadStatus`, `IsBlobDataAvailable`, pending EL payload helpers | Gloas `Store.payload_states`, `Store.payloads`; Gloas payload-attestation API support; Fulu data-column availability support |
+| `forkchoice.go`: `GetRecentExecutionPayloadStatus`, `IsBlobDataAvailable`, `HasEnvelope`, `ReadEnvelopeFromDisk`, pending EL payload helpers | Gloas `Store`, `on_execution_payload_envelope`; Gloas `Store.payload_states`, `Store.payloads`; Gloas payload-attestation API support; Fulu data-column availability support |
 | `types.go`: `LatestMessage`, `ForkChoiceNode` | Phase0 `LatestMessage`; Gloas modified `LatestMessage`, `ForkChoiceNode` |
 | `get_head.go`: `accountWeights`, `computeVotes`, `getHead`, `GetHead` | Phase0 `get_attestation_score`, `get_weight`, `get_head`; Gloas dispatch boundary for modified `get_head` |
 | `get_head.go`: `getHeadGloas` | Gloas `get_head`, `get_node_children`, `get_weight`, `get_payload_status_tiebreaker` |
