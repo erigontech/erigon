@@ -136,7 +136,7 @@ counter or use a digest prefix. It is not the canonical identity.
 The digest identifies canonical *content* — but only *within one stream*. Which
 stream a canonical view belongs to is a separate, higher identity: the pair
 `(forkid, lineage)`, where `forkid` is the EIP-2124 fork ID (consensus rules)
-and `lineage` is the `[view]` branch point. This is specified in the
+and `lineage` is the `[parent]` branch point. This is specified in the
 *Identification* section of `erigon-documents` →
 `ethereum/design/erigon-archive/fork-spec.md`.
 
