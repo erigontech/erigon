@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -84,7 +85,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	ibs88.SetTxContext(100, 88)
 	ibs88.SetVersion(0)
 
-	err := ibs88.SetCode(addr, nil) // clear code
+	err := ibs88.SetCode(addr, nil, tracing.CodeChangeUnspecified) // clear code
 	require.NoError(t, err)
 
 	// Flush TX 88 writes to versionMap
@@ -105,7 +106,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 	ibs90.SetTxContext(100, 90)
 	ibs90.SetVersion(0)
 
-	err = ibs90.SetCode(addr, delegationCode)
+	err = ibs90.SetCode(addr, delegationCode, tracing.CodeChangeUnspecified)
 	require.NoError(t, err)
 
 	// -----------------------------------------------------------

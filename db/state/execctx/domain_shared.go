@@ -603,6 +603,12 @@ func (sd *SharedDomains) SetParent(parent *SharedDomains) { sd.parent = parent }
 // Returns nil if no overlay has been initialized via InitBlockOverlay.
 func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return sd.blockOverlay.Load() }
 
+func (sd *SharedDomains) CloseBlockOverlay() {
+	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
+		overlay.Close()
+	}
+}
+
 // BlockOverlayTemporalTx returns a read-only temporal view of the block overlay.
 // This allows consumers (RPC, shutter) to read uncommitted block data with
 // temporal (state history) support. Returns nil if no overlay is active.
@@ -741,9 +747,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.mem.Close()
 
-	if overlay := sd.blockOverlay.Swap(nil); overlay != nil {
-		overlay.Close()
-	}
+	sd.CloseBlockOverlay()
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
