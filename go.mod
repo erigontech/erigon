@@ -9,7 +9,7 @@ require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
 	github.com/erigontech/go-libdeflate v0.1.0
-	github.com/erigontech/mdbx-go v0.40.1-0.20260513090935-2b550724fa06
+	github.com/erigontech/mdbx-go v0.40.1
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 )
 
