@@ -30,6 +30,7 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/testforks"
@@ -385,7 +387,6 @@ func (t *StateTest) runNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	var msg protocol.Message
 	if len(post.Tx) > 0 {
 		signer := types.LatestSignerForChainID(config.ChainID)
-		signer.SetMalleable(true) // allow Frontier/Homestead malleable signatures
 		decodedTx, err := types.DecodeTransaction(post.Tx)
 		if err != nil {
 			return statedb, preRoot, 0, common.Hash{}, err
@@ -513,6 +514,7 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 		v := msg.To().Value()
 		to = &v
 	}
+	chainID := uint256.MustFromBig(config.ChainID)
 	switch {
 	case tx.IsSetCodeTx:
 		if to == nil {
@@ -531,13 +533,13 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 				CommonTx: types.CommonTx{
 					Nonce:    msg.Nonce(),
 					To:       to,
-					Value:    *msg.Value(),
+					Value:    msg.Value(),
 					GasLimit: msg.Gas(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *config.ChainID,
-				TipCap:     *msg.TipCap(),
-				FeeCap:     *msg.FeeCap(),
+				ChainID:    chainID,
+				TipCap:     msg.TipCap(),
+				FeeCap:     msg.FeeCap(),
 				AccessList: msg.AccessList(),
 			},
 			Authorizations: auths,
@@ -551,16 +553,16 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 				CommonTx: types.CommonTx{
 					Nonce:    msg.Nonce(),
 					To:       to,
-					Value:    *msg.Value(),
+					Value:    msg.Value(),
 					GasLimit: msg.Gas(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *config.ChainID,
-				TipCap:     *msg.TipCap(),
-				FeeCap:     *msg.FeeCap(),
+				ChainID:    chainID,
+				TipCap:     msg.TipCap(),
+				FeeCap:     msg.FeeCap(),
 				AccessList: msg.AccessList(),
 			},
-			MaxFeePerBlobGas:    *msg.MaxFeePerBlobGas(),
+			MaxFeePerBlobGas:    msg.MaxFeePerBlobGas(),
 			BlobVersionedHashes: msg.BlobHashes(),
 		}, nil
 	case tx.MaxFeePerGas != nil || tx.MaxPriorityFeePerGas != nil:
@@ -573,13 +575,13 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 			CommonTx: types.CommonTx{
 				Nonce:    msg.Nonce(),
 				To:       to,
-				Value:    *msg.Value(),
+				Value:    msg.Value(),
 				GasLimit: msg.Gas(),
 				Data:     msg.Data(),
 			},
-			ChainID:    *config.ChainID,
-			TipCap:     tipCap,
-			FeeCap:     feeCap,
+			ChainID:    chainID,
+			TipCap:     &tipCap,
+			FeeCap:     &feeCap,
 			AccessList: msg.AccessList(),
 		}, nil
 	case len(msg.AccessList()) > 0:
@@ -588,13 +590,13 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 				CommonTx: types.CommonTx{
 					Nonce:    msg.Nonce(),
 					To:       to,
-					Value:    *msg.Value(),
+					Value:    msg.Value(),
 					GasLimit: msg.Gas(),
 					Data:     msg.Data(),
 				},
-				GasPrice: *msg.GasPrice(),
+				GasPrice: msg.GasPrice(),
 			},
-			ChainID:    *config.ChainID,
+			ChainID:    chainID,
 			AccessList: msg.AccessList(),
 		}, nil
 	case !msg.To().IsNil():
@@ -617,8 +619,8 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis)
-		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
+		statedb.SetCode(address, a.Code)
+		statedb.SetNonce(address, a.Nonce)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
@@ -718,7 +720,14 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-var rlpHash = types.RlpHash
+func rlpHash(x any) (h common.Hash) {
+	hw := keccak.NewFastKeccak()
+	if err := rlp.Encode(hw, x); err != nil {
+		panic(err)
+	}
+	hw.Sum(h[:0])
+	return h
+}
 
 func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil

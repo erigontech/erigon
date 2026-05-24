@@ -602,7 +602,7 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 		}
 	}()
 	newBlockExecAtCurrentState := func(txTask *exec.TxTask) {
-		stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
+		stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
 		blockExec = gevmadapter.NewBlockExecutorAtCurrentState(ctx, se.applyTx, se.rs.Domains(), se.cfg.blockReader, se.cfg.chainConfig, txTask.Header, txTask.EvmBlockContext, stateWriter)
 	}
 	for _, task := range tasks {
@@ -612,8 +612,8 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 
 		if txTask.TxIndex == -1 {
 			se.onBlockStart(ctx, txTask.BlockNumber(), txTask.BlockHash())
-			stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
-			blockExec, err = gevmadapter.NewBlockExecutor(ctx, se.applyTx, se.rs.Domains(), se.cfg.blockReader, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.EvmBlockContext, stateWriter, txTask.TxNum, se.accumulator)
+			stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+			blockExec, err = gevmadapter.NewBlockExecutor(ctx, se.applyTx, se.rs.Domains(), se.cfg.blockReader, se.cfg.chainConfig, se.cfg.engine, txTask.Header, txTask.EvmBlockContext, stateWriter, txTask.TxNum, nil)
 			if err != nil {
 				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 			}
@@ -622,7 +622,7 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 				newBlockExecAtCurrentState(txTask)
 			}
 			chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
-			if err = blockExec.FinalizeBlock(se.cfg.chainConfig, se.cfg.engine, txTask.Header, blockReceipts, txTask.Withdrawals, chainReader, txTask.TxNum, se.accumulator); err != nil {
+			if err = blockExec.FinalizeBlock(se.cfg.chainConfig, se.cfg.engine, txTask.Header, blockReceipts, txTask.Withdrawals, chainReader, txTask.TxNum, nil); err != nil {
 				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 			}
 			if startTxIndex == 0 && !isInitialCycle {
@@ -631,10 +631,14 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 			checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 			checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 			if txTask.BlockNumber() > 0 && startTxIndex == 0 {
-				blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
-				if err := protocol.BlockPostValidation(blockGasUsed, se.blobGasUsed, checkReceipts, checkBloom, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+				if err := protocol.BlockPostValidation(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, false, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 					return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
+			}
+			if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
+				txTask.BalanceIncreaseSet, nil, se.blobGasUsed, nil, nil, nil,
+				se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
+				return false, err
 			}
 		} else {
 			if blockExec == nil {
@@ -670,8 +674,7 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 				return false, fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err)
 			}
 			se.txCount++
-			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
-			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
 			mxExecTransactions.Add(1)
 			se.blobGasUsed += txTask.Tx().GetBlobGas()
 
@@ -688,37 +691,16 @@ func (se *serialExecutor) executeBlockGevm(ctx context.Context, tasks []exec.Tas
 				hooks.OnTxEnd(receipt, result.Err)
 			}
 
-			if !txTask.HistoryExecution {
-				if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-					txTask.BalanceIncreaseSet, txTask.Rules(), nil); err != nil {
-					return false, err
-				}
-				if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, receipt, se.blobGasUsed,
-					result.Logs, result.TraceFroms, result.TraceTos); err != nil {
-					return false, err
-				}
-				if err := se.rs.CommitStepBoundary(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
-					return false, err
-				}
+			if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
+				txTask.BalanceIncreaseSet, receipt, se.blobGasUsed, result.Logs, result.TraceFroms, result.TraceTos,
+				se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
+				return false, err
 			}
 		}
 
 		if txTask.IsBlockEnd() {
-			if !txTask.HistoryExecution {
-				if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-					txTask.BalanceIncreaseSet, txTask.Rules(), nil); err != nil {
-					return false, err
-				}
-				if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, nil, se.blobGasUsed, nil, nil, nil); err != nil {
-					return false, err
-				}
-				if err := se.rs.CommitStepBoundary(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
-					return false, err
-				}
-			}
-			se.executedGas.Add(int64(max(se.blockGasUsed, se.blockStateGasUsed)))
+			se.executedGas.Add(int64(se.blockGasUsed))
 			se.blockGasUsed = 0
-			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0
 		}
 

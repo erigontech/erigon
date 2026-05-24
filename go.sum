@@ -47,8 +47,6 @@ github.com/FastFilter/xorfilter v0.5.1 h1:UjtPttI1SnKWUmeQKu8Y+4ZvMJv7KP6/NZTsGB
 github.com/FastFilter/xorfilter v0.5.1/go.mod h1:h+9l02/leuyyhepO30BKr25MkZdy7LHcfPRBDRuflXw=
 github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e h1:RrlPQT2lAmlGWldQ7PIhmxnusr7V5cFXynPWhktgP30=
 github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
-github.com/Giulio2002/gevm v0.0.0-20260510200827-88a0ec5da13b h1:zafQqixtqnN4mYzhxfxUDzUs+oHc32imtfI69mibNMA=
-github.com/Giulio2002/gevm v0.0.0-20260510200827-88a0ec5da13b/go.mod h1:2lMa5Fzyr09GVk4IY88/u5fuK5zYu2oNUn3e+kw+MiY=
 github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2 h1:EDX9aPfRkEGkz0Wl9FJX5NHhulPPSoO3yt7Y7U3JJH4=
 github.com/Giulio2002/gevm v0.0.0-20260516015636-dedeeea8f7a2/go.mod h1:2lMa5Fzyr09GVk4IY88/u5fuK5zYu2oNUn3e+kw+MiY=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
@@ -257,8 +255,8 @@ github.com/cilium/ebpf v0.16.0/go.mod h1:L7u2Blt2jMM/vLAVgjxluxtBKlz3/GWjB0dMOEn
 github.com/ckaznocha/intrange v0.3.1 h1:j1onQyXvHUsPWujDH6WIjhyH26gkRt/txNlV7LspvJs=
 github.com/ckaznocha/intrange v0.3.1/go.mod h1:QVepyz1AkUoFQkpEqksSYpNpUo3c5W7nWh/s6SHIJJk=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
-github.com/consensys/gnark-crypto v0.19.1 h1:FWO1JDs7A2OajswzwMG7f8l2Zrxc/yOkxSTByKTc3O0=
-github.com/consensys/gnark-crypto v0.19.1/go.mod h1:rT23F0XSZqE0mUA0+pRtnL56IbPxs6gp4CeRsBk4XS0=
+github.com/consensys/gnark-crypto v0.19.2 h1:qrEAIXq3T4egxqiliFFoNrepkIWVEeIYwt3UL0fvS80=
+github.com/consensys/gnark-crypto v0.19.2/go.mod h1:rT23F0XSZqE0mUA0+pRtnL56IbPxs6gp4CeRsBk4XS0=
 github.com/containerd/cgroups/v3 v3.0.5 h1:44na7Ud+VwyE7LIoJ8JTNQOa549a8543BmzaJHo6Bzo=
 github.com/containerd/cgroups/v3 v3.0.5/go.mod h1:SA5DLYnXO8pTGYiAHXz94qvLQTKfVM5GEVisn4jpins=
 github.com/containerd/log v0.1.0 h1:TCJt7ioM2cr/tfR8GPbGf9/VRAX8D2B4PjzCpfX540I=

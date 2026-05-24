@@ -12,7 +12,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -122,11 +121,10 @@ func (be *BlockExecutor) ExecuteTx(input TxInput) (*TxOutput, error) {
 	}
 	be.evm.Journal.CommitTx()
 	evmResult := evmtypes.ExecutionResult{
-		ReceiptGasUsed:      result.GasUsed,
-		BlockRegularGasUsed: result.GasUsed,
-		MaxGasUsed:          input.Tx.GetGasLimit(),
-		ReturnData:          common.Copy(result.Output),
-		Reverted:            result.IsRevert(),
+		ReceiptGasUsed: result.GasUsed,
+		BlockGasUsed:   result.GasUsed,
+		ReturnData:     common.Copy(result.Output),
+		Reverted:       result.IsRevert(),
 	}
 	if result.IsRevert() {
 		evmResult.Err = vm.ErrExecutionReverted
@@ -171,14 +169,14 @@ func (be *BlockExecutor) FinalizeBlock(chainConfig *chain.Config, engine rules.E
 			return err
 		}
 		requests = append(requests, depositReqs...)
-		withdrawalReq, err := be.dequeueRequest(chainConfig.GetWithdrawalRequestContract(), types.WithdrawalRequestType, header, chainConfig)
+		withdrawalReq, err := be.dequeueRequest(params.WithdrawalRequestAddress, types.WithdrawalRequestType, header, chainConfig)
 		if err != nil {
 			return err
 		}
 		if withdrawalReq != nil {
 			requests = append(requests, *withdrawalReq)
 		}
-		consolidationReq, err := be.dequeueRequest(chainConfig.GetConsolidationRequestContract(), types.ConsolidationRequestType, header, chainConfig)
+		consolidationReq, err := be.dequeueRequest(params.ConsolidationRequestAddress, types.ConsolidationRequestType, header, chainConfig)
 		if err != nil {
 			return err
 		}
@@ -385,7 +383,7 @@ func makeTransaction(tx types.Transaction, sender accounts.Address) (*gevmhost.T
 		out.To = gevmtypes.Address(*to)
 	}
 	if blobTx, ok := tx.(*types.BlobTx); ok {
-		out.MaxFeePerBlobGas = blobTx.MaxFeePerBlobGas
+		out.MaxFeePerBlobGas = *blobTx.MaxFeePerBlobGas
 	}
 	for _, item := range tx.GetAccessList() {
 		gevmItem := gevmhost.AccessListItem{Address: gevmtypes.Address(item.Address)}
@@ -473,7 +471,7 @@ func makeLogs(logs []gevmstate.Log, input TxInput) []*types.Log {
 			Address: common.Address(logs[i].Address),
 			Topics:  topics,
 			Data:    common.Copy(logs[i].Data),
-			TxIndex: hexutil.Uint(input.TxIndex),
+			TxIndex: uint(input.TxIndex),
 		}
 	}
 	return out
