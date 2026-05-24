@@ -26,6 +26,7 @@ import (
 
 	cli2 "github.com/erigontech/erigon/node/cli"
 
+	"github.com/erigontech/erigon/cmd/snapshots/forkfrom"
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/disk"
@@ -43,6 +44,7 @@ func main() {
 
 	app.Commands = []*cli.Command{
 		&genfromrpc.Command,
+		&forkfrom.Command,
 	}
 
 	app.Flags = []cli.Flag{}
