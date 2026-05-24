@@ -102,7 +102,7 @@ var (
 	UseGevmFlag = cli.BoolFlag{
 		Name:  "use-gevm",
 		Usage: "Use GEVM for staged block execution",
-		Value: false,
+		Value: true,
 	}
 
 	// Throttling Flags
