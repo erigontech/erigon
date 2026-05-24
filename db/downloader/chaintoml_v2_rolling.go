@@ -274,6 +274,16 @@ type RollingV2Publisher struct {
 	// (legacy behaviour). See fork-spec.md § Identification.
 	chainIdentityGenesisFork string
 	chainIdentityForks       []ForkActivation
+
+	// forkCutBlock is the fork's divergence point — set by a fork-chain
+	// publisher via SetForkCutBlock so Publish drops pre-cut entries
+	// (parent-lineage files we hold but cannot authoritatively speak
+	// about under the fork's trust root). Zero disables filtering
+	// (the root-chain default). See memory/fork-trust-root-model-2026-05-24
+	// for the write-side rule and FilterForkManifestPostCutOnly for
+	// the classifier reuse.
+	forkCutBlock    uint64
+	forkStepToBlock StepToBlock
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -361,6 +371,27 @@ func (r *RollingV2Publisher) SetChainIdentity(genesisFork string, forks []ForkAc
 	defer r.mu.Unlock()
 	r.chainIdentityGenesisFork = genesisFork
 	r.chainIdentityForks = forks
+}
+
+// SetForkCutBlock configures the fork-publisher post-cut-only filter.
+// On a fork chain (chain.Config.Parent != ""), backend.go calls this
+// with the chain config's CutBlock. Each Publish() then runs
+// FilterForkManifestPostCutOnly against the generated manifest to
+// drop pre-cut entries (parent-lineage files the fork's trust root
+// cannot authoritatively attest). Zero cutBlock disables filtering
+// (the root-chain default).
+//
+// stepToBlock maps state-file step boundaries to parent EL blocks at
+// fork-creation time. Empty map → state files conservatively
+// classify as straddle and get dropped, which is the right semantics
+// for a fork publisher (its first retire produces fresh
+// fork-lineage state files; the parent's are never authoritative
+// from the fork's perspective).
+func (r *RollingV2Publisher) SetForkCutBlock(cutBlock uint64, stepToBlock StepToBlock) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.forkCutBlock = cutBlock
+	r.forkStepToBlock = stepToBlock
 }
 
 // resolveENRFP returns the ENR fingerprint for filename construction:
@@ -519,6 +550,18 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
+
+	// Fork-publisher filter: on a fork chain, drop pre-cut + straddle
+	// entries before any downstream step sees the manifest. The fork's
+	// chain.v2 can only authoritatively attest post-cut files under
+	// the fork's own trust root; pre-cut entries are
+	// parent-canonicity, transported via raw BT info-hash discovery
+	// on the parent's manifest. Self-check, marshalling, content-UCAN
+	// mint all see the filtered manifest. Zero forkCutBlock (root
+	// chain) is a no-op.
+	if r.forkCutBlock > 0 {
+		FilterForkManifestPostCutOnly(manifest, r.forkCutBlock, r.forkStepToBlock)
+	}
 
 	// Stamp chain identity (see fork-spec.md § Identification). The
 	// fields are absent — and consumers fall back to the legacy

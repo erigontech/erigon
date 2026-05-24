@@ -663,6 +663,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// run an EIP-2124 compatibility early-reject before quorum.
 		genesisFork, forks := downloader.BuildChainIdentity(chainConfig, backend.genesisHash, genesis.Time())
 		backend.components.Downloader.Downloader.SetChainIdentity(genesisFork, forks)
+
+		// Fork-publisher post-cut-only filter: on a fork chain
+		// (chainConfig.Parent != ""), every chain.v2 generation drops
+		// pre-cut entries before the manifest is written. Pre-cut
+		// files we hold are parent-canonicity (transported via raw BT
+		// info-hash discovery on the parent's manifest); listing them
+		// in the fork's manifest would impersonate parent canonicity
+		// under the fork's trust root. See
+		// memory/fork-trust-root-model-2026-05-24 for the rule. Empty
+		// stepToBlock is the safe default — state files conservatively
+		// classify as straddle and drop, which is correct for a fork
+		// publisher whose first retire produces fresh fork-lineage
+		// state files.
+		if chainConfig.Parent != "" && chainConfig.CutBlock > 0 {
+			backend.components.Downloader.Downloader.SetForkCutBlock(chainConfig.CutBlock, nil)
+		}
 	}
 
 	// Wire wait-on-miss into the read handles. Awaiter is satisfied

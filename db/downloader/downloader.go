@@ -192,6 +192,14 @@ type Downloader struct {
 	chainIdentityGenesisFork string
 	chainIdentityForks       []ForkActivation
 
+	// forkCutBlock + forkStepToBlock configure the fork-publisher
+	// post-cut-only filter (see RollingV2Publisher.SetForkCutBlock).
+	// Set once at startup via SetForkCutBlock from chain.Config when
+	// the node is configured as a shadow-fork publisher
+	// (chain.Config.Parent != ""). Zero means root chain → no filter.
+	forkCutBlock    uint64
+	forkStepToBlock StepToBlock
+
 	// v2PublishGate{Enabled,Open} implement the chain.v2 first-publish
 	// gate — see EnableV2PublishGate. Default: both false → ungated.
 	v2PublishGateEnabled atomic.Bool
@@ -601,6 +609,20 @@ func (d *Downloader) SetChainIdentity(genesisFork string, forks []ForkActivation
 	d.chainIdentityForks = forks
 }
 
+// SetForkCutBlock configures the fork-publisher post-cut-only filter
+// (see RollingV2Publisher.SetForkCutBlock). Production wires this from
+// backend.go when chain.Config.Parent is non-empty; the cutBlock is the
+// fork's divergence point. Zero is the root-chain default (no filter).
+// stepToBlock is the parent's step→block mapping at cut; empty map
+// drops state files conservatively, which is the right semantics for a
+// fork publisher's first generations.
+func (d *Downloader) SetForkCutBlock(cutBlock uint64, stepToBlock StepToBlock) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.forkCutBlock = cutBlock
+	d.forkStepToBlock = stepToBlock
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -867,6 +889,8 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	delegationSource := d.delegationSource
 	chainIdentityGenesisFork := d.chainIdentityGenesisFork
 	chainIdentityForks := d.chainIdentityForks
+	forkCutBlock := d.forkCutBlock
+	forkStepToBlock := d.forkStepToBlock
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
@@ -879,6 +903,9 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	}
 	if chainIdentityGenesisFork != "" {
 		pub.SetChainIdentity(chainIdentityGenesisFork, chainIdentityForks)
+	}
+	if forkCutBlock > 0 {
+		pub.SetForkCutBlock(forkCutBlock, forkStepToBlock)
 	}
 	// Re-seed the generations a fresh publisher recovered from disk
 	// (see RollingV2Publisher.ResumeSeeding), once.
