@@ -346,6 +346,9 @@ func (s *DirtySegment) IsIndexed() bool {
 }
 
 func (s *DirtySegment) FileName() string {
+	if s.Decompressor != nil {
+		return s.Decompressor.FileName()
+	}
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
@@ -1375,7 +1378,7 @@ func (s *RoSnapshots) delete(fileName string) error {
 				if sn.Decompressor == nil {
 					continue
 				}
-				if sn.segType.FileName(sn.version, sn.from, sn.to) != fName {
+				if sn.FileName() != fName {
 					continue
 				}
 				sn.canDelete.Store(true)

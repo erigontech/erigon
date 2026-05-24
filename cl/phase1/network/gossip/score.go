@@ -3,7 +3,6 @@ package gossip
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/erigontech/erigon/cl/gossip"
@@ -63,24 +62,22 @@ const (
 
 func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
+	case topic == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(topic):
 		return g.defaultBlockTopicParams()
-	// execution_payload_bid must be checked before execution_payload (substring match).
-	case strings.Contains(topic, gossip.TopicNameExecutionPayloadBid):
-		return g.defaultExecutionPayloadBidTopicParams()
-	case strings.Contains(topic, gossip.TopicNameExecutionPayload):
+	case topic == gossip.TopicNameExecutionPayload:
 		return g.defaultExecutionPayloadTopicParams()
-	case strings.Contains(topic, gossip.TopicNamePayloadAttestation):
+	case topic == gossip.TopicNameExecutionPayloadBid:
+		return g.defaultExecutionPayloadBidTopicParams()
+	case topic == gossip.TopicNamePayloadAttestation:
 		return g.defaultPayloadAttestationTopicParams()
-	case strings.Contains(topic, gossip.TopicNameProposerPreferences):
+	case topic == gossip.TopicNameProposerPreferences:
 		return g.defaultProposerPreferencesTopicParams()
-	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
+	case topic == gossip.TopicNameVoluntaryExit:
 		return g.defaultVoluntaryExitTopicParams()
 	case gossip.IsTopicBeaconAttestation(topic):
 		return g.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
 		return g.defaultSyncSubnetTopicParams(g.activeIndicies)
-
 	default:
 		return nil
 	}
