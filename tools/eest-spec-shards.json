@@ -1,12 +1,12 @@
 [
   {
     "shard": "statetests-stable",
-    "workers": 12,
+    "workers": 1,
     "max-allowed-failures": 0
   },
   {
     "shard": "statetests-devnet",
-    "workers": 12,
+    "workers": 1,
     "max-allowed-failures": 0
   },
   {
