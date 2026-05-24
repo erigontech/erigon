@@ -461,7 +461,7 @@ func marshalWitnessHeader(h *types.Header) map[string]any {
 
 	// Geth always emits these optional fields as null when absent.
 	nullFields := []string{
-		"blockAccessListHash", "blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
+		"baseFeePerGas", "blockAccessListHash", "blobGasUsed", "excessBlobGas", "parentBeaconBlockRoot", "requestsHash", "slotNumber", "withdrawalsRoot"}
 
 	for _, field := range nullFields {
 		if _, ok := m[field]; !ok {
@@ -683,7 +683,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, endTxNum, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -722,24 +722,6 @@ type accessedState struct {
 // code without touching the underlying account if the bytecode was already cached.
 func (a *accessedState) isEmpty() bool {
 	return len(a.Addresses)+len(a.Storage)+len(a.CodeAddrs) == 0
-}
-
-// touchAll touches every accessed account, storage slot, and code address on the
-// commitment context. Order matches the original inline implementation: accounts
-// first, then storage, then code.
-func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
-	for addr := range a.Addresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
-	}
-	for addr, keys := range a.Storage {
-		for key := range keys {
-			storageKey := string(append(addr.Bytes(), key.Bytes()...))
-			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
-		}
-	}
-	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-	}
 }
 
 // collectAccessedState rolls the RecordingState read/write maps and the three
@@ -888,33 +870,20 @@ func detectCollapseSiblings(
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
 	stepSize := domains.StepSize()
 
-	// Touch accounts, logging zero→zero empties for diagnosis.
-	var acctSkipped int
 	for addr := range accessed.Addresses {
 		plainKey := addr.Bytes()
 		postEnc, _, _ := splitStateReader.Read(kv.AccountsDomain, plainKey, stepSize)
 		if len(postEnc) == 0 {
 			preEnc, _, _ := preReader.Read(kv.AccountsDomain, plainKey, stepSize)
 			if len(preEnc) == 0 {
-				acctSkipped++
-				log.Warn("[debug_executionWitness] account zero→zero", "block", blockNum, "addr", addr)
 				continue
 			}
 		}
 		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
 	}
-	log.Warn("[debug_executionWitness] account touch stats", "block", blockNum,
-		"total", len(accessed.Addresses), "skipped", acctSkipped, "touched", len(accessed.Addresses)-acctSkipped)
-
 	for addr := range accessed.CodeAddrs {
 		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
 	}
-
-	// Touch storage, skipping zero→zero no-ops: slots that had zero value both
-	// before and after the block never affect the trie structure. Including them
-	// causes DeleteUpdate calls on absent keys which corrupt the in-flight afterMap
-	// and trigger spurious CollapseTracer fires.
-	var storSkipped int
 	for addr, keys := range accessed.Storage {
 		for key := range keys {
 			plainKey := append(addr.Bytes(), key.Bytes()...)
@@ -922,29 +891,14 @@ func detectCollapseSiblings(
 			if len(postEnc) == 0 {
 				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
 				if len(preEnc) == 0 {
-					storSkipped++
 					continue
 				}
 			}
 			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
 		}
 	}
-	log.Warn("[debug_executionWitness] storage touch stats", "block", blockNum,
-		"totalSlots", func() int {
-			n := 0
-			for _, ks := range accessed.Storage {
-				n += len(ks)
-			}
-			return n
-		}(),
-		"skipped", storSkipped)
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		kind := "account"
-		if len(hashedKeyPath) > 64 {
-			kind = "storage"
-		}
-		log.Warn("[debug_executionWitness] collapse fire", "block", blockNum, "kind", kind, "pathLen", len(hashedKeyPath), "path", fmt.Sprintf("%x", hashedKeyPath))
 		siblingPaths = append(siblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -952,8 +906,6 @@ func detectCollapseSiblings(
 	if err != nil {
 		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
-
-	log.Warn("[debug_executionWitness] collapse detection done", "block", blockNum, "totalFires", len(siblingPaths))
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
 		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, expectedBlockRoot)
@@ -975,7 +927,7 @@ func buildWitnessTrie(
 	tx kv.TemporalTx,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
-	firstTxNumInBlock uint64,
+	firstTxNumInBlock, endTxNum uint64,
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
@@ -987,7 +939,37 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
 
-	accessed.touchAll(sdCtx)
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false)
+	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	stepSize := domains.StepSize()
+
+	for addr := range accessed.Addresses {
+		plainKey := addr.Bytes()
+		postEnc, _, _ := splitStateReader.Read(kv.AccountsDomain, plainKey, stepSize)
+		if len(postEnc) == 0 {
+			preEnc, _, _ := preReader.Read(kv.AccountsDomain, plainKey, stepSize)
+			if len(preEnc) == 0 {
+				continue
+			}
+		}
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+	}
+	for addr := range accessed.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range accessed.Storage {
+		for key := range keys {
+			plainKey := append(addr.Bytes(), key.Bytes()...)
+			postEnc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, stepSize)
+			if len(postEnc) == 0 {
+				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
+				if len(preEnc) == 0 {
+					continue
+				}
+			}
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+		}
+	}
 
 	if len(siblingPaths) > 0 {
 		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
