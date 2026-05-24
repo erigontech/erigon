@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -58,11 +59,12 @@ type RecordingState struct {
 	codeOverlay    map[common.Address][]byte
 
 	// Write tracking
-	ModifiedAccounts map[common.Address]struct{}
-	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
-	ModifiedCode     map[common.Address][]byte
-	DeletedAccounts  map[common.Address]struct{}
-	CreatedContracts map[common.Address]struct{}
+	ModifiedAccounts      map[common.Address]struct{}
+	ReallyChangedAccounts map[common.Address]struct{}
+	ModifiedStorage       map[common.Address]map[common.Hash]struct{}
+	ModifiedCode          map[common.Address][]byte
+	DeletedAccounts       map[common.Address]struct{}
+	CreatedContracts      map[common.Address]struct{}
 
 	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
@@ -71,19 +73,20 @@ type RecordingState struct {
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
 func NewRecordingState(inner state.StateReader) *RecordingState {
 	return &RecordingState{
-		inner:            inner,
-		AccessedAccounts: make(map[common.Address]struct{}),
-		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		AccessedCode:     make(map[common.Address][]byte),
-		PreStateCode:     make(map[common.Address][]byte),
-		accountOverlay:   make(map[common.Address]*accounts.Account),
-		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
-		codeOverlay:      make(map[common.Address][]byte),
-		ModifiedAccounts: make(map[common.Address]struct{}),
-		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		ModifiedCode:     make(map[common.Address][]byte),
-		DeletedAccounts:  make(map[common.Address]struct{}),
-		CreatedContracts: make(map[common.Address]struct{}),
+		inner:                 inner,
+		AccessedAccounts:      make(map[common.Address]struct{}),
+		AccessedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		AccessedCode:          make(map[common.Address][]byte),
+		PreStateCode:          make(map[common.Address][]byte),
+		accountOverlay:        make(map[common.Address]*accounts.Account),
+		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
+		codeOverlay:           make(map[common.Address][]byte),
+		ModifiedAccounts:      make(map[common.Address]struct{}),
+		ReallyChangedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:       make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:          make(map[common.Address][]byte),
+		DeletedAccounts:       make(map[common.Address]struct{}),
+		CreatedContracts:      make(map[common.Address]struct{}),
 	}
 }
 
@@ -307,6 +310,9 @@ func (s *RecordingState) TracePrefix() string {
 func (s *RecordingState) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
+	if original != nil && (account.Nonce != original.Nonce || !account.Balance.Eq(&original.Balance) || account.CodeHash != original.CodeHash) {
+		s.ReallyChangedAccounts[addr] = struct{}{}
+	}
 	// Store a copy in the overlay
 	acctCopy := *account
 	s.accountOverlay[addr] = &acctCopy
@@ -683,7 +689,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, endTxNum, expectedParentRoot, siblingPaths, accessed)
+	nodes, err := buildWitnessTrie(ctx, tx, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed)
 	if err != nil {
 		return nil, err
 	}
@@ -715,6 +721,21 @@ type accessedState struct {
 	CodeAddrs   map[common.Address]struct{}
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
+}
+
+func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
+	for addr := range a.Addresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range a.Storage {
+		for key := range keys {
+			storageKey := string(append(addr.Bytes(), key.Bytes()...))
+			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+		}
+	}
+	for addr := range a.CodeAddrs {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -828,6 +849,19 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 		out.CodeAddrs[addr] = struct{}{}
 	}
 
+	// The system address (0xff...fe) is used as msg.sender for system calls
+	// (EIP-4788, EIP-2935) but must not appear in the witness unless its state
+	// actually changed (nonce/balance/code).
+	sysAddr := common.Address(params.SystemAddress.Value())
+	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
+		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
+		_, deleted := rs.DeletedAccounts[sysAddr]
+		hasStorage := len(out.Storage[sysAddr]) > 0
+		if !reallyChanged && !deleted && !hasStorage {
+			delete(out.Addresses, sysAddr)
+		}
+	}
+
 	return out
 }
 
@@ -927,7 +961,7 @@ func buildWitnessTrie(
 	tx kv.TemporalTx,
 	domains *execctx.SharedDomains,
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext,
-	firstTxNumInBlock, endTxNum uint64,
+	firstTxNumInBlock uint64,
 	expectedParentRoot common.Hash,
 	siblingPaths [][]byte,
 	accessed *accessedState,
@@ -939,37 +973,7 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
 
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, endTxNum, false)
-	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	stepSize := domains.StepSize()
-
-	for addr := range accessed.Addresses {
-		plainKey := addr.Bytes()
-		postEnc, _, _ := splitStateReader.Read(kv.AccountsDomain, plainKey, stepSize)
-		if len(postEnc) == 0 {
-			preEnc, _, _ := preReader.Read(kv.AccountsDomain, plainKey, stepSize)
-			if len(preEnc) == 0 {
-				continue
-			}
-		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
-	}
-	for addr := range accessed.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-	}
-	for addr, keys := range accessed.Storage {
-		for key := range keys {
-			plainKey := append(addr.Bytes(), key.Bytes()...)
-			postEnc, _, _ := splitStateReader.Read(kv.StorageDomain, plainKey, stepSize)
-			if len(postEnc) == 0 {
-				preEnc, _, _ := preReader.Read(kv.StorageDomain, plainKey, stepSize)
-				if len(preEnc) == 0 {
-					continue
-				}
-			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
-		}
-	}
+	accessed.touchAll(sdCtx)
 
 	if len(siblingPaths) > 0 {
 		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
