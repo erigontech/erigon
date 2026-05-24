@@ -757,6 +757,10 @@ var (
 		Name:  "snap.bootstrap-from-preverified",
 		Usage: "Opt this node into bootstrap-publisher mode: use preverified.toml as the initial download set AND seed it into the published chain.toml. Default false — V2 nodes (--snap.p2p-manifest) use peer-discovered chain.toml exclusively. Set this on initial publishers / chain rollout / recovery scenarios.",
 	}
+	SnapBlockAlignedBoundariesFlag = cli.BoolFlag{
+		Name:  "snap.block-aligned-boundaries",
+		Usage: "Emit retired snapshot files with literal block coordinates instead of rounding down to the nearest 1k. Eliminates partial-block straddles by construction. Default false — legacy 1k-rounded convention (every existing preverified.toml). Aligned-mode block files use a different filename convention (literal coords >6 chars) that ParseFileName recognises dual-mode. Feature-flagged rollout per the block/slot-aligned model.",
+	}
 	SnapDownloadToBlockFlag = cli.Uint64Flag{
 		Name:    "snap.download.to.block",
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
@@ -2014,6 +2018,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.P2PManifest = ctx.Bool(SnapP2PManifestFlag.Name)
 	cfg.Snapshot.LifecycleDrivenByStorage = ctx.Bool(SnapLifecycleDrivenByStorageFlag.Name)
 	cfg.Snapshot.BootstrapFromPreverified = ctx.Bool(SnapBootstrapFromPreverifiedFlag.Name)
+	cfg.Snapshot.BlockAlignedBoundaries = ctx.Bool(SnapBlockAlignedBoundariesFlag.Name)
 	cfg.Snapshot.DelegationPath = ctx.String(SnapshotDelegationPath.Name)
 	cfg.Snapshot.TrustRoots = ctx.String(SnapshotTrustRoots.Name)
 	cfg.Snapshot.QuorumFloor = ctx.Int(SnapshotQuorumFlag.Name)

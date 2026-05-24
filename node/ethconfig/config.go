@@ -237,6 +237,16 @@ type BlocksFreezing struct {
 	// disagreement settles instead of kicking off a fetch + cutover.
 	// 0 → adopt on first minority detection.
 	AdoptionGrace time.Duration
+
+	// BlockAlignedBoundaries opts the publisher into the aligned
+	// snapshot-boundary convention (--snap.block-aligned-boundaries):
+	// chooseSegmentEnd returns literal block coordinates instead of
+	// rounding down to the nearest 1k. Eliminates partial-block
+	// straddles by construction; every retired file's To matches a
+	// real block. Defaults false → legacy 1k-rounded convention used
+	// by every existing preverified.toml. See
+	// memory/block-slot-aligned-storage-model-2026-05-24.
+	BlockAlignedBoundaries bool
 }
 
 func (s BlocksFreezing) String() string {

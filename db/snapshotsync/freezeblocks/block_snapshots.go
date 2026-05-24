@@ -193,7 +193,16 @@ func NewBlockRetire(
 	if chainConfig != nil {
 		chainName = chainConfig.ChainName
 	}
-	snCfg := snapcfg.KnownCfgOrDevnet(chainName)
+	// Shallow-copy the cached cfg so the per-instance BlockAligned
+	// override doesn't mutate the package-global registry. The slice
+	// fields (Preverified, PreverifiedParsed) are shared read-only —
+	// safe to alias since BlockRetire never mutates them.
+	cached := snapcfg.KnownCfgOrDevnet(chainName)
+	cfgCopy := *cached
+	if config != nil {
+		cfgCopy.BlockAlignedBoundaries = config.Snapshot.BlockAlignedBoundaries
+	}
+	snCfg := &cfgCopy
 	r := &BlockRetire{
 		tmpDir:                dirs.Tmp,
 		dirs:                  dirs,
