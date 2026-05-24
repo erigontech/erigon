@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v2"
 
@@ -101,6 +102,17 @@ var DryRunFlag = cli.BoolFlag{
 	Usage: "Print the file-copy plan + classifications; do NOT write the fork datadir.",
 }
 
+var ValidParentTrustRootsFlag = cli.StringFlag{
+	Name: "valid-parent-trust-roots",
+	Usage: "Comma-separated list of parent-chain trust roots the fork is willing to accept the pre-cut state from. " +
+		`Each entry is "<kind>:<pubkey-hex>" where kind is "did" / "enr" / "bootnode" and pubkey is the 33-byte ` +
+		"compressed secp256k1 pubkey hex-encoded (66 chars). Captured into the derived chain.Config's " +
+		"ValidParentTrustRoots field (operator-facing audit record) and into the fork's V2 [parent] section. " +
+		"The fork's authority UCAN separately embeds the SPECIFIC trust root used at fork-from time as a " +
+		"forked-from capability (cryptographic enforcement). Optional; empty omits the field — fork-followers " +
+		"fall back to their own --accept-parent-trust-roots config.",
+}
+
 // Command is the urfave/cli registration. Wire into cmd/snapshots/main.go's
 // app.Commands.
 var Command = cli.Command{
@@ -138,6 +150,7 @@ past the cut block until paired with the CL setup (Phase 2c-CL).
 		&ParentManifestNameFlag,
 		&SaveParentCutFlag,
 		&DryRunFlag,
+		&ValidParentTrustRootsFlag,
 	},
 	Action: action,
 }
@@ -203,12 +216,29 @@ func action(ctx *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("derive fork chain.Config: %w", err)
 	}
+
+	// Operator-pinned parent-trust-root accept-set: captured into the
+	// derived chain.Config (operator-facing audit record). Empty input
+	// leaves the field nil — fork-followers fall back to their own
+	// accept-set config. The cryptographic enforcement (forked-from
+	// capability embed in the fork authority UCAN) happens at UCAN
+	// mint time downstream, against ONE of these roots.
+	trustRootsFlag := ctx.String(ValidParentTrustRootsFlag.Name)
+	if trustRootsFlag != "" {
+		roots, err := parseValidParentTrustRoots(trustRootsFlag)
+		if err != nil {
+			return fmt.Errorf("parse --%s: %w", ValidParentTrustRootsFlag.Name, err)
+		}
+		derived.ValidParentTrustRoots = roots
+	}
+
 	logger.Info("[fork-from] derived fork chain.Config",
 		"chain_name", derived.ChainName,
 		"chain_id", derived.ChainID,
 		"parent", derived.Parent,
 		"cut_block", derived.CutBlock,
-		"parent_manifest_hash", hex.EncodeToString(derived.ParentManifestHash[:]))
+		"parent_manifest_hash", hex.EncodeToString(derived.ParentManifestHash[:]),
+		"valid_parent_trust_roots", len(derived.ValidParentTrustRoots))
 
 	// Plan the pre-cut file copy. v1: no step→block map yet — state
 	// files default to "straddle" if their step boundary isn't
@@ -254,6 +284,56 @@ func action(ctx *cli.Context) error {
 		"bytes_copied", bytes)
 	logger.Info("[fork-from] EL-side complete; pair with CL setup (Phase 2c-CL) before starting erigon")
 	return nil
+}
+
+// parseValidParentTrustRoots parses the --valid-parent-trust-roots
+// flag value. Format: comma-separated "<kind>:<pubkey-hex>" entries
+// where kind ∈ {did, enr, bootnode} and pubkey is 66 hex chars
+// (33-byte compressed secp256k1). DID strings are not parsed here —
+// the operator who wants to attach a DID label to a trust root uses
+// the JSON config form (or sets it post-hoc); the CLI flag captures
+// just kind + pubkey.
+//
+// Empty input is a programming error in the caller (the caller
+// short-circuits when the flag is empty); this function returns an
+// error for safety.
+func parseValidParentTrustRoots(s string) ([]chain.ParentTrustRoot, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("empty input")
+	}
+	parts := strings.Split(s, ",")
+	out := make([]chain.ParentTrustRoot, 0, len(parts))
+	for i, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		kind, pubkeyHex, ok := strings.Cut(p, ":")
+		if !ok {
+			return nil, fmt.Errorf("entry %d: expected <kind>:<pubkey-hex>, got %q", i, p)
+		}
+		kind = strings.TrimSpace(strings.ToLower(kind))
+		pubkeyHex = strings.TrimSpace(strings.ToLower(pubkeyHex))
+		switch kind {
+		case "did", "enr", "bootnode":
+			// valid
+		default:
+			return nil, fmt.Errorf("entry %d: unknown kind %q (want did|enr|bootnode)", i, kind)
+		}
+		pk, err := hex.DecodeString(pubkeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("entry %d: pubkey hex decode: %w", i, err)
+		}
+		if len(pk) != 33 {
+			return nil, fmt.Errorf("entry %d: pubkey length %d (want 33 bytes / 66 hex chars)", i, len(pk))
+		}
+		out = append(out, chain.ParentTrustRoot{Kind: kind, Pubkey: pk})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no entries parsed from %q", s)
+	}
+	return out, nil
 }
 
 // loadChainConfig reads a chain.json file and unmarshals into chain.Config.
