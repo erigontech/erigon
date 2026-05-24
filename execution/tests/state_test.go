@@ -167,7 +167,7 @@ func beginRwNoContention(t *testing.T, db kv.TemporalRwDB) kv.TemporalRwTx {
 
 func withTrace(t *testing.T, test func(vm.Config) error) {
 	// Use config from command line arguments.
-	config := vm.Config{}
+	config := vm.Config{UseGevm: os.Getenv("USE_GEVM") == "1"}
 	err := test(config)
 	if err == nil {
 		return
@@ -178,6 +178,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
 	tracer := logger.NewJSONLogger(&logger.LogConfig{EnableMemory: false}, w)
+	config.UseGevm = os.Getenv("USE_GEVM") == "1"
 	config.Tracer = tracer.Tracer().Hooks
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {
