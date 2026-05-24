@@ -163,7 +163,13 @@ func dropPostCutActivations(cfg *chain.Config, cutBlock uint64, cutTime uint64) 
 //
 // network_id is the fork's p2p network identity — distinct from the
 // parent's chain id so the fork's p2p network is distinguishable.
-func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsRoot, clForkVersion [32]byte, clConfigName string) (*ParentSection, error) {
+//
+// validParentTrustRoots is the operator's accept-set captured at
+// fork-from time, propagated from the derived chain.Config. nil/empty
+// is legal (means the operator didn't pin a parent-trust-root set;
+// fork-followers fall back to whatever their own --accept-parent-
+// trust-roots config says). See memory/fork-trust-root-model-2026-05-24.
+func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsRoot, clForkVersion [32]byte, clConfigName string, validParentTrustRoots []chain.ParentTrustRoot) (*ParentSection, error) {
 	if cut == nil {
 		return nil, fmt.Errorf("parent-section-from-cut: nil parent-cut")
 	}
@@ -182,7 +188,53 @@ func ParentSectionFromCut(cut *ParentCut, networkID uint64, clGenesisValidatorsR
 		CLGenesisValidatorsRoot: hexNoPrefix(clGenesisValidatorsRoot[:]),
 		CLForkVersion:           hexNoPrefix(clForkVersion[:4]),
 		CLConfigName:            clConfigName,
+		ValidParentTrustRoots:   trustRootsToEntries(validParentTrustRoots),
 	}, nil
+}
+
+// trustRootsToEntries converts chain.ParentTrustRoot (raw-bytes pubkey,
+// for JSON in chain.Config) to the V2 manifest's ParentTrustRootEntry
+// (hex-string pubkey, for TOML). Returns nil for empty/nil input so the
+// optional `valid_parent_trust_roots` TOML field is omitted entirely
+// when the operator didn't pin a set.
+func trustRootsToEntries(roots []chain.ParentTrustRoot) []ParentTrustRootEntry {
+	if len(roots) == 0 {
+		return nil
+	}
+	out := make([]ParentTrustRootEntry, len(roots))
+	for i, r := range roots {
+		out[i] = ParentTrustRootEntry{
+			Kind:   r.Kind,
+			Pubkey: hexNoPrefix(r.Pubkey),
+			DID:    r.DID,
+		}
+	}
+	return out
+}
+
+// EntriesToTrustRoots is the inverse of trustRootsToEntries: V2
+// manifest hex form → chain.Config raw-bytes form. Used by consumers
+// reading a fork's manifest to populate the structured field for
+// downstream trust-root verification. Hex-decode errors yield an empty
+// pubkey on that entry — the verifier will reject it on subsequent
+// equality check against a configured root.
+func EntriesToTrustRoots(entries []ParentTrustRootEntry) []chain.ParentTrustRoot {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]chain.ParentTrustRoot, len(entries))
+	for i, e := range entries {
+		pk, err := hex.DecodeString(e.Pubkey)
+		if err != nil {
+			pk = nil
+		}
+		out[i] = chain.ParentTrustRoot{
+			Kind:   e.Kind,
+			Pubkey: pk,
+			DID:    e.DID,
+		}
+	}
+	return out
 }
 
 func hexNoPrefix(b []byte) string {

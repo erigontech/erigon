@@ -237,6 +237,31 @@ type ParentSection struct {
 
 	// CLConfigName is the fork CL's CONFIG_NAME (e.g. "msf-0").
 	CLConfigName string `toml:"cl_config_name,omitempty"`
+
+	// ValidParentTrustRoots is the set of parent-chain trust roots this
+	// fork is willing to accept the pre-cut state from. Mirrors the
+	// same field on chain.Config so fork-followers can read the operator-
+	// facing accept-set directly from the V2 manifest without separately
+	// fetching the fork's chain.Config. The fork's authority UCAN embeds
+	// the specific trust root that vetted ParentManifestHash at fork
+	// creation as a forked-from:<id> capability — that's the
+	// cryptographic enforcement; this field is the auditable record.
+	// See memory/fork-trust-root-model-2026-05-24.
+	ValidParentTrustRoots []ParentTrustRootEntry `toml:"valid_parent_trust_roots,omitempty"`
+}
+
+// ParentTrustRootEntry is a single entry in ParentSection's
+// ValidParentTrustRoots list. Mirrors chain.ParentTrustRoot but with
+// hex-encoded Pubkey for TOML compatibility (chain.ParentTrustRoot
+// stores raw bytes for JSON). The two forms convert at the
+// chain.Config ↔ V2 manifest serialisation boundary.
+//
+// Hex strings are lower-case without `0x` prefix, matching other hex
+// fields in this manifest.
+type ParentTrustRootEntry struct {
+	Kind   string `toml:"kind"`          // "did" | "enr" | "bootnode"
+	Pubkey string `toml:"pubkey"`        // hex(33-byte compressed secp256k1)
+	DID    string `toml:"did,omitempty"` // informational, populated for kind=="did"
 }
 
 // BuildChainIdentity computes the manifest's identity fields for the

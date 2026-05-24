@@ -136,6 +136,33 @@ type Config struct {
 	Parent             string   `json:"parent,omitempty"`             // parent chain name (e.g. "mainnet", "sepolia")
 	CutBlock           uint64   `json:"cutBlock,omitempty"`           // post-merge EL block at which the fork diverged
 	ParentManifestHash [20]byte `json:"parentManifestHash,omitempty"` // sha256-truncated info-hash of parent's V2 manifest at cut time
+
+	// ValidParentTrustRoots is the set of parent-chain trust roots this
+	// fork is willing to accept the pre-cut state from. Captured at
+	// fork-from time, immutable after. Each entry is a trust root whose
+	// authority could have vetted ParentManifestHash; the fork's
+	// authority UCAN embeds the SPECIFIC one used at fork creation as a
+	// forked-from:<id> capability (the cryptographic enforcement).
+	// This field is the operator-facing, auditable record — listing it
+	// here is redundant with the UCAN embed but lets operators inspect
+	// "what parent trust roots does this fork accept" without parsing
+	// the UCAN. See memory/fork-trust-root-model-2026-05-24 for the
+	// design rule; only populated for fork configs (Parent != "").
+	ValidParentTrustRoots []ParentTrustRoot `json:"validParentTrustRoots,omitempty"`
+}
+
+// ParentTrustRoot is plain-data describing a single trust root a fork
+// is willing to accept the parent state from. Pubkey is the
+// cryptographic identity (33-byte compressed secp256k1); Kind + DID
+// are metadata for diagnostics. snapshotauth converts FROM this type
+// for verification; this package stays free of snapshotauth dependency.
+//
+// Kind is "did" / "enr" / "bootnode", matching snapshotauth.TrustRootKind
+// names. The string form keeps chain.Config self-contained.
+type ParentTrustRoot struct {
+	Kind   string `json:"kind"`          // "did" | "enr" | "bootnode"
+	Pubkey []byte `json:"pubkey"`        // 33-byte compressed secp256k1
+	DID    string `json:"did,omitempty"` // informational, populated for kind=="did"
 }
 
 // IsEIPDisabled returns true if the given EIP number is in the DisabledEIPs list.

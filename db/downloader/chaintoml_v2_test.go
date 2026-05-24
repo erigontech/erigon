@@ -825,3 +825,72 @@ func TestParentSection_OmittedOnRootChain(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, parsed.Parent)
 }
+
+// TestParentSection_ValidParentTrustRootsRoundTrip pins the
+// valid_parent_trust_roots field: a fork manifest emitting an
+// operator-pinned accept-set must round-trip every entry's kind,
+// pubkey hex, and DID.
+func TestParentSection_ValidParentTrustRootsRoundTrip(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:        "mainnet",
+			ManifestHash: "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:     23760000,
+			CutBlockHash: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+			NetworkID:    23760000,
+			ValidParentTrustRoots: []ParentTrustRootEntry{
+				{
+					Kind:   "did",
+					Pubkey: "020304050607080900010203040506070809000102030405060708090001020304",
+					DID:    "did:key:z6MkfooBar",
+				},
+				{
+					Kind:   "enr",
+					Pubkey: "03ffeeddccbbaa998877665544332211ffeeddccbbaa9988776655443322110011",
+				},
+			},
+		},
+	}
+
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "valid_parent_trust_roots")
+	require.Contains(t, string(data), "did:key:z6MkfooBar")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent)
+	require.Len(t, parsed.Parent.ValidParentTrustRoots, 2)
+	require.Equal(t, "did", parsed.Parent.ValidParentTrustRoots[0].Kind)
+	require.Equal(t, "did:key:z6MkfooBar", parsed.Parent.ValidParentTrustRoots[0].DID)
+	require.Equal(t, "enr", parsed.Parent.ValidParentTrustRoots[1].Kind)
+	require.Empty(t, parsed.Parent.ValidParentTrustRoots[1].DID,
+		"non-DID kinds carry no DID")
+}
+
+// TestParentSection_ValidParentTrustRootsOmittedWhenEmpty confirms
+// that a fork manifest with no operator-pinned accept-set emits no
+// `valid_parent_trust_roots` field (back-compat for fork-from
+// invocations that don't supply the flag).
+func TestParentSection_ValidParentTrustRootsOmittedWhenEmpty(t *testing.T) {
+	original := &ChainTomlV2{
+		Version: 2,
+		Parent: &ParentSection{
+			Chain:        "mainnet",
+			ManifestHash: "1234567890abcdef1234567890abcdef12345678",
+			CutBlock:     23760000,
+			NetworkID:    23760000,
+			// ValidParentTrustRoots: nil — not pinned
+		},
+	}
+	data, err := MarshalV2(original)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), "valid_parent_trust_roots",
+		"unpinned accept-set must not emit the field")
+
+	parsed, err := ParseV2(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Parent)
+	require.Empty(t, parsed.Parent.ValidParentTrustRoots)
+}
