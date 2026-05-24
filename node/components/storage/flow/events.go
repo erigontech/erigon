@@ -444,3 +444,44 @@ type RestartBegin struct {
 // re-opened; the Provider's Restart call then returns. Async
 // subscribers are drained via WaitAsync before the call returns.
 type RestartEnd struct{}
+
+// ForkBootstrapRequired is published once at startup when the running
+// chain.Config carries a non-empty Parent — i.e. the node is configured
+// as a shadow-fork follower and needs to bootstrap from the parent's
+// swarm in addition to whatever the fork's own publishers offer.
+//
+// Subscribers (manifest_exchange's consumer flow, downloader's request
+// router) read the event to know to fetch the parent's V2 manifest by
+// ParentManifestHash AND to route per-file download requests to the
+// right swarm (pre-cut files come from parent's seeders, post-cut
+// from the fork's). Without this signal, a fork follower would only
+// see fork-publisher manifests and have no path to the pre-cut data.
+//
+// Fires once per process lifetime, immediately after the storage
+// Provider validates the fork chain.Config via
+// downloader.ValidateForkDatadir (Phase 2e). A non-fork chain (Parent
+// == "") never publishes this event; existing root-chain bootstrap
+// paths are unchanged.
+//
+// Observational + routing-relevant: gates no orchestrator work
+// directly, but the manifest_exchange subscriber uses it to drive an
+// additional `fetchPeerSidecar` of the parent's manifest by hash.
+type ForkBootstrapRequired struct {
+	// Parent is the parent chain name (e.g. "mainnet"). Matches the
+	// derived chain.Config.Parent field; used by subscribers to scope
+	// the parent-manifest lookup.
+	Parent string
+
+	// ParentManifestHash is the 20-byte info-hash of the parent's V2
+	// manifest captured at fork creation. Subscribers use this as the
+	// direct key for fetching the parent's manifest via BitTorrent;
+	// hash mismatch on receipt is a hard reject (catches tampered or
+	// wrong-version derived configs).
+	ParentManifestHash [20]byte
+
+	// CutBlock is the EL block at which the fork diverges. Used by
+	// the downloader's request router to classify per-file download
+	// requests (pre-cut → fetch from parent's peers; post-cut →
+	// fetch from fork's peers).
+	CutBlock uint64
+}
