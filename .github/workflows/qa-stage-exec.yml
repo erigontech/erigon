@@ -59,6 +59,19 @@ jobs:
       # in common/dbg/dbg_env.go auto-prepends ERIGON_, so this maps to
       # the EXEC3_PARALLEL flag declared in common/dbg/experiments.go.
       ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+      # Diagnostics for the from-0 parallel wrong-trie-root at block 200606
+      # (#21017 investigation). Trace env vars are read by common/dbg
+      # (TRACE_BLOCKS / TRACE_ACCOUNTS / TRACE_TRANSACTION_IO / TRACE_APPLY)
+      # and limit verbose per-tx I/O output to the listed accounts within
+      # the listed blocks. The 5 addresses are every unique address in
+      # block 200606's tx set (miner self-send + ping-pong + contract call).
+      # Both serial (passes) and parallel (fails) jobs emit traces; diff
+      # them to localise the divergent read/write. Remove once root cause
+      # is identified.
+      TRACE_BLOCKS: "200606"
+      TRACE_ACCOUNTS: "0x52bc44d5378309EE2abF1539BF71dE1b7d7bE3b5,0x329A2Da2753351f9b5D7A7c9aC51664278b3b817,0xe82363423b50711fbadF69C97d1380ffe17c35ec,0x42E6723A0c884E922240e56D7B618BeC96F35800,0x1194E966965418C7d73a42CCEEB254d875860356"
+      TRACE_TRANSACTION_IO: "true"
+      TRACE_APPLY: "true"
 
     steps:
     - name: Check out repository
