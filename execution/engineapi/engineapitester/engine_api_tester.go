@@ -39,7 +39,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -399,8 +401,37 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		TxnInclusionVerifier: NewTxnInclusionVerifier(rpcApiClient),
 		Node:                 ethNode,
 		NodeKey:              nodeKey,
+		ChainDB:              ethBackend.ChainKV(),
 		cleanup:              cleanup,
 	}, nil
+}
+
+// ResetBranchCache drops the aggregator's in-memory branchCache. The cache is
+// aggregator-scoped and survives a tx rollback, so a tester reused across
+// independent EEST cases would otherwise serve commitment-trie entries
+// populated by the previous test's pre-state — producing a `wrong trie root
+// of block 1` on the next test's genesis→block-1 boundary. Same mechanism the
+// rawdbreset.ResetExec path uses after wiping the commitment table (#21138);
+// here the trigger is "moving to a new test" instead of "wiping the table".
+// Safe to call at any time the tester is between tests; no-op if no
+// aggregator-backed db is attached.
+func (eat EngineApiTester) ResetBranchCache() {
+	if eat.ChainDB == nil {
+		return
+	}
+	hasAgg, ok := eat.ChainDB.(dbstate.HasAgg)
+	if !ok {
+		return
+	}
+	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
+	if !ok {
+		return
+	}
+	aggTx := agg.BeginFilesRo()
+	if bc := aggTx.BranchCache(); bc != nil {
+		bc.Clear()
+	}
+	aggTx.Close()
 }
 
 type EngineApiTesterInitArgs struct {
@@ -430,7 +461,13 @@ type EngineApiTester struct {
 	TxnInclusionVerifier TxnInclusionVerifier
 	Node                 *node.Node
 	NodeKey              *ecdsa.PrivateKey
-	cleanup              *cleanupHandle
+	// ChainDB is the running backend's temporal DB. Retained on the tester so
+	// callers (e.g. EngineXTestRunner.Run between tests in the same group) can
+	// reach the aggregator's BranchCache and clear it without rebuilding the
+	// whole tester. The reference must NOT be Closed by callers — the tester's
+	// cleanup owns the lifecycle.
+	ChainDB kv.RwDB
+	cleanup *cleanupHandle
 }
 
 func (eat EngineApiTester) Run(t *testing.T, test func(ctx context.Context, t *testing.T, eat EngineApiTester)) {
