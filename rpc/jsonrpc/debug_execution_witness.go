@@ -855,9 +855,21 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	sysAddr := common.Address(params.SystemAddress.Value())
 	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
 		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
-		_, deleted := rs.DeletedAccounts[sysAddr]
 		hasStorage := len(out.Storage[sysAddr]) > 0
-		if !reallyChanged && !deleted && !hasStorage {
+		preAcct, _ := rs.inner.ReadAccountData(params.SystemAddress)
+		preExists := preAcct != nil
+		_, deleted := rs.DeletedAccounts[sysAddr]
+		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
+		var postExists bool
+		if deleted {
+			postExists = false
+		} else if hasOverlay {
+			postExists = postOverlay != nil
+		} else {
+			postExists = preExists
+		}
+		existenceChanged := preExists != postExists
+		if !reallyChanged && !hasStorage && !existenceChanged {
 			delete(out.Addresses, sysAddr)
 		}
 	}
