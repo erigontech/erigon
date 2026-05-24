@@ -134,6 +134,14 @@ func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cf
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
 
+	// Block-aligned mode emits files whose To is the literal block
+	// requested — no rounding to 1k boundaries. Eliminates partial-
+	// block straddles by construction. snCfg can be nil in some test
+	// paths; treat nil as legacy (rounded).
+	if snCfg != nil && snCfg.BlockAlignedBoundaries {
+		return to
+	}
+
 	if to < snaptype.Erigon2MinSegmentSize {
 		return to
 	}

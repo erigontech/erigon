@@ -400,6 +400,16 @@ type Cfg struct {
 	// initial sync completed successfully.
 	Local       bool
 	networkName string
+
+	// BlockAlignedBoundaries makes chooseSegmentEnd return literal
+	// block coordinates instead of rounding down to the nearest
+	// Erigon2MinSegmentSize (1000) boundary. Defaults to false →
+	// legacy 1k-rounded boundaries (the convention every existing
+	// preverified.toml uses). When true, retire emits files whose
+	// To is the actual block requested, eliminating partial-block
+	// straddles by construction. See
+	// memory/block-slot-aligned-storage-model-2026-05-24.
+	BlockAlignedBoundaries bool
 }
 
 // Seedable - can seed it over Bittorrent network to other nodes
