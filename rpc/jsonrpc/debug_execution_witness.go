@@ -797,9 +797,8 @@ func collectAccessedState(rs *RecordingState) *accessedState {
 	sysAddr := common.Address(params.SystemAddress.Value())
 	if _, inAddresses := out.Addresses[sysAddr]; inAddresses {
 		_, reallyChanged := rs.ReallyChangedAccounts[sysAddr]
-		_, deleted := rs.DeletedAccounts[sysAddr]
 		hasStorage := len(out.Storage[sysAddr]) > 0
-		if !reallyChanged && !deleted && !hasStorage {
+		if !reallyChanged && !hasStorage {
 			delete(out.Addresses, sysAddr)
 		}
 	}
