@@ -181,7 +181,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withUseGevm(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&useGevm, "use-gevm", false, "Use GEVM for staged block execution")
+	cmd.Flags().BoolVar(&useGevm, "use-gevm", true, "Use GEVM for staged block execution")
 }
 
 func withChain(cmd *cobra.Command) {
