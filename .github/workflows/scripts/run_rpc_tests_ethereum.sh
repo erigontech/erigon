@@ -49,6 +49,9 @@ DISABLED_TEST_LIST=(
   # For debug_traceTransaction, the issue is under analysis.
   eth_createAccessList/test_15.json
   debug_traceTransaction/test_12.json
+  # Temporarily disabled: the following tests: ots_searchTransactionsAfter/test_11.json, ots_searchTransactionsAfter/test_12.json have been disabled because their response changed after moving the TIP. The request or the response should be updated so that the output is unaffected by changes to the TIP
+  ots_searchTransactionsAfter/test_11.json
+  ots_searchTransactionsAfter/test_12.json
 )
 
 # Transform the array into a comma-separated string
