@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -215,6 +216,27 @@ func runStateTest(ctx *cli.Context, cfg vm.Config, fname string) ([]testResult, 
 		}
 		for _, st := range test.Subtests() {
 			result := &testResult{Name: key, Fork: st.Fork, Pass: true}
+
+			// PROBE (#21380): clear the aggregator's BranchCache between
+			// subtests. The runner's "per-subtest isolation via tx
+			// rollback" contract holds for disk state but not for
+			// in-memory caches: BranchCache lives at the Aggregator
+			// scope (above any tx) and survives Rollback, so subtest
+			// N+1 reads cache entries derived from subtest N's
+			// (rolled-back) writes — producing wrong roots. Same
+			// lifecycle gap fixed by #21138 on the ResetExec path; the
+			// staterunner reuse pattern hits it too. Diagnostic — the
+			// production fix probably belongs inside Rollback so every
+			// caller benefits, not in the runner.
+			if hasAgg, ok := db.(dbstate.HasAgg); ok {
+				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+					aggTx := agg.BeginFilesRo()
+					if bc := aggTx.BranchCache(); bc != nil {
+						bc.Clear()
+					}
+					aggTx.Close()
+				}
+			}
 
 			func() {
 				tx, err := db.BeginTemporalRw(context.Background())
