@@ -141,27 +141,42 @@ func TestFilterForkManifestPostCutOnly_CaplinFiltered(t *testing.T) {
 	require.Equal(t, "v1.0-020001-020002-caplin.seg", m.Caplin[0].Name)
 }
 
-func TestFilterForkManifestPostCutOnly_DropsUnparseableNames(t *testing.T) {
-	// Defensive: an unparseable name in a fork manifest is suspicious;
-	// the classifier returns CopyUnknown with TypeString == "" which
-	// the filter treats as "drop" since classify() returns CopyUnknown
-	// only when TypeString is empty, not the chain-wide route. Pin
-	// the conservative behavior.
+func TestFilterForkManifestPostCutOnly_DropsUnparseableNamesFromRangedBuckets(t *testing.T) {
+	// Defensive: an unparseable name in a ranged bucket is suspicious;
+	// an honest publisher's inventory shouldn't carry garbage names,
+	// and a bad entry must not silently pass into a signed manifest.
+	// Bucket-aware rule applies: Blocks is a ranged bucket → drop;
+	// Meta + Salt (asserted below) accept any name by categorisation.
 	m := &ChainTomlV2{
 		Blocks: map[string]string{
-			"random-garbage":                 "aaaa",
-			"v1.0-020001-020002-headers.seg": "bbbb",
+			"random-garbage":                 "aaaa", // unparseable → drop from ranged bucket
+			"v1.0-020001-020002-headers.seg": "bbbb", // post-cut → keep
 		},
 	}
 	FilterForkManifestPostCutOnly(m, 20_000_000, nil)
 	require.Equal(t, map[string]string{
-		// Unparseable names route to CopyUnknown which the filter
-		// keeps. Document the actual current behaviour so future
-		// tightening is explicit. The defensive-drop hardening is a
-		// Phase 2g cascade-test item.
-		"random-garbage":                 "aaaa",
 		"v1.0-020001-020002-headers.seg": "bbbb",
-	}, m.Blocks)
+	}, m.Blocks, "unparseable names are dropped from ranged buckets")
+}
+
+func TestFilterForkManifestPostCutOnly_KeepsMetaAndSaltUnconditionally(t *testing.T) {
+	// Meta + Salt are chain-wide by bucket categorisation; the
+	// publisher's choice to place a file there is the signal. The
+	// filter accepts any name, including ones the classifier would
+	// flag as unparseable on a ranged bucket. Mirrors the
+	// consumer-side validator's accept-by-bucket rule.
+	m := &ChainTomlV2{
+		Meta: map[string]string{
+			"erigondb.toml": "aaaa",
+		},
+		Salt: map[string]string{
+			"salt-blocks.txt": "bbbb",
+			"salt-state.txt":  "cccc",
+		},
+	}
+	FilterForkManifestPostCutOnly(m, 20_000_000, nil)
+	require.Len(t, m.Meta, 1, "meta files survive regardless of parseability")
+	require.Len(t, m.Salt, 2, "salt files survive regardless of parseability")
 }
 
 func TestFilterForkManifestPostCutOnly_PreservesIdentityAndUcanFields(t *testing.T) {

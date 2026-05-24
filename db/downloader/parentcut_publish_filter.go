@@ -33,15 +33,33 @@ package downloader
 // BitTorrent peer discovery on the parent's info-hashes — they just
 // don't appear in the fork's chain.v2.
 //
-// Classification rules (same as BuildCopyPlan's classifier):
-//   - File entirely strictly before cutBlock → drop (PreCut)
-//   - File spans cutBlock → drop (Straddle — ValidateForkDatadir
-//     guards startup against these)
-//   - File entirely strictly after cutBlock → keep (PostCut)
-//   - Non-range files (salt-*.txt, etc.) → keep (chain-wide, no lineage)
-//   - Unparseable names → drop (defensive; an honest publisher's
-//     inventory shouldn't contain unparseable names, but a bad entry
-//     should not silently pass into a signed manifest)
+// Bucket-aware rules:
+//
+//	Blocks / Caplin / Domains entries (ranged buckets)
+//	  post-cut classification     → keep
+//	  pre-cut / straddle          → drop
+//	  unparseable filename        → drop (defensive — an honest
+//	                                publisher's inventory shouldn't
+//	                                carry garbage names; a bad entry
+//	                                must not silently pass into a
+//	                                signed manifest)
+//	  non-range parseable name    → drop (chain-wide artefacts have
+//	                                their own buckets; a non-range
+//	                                file in a ranged bucket is a
+//	                                bucket-categorisation bug)
+//
+//	Meta / Salt entries (chain-wide buckets)
+//	  any name                    → keep (the publisher's
+//	                                categorisation is the signal;
+//	                                erigondb.toml, salt-*.txt, etc.
+//	                                have no block coordinate by design)
+//
+// The bucket asymmetry mirrors the consumer-side validator
+// (ValidateForkManifestPostCutOnly): both sides apply strict
+// post-cut + parseable rules only where the cut-block coordinate is
+// meaningful. The producer's KEEP set ≡ the consumer's ACCEPT set,
+// so a manifest that survives the filter always passes the
+// validator (round-trip test pins this).
 //
 // stepToBlock is the parent's step→block mapping. Empty map is the
 // safe default: state files with no mapping classify as Straddle and
@@ -56,58 +74,35 @@ func FilterForkManifestPostCutOnly(manifest *ChainTomlV2, cutBlock uint64, stepT
 		return
 	}
 
-	keepName := func(name string) bool {
+	// keepRanged is for buckets where the publisher's categorisation
+	// asserts a block-coordinate exists (Blocks, Caplin, Domains).
+	// Drops pre-cut, straddle, unparseable, and non-range entries.
+	keepRanged := func(name string) bool {
 		entry := classify(name, cutBlock, stepToBlock)
-		switch entry.Classification {
-		case CopyPostCut, CopyUnknown:
-			return true
-		default:
-			return false
-		}
+		return entry.Classification == CopyPostCut
 	}
 
-	// Block files (flat map name→hash).
 	for name := range manifest.Blocks {
-		if !keepName(name) {
+		if !keepRanged(name) {
 			delete(manifest.Blocks, name)
 		}
 	}
 
-	// Meta + Salt: chain-wide, no lineage. Classifier routes them to
-	// CopyUnknown (parsed but with no From/To range) so they survive
-	// the keepName check above — no special-case needed. State this
-	// explicitly so a future refactor that changes the classifier
-	// doesn't accidentally drop chain-wide config without noticing.
-	for name := range manifest.Meta {
-		if !keepName(name) {
-			delete(manifest.Meta, name)
-		}
-	}
-	for name := range manifest.Salt {
-		if !keepName(name) {
-			delete(manifest.Salt, name)
-		}
-	}
-
-	// Caplin: post-cut filter, same classifier.
 	kept := manifest.Caplin[:0]
 	for _, f := range manifest.Caplin {
-		if keepName(f.Name) {
+		if keepRanged(f.Name) {
 			kept = append(kept, f)
 		}
 	}
 	manifest.Caplin = kept
 
-	// Domain files: filter the inner Files slice per-domain. A domain
-	// whose Files becomes empty is dropped from the Domains map so
-	// the manifest doesn't claim coverage it can't back.
 	for domain, dm := range manifest.Domains {
 		if dm == nil {
 			continue
 		}
 		keptFiles := dm.Files[:0]
 		for _, f := range dm.Files {
-			if keepName(f.Name) {
+			if keepRanged(f.Name) {
 				keptFiles = append(keptFiles, f)
 			}
 		}
@@ -116,4 +111,8 @@ func FilterForkManifestPostCutOnly(manifest *ChainTomlV2, cutBlock uint64, stepT
 			delete(manifest.Domains, domain)
 		}
 	}
+
+	// Meta + Salt: chain-wide; the publisher's bucket categorisation
+	// is the signal. Touched only if something obviously wrong (nil
+	// map) but normally left alone.
 }
