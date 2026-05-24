@@ -246,7 +246,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	// per-block — otherwise batch-mode dedupes branch updates across the
 	// batch and flushes them all into the last block's changeset, which
 	// fails on subsequent reorgs.
-	forcePerBlockCompute := pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
+	// PROBE (#21017 investigation): force per-block compute so the wrong-trie-
+	// root that fires deterministically at "end of batch 3" (block 263641) on
+	// from-0 parallel narrows to the SPECIFIC block whose commitment first
+	// diverges. Per-batch mode hides which block inside [199369, 263641] is
+	// actually wrong. Not for merge.
+	forcePerBlockCompute := true || pe.shouldGenerateChangesets || pe.cfg.syncCfg.KeepExecutionProofs
 	calculator, err := newCommitmentCalculator(executorContext, pe.rs.Domains(), pe.cfg.db, pe.logPrefix, pe.logger, forcePerBlockCompute, commitResults, rootResults)
 	if err != nil {
 		return nil, nil, err
