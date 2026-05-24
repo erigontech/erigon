@@ -535,7 +535,7 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 					GasLimit: msg.Gas(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *uint256.MustFromBig(config.ChainID),
+				ChainID:    *config.ChainID,
 				TipCap:     *msg.TipCap(),
 				FeeCap:     *msg.FeeCap(),
 				AccessList: msg.AccessList(),
@@ -555,7 +555,7 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 					GasLimit: msg.Gas(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *uint256.MustFromBig(config.ChainID),
+				ChainID:    *config.ChainID,
 				TipCap:     *msg.TipCap(),
 				FeeCap:     *msg.FeeCap(),
 				AccessList: msg.AccessList(),
@@ -577,7 +577,7 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 				GasLimit: msg.Gas(),
 				Data:     msg.Data(),
 			},
-			ChainID:    *uint256.MustFromBig(config.ChainID),
+			ChainID:    *config.ChainID,
 			TipCap:     tipCap,
 			FeeCap:     feeCap,
 			AccessList: msg.AccessList(),
@@ -594,7 +594,7 @@ func stateTestTransaction(tx stTransaction, msg protocol.Message, config *chain.
 				},
 				GasPrice: *msg.GasPrice(),
 			},
-			ChainID:    *uint256.MustFromBig(config.ChainID),
+			ChainID:    *config.ChainID,
 			AccessList: msg.AccessList(),
 		}, nil
 	case !msg.To().IsNil():
@@ -617,13 +617,13 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code)
-		statedb.SetNonce(address, a.Nonce)
+		statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis)
+		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(address, balance, tracing.BalanceChangeUnspecified)
+		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v.Bytes())

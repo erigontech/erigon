@@ -217,10 +217,7 @@ func New(
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	configChainID, overflow := uint256.FromBig(chainConfig.ChainID)
-	if overflow {
-		return nil, errors.New("chainID overflow")
-	}
+	configChainID := chainConfig.ChainID
 
 	lock := &sync.Mutex{}
 
@@ -370,12 +367,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(),
 			"err", err)
 	}()
-
-	if assert.Enable {
-		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
-			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
-		}
-	}
 
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	if baseFeeChanged {

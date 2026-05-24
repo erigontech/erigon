@@ -25,13 +25,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
@@ -212,6 +213,7 @@ type Ethereum struct {
 	stopNode           func() error
 	bgComponentsEg     errgroup.Group
 	readAheader        *exec.BlockReadAheader
+	kzgWarmupDone      chan struct{}
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
@@ -261,6 +263,17 @@ const sentryMcDisableBlockDownload = true
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	var kzgWarmupDone chan struct{}
+	if config.WarmupKzgCtxOnInit {
+		kzgWarmupDone = make(chan struct{})
+		go func() {
+			defer close(kzgWarmupDone)
+			t := time.Now()
+			kzg.InitKZGCtx()
+			logger.Info("KZG crypto context ready", "took", time.Since(t))
+		}()
+	}
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -333,6 +346,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		minedBlockObservers:       event.NewObservers[*types.Block](),
 		logger:                    logger,
 		readAheader:               exec.NewBlockReadAheader(),
+		kzgWarmupDone:             kzgWarmupDone,
 		stopNode: func() error {
 			return stack.Close()
 		},
@@ -1260,19 +1274,36 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentryProvider.Client.Sentries()) {
-		limit = len(s.sentryProvider.Client.Sentries())
+	sentries := s.sentryProvider.Client.Sentries()
+	if limit == 0 || limit > len(sentries) {
+		limit = len(sentries)
 	}
 
+	// Sentries that share a single p2p.Server return identical NodeInfo
+	// (same Node ID, same enode). Dedup by Enode so admin_nodeInfo doesn't
+	// list the same node N times. `limit` caps the number of *unique* nodes
+	// returned — keep scanning the rest of the sentry list past duplicates
+	// so a hybrid setup with both shared-Server and external sentries can
+	// still fill the cap.
+	seenEnodes := make(map[string]struct{}, limit)
 	nodes := make([]*typesproto.NodeInfoReply, 0, limit)
-	for i := 0; i < limit; i++ {
-		sc := s.sentryProvider.Client.Sentries()[i]
+	for _, sc := range sentries {
+		if len(nodes) >= limit {
+			break
+		}
 
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
 			s.logger.Error("sentry nodeInfo", "err", err)
 			continue
 		}
+		if nodeInfo == nil || nodeInfo.Enode == "" {
+			continue
+		}
+		if _, dup := seenEnodes[nodeInfo.Enode]; dup {
+			continue
+		}
+		seenEnodes[nodeInfo.Enode] = struct{}{}
 
 		nodes = append(nodes, nodeInfo)
 	}
@@ -1308,7 +1339,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
-	aggOpts := state.New(dirs).Logger(logger).GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
 	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
 		v := *snConfig.ErigondbDomainStepsInFrozenFile
 		stepsStr := "Inf"
@@ -1431,7 +1462,7 @@ func (s *Ethereum) Start() error {
 	stageLoopDispatcher := execmodule.NewDispatcher(s.chainConfig, s.notifications.Events, s.notifications.StateChangesConsumer, s.logger)
 	hook := stageloop.NewHook(s.sentryCtx, s.notifications, s.stagedSync, s.chainConfig, s.logger, stageLoopDispatcher, s.sentryProvider.Client.SetStatus, s.sentryProvider.StatusDataProvider, s.sentryProvider.ExecutionP2PPublisher)
 
-	currentTDProvider := func() *big.Int {
+	currentTDProvider := func() *uint256.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
 		if err != nil {
 			panic(err)
@@ -1558,6 +1589,19 @@ func (s *Ethereum) Stop() error {
 		warmCancel()
 	}
 
+	// Wait for the KZG warmup goroutine (spawned in New) to finish. It logs
+	// on completion; without this wait a slow warmup can log after the owning
+	// scope is gone — in tests that panics the runner ("Log in goroutine
+	// after <test> has completed"). InitKZGCtx is bounded (a one-time trusted
+	// setup load), so the timeout is a safety valve only.
+	if s.kzgWarmupDone != nil {
+		select {
+		case <-s.kzgWarmupDone:
+		case <-time.After(30 * time.Second):
+			s.logger.Warn("KZG warmup goroutine still running at shutdown")
+		}
+	}
+
 	s.chainDB.Close()
 
 	if s.config.Downloader != nil {
@@ -1632,8 +1676,8 @@ func RemoveContents(dirname string) error {
 	return nil
 }
 
-func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*big.Int, error) {
-	var currentTD *big.Int
+func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader services.FullBlockReader) (*uint256.Int, error) {
+	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
 		h, err := blockReader.CurrentBlock(tx)
 		if err != nil {

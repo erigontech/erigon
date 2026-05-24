@@ -84,7 +84,7 @@ func newBlockExecutor(ctx context.Context, tx kv.TemporalTx, domains *execctx.Sh
 	block.GetHash = stateDB.BlockHash
 	cfg := gevmhost.CfgEnv{}
 	if chainConfig != nil && chainConfig.ChainID != nil {
-		cfg.ChainId.SetFromBig(chainConfig.ChainID)
+		cfg.ChainId = *chainConfig.ChainID
 	}
 	e := gevmhost.NewEvm(stateDB, forkID(blockCtx.Rules(chainConfig), blockCtx.PrevRanDao != nil), block, cfg)
 	be := &BlockExecutor{evm: e, reader: stateDB, stateWriter: stateWriter}
