@@ -17,6 +17,7 @@
 package snapshotauth
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -48,6 +49,24 @@ const (
 	// UCAN to the exact manifest bytes it attests. Recognised
 	// prefix-wise (see ParseContentHashCapability), not by exact match.
 	CapContentHashPrefix = "chain.v2:hash:"
+
+	// CapForkedFromPrefix is the prefix of a Fork-Authority-UCAN
+	// capability binding a fork's authority to the specific parent trust
+	// root that vetted ParentManifestHash at fork creation. Dynamic
+	// (parsed prefix-wise via ParseForkedFromCapability), embedded
+	// during MintForkAuthorityUCAN. The form is
+	// fork:from:<33-byte-compressed-secp256k1-pubkey-hex> — the parent
+	// trust root's cryptographic identity. Kind (did/enr/bootnode) is
+	// recoverable from the operator's accept-set lookup keyed by
+	// pubkey; it is not embedded in the capability.
+	//
+	// Embedding this capability ties the fork's authority UCAN
+	// (signed by the fork's trust root) to a specific parent trust
+	// root, closing the trust loop: a fork-follower who trusts the
+	// fork's trust root transitively trusts the fork's claim about
+	// which parent state was vetted. See memory/fork-trust-root-model-
+	// 2026-05-24.
+	CapForkedFromPrefix = "fork:from:"
 )
 
 // AllCapabilities is the canonical set the package recognises.
@@ -102,6 +121,35 @@ func ParseContentHashCapability(capability string) (hashHex string, ok bool) {
 		return "", false
 	}
 	return strings.TrimPrefix(capability, CapContentHashPrefix), true
+}
+
+// ForkedFromCapability builds a Fork-Authority-UCAN capability binding
+// the fork to a specific parent trust root: fork:from:<pubkey-hex>.
+// parentTrustRootPubkey is the 33-byte compressed secp256k1 public key
+// of the parent trust root that vetted ParentManifestHash at fork-from
+// time. Returns an error on wrong-length input — better to surface a
+// mistake at mint time than ship a malformed UCAN.
+func ForkedFromCapability(parentTrustRootPubkey []byte) (string, error) {
+	if len(parentTrustRootPubkey) != PubKeyLen {
+		return "", fmt.Errorf("ForkedFromCapability: pubkey length %d (want %d)", len(parentTrustRootPubkey), PubKeyLen)
+	}
+	return CapForkedFromPrefix + hex.EncodeToString(parentTrustRootPubkey), nil
+}
+
+// ParseForkedFromCapability reports whether cap is a forked-from
+// capability and, if so, returns the decoded 33-byte parent trust root
+// pubkey it binds. ok=false for any non-forked-from capability or for
+// a malformed pubkey hex.
+func ParseForkedFromCapability(capability string) (parentTrustRootPubkey []byte, ok bool) {
+	if !strings.HasPrefix(capability, CapForkedFromPrefix) {
+		return nil, false
+	}
+	hexPub := strings.TrimPrefix(capability, CapForkedFromPrefix)
+	pub, err := hex.DecodeString(hexPub)
+	if err != nil || len(pub) != PubKeyLen {
+		return nil, false
+	}
+	return pub, true
 }
 
 func capabilityNamesJoined() string {
