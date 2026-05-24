@@ -314,7 +314,11 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		root = common.BytesToHash(rootBytes)
 	}()
 
-	r := rpchelper.NewLatestStateReader(tx)
+	// Read through sd.AsGetter(tx) so the tx execution sees pre-state
+	// writes held in sd.mem. Without this the reader would hit MDBX
+	// directly and miss the never-Flushed pre-state, surfacing as
+	// "insufficient funds for gas * price + value" on every test.
+	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
 
@@ -452,7 +456,10 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 // NOT enter the cache, so each subtest creates an SD, calls this, runs, and
 // discards the SD without flushing.
 func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	r := rpchelper.NewLatestStateReader(tx)
+	// Read through sd.AsGetter so SetCode/SetBalance see prior pre-state
+	// writes held in sd.mem (consistent with the writer that targets sd
+	// via NewLatestStateWriter below).
+	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
