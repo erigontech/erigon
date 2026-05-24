@@ -1039,43 +1039,35 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// short-circuit misses this when its revival check fires for a
 		// recreate-in-the-same-tx target.)
 		//
-		// Only when the account is actually destroyed (SelfDestructPath=true)
-		// AND not revived since: a SelfDestructPath=false entry marks a
-		// created/alive account whose fields are not zero, and a later
-		// Balance/Nonce/CodeHash write at a higher TxIndex re-creates it.
-		// revivalLimit excludes the current tx's own writes (versionMap.Read
-		// uses floor(txIdx-1); LatestTxIndex's bound is inclusive).
+		// Per-path revival resolution (issue #21319): reaching here means res
+		// — the version-map read of THIS path — was MVReadResultNone, so this
+		// field has no post-SD write and per-path it is not revived; it reads
+		// as the post-SD zero value regardless of whether other fields were
+		// revived. The old account-wide LatestTxIndex scan over
+		// Balance|Nonce|CodeHash would, for a value-transfer revival
+		// (BalancePath write only), treat the whole account as revived and
+		// fall through to surface a stale pre-SD nonce/codeHash — the same
+		// imprecision #21323 removed from the branch-794 SD short-circuit.
 		if path == BalancePath || path == NoncePath || path == IncarnationPath ||
 			path == CodeHashPath || path == CodePath || path == CodeSizePath {
 			if sd := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); sd.Status() == MVReadResultDone {
 				if destructed, ok := sd.Value().(bool); ok && destructed {
-					destructTxIndex := sd.DepIdx()
-					revivalLimit := s.txIndex - 1
-					revived := false
-					for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
-						if hi, ok := s.versionMap.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destructTxIndex {
-							revived = true
-							break
+					sdVer := Version{TxIndex: sd.DepIdx(), Incarnation: sd.Incarnation()}
+					if !commited {
+						if s.versionedReads == nil {
+							s.versionedReads = ReadSet{}
 						}
+						s.versionedReads.Set(VersionedRead{
+							Address: addr,
+							Path:    SelfDestructPath,
+							Key:     accounts.NilKey,
+							Source:  MapRead,
+							Version: sdVer,
+							Val:     true,
+						})
 					}
-					if !revived {
-						sdVer := Version{TxIndex: destructTxIndex, Incarnation: sd.Incarnation()}
-						if !commited {
-							if s.versionedReads == nil {
-								s.versionedReads = ReadSet{}
-							}
-							s.versionedReads.Set(VersionedRead{
-								Address: addr,
-								Path:    SelfDestructPath,
-								Key:     accounts.NilKey,
-								Source:  MapRead,
-								Version: sdVer,
-								Val:     true,
-							})
-						}
-						var zero T
-						return zero, MapRead, sdVer, nil
-					}
+					var zero T
+					return zero, MapRead, sdVer, nil
 				}
 			}
 		}
