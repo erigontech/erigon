@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -122,7 +123,12 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					sd, sdErr := execctx.NewSharedDomains(context.Background(), tx, log.New())
+					if sdErr != nil {
+						return sdErr
+					}
+					defer sd.Close()
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
