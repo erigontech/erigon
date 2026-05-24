@@ -284,6 +284,15 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.Inventory = deps.Inventory
 	p.Aggregator = deps.Aggregator
 
+	// Fork-config datadir guards: refuse pre-merge cut or a datadir
+	// already populated with parent-lineage post-cut files. Runs before
+	// any disk handle opens so the failure mode is "abort startup with
+	// a clear hint" rather than corrupting an existing datadir or
+	// failing later mid-sweep. No-op for non-fork chains (Parent == "").
+	if err := downloader.ValidateForkDatadir(p.ChainConfig, config.Dirs.Snap); err != nil {
+		return fmt.Errorf("storage: fork datadir validation: %w", err)
+	}
+
 	// Read current block number. Use deps.Ctx so cancellation/shutdown
 	// propagates into this lookup instead of masking it with Background.
 	var currentBlock *types.Block
@@ -1174,6 +1183,52 @@ func (p *Provider) BootstrapFromPreverified() {
 	if err := p.bootstrapFromPreverified(p.bootstrapChainName); err != nil {
 		p.logger.Warn("[storage] bootstrap from preverified failed", "err", err)
 	}
+}
+
+// EmitForkBootstrap publishes ForkBootstrapRequired on the storage
+// event bus when the running chain.Config carries a non-empty Parent
+// (i.e. the node is a shadow-fork follower). No-op for root chains.
+// Called by backend.go at the same lifecycle point as
+// BootstrapFromPreverified — after BindBus has wired sentry +
+// downloader + manifest_exchange subscribers, so the
+// manifest_exchange subscriber is guaranteed to receive the event.
+//
+// Failure modes:
+//   - Malformed fork config (Parent set but CutBlock zero) →
+//     log Warn and skip. Startup continues; the fork-follower
+//     simply never bootstraps from the parent's swarm. The
+//     ValidateForkDatadir call in Initialize would normally
+//     surface the same upstream config error earlier; this is the
+//     defensive second check.
+//   - eventBus nil (component not running its own orchestrator) →
+//     silent no-op. Storage-driven lifecycle is the only mode that
+//     wires the bus today.
+func (p *Provider) EmitForkBootstrap() {
+	if p == nil || p.eventBus == nil {
+		return
+	}
+	plan, err := downloader.BuildForkBootstrapPlan(p.ChainConfig)
+	if err != nil {
+		if p.logger != nil {
+			p.logger.Warn("[storage] fork bootstrap plan", "err", err)
+		}
+		return
+	}
+	if plan == nil {
+		return // root chain — no fork bootstrap required
+	}
+	if p.logger != nil {
+		p.logger.Info("[storage] publishing ForkBootstrapRequired",
+			"parent", plan.Parent,
+			"cut_block", plan.CutBlock,
+			"parent_manifest_hash", fmt.Sprintf("%x", plan.ParentManifestHash),
+		)
+	}
+	p.eventBus.Publish(flow.ForkBootstrapRequired{
+		Parent:             plan.Parent,
+		ParentManifestHash: plan.ParentManifestHash,
+		CutBlock:           plan.CutBlock,
+	})
 }
 
 // bootstrapFromPreverified builds a synthetic flow.PeerManifestReceived

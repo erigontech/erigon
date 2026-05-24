@@ -78,8 +78,9 @@ type Provider struct {
 
 	// Materialised handlers — stable reflect.Value.Pointer() for
 	// Subscribe/Unsubscribe, same pattern used in downloader/bus.go.
-	hConnected    func(sentry.PeerConnected)
-	hDisconnected func(sentry.PeerDisconnected)
+	hConnected        func(sentry.PeerConnected)
+	hDisconnected     func(sentry.PeerDisconnected)
+	hForkBootstrapReq func(flow.ForkBootstrapRequired)
 
 	// inflight tracks peer IDs whose manifest fetch is still in progress
 	// so concurrent PeerConnected events for the same peer don't stack.
@@ -256,6 +257,7 @@ func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, fetcher Mani
 	}
 	p.hConnected = p.onPeerConnected
 	p.hDisconnected = p.onPeerDisconnected
+	p.hForkBootstrapReq = p.onForkBootstrapRequired
 	p.mu.Unlock()
 
 	if err := bus.Subscribe(p.hConnected); err != nil {
@@ -266,6 +268,12 @@ func (p *Provider) BindBus(ctx context.Context, bus event.EventBus, fetcher Mani
 		_ = bus.Unsubscribe(p.hConnected)
 		p.unbindNoLock()
 		return fmt.Errorf("subscribe sentry.PeerDisconnected: %w", err)
+	}
+	if err := bus.Subscribe(p.hForkBootstrapReq); err != nil {
+		_ = bus.Unsubscribe(p.hConnected)
+		_ = bus.Unsubscribe(p.hDisconnected)
+		p.unbindNoLock()
+		return fmt.Errorf("subscribe flow.ForkBootstrapRequired: %w", err)
 	}
 	return nil
 }
@@ -281,6 +289,7 @@ func (p *Provider) UnbindBus() error {
 	bus := p.bus
 	hC := p.hConnected
 	hD := p.hDisconnected
+	hF := p.hForkBootstrapReq
 	cancel := p.cancelCtx
 	p.mu.Unlock()
 	if bus == nil || hC == nil {
@@ -302,6 +311,11 @@ func (p *Provider) UnbindBus() error {
 	if err := bus.Unsubscribe(hD); err != nil && firstErr == nil {
 		firstErr = err
 	}
+	if hF != nil {
+		if err := bus.Unsubscribe(hF); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 	p.unbindNoLock()
 	return firstErr
 }
@@ -314,8 +328,103 @@ func (p *Provider) unbindNoLock() {
 	p.cancelCtx = nil
 	p.hConnected = nil
 	p.hDisconnected = nil
+	p.hForkBootstrapReq = nil
 	p.inflight = nil
 	p.mu.Unlock()
+}
+
+// ForkBootstrapParentPeerID is the sentinel PeerID used on
+// flow.PeerManifestReceived events synthesised from a successful
+// fork-bootstrap parent-manifest fetch. Routes downstream consumers'
+// "where do I download pre-cut file X" queries through a stable
+// identifier that doesn't collide with any real peer.
+const ForkBootstrapParentPeerID = "fork-bootstrap-parent"
+
+// onForkBootstrapRequired handles flow.ForkBootstrapRequired by
+// fetching the parent's V2 manifest by ParentManifestHash from the
+// swarm and re-publishing it on the bus as a synthetic peer manifest.
+//
+// Lite-mode verification (the default): BitTorrent's info-hash
+// equality is the sole authenticity check — the protocol rejects
+// any payload whose bencoded info dict hashes differently from the
+// requested info-hash. The fork's chain.Config pinned this hash
+// at fork creation, and the fork's authority UCAN (signed under the
+// fork's trust root) vouches for the pin. No parent-chain UCAN walk
+// is required in lite mode. Belt-and-braces verification (independent
+// parent UCAN chain) lands with Phase 2g; this handler is the
+// lite-mode-only entry point.
+//
+// PeerID for the synthesised flow.PeerManifestReceived is the stable
+// sentinel ForkBootstrapParentPeerID — distinguishes parent-lineage
+// entries from any real peer's contributions and is never paired
+// with a flow.PeerDeparted (parent bootstrap is a once-per-process
+// seed, not a peer lifecycle).
+//
+// Runs in its own goroutine via fetchWG so a slow swarm doesn't
+// block the bus handler. UnbindBus cancels via ctx and waits for
+// the goroutine to return.
+//
+// Failure modes (all logged Warn, none fatal):
+//   - Zero ParentManifestHash → skip with Info log. A fork off a
+//     pre-Phase-1 root parent may legitimately lack a V2 manifest
+//     to pin; the fork-follower falls back to direct file downloads
+//     via the parent's preverified set.
+//   - FetchPeerManifestV2 error → log + return. The fork-follower
+//     can retry on a later bootstrap event (none today, but the
+//     event type is replayable).
+//   - ParseV2 error → log + return.
+func (p *Provider) onForkBootstrapRequired(e flow.ForkBootstrapRequired) {
+	p.mu.Lock()
+	fetcher := p.fetcher
+	bus := p.bus
+	ctx := p.ctx
+	logger := p.log
+	p.mu.Unlock()
+	if fetcher == nil || bus == nil || ctx == nil {
+		return
+	}
+	if e.ParentManifestHash == ([20]byte{}) {
+		if logger != nil {
+			logger.Info("[manifest_exchange] fork bootstrap: zero parent manifest hash — skipping parent-manifest fetch (legitimate for forks off pre-Phase-1 roots)",
+				"parent", e.Parent, "cut_block", e.CutBlock)
+		}
+		return
+	}
+
+	p.fetchWG.Add(1)
+	go func() {
+		defer p.fetchWG.Done()
+		if logger != nil {
+			logger.Info("[manifest_exchange] fork bootstrap: fetching parent manifest",
+				"parent", e.Parent, "cut_block", e.CutBlock,
+				"parent_manifest_hash", fmt.Sprintf("%x", e.ParentManifestHash))
+		}
+		data, err := fetcher.FetchPeerManifestV2(ctx, ForkBootstrapParentPeerID, e.ParentManifestHash, nil, 0)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("[manifest_exchange] fork bootstrap: fetch parent manifest", "err", err)
+			}
+			return
+		}
+		manifest, err := downloader.ParseV2(data)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("[manifest_exchange] fork bootstrap: parse parent manifest", "err", err)
+			}
+			return
+		}
+		out := v2ToPeerManifest(ForkBootstrapParentPeerID, manifest)
+		if logger != nil {
+			logger.Info("[manifest_exchange] fork bootstrap: publishing parent manifest as synthetic peer event",
+				"parent", e.Parent,
+				"blocks", len(out.Blocks),
+				"caplin", len(out.Caplin),
+				"meta", len(out.Meta),
+				"salt", len(out.Salt),
+				"domains", len(out.Domains))
+		}
+		bus.Publish(out)
+	}()
 }
 
 // onPeerConnected reads the peer's chain-toml ENR entry and kicks off a

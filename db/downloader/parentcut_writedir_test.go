@@ -146,12 +146,12 @@ func TestWriteForkDatadir_RejectsBadInputs(t *testing.T) {
 	}
 
 	cases := map[string]func(*WriteForkDatadirOpts){
-		"empty ParentSnapDir":      func(o *WriteForkDatadirOpts) { o.ParentSnapDir = "" },
-		"empty ForkSnapDir":        func(o *WriteForkDatadirOpts) { o.ForkSnapDir = "" },
-		"identical parent/fork":    func(o *WriteForkDatadirOpts) { o.ForkSnapDir = o.ParentSnapDir },
-		"nil chain.Config":         func(o *WriteForkDatadirOpts) { o.ForkChainConfig = nil },
-		"nil plan":                 func(o *WriteForkDatadirOpts) { o.Plan = nil },
-		"nonexistent parent":       func(o *WriteForkDatadirOpts) { o.ParentSnapDir = filepath.Join(t.TempDir(), "missing") },
+		"empty ParentSnapDir":   func(o *WriteForkDatadirOpts) { o.ParentSnapDir = "" },
+		"empty ForkSnapDir":     func(o *WriteForkDatadirOpts) { o.ForkSnapDir = "" },
+		"identical parent/fork": func(o *WriteForkDatadirOpts) { o.ForkSnapDir = o.ParentSnapDir },
+		"nil chain.Config":      func(o *WriteForkDatadirOpts) { o.ForkChainConfig = nil },
+		"nil plan":              func(o *WriteForkDatadirOpts) { o.Plan = nil },
+		"nonexistent parent":    func(o *WriteForkDatadirOpts) { o.ParentSnapDir = filepath.Join(t.TempDir(), "missing") },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

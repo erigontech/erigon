@@ -18,6 +18,7 @@ package downloader
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -129,12 +130,12 @@ func BuildCopyPlan(parentSnapDir string, cutBlock uint64, stepToBlock StepToBloc
 	}
 
 	plan := &CopyPlan{}
-	walkErr := filepath.Walk(parentSnapDir, func(path string, fi os.FileInfo, err error) error {
+	walkErr := filepath.WalkDir(parentSnapDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			plan.Errors = append(plan.Errors, fmt.Sprintf("walk %s: %v", path, err))
 			return nil // continue
 		}
-		if fi.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 		rel, err := filepath.Rel(parentSnapDir, path)
@@ -214,7 +215,7 @@ func classify(relPath string, cutBlock uint64, stepToBlock StepToBlock) CopyPlan
 			entry.Reason = fmt.Sprintf("ToStep %d not in step→block map — treating as straddle (fork retires)", parsed.To)
 			return entry
 		}
-		blockAtFrom, _ := stepToBlock[parsed.From]
+		blockAtFrom := stepToBlock[parsed.From]
 		entry.Classification = classifyRange(blockAtFrom, blockAtTo, cutBlock)
 		entry.Reason = fmt.Sprintf("step [%d, %d) → blocks [%d, %d)", parsed.From, parsed.To, blockAtFrom, blockAtTo)
 		return entry

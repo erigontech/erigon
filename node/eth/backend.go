@@ -993,6 +993,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// the wedge symptom is indistinguishable from the original
 		// no-V2-peer-bootstrap gap this is meant to close.
 		backend.components.Storage.BootstrapFromPreverified()
+
+		// Shadow-fork follower path: if the running chain.Config carries
+		// a non-empty Parent, publish ForkBootstrapRequired so the
+		// manifest_exchange subscriber fetches the parent's V2 manifest
+		// by ParentManifestHash. No-op for root chains.
+		backend.components.Storage.EmitForkBootstrap()
 	}
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.

@@ -134,11 +134,11 @@ func TestParseTrustRoots_DIDKeyMalformed(t *testing.T) {
 		spec    string
 		errFrag string
 	}{
-		"wrong multibase":                 {"did:key:qABCDEF", "base58btc multibase"},
-		"bad base58 after z":              {"did:key:z!!!notbase58!!!", "base58 decode"},
-		"valid base58, no secp prefix":    {"did:key:zABC", "not a secp256k1 key"},
-		"secp prefix, short pubkey":       {didKeyWithCustomPubBytes(t, []byte{0x01, 0x02, 0x03}), "33 bytes"},
-		"secp prefix, wrong-length 32 b":  {didKeyWithCustomPubBytes(t, bytesN(32)), "33 bytes"},
+		"wrong multibase":                {"did:key:qABCDEF", "base58btc multibase"},
+		"bad base58 after z":             {"did:key:z!!!notbase58!!!", "base58 decode"},
+		"valid base58, no secp prefix":   {"did:key:zABC", "not a secp256k1 key"},
+		"secp prefix, short pubkey":      {didKeyWithCustomPubBytes(t, []byte{0x01, 0x02, 0x03}), "33 bytes"},
+		"secp prefix, wrong-length 32 b": {didKeyWithCustomPubBytes(t, bytesN(32)), "33 bytes"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -272,10 +272,10 @@ func CaptureParentCut(
 		tag = "latest"
 	}
 	var block struct {
-		Number        hexutil.Uint64 `json:"number"`
-		Hash          common.Hash    `json:"hash"`
-		ParentHash    common.Hash    `json:"parentHash"`
-		Timestamp     hexutil.Uint64 `json:"timestamp"`
+		Number     hexutil.Uint64 `json:"number"`
+		Hash       common.Hash    `json:"hash"`
+		ParentHash common.Hash    `json:"parentHash"`
+		Timestamp  hexutil.Uint64 `json:"timestamp"`
 		// ParentBeaconBlockRoot is non-empty post-Dencun (EIP-4788);
 		// not strictly required for our merge-check but useful diagnostic.
 		ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot,omitempty"`
