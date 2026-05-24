@@ -211,7 +211,25 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		if err != nil {
 			return res, false, false
 		}
-		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from)*1_000, uint64(to)*1_000, typeString, typeString
+		// Dual-mode coordinate interpretation:
+		//   - Legacy rounded form: both strings are ≤6 chars (the
+		//     mainnet/sepolia 6-char zero-padded convention plus
+		//     short-form variants like "1-2"); represent steps; block
+		//     = step * 1000.
+		//   - Aligned literal form: either string is >6 chars (block
+		//     numbers past 1M with no padding); represents block
+		//     coordinates directly (no multiplier).
+		// The 6-char-or-less width is the legacy contract; new
+		// block/slot-aligned producers writing past-1M block numbers
+		// automatically fall into the literal branch. Devnet-scale
+		// aligned producers (blocks < 1M) need to zero-pad to >6
+		// chars to disambiguate. See
+		// memory/block-slot-aligned-storage-model-2026-05-24.
+		if len(fromStr) <= 6 && len(toStr) <= 6 {
+			from *= 1_000
+			to *= 1_000
+		}
+		res.From, res.To, res.TypeString, res.CaplinTypeString = uint64(from), uint64(to), typeString, typeString
 		res.Type, ok = ParseFileType(typeString)
 		if ok {
 			res.CaplinTypeString = res.Type.Name()
