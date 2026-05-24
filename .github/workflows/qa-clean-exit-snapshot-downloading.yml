@@ -23,7 +23,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [self-hosted, qa, long-running]
+    runs-on: [ self-hosted, qa, long-running ]
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa

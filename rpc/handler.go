@@ -59,6 +59,7 @@ import (
 //	    h.removeRequestOp(op) // timeout, etc.
 //	}
 type handler struct {
+	new            bool
 	reg            *serviceRegistry
 	unsubscribeCb  *callback
 	idgen          func() ID                      // subscription ID generator
@@ -132,11 +133,13 @@ func newHandler(
 	traceRequests bool,
 	logger log.Logger,
 	rpcSlowLogThreshold time.Duration,
+	new bool,
 ) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := ForbiddenList{}
 
 	h := &handler{
+		new:            new,
 		reg:            reg,
 		idgen:          idgen,
 		conn:           conn,
@@ -510,7 +513,12 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			start = time.Now()
 		}
 
-		resp := h.handleCall(ctx, msg, stream)
+		var resp *jsonrpcMessage
+		if h.new {
+			resp = h.handleCallNew(ctx, msg, stream)
+		} else {
+			resp = h.handleCall(ctx, msg, stream)
+		}
 
 		if doSlowLog {
 			requestDuration := time.Since(start)
@@ -581,6 +589,39 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 		} else {
 			callb.timerSuccess.ObserveDuration(start)
 		}
+	}
+	return answer
+}
+
+func writeNilIfNotPresent(stream jsonstream.Stream) {
+	stream.WriteNil()
+}
+
+func (h *handler) handleCallNew(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+	if msg.isSubscribe() {
+		return h.handleSubscribe(cp, msg, stream)
+	}
+	var callb invoker
+	if msg.isUnsubscribe() {
+		//callb = h.unsubscribeCb
+	} else if h.isMethodAllowedByGranularControl(msg.Method) {
+		callb = h.reg.invoke(msg.Method)
+	}
+	if callb == nil {
+		return msg.errorResponse(&methodNotFoundError{method: msg.Method})
+	}
+
+	start := time.Now()
+	answer := h.runMethodNew(cp.ctx, msg, callb, stream)
+
+	// Collect the statistics for RPC calls if metrics is enabled.
+	// We only care about pure rpc call. Filter out subscription.
+	if true /*callb != h.unsubscribeCb*/ {
+		rpcRequestGauge.Inc()
+		if answer != nil && answer.Error != nil {
+			failedReqeustGauge.Inc()
+		}
+		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).ObserveDuration(start)
 	}
 	return answer
 }
@@ -702,6 +743,36 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()
+	return nil
+}
+
+func (h *handler) runMethodNew(ctx context.Context, msg *jsonrpcMessage, callb invoker, stream jsonstream.Stream) *jsonrpcMessage {
+	if /*!callb.streamable*/ false {
+		err := callb.call(ctx, msg.Params, stream)
+		if err != nil {
+			return msg.errorResponse(err)
+		}
+		return msg.response(stream.Buffer())
+	}
+
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	if msg.ID != nil {
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+	}
+	stream.WriteObjectField("result")
+	err := callb.call(ctx, msg.Params, stream)
+	if err != nil {
+		writeNilIfNotPresent(stream)
+		stream.WriteMore()
+		HandleError(err, stream)
+	}
+	stream.WriteObjectEnd()
+	stream.Flush()
 	return nil
 }
 

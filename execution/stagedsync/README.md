@@ -103,7 +103,8 @@ This stage can spawn unwinds if the block execution fails.
 
 Also at this stage we computing MerkleTrie Root (also we call it Commitment)
 
-Also at this stage we writing: **Account History Index**, **Storage History Index**, **Log Index**, **Call traces index**
+Also at this stage we writing: **Account History Index**, **Storage History Index**, **Log Index**, **Call traces index
+**
 
 ### Stage 5: Tx Lookup Index
 

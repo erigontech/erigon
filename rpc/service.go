@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -42,10 +43,43 @@ var (
 	stringType       = reflect.TypeFor[string]()
 )
 
+type invoker interface {
+	call(ctx context.Context, raw json.RawMessage, s jsonstream.Stream) error
+}
+
+type Method[M any, R any] struct {
+	Name string
+	Fn   func(ctx context.Context, req M) (R, error)
+}
+
+func (m Method[M, R]) call(
+	ctx context.Context, raw json.RawMessage, s jsonstream.Stream,
+) error {
+	var req M
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return err
+		}
+	}
+
+	resp, err := m.Fn(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	s.Write(data) //nolint:errcheck
+	return nil
+}
+
 type serviceRegistry struct {
-	mu       sync.Mutex
-	services map[string]service
-	logger   log.Logger
+	mu        sync.Mutex
+	callbacks map[string]invoker // registered handlers
+	services  map[string]service
+	logger    log.Logger
 }
 
 // service represents a registered object.
@@ -68,6 +102,20 @@ type callback struct {
 
 	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
 	timerFailure metrics.Summary // pre-cached failure timer
+}
+
+func registerName[M any, R any](
+	r *serviceRegistry,
+	name string, fn func(ctx context.Context, in M) (R, error),
+) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.callbacks == nil {
+		r.callbacks = make(map[string]invoker)
+	}
+
+	r.callbacks[name] = Method[M, R]{Name: name, Fn: fn}
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr any) error {
@@ -118,6 +166,16 @@ func (r *serviceRegistry) callback(method string) *callback {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.services[svc].callbacks[name]
+}
+
+func (r *serviceRegistry) invoke(method string) invoker {
+	elem := strings.SplitN(method, serviceMethodSeparator, 2)
+	if len(elem) != 2 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.callbacks[method]
 }
 
 // subscription returns a subscription callback in the given service.

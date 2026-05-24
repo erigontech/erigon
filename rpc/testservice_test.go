@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -216,4 +217,12 @@ type largeRespService struct {
 
 func (x largeRespService) LargeResp() string {
 	return strings.Repeat("x", x.length)
+}
+
+// largeRespService generates arbitrary-size JSON responses.
+type simpleRespService struct {
+}
+
+func (s simpleRespService) BlockNumber() string {
+	return strconv.Itoa(321321433)
 }

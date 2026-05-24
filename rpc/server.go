@@ -50,6 +50,7 @@ const (
 
 // Server is an RPC server.
 type Server struct {
+	New             bool
 	services        serviceRegistry
 	methodAllowList AllowList
 	idgen           func() ID
@@ -98,6 +99,14 @@ func (s *Server) RegisterName(name string, receiver any) error {
 	return s.services.registerName(name, receiver)
 }
 
+// RegisterName creates a service for the given receiver type under the given name. When no
+// methods on the given receiver match the criteria to be either a RPC method or a
+// subscription an error is returned. Otherwise a new service is created and added to the
+// service collection this server provides to clients.
+func RegisterName[M any, R any](s *Server, name string, fn func(ctx context.Context, in M) (R, error)) {
+	registerName[M, R](&s.services, name, fn)
+}
+
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
 // the response back using the given codec. It will block until the codec is closed or the
 // server is stopped. In either case the codec is closed.
@@ -136,7 +145,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return nil
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold, s.New)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
