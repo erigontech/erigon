@@ -102,7 +102,7 @@ func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
 	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
 	mustExist(t, subset01, true)
 
-	// pin every dirty file (incl. the soon-to-be-retired overlaps) via FilesItem.refcount
+	// pin the current generation (incl. the soon-to-be-retired overlaps in its dirtyFiles)
 	rotx := agg.DebugBeginDirtyFilesRo()
 
 	// retire the overlap files; they are pinned by rotx so must be parked, not deleted

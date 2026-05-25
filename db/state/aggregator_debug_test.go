@@ -32,6 +32,7 @@ func TestDirtyFilesRoTx_CloseIsNotADeleter(t *testing.T) {
 
 	dec, err := seg.NewDecompressor(fPath)
 	require.NoError(t, err)
+	defer dec.Close() // Close() under test must not delete; release the FD so TempDir cleanup can unlink (Windows)
 
 	item := &FilesItem{startTxNum: 0, endTxNum: 10}
 	item.decompressor = dec
