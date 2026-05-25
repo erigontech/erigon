@@ -2161,9 +2161,11 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		// authoritative, causing silent state corruption.
 		if flushedTxNum := a.lastFlushedCommitmentTxNum.Load(); flushedTxNum > 0 {
 			stepSize := a.StepSize()
-			// The highest step S where (S+1)*stepSize <= flushedTxNum
-			safeStep := kv.Step(flushedTxNum/stepSize) - 1
-			if flushedTxNum >= stepSize && lastInDB > safeStep {
+			// Mirror stepFullyCommitted: step S is fully committed iff
+			// flushedTxNum+1 >= (S+1)*stepSize. The exclusive upper bound on
+			// safe-to-build steps is therefore (flushedTxNum+1)/stepSize.
+			safeStep := kv.Step((flushedTxNum + 1) / stepSize)
+			if lastInDB > safeStep {
 				lastInDB = safeStep
 			}
 		}
