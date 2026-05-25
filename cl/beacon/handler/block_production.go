@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
@@ -684,7 +685,7 @@ func (a *ApiHandler) produceBeaconBody(
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
 			if isPreGloasParent {
 				head = parentBid.BlockHash
-			} else if a.forkchoiceStore.HasEnvelope(baseBlockRoot) && a.forkchoiceStore.ShouldExtendPayload(baseBlockRoot) {
+			} else if a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull && a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}) {
 				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()

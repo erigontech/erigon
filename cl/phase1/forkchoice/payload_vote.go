@@ -125,10 +125,10 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool {
 	voteRaw, ok := f.payloadTimelinessVote.Load(root)
 	if !ok {
-		return !timely
+		return false
 	}
 	if !f.forkGraph.HasEnvelope(root) {
-		return !timely
+		return false
 	}
 	votes := voteRaw.([clparams.PtcSize]bool)
 	count := uint64(0)
@@ -146,10 +146,10 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bool) bool {
 	voteRaw, ok := f.payloadDataAvailabilityVote.Load(root)
 	if !ok {
-		return !available
+		return false
 	}
 	if !f.forkGraph.HasEnvelope(root) {
-		return !available
+		return false
 	}
 	votes := voteRaw.([clparams.PtcSize]bool)
 	count := uint64(0)
