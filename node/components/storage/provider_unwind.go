@@ -24,14 +24,9 @@ import (
 )
 
 // UnwindOpts holds the per-call inputs Provider.Unwind needs that it
-// cannot derive from its own state.
-//
-// Mode B as implemented today (snapshot-trim + DB-reset, no
-// commitment write) only needs a writable temporal tx. The
-// commitment-recompute path (next commit) will add the fields it
-// requires back here — *SharedDomains will be re-introduced via
-// the commitmentdb.CommitmentStateWriter interface, asserted
-// structurally when that callsite lands.
+// cannot derive from its own state. The complete mode-B chain only
+// needs a writable temporal tx; the writable-domain shadow wipe and
+// commitment-anchor verification both run inside it.
 type UnwindOpts struct {
 	// Tx is the writable temporal transaction the storage-layer
 	// sub-ops run inside. SetHead owns its lifecycle; Provider.Unwind
@@ -46,6 +41,9 @@ type UnwindOpts struct {
 // AggregatorRoTx.Unwind / unwindExec3 chain and remains bounded by
 // rawtemporaldb.CanUnwindBeforeBlockNum.
 //
+// Post-state invariant: MDBX is empty past toBlock; snapshot files
+// are the only state. Cold-start-equivalent.
+//
 // Sub-ops, in order — landed together to avoid intermediate-wedge
 // states (snapshot-trim without DB-reset leaves orphan DB entries
 // pointing past the new tip; DB-reset without snapshot-trim leaves
@@ -58,11 +56,15 @@ type UnwindOpts struct {
 //  2. DB-reset past toBlock — see unwindDBPastBlock. Truncates
 //     TxNums + canonical hashes, resets Headers / Bodies /
 //     BlockHashes / Execution stages, clears ChangeSets3 > toBlock,
-//     resets HeadBlockHash / HeadHeaderHash / ForkchoiceHead.
+//     resets HeadBlockHash / HeadHeaderHash / ForkchoiceHead, and
+//     wipes the writable-domain MDBX shadow (accounts / storage /
+//     code / commitment + standalone IIs) past lastTxNum so the
+//     snapshot files are the authoritative state.
 //  3. Commitment anchor at toBlock — see ensureCommitmentAtBlock.
-//     Validation only in this commit: requires the latest commitment
-//     entry to already sit at toBlock. Arbitrary-block recompute
-//     lands in commit 2d.
+//     Pure verification: the commitment file's entry for toBlock's
+//     step boundary surfaces naturally once the writable shadow is
+//     gone. A mismatch surfaces as a fatal chain-malformed error
+//     rather than being papered over by a recompute.
 //
 // The post-state is observably identical to a freshly-started node
 // that has just processed frozen blocks up to toBlock (the cold-start

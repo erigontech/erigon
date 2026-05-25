@@ -31,14 +31,15 @@ import (
 // unwindDBPastBlock resets all writable-DB content covering blocks
 // past toBlock. Mode-B sub-op #2. Runs after the snapshot-trim sub-op
 // has shortened the on-disk file set to [0, toBlock]. The pairing is
-// load-bearing: snapshot-trim alone would leave a wedge of orphan
-// TxNums / canonical-hashes / stage-progress / diffsets pointing at
-// blocks that no longer exist in snapshots.
+// load-bearing: snapshot-trim alone would leave a wedge of orphan DB
+// entries pointing at blocks that no longer exist in snapshots.
 //
 // The resulting DB is observably equivalent to a freshly-started node
 // that has just processed the frozen blocks up to toBlock — see the
 // "Equivalence to the cold-start 'processed frozen blocks' state"
 // section of docs/plans/20260525-admin-sethead-unwind-design.md.
+// "Empty MDBX past toBlock; snapshots populated with state" is the
+// invariant.
 //
 // Resets performed:
 //
@@ -48,14 +49,18 @@ import (
 //     to toBlock.
 //   - HeadBlockHash / HeadHeaderHash / ForkchoiceHead set to
 //     toBlock's canonical hash.
-//   - ChangeSets3 entries for > toBlock deleted (mode-B mandates a
-//     clean post-state; remaining diffsets above toBlock would be
-//     orphaned references to blocks that no longer have canonical
-//     hashes).
+//   - ChangeSets3 entries for > toBlock deleted.
+//   - Writable-domain MDBX shadow (accounts / storage / code /
+//     commitment + standalone IIs) wiped past lastTxNum via the
+//     aggregator's WipeWritableShadowPast primitive. The cold-start
+//     equivalence requires that the next forward execution sees the
+//     snapshot files as the authoritative state — any DB-shadow
+//     override would defeat it.
 //
-// Does NOT modify the commitment domain — sub-op #3
-// (ensureCommitmentAtBlock) handles that with its own validation /
-// recompute logic.
+// After this runs, sub-op #3 (ensureCommitmentAtBlock) is a pure
+// verification: LatestCommitmentState should resolve to the
+// commitment file's entry at toBlock's step boundary because no
+// DB-shadow entry shadows it.
 func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, toBlock uint64) error {
 	if p.BlockReader == nil {
 		return fmt.Errorf("Provider.BlockReader is nil — cannot resolve canonical hash at toBlock")
@@ -90,6 +95,16 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 
 	if err := deleteChangeSetsPastBlock(tx, toBlock); err != nil {
 		return fmt.Errorf("deleteChangeSetsPastBlock(%d): %w", toBlock, err)
+	}
+
+	if p.Aggregator != nil {
+		lastTxNum, err := rawdbv3.TxNums.Max(ctx, tx, toBlock)
+		if err != nil {
+			return fmt.Errorf("TxNums.Max(%d) for shadow wipe: %w", toBlock, err)
+		}
+		if err := p.Aggregator.WipeWritableShadowPast(ctx, tx, lastTxNum); err != nil {
+			return fmt.Errorf("WipeWritableShadowPast(lastTxNum=%d): %w", lastTxNum, err)
+		}
 	}
 
 	return nil

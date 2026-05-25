@@ -16,7 +16,11 @@
 
 package storage
 
-import "context"
+import (
+	"context"
+
+	"github.com/erigontech/erigon/db/kv"
+)
 
 // StateAggregator is the subset of db/state.Aggregator that the storage
 // Provider depends on. Depending on this interface rather than the concrete
@@ -38,4 +42,13 @@ type StateAggregator interface {
 	// the block boundary. Production *state.Aggregator satisfies this
 	// structurally; mocks add a return-constant stub.
 	StepSize() uint64
+
+	// WipeWritableShadowPast clears every writable-domain MDBX entry
+	// (accounts / storage / code / commitment + standalone IIs) whose
+	// coordinate falls past lastTxNum. Mode-B SetHead calls it as part
+	// of the DB-reset sub-op to reach cold-start-equivalence: writable
+	// shadow holds nothing newer than the snapshot-trimmed file tip.
+	// Production *state.Aggregator satisfies this structurally; mocks
+	// implement it as a no-op (the harness has no real state).
+	WipeWritableShadowPast(ctx context.Context, tx kv.TemporalRwTx, lastTxNum uint64) error
 }

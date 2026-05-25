@@ -23,24 +23,25 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// ensureCommitmentAtBlock is mode-B sub-op #3. Validates that the
-// latest commitment entry sits exactly at toBlock — the equivalence
-// case where the cold-start "processed frozen blocks" state is
-// already correct. If the latest commitment is at an earlier block,
-// returns the explicit "recompute not yet implemented" sentinel
-// pointing at commit 2d.
+// ensureCommitmentAtBlock is mode-B sub-op #3 — a pure verification.
 //
-// Sub-op #3's recompute case is genuinely new code (read state at
-// toBlock's end-txNum via GetAsOf, walk the patricia trie to derive
-// the new root, validate against the block header's stateRoot, write
-// the new commitment entry). That work lands in commit 2d. The same
-// primitive will be used by fork-from CLI when the cut block isn't
-// at an existing commitment boundary — same state-diff problem.
+// After sub-op #2 has wiped the writable-domain MDBX shadow past
+// toBlock's last txNum, LatestCommitmentState resolves through the
+// commitment files: in aligned mode with toBlock at a step boundary,
+// the file for that step has its KeyCommitmentState entry tagged at
+// the step's last txNum = toBlock, so latest == toBlock by
+// construction.
 //
-// The validation case here is enough to unblock operators picking a
-// toBlock that already has a commitment entry (e.g. a step boundary,
-// or a previously-anchored cut). Arbitrary-block mode-B has to wait
-// for 2d.
+// If latest != toBlock here the chain is malformed (the file for
+// toBlock's step is missing or its commitment entry is at the wrong
+// coordinate), and the unwind has nowhere to anchor the new tip.
+// We surface that loudly rather than papering over it with a
+// re-derivation that would only mask the underlying corruption.
+//
+// The fork-from CLI's "cut at a non-boundary parent block" case has
+// the same shape but operates on the fork's commitment file, not
+// the active one; its primitive lives alongside that wiring, not
+// here.
 func (p *Provider) ensureCommitmentAtBlock(tx kv.TemporalTx, toBlock uint64) error {
 	latest, err := commitmentdb.LatestBlockNumWithCommitment(tx)
 	if err != nil {
@@ -49,5 +50,5 @@ func (p *Provider) ensureCommitmentAtBlock(tx kv.TemporalTx, toBlock uint64) err
 	if latest == toBlock {
 		return nil
 	}
-	return fmt.Errorf("commitment recompute at non-step-boundary toBlock=%d (latest commitment is at block %d) not yet implemented — lands in commit 2d (GetAsOf + patricia rebuild + header-stateRoot validation, shared primitive with fork-from CLI per docs/plans/20260525-admin-sethead-unwind-design.md)", toBlock, latest)
+	return fmt.Errorf("commitment-anchor verification failed: latest commitment is at block %d, expected %d — the commitment file for toBlock's step is missing or its entry is at the wrong coordinate (sub-op #2 wiped MDBX shadow past toBlock; no override is possible from the writable side)", latest, toBlock)
 }
