@@ -52,6 +52,7 @@ type MockCl struct {
 	engineApiClient       *engineapi.JsonRpcClient
 	suggestedFeeRecipient common.Address
 	genesis               common.Hash
+	genesisGasLimit       uint64
 	state                 *MockClState
 	chainConfig           *chain.Config
 }
@@ -62,6 +63,7 @@ func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *ty
 		engineApiClient:       elClient,
 		suggestedFeeRecipient: genesis.Coinbase(),
 		genesis:               genesis.Hash(),
+		genesisGasLimit:       genesis.GasLimit(),
 		chainConfig:           chainConfig,
 		state: &MockClState{
 			ParentElBlock:     genesis.Hash(),
@@ -134,6 +136,8 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	if cl.chainConfig.AmsterdamTime != nil {
 		payloadAttributes.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		targetGasLimit := hexutil.Uint64(cl.genesisGasLimit)
+		payloadAttributes.TargetGasLimit = &targetGasLimit
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
