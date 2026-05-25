@@ -926,8 +926,6 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	files.refcntIncrement()
-
 	return &HistoryRoTx{
 		h:                 h,
 		iit:               h.InvertedIndex.beginFilesRo(iv),
@@ -1126,9 +1124,7 @@ func (ht *HistoryRoTx) Close() {
 	if ht.files == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	files := ht.files
 	ht.files = nil
-	files.refcntDecrement(ht.h.FilenameBase, ht.h.logger)
 	for _, r := range ht.readers {
 		r.Close()
 	}

@@ -79,7 +79,10 @@ type Aggregator struct {
 
 	dirtyFilesLock sync.Mutex
 	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
-	visible           atomic.Pointer[aggregatorVisible]
+	visible atomic.Pointer[aggregatorVisible]
+	// oldestVisible is the chain head (oldest still-pinned bundle) used by the
+	// reclaimer. Mutated only under dirtyFilesLock.
+	oldestVisible     *aggregatorVisible
 	snapshotBuildSema *semaphore.Weighted
 
 	disableHistory bool
@@ -159,8 +162,11 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		produce: true,
 	}
 	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
-	// nil pointer — recalcVisibleFiles will overwrite it during ConfigureDomains.
-	a.visible.Store(&aggregatorVisible{})
+	// nil pointer — recalcVisibleFiles will chain new generations off it during
+	// ConfigureDomains.
+	empty := &aggregatorVisible{}
+	a.visible.Store(empty)
+	a.oldestVisible = empty
 	return a, nil
 }
 
@@ -375,7 +381,7 @@ func (a *Aggregator) ConfigureDomains() error {
 	func() {
 		a.dirtyFilesLock.Lock()
 		defer a.dirtyFilesLock.Unlock()
-		a.recalcVisibleFiles()
+		a.recalcVisibleFiles(nil)
 	}()
 	return nil
 }
@@ -432,7 +438,7 @@ func (a *Aggregator) EnableAllDependencies() {
 	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DisableAllDependencies() {
@@ -442,7 +448,7 @@ func (a *Aggregator) DisableAllDependencies() {
 	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DisableInterDomainDependencies() {
@@ -452,7 +458,7 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) OpenFolder() error {
@@ -527,7 +533,7 @@ func (a *Aggregator) openFolder() error {
 	if err := eg.Wait(); err != nil {
 		return fmt.Errorf("openFolder: %w", err)
 	}
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 	return nil
 }
 
@@ -560,7 +566,7 @@ func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) closeDirtyFiles() {
@@ -1183,7 +1189,7 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 		ii.integrateDirtyFiles(sf.ivfs[id], txNumFrom, txNumTo)
 	}
 
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) DomainTables(names ...kv.Domain) (tables []string) {
@@ -1760,12 +1766,25 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // AggregatorRoTx. The bundle is what makes BeginFilesRo lock-free and
 // cross-entity consistent: a single atomic load pins one generation for all
 // domains, histories, inverted indexes and the state minimax.
+//
+// Reclamation model (replaces per-file refcount/canDelete on the main path):
+// published bundles form an oldest→newest chain. A reader pins exactly one
+// bundle (refcnt) for its lifetime; refcnt only grows while the bundle is
+// current and only shrinks once superseded. Files removed from dirtyFiles by a
+// merge/prune are attached to the OUTGOING bundle's `retired` set and physically
+// deleted only once that bundle (and every older one) has drained — see the file
+// lifecycle in docs/plans/20260525-lockfree-file-reclamation-spec.md.
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
 	dhii         [kv.DomainLen]*iiVisible        // per-domain History.InvertedIndex visible
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
+
+	gen     uint64             // generation; assigned at publish, increases monotonically
+	refcnt  atomic.Int32       // live readers pinning this bundle
+	retired []*FilesItem       // files this generation is the last to reference; deleted on head-drain
+	next    *aggregatorVisible // oldest→newest chain link (set under dirtyFilesLock)
 }
 
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
@@ -1774,7 +1793,12 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-func (a *Aggregator) recalcVisibleFiles() {
+//
+// retired carries files just removed from dirtyFiles (merge/prune). They are
+// pinned to the OUTGOING generation and physically deleted only once that
+// generation drains — never inside this call, so a reader still using them is
+// never surprised.
+func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
 	for id, d := range a.d {
@@ -1790,7 +1814,35 @@ func (a *Aggregator) recalcVisibleFiles() {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+
+	old := a.visible.Load()
+	next.gen = old.gen + 1
+	old.retired = retired
+	old.next = next
 	a.visible.Store(next)
+	a.reclaimDrainedLocked()
+}
+
+// reclaimDrainedLocked deletes the retired files of every fully-drained bundle
+// from the oldest end of the chain. Must hold dirtyFilesLock. Reclaiming
+// oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
+// references its retired files. Single caller of closeFilesAndRemove on the main
+// path → at-most-once deletion without any per-file flag.
+func (a *Aggregator) reclaimDrainedLocked() {
+	cur := a.visible.Load()
+	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+		for _, f := range h.retired {
+			f.closeFilesAndRemove()
+		}
+		h.retired = nil
+		a.oldestVisible = h.next
+	}
+}
+
+func (a *Aggregator) reclaimDrained() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.reclaimDrainedLocked()
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2025,9 +2077,11 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, d.cleanAfterMerge(nil, nil, nil, dryRun)...)
+			names, _ := d.cleanAfterMerge(nil, nil, nil, dryRun)
+			deleted = append(deleted, names...)
 		} else {
-			deleted = append(deleted, d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)...)
+			names, _ := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
+			deleted = append(deleted, names...)
 		}
 	}
 	for id, ii := range at.standaloneIIs() {
@@ -2035,23 +2089,29 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 			continue
 		}
 		if in == nil {
-			deleted = append(deleted, ii.cleanAfterMerge(nil, dryRun)...)
+			names, _ := ii.cleanAfterMerge(nil, dryRun)
+			deleted = append(deleted, names...)
 		} else {
-			deleted = append(deleted, ii.cleanAfterMerge(in.iis[id], dryRun)...)
+			names, _ := ii.cleanAfterMerge(in.iis[id], dryRun)
+			deleted = append(deleted, names...)
 		}
 	}
 	a.onFilesDelete(deleted)
 
-	// Step 2: delete
+	// Step 2: remove garbage from dirtyFiles and collect it as `retired`. Physical
+	// deletion is deferred to reclaimDrained once the pinning generation drains.
+	var retired []*FilesItem
 	dryRun = false
 	for id, d := range at.d {
 		if d.d.Disable {
 			continue
 		}
 		if in == nil {
-			d.cleanAfterMerge(nil, nil, nil, dryRun)
+			_, r := d.cleanAfterMerge(nil, nil, nil, dryRun)
+			retired = append(retired, r...)
 		} else {
-			d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
+			_, r := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
+			retired = append(retired, r...)
 		}
 	}
 	for id, ii := range at.standaloneIIs() {
@@ -2059,13 +2119,15 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 			continue
 		}
 		if in == nil {
-			ii.cleanAfterMerge(nil, dryRun)
+			_, r := ii.cleanAfterMerge(nil, dryRun)
+			retired = append(retired, r...)
 		} else {
-			ii.cleanAfterMerge(in.iis[id], dryRun)
+			_, r := ii.cleanAfterMerge(in.iis[id], dryRun)
+			retired = append(retired, r...)
 		}
 	}
 
-	a.recalcVisibleFiles()
+	a.recalcVisibleFiles(retired)
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
@@ -2385,6 +2447,7 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
 	a        *Aggregator
+	visible  *aggregatorVisible // pinned generation; refcnt released in Close
 	d        [kv.DomainLen]*DomainRoTx
 	iis      [kv.StandaloneIdxLen]*InvertedIndexRoTx
 	iisCount int
@@ -2393,9 +2456,23 @@ type AggregatorRoTx struct {
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	v := a.visible.Load()
+	// validate-after-pin: increment, then re-check the bundle is still current.
+	// Closes the load→pin window — a bundle superseded mid-pin is dropped and we
+	// retry, so we never use (and never keep a ref on) files that may be retired.
+	var v *aggregatorVisible
+	for {
+		v = a.visible.Load()
+		v.refcnt.Add(1)
+		if a.visible.Load() == v {
+			break
+		}
+		if v.refcnt.Add(-1) == 0 {
+			a.reclaimDrained()
+		}
+	}
 	ac := &AggregatorRoTx{
 		a:        a,
+		visible:  v,
 		iisCount: a.iisCount,
 		_leakID:  a.leakDetector.Add(),
 	}
@@ -2590,7 +2667,8 @@ func (at *AggregatorRoTx) Close() {
 	if at == nil || at.a == nil { // invariant: it's safe to call Close multiple times
 		return
 	}
-	at.a.leakDetector.Del(at._leakID)
+	a := at.a
+	a.leakDetector.Del(at._leakID)
 	at.a = nil
 
 	for _, d := range at.d {
@@ -2600,6 +2678,13 @@ func (at *AggregatorRoTx) Close() {
 	}
 	for _, ii := range at.standaloneIIs() {
 		ii.Close()
+	}
+
+	if at.visible != nil {
+		if at.visible.refcnt.Add(-1) == 0 {
+			a.reclaimDrained()
+		}
+		at.visible = nil
 	}
 }
 
