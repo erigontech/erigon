@@ -9,65 +9,95 @@ import (
 )
 
 // renderMarkdown formats the benchmark results as a single markdown
-// report: one table per file plus a roll-up across all files.
-func renderMarkdown(results []fileResult, codecOrder []string) string {
+// report: one table per file (rows per codec × framing) plus per-
+// framing roll-ups at the end.
+func renderMarkdown(results []fileResult, codecOrder []string, framings []FramingMode) string {
 	var b strings.Builder
 
 	fmt.Fprintln(&b, "# seg-bench results")
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "Generated: %s\n\n", time.Now().UTC().Format(time.RFC3339))
-	fmt.Fprintln(&b, "## Per-file results")
-	fmt.Fprintln(&b)
 
-	for _, fr := range results {
-		writeFileTable(&b, fr)
+	multiFraming := len(framings) > 1
+	if multiFraming {
+		fmt.Fprintln(&b, "Framing modes measured: per-record + whole-stream. Per-record is the random-access shape today's `.seg` and era1 use (one codec frame per record + offset table). Whole-stream is the bulk-sync-optimal shape (one codec frame for the whole file); its Decode column is the full-stream decode cost and the RA column is the walk-cost only (amortised, assumes the decoded buffer stays in memory).")
 		fmt.Fprintln(&b)
 	}
 
-	fmt.Fprintln(&b, "## Roll-up (mean ratios across all input files)")
+	fmt.Fprintln(&b, "## Per-file results")
 	fmt.Fprintln(&b)
-	writeRollup(&b, results, codecOrder)
+	for _, fr := range results {
+		writeFileTable(&b, fr, multiFraming)
+		fmt.Fprintln(&b)
+	}
+
+	for _, framing := range framings {
+		fmt.Fprintf(&b, "## Roll-up — %s framing (mean ratios across all input files)\n\n", framing)
+		writeRollup(&b, results, codecOrder, framing)
+		fmt.Fprintln(&b)
+	}
 
 	return b.String()
 }
 
-func writeFileTable(b *strings.Builder, fr fileResult) {
+func writeFileTable(b *strings.Builder, fr fileResult, multiFraming bool) {
 	fmt.Fprintf(b, "### `%s`\n\n", filepath.Base(fr.Path))
 	fmt.Fprintf(b, "- records: %d  \n", fr.Records)
 	fmt.Fprintf(b, "- raw (decompressed) size: %s  \n", humanBytes(fr.RawSize))
 	fmt.Fprintf(b, "- `.seg` size on disk: %s  \n", humanBytes(fr.SegSize))
 	fmt.Fprintln(b)
-	fmt.Fprintln(b, "| Codec | Compressed | Ratio vs raw | Ratio vs `.seg` | Encode (ms/MB) | Decode (ms/MB) | Random-access (µs/rec, median) | Random-access (µs/rec, p99) |")
-	fmt.Fprintln(b, "|---|---:|---:|---:|---:|---:|---:|---:|")
 
-	// Baseline row: the current .seg/compress.
-	fmt.Fprintf(b, "| `seg/compress` (current) | %s | %.2f× | 1.00× | n/a | n/a | n/a | n/a |\n",
-		humanBytes(fr.SegSize),
-		ratio(fr.SegSize, fr.RawSize))
+	if multiFraming {
+		fmt.Fprintln(b, "| Codec | Framing | Compressed | Ratio vs raw | Ratio vs `.seg` | Encode (ms/MB) | Decode (ms/MB) | RA (µs/rec, median) | RA (µs/rec, p99) |")
+		fmt.Fprintln(b, "|---|---|---:|---:|---:|---:|---:|---:|---:|")
+	} else {
+		fmt.Fprintln(b, "| Codec | Compressed | Ratio vs raw | Ratio vs `.seg` | Encode (ms/MB) | Decode (ms/MB) | RA (µs/rec, median) | RA (µs/rec, p99) |")
+		fmt.Fprintln(b, "|---|---:|---:|---:|---:|---:|---:|---:|")
+	}
+
+	// Baseline row: the current .seg/compress (always per-record by construction).
+	if multiFraming {
+		fmt.Fprintf(b, "| `seg/compress` (current) | per-record | %s | %.2f× | 1.00× | n/a | n/a | n/a | n/a |\n",
+			humanBytes(fr.SegSize), ratio(fr.SegSize, fr.RawSize))
+	} else {
+		fmt.Fprintf(b, "| `seg/compress` (current) | %s | %.2f× | 1.00× | n/a | n/a | n/a | n/a |\n",
+			humanBytes(fr.SegSize), ratio(fr.SegSize, fr.RawSize))
+	}
 
 	for _, cr := range fr.Results {
 		if !cr.OK {
-			fmt.Fprintf(b, "| `%s` | FAIL | — | — | — | — | — | — |\n", cr.Codec)
-			fmt.Fprintf(b, "_(`%s` error: %s)_\n", cr.Codec, cr.Err)
+			if multiFraming {
+				fmt.Fprintf(b, "| `%s` | %s | FAIL | — | — | — | — | — | — |\n", cr.Codec, cr.Framing)
+			} else {
+				fmt.Fprintf(b, "| `%s` | FAIL | — | — | — | — | — | — |\n", cr.Codec)
+			}
+			fmt.Fprintf(b, "_(`%s` %s error: %s)_\n", cr.Codec, cr.Framing, cr.Err)
 			continue
 		}
 		encMsPerMB := msPerMB(cr.EncodeNs, fr.RawSize)
 		decMsPerMB := msPerMB(cr.DecodeNs, fr.RawSize)
 		medUs, p99Us := accessQuantiles(cr.AccessTimes)
-		fmt.Fprintf(b, "| `%s` | %s | %.2f× | %.2f× | %.1f | %.1f | %.2f | %.2f |\n",
-			cr.Codec,
-			humanBytes(cr.CompressedSize),
-			ratio(cr.CompressedSize, fr.RawSize),
-			ratio(cr.CompressedSize, fr.SegSize),
-			encMsPerMB,
-			decMsPerMB,
-			medUs,
-			p99Us,
-		)
+		if multiFraming {
+			fmt.Fprintf(b, "| `%s` | %s | %s | %.2f× | %.2f× | %.1f | %.1f | %.2f | %.2f |\n",
+				cr.Codec, cr.Framing,
+				humanBytes(cr.CompressedSize),
+				ratio(cr.CompressedSize, fr.RawSize),
+				ratio(cr.CompressedSize, fr.SegSize),
+				encMsPerMB, decMsPerMB, medUs, p99Us,
+			)
+		} else {
+			fmt.Fprintf(b, "| `%s` | %s | %.2f× | %.2f× | %.1f | %.1f | %.2f | %.2f |\n",
+				cr.Codec,
+				humanBytes(cr.CompressedSize),
+				ratio(cr.CompressedSize, fr.RawSize),
+				ratio(cr.CompressedSize, fr.SegSize),
+				encMsPerMB, decMsPerMB, medUs, p99Us,
+			)
+		}
 	}
 }
 
-func writeRollup(b *strings.Builder, results []fileResult, codecOrder []string) {
+func writeRollup(b *strings.Builder, results []fileResult, codecOrder []string, framing FramingMode) {
 	type acc struct {
 		codec        string
 		ratioVsSeg   []float64
@@ -81,6 +111,9 @@ func writeRollup(b *strings.Builder, results []fileResult, codecOrder []string) 
 	}
 	for _, fr := range results {
 		for _, cr := range fr.Results {
+			if cr.Framing != framing {
+				continue
+			}
 			a := bag[cr.Codec]
 			if a == nil {
 				continue
@@ -97,11 +130,11 @@ func writeRollup(b *strings.Builder, results []fileResult, codecOrder []string) 
 			}
 		}
 	}
-	fmt.Fprintln(b, "| Codec | Mean ratio vs raw | Mean ratio vs `.seg` | Mean random-access µs/rec (median) | Files / failures |")
+	fmt.Fprintln(b, "| Codec | Mean ratio vs raw | Mean ratio vs `.seg` | Mean RA µs/rec (median) | Files / failures |")
 	fmt.Fprintln(b, "|---|---:|---:|---:|---|")
 	for _, name := range codecOrder {
 		a := bag[name]
-		if a == nil {
+		if a == nil || a.count == 0 {
 			continue
 		}
 		fmt.Fprintf(b, "| `%s` | %.2f× | %.2f× | %.2f | %d / %d |\n",

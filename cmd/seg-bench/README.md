@@ -15,7 +15,7 @@ repo.
 
 ```bash
 # Build
-make seg-bench    # or: go build -o build/bin/seg-bench ./cmd/seg-bench
+go build -o build/bin/seg-bench ./cmd/seg-bench
 
 # Step 1: fetch a representative mainnet sampling via R2 webseeds
 ./build/bin/seg-bench fetch --chain mainnet --out samples/
@@ -25,9 +25,19 @@ make seg-bench    # or: go build -o build/bin/seg-bench ./cmd/seg-bench
 
 # Optional flags for `run`:
 #   --codecs snappy,zstd-3,zstd-9,zstd-19   (default; comma-separated)
+#   --framing per-record                     (also: whole-stream; or both: per-record,whole-stream)
+#   --dict /path/to/trained-zstd.dict        (required by any zstd-*+dict codec)
 #   --repeats 5                              (best-of-N timing)
 #   --random-access-samples 2000             (random reads per codec)
 #   --seed 1                                 (RNG seed, for reproducibility)
+
+# Trained dictionary (v2): train out-of-band with the zstd CLI, then pass via --dict.
+# Use a held-out training set distinct from the measurement set to avoid overfitting:
+#
+#   zstd --train -B<recordSize> -o trained.dict samples-train/*.seg-records-extracted
+#   ./build/bin/seg-bench run --input samples-measure/ \
+#                             --codecs snappy,zstd-3,zstd-3+dict,zstd-19,zstd-19+dict \
+#                             --dict trained.dict --out report.md
 ```
 
 ## What gets measured
@@ -62,20 +72,59 @@ apples-to-apples replacement for `seg/compress` because the codec
 must be independently decodable from a per-record offset for the
 `.bt` / `.kvi` index to work.
 
-## What is NOT measured (v1)
+## What IS measured (v2)
 
-- **Trained zstd dictionary.** Requires a held-out training set
-  distinct from the measurement set. Worth adding as v2.
-- **Whole-stream framing.** As a separate measurement, useful for
-  characterising the per-record-framing tax. Out of scope here.
-- **Cold-cache random-access.** v1 measures hot-cache (the
-  realistic warm-serving-node scenario). Cold-cache (page cache
-  flushed between samples) is a v2 measurement for the disk-I/O
-  floor.
+- **Both framing modes**: per-record (random-access shape today's
+  `.seg` and era1 use) and whole-stream (bulk-sync optimum; one
+  codec frame for the whole file). The size delta between the two
+  on the same codec is the **per-record-framing tax**.
+- **Trained zstd dictionary** as a codec variant (`zstd-3+dict`,
+  `zstd-19+dict`). Requires the `--dict <path>` flag pointing at a
+  pre-trained dictionary file. See [§ Trained dictionary](#trained-dictionary)
+  below for the workflow.
+
+## What is NOT measured (still v2.1+)
+
+- **Streaming variant** for files too big to hold in memory (the
+  mid-era transactions `.seg` is ~15 GB). Disk-backed per-record
+  framing is the natural next addition.
+- **Era1 input format**. The benchmark currently reads `.seg` files
+  via `db/seg`; era1 input would use `db/era`'s reader (currently
+  unmerged on the main branch — sits as untracked work). Required
+  for the Q2 (interchange-codec) measurement to be honest; until
+  then the snappy column on `.seg` input is a *proxy* for Q2,
+  not a real era1 measurement.
+- **Cold-cache random-access.** v2 measures hot-cache (warm
+  serving-node scenario). Cold-cache (page cache flushed between
+  samples) is a v2.1 measurement for the disk-I/O floor.
 - **State-domain `.kv` files.** Different methodology (the
   `seg/compress` 4× ratio on `.kv` files reflects file-level value
   sharing that naive recompression wouldn't reproduce). Block-stage
   only here.
+
+## Trained dictionary
+
+To measure `zstd-3+dict` / `zstd-19+dict` honestly, train the
+dictionary on a **held-out subset** distinct from the measurement
+set — otherwise the dictionary is overfit to its own measurement
+data and the size numbers are flattering.
+
+Recommended workflow:
+
+1. Split the sample files into `train/` and `measure/` (e.g. early-
+   era files for training; mid-era + late-era for measurement).
+2. Extract raw records from the train set into a directory (one
+   file per record, or one big concatenated file with length
+   prefixes — `zstd --train` is flexible).
+3. Run `zstd --train -o trained.dict <train-records>`. Default
+   dictionary size is 110 KB; tweak with `--maxdict=64K` or
+   `--maxdict=256K` to characterise the size/ratio curve.
+4. Pass `--dict trained.dict` to `seg-bench run` and add
+   `zstd-3+dict`, `zstd-19+dict` to the codec list.
+
+Training is one-off (out of the benchmark's hot path); the
+dictionary file is small (KB–hundred-KB range) and ships alongside
+the bench results for reproducibility.
 
 ## File layout
 

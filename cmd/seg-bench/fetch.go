@@ -39,9 +39,18 @@ func runFetch(args []string) {
 		die("manifest: %v", err)
 	}
 
-	// Strip "<chain>.toml" from the manifest URL to get the base prefix
-	// that .seg files live under (same R2 bucket, different filenames).
-	baseURL := strings.TrimSuffix(manifestURL, "/"+*chain+".toml")
+	// Snapshot files live at a different CDN than the verification manifest:
+	// chain.toml is at R2 (erigon-snapshots.erigon.network); the actual files
+	// are served from the per-chain webseed host listed in snapcfg.EmbeddedWebseeds.
+	wsList, ok := snapcfg.GetEmbeddedWebseeds(*chain)
+	if !ok || len(wsList) == 0 {
+		die("no embedded webseed entry for chain %q", *chain)
+	}
+	baseURL, err := snapcfg.WebseedToUrl(wsList[0])
+	if err != nil {
+		die("parse webseed url: %v", err)
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
 
 	samples, err := pickSamples(manifestPath, *perKind)
 	if err != nil {
@@ -49,6 +58,7 @@ func runFetch(args []string) {
 	}
 	fmt.Printf("Selected %d files (%d per kind across headers/bodies/transactions)\n", len(samples), *perKind)
 
+	var failed []string
 	for _, name := range samples {
 		out := filepath.Join(*outDir, name)
 		if _, err := os.Stat(out); err == nil {
@@ -58,8 +68,13 @@ func runFetch(args []string) {
 		url := baseURL + "/" + name
 		fmt.Printf("  fetch %s\n", name)
 		if err := downloadCloudflare(url, out); err != nil {
-			die("download %s: %v", name, err)
+			fmt.Printf("    WARN: %v — continuing\n", err)
+			failed = append(failed, name)
+			continue
 		}
+	}
+	if len(failed) > 0 {
+		fmt.Printf("\n%d file(s) failed to download (skipped): %v\n", len(failed), failed)
 	}
 	fmt.Println("\nDone. Run:")
 	fmt.Printf("  seg-bench run --input %s --out report.md\n", *outDir)

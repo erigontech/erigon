@@ -47,13 +47,22 @@ Usage:
       db/snapcfg/cdn.go. Skips files already present in --out.
 
   seg-bench run --input samples/ [--out report.md] [--codecs ...]
-                [--repeats 5] [--random-access-samples 2000]
-                [--seed 1]
+                [--framing per-record[,whole-stream]] [--dict <path>]
+                [--repeats 5] [--random-access-samples 2000] [--seed 1]
       Run the benchmark over every .seg file in --input. For each
-      file: decompress through db/seg, recompress under each codec
-      using the per-record framing format defined in format.go,
-      verify round-trip, measure size / encode / decode / random-
-      access. Output is a markdown report.
+      file: decompress through db/seg, recompress under each (codec,
+      framing) combination, verify round-trip, measure size /
+      encode / decode / random-access. Output is a markdown report.
+
+      Framing modes:
+        per-record   - one codec frame per record (random-access)
+        whole-stream - one codec frame per file (bulk-sync optimum)
+        per-record,whole-stream - measure both; size delta = per-record-framing tax
+
+      Dictionary: codecs zstd-3+dict and zstd-19+dict require
+      --dict pointing at a zstd-trained dictionary file. See
+      cmd/seg-bench/README.md § "Trained dictionary" for the
+      training workflow.
 
   seg-bench help
       Print this message.
