@@ -258,13 +258,13 @@ test-fixtures-eest:
 
 # EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest)
 # against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.json (single source of truth shared with
+# tools/eest-spec-shards.yml (single source of truth shared with
 # .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race-" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards.
-EEST_SPEC_RACE_SHARDS := $(shell jq -r '.[].shard | select(test("-race-"))' tools/eest-spec-shards.json)
-EEST_SPEC_SHARDS      := $(shell jq -r '.[].shard | select(test("-race-") | not)' tools/eest-spec-shards.json)
+EEST_SPEC_RACE_SHARDS := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race-"))')
+EEST_SPEC_SHARDS      := $(shell yq -o=json '.' tools/eest-spec-shards.yml | jq -r '.[].shard | select(test("-race-") | not)')
 
 .PHONY: $(addprefix eest-spec-,$(EEST_SPEC_SHARDS)) $(addprefix eest-spec-,$(EEST_SPEC_RACE_SHARDS)) evm.race
 

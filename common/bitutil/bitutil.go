@@ -30,9 +30,9 @@ func fastANDBytes(dst, a, b []byte) int {
 	n := min(len(b), len(a))
 	w := n / wordSize
 	if w > 0 {
-		dw := *(*[]uintptr)(unsafe.Pointer(&dst))
-		aw := *(*[]uintptr)(unsafe.Pointer(&a))
-		bw := *(*[]uintptr)(unsafe.Pointer(&b))
+		dw := unsafe.Slice((*uintptr)(unsafe.Pointer(&dst[0])), w)
+		aw := unsafe.Slice((*uintptr)(unsafe.Pointer(&a[0])), w)
+		bw := unsafe.Slice((*uintptr)(unsafe.Pointer(&b[0])), w)
 		for i := 0; i < w; i++ {
 			dw[i] = aw[i] & bw[i]
 		}
@@ -68,9 +68,9 @@ func fastORBytes(dst, a, b []byte) int {
 	n := min(len(b), len(a))
 	w := n / wordSize
 	if w > 0 {
-		dw := *(*[]uintptr)(unsafe.Pointer(&dst))
-		aw := *(*[]uintptr)(unsafe.Pointer(&a))
-		bw := *(*[]uintptr)(unsafe.Pointer(&b))
+		dw := unsafe.Slice((*uintptr)(unsafe.Pointer(&dst[0])), w)
+		aw := unsafe.Slice((*uintptr)(unsafe.Pointer(&a[0])), w)
+		bw := unsafe.Slice((*uintptr)(unsafe.Pointer(&b[0])), w)
 		for i := 0; i < w; i++ {
 			dw[i] = aw[i] | bw[i]
 		}
@@ -105,7 +105,7 @@ func fastTestBytes(p []byte) bool {
 	n := len(p)
 	w := n / wordSize
 	if w > 0 {
-		pw := *(*[]uintptr)(unsafe.Pointer(&p))
+		pw := unsafe.Slice((*uintptr)(unsafe.Pointer(&p[0])), w)
 		for i := 0; i < w; i++ {
 			if pw[i] != 0 {
 				return true
