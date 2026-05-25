@@ -258,7 +258,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"commitment", times.ComputeCommitment,
 			)
 			stateCache.PrintStatsAndReset()
-			if isBatchFull {
+			if isBatchFull && blockNum != maxBlockNum {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 		}
