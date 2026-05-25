@@ -29,7 +29,7 @@ jobs:
           test -d docs/site/scripts || { echo "missing docs/site/scripts/"; exit 1; }
           test -f docs/site/scripts/generate-llms.py || { echo "missing docs/site/scripts/generate-llms.py"; exit 1; }
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.guard.outputs.present == 'true'
         with:
           python-version: '3.11'
