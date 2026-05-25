@@ -89,6 +89,31 @@ func TestAggregatorReadAfterRetire(t *testing.T) {
 	require.Equal(t, uint64(2), hf[0].endTxNum/stepSize)
 }
 
+// TestAggregatorRetireDeferredWhileDebugPins verifies that a file retired by an
+// overlap-cleanup is NOT physically deleted while a DebugBeginDirtyFilesRo
+// (BuildMissedAccessors) still pins the generation — deletion is deferred until
+// that debug tx closes. Guards against the reclaimer deleting a file out from
+// under a concurrent accessor build.
+func TestAggregatorRetireDeferredWhileDebugPins(t *testing.T) {
+	stepSize := uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+	generateAllDomainsOverlap(t, agg)
+
+	subset01 := filepath.Join(agg.Dirs().SnapHistory, "v1.0-accounts.0-1.v")
+	mustExist(t, subset01, true)
+
+	// pin every dirty file (incl. the soon-to-be-retired overlaps) via FilesItem.refcount
+	rotx := agg.DebugBeginDirtyFilesRo()
+
+	// retire the overlap files; they are pinned by rotx so must be parked, not deleted
+	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	mustExist(t, subset01, true) // deferred — still on disk
+
+	// releasing the debug pin triggers the deferred deletion
+	rotx.Close()
+	mustExist(t, subset01, false)
+}
+
 // TestAggregatorReclaimConcurrent stresses BeginFilesRo/Close against a
 // concurrent retirement under the race detector: no double-free / use-after-free
 // of FilesItem regardless of how Close and reclamation interleave.
