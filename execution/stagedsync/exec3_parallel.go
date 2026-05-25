@@ -1638,25 +1638,30 @@ func (result *execResult) finalizeTxSimple(
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
-	// Check if the worker's execution modified the coinbase (e.g., a TX
-	// that sends ETH to the block producer). The execution delta =
-	// CollectorWrites balance - versionMap base.
-	if result.CollectorWrites != nil {
-		for _, w := range result.CollectorWrites {
-			if w.Address == result.Coinbase && w.Path == state.BalancePath {
-				if execBal, ok := w.Val.(uint256.Int); ok {
-					// The worker's execution balance = staleBase + executionDelta
-					// We want: correctBase + executionDelta + tip
-					// executionDelta = execBal - staleBase
-					// But we don't have staleBase. However, since shouldDelayFeeCalc=true,
-					// the worker's base was whatever it read from the versionMap at
-					// execution time. If the TX was validated (reads matched), the
-					// worker's base IS the correct base. So execBal = correctBase + executionDelta.
-					// We just need to add FeeTipped.
-					newCoinbaseBalance = execBal
-				}
-				break
+	// Detect the worker's coinbase Balance write so we can start the
+	// finalize from the worker's post-execution value rather than the
+	// pre-tx versionMap value. Scan result.TxOut (the raw worker output,
+	// where every intermediate write lands) — NOT result.CollectorWrites,
+	// which is the IBS's "net change" set and SUPPRESSES the coinbase
+	// entry when sender == coinbase and the per-tx net balance change is
+	// zero in the IBS's view (e.g. Frontier miner-self-send: gas pre-pay
+	// + value-transfer + refund net to zero in the IBS journal, but the
+	// worker's intermediate balance under shouldDelayFeeCalc=true still
+	// debited the gas-used portion which the finalize must re-credit via
+	// the tip).
+	//
+	// Without this, finalize uses the stale pre-tx versionMap value as
+	// base and adds the tip on top — over-crediting the coinbase by one
+	// tip per sender==coinbase tx. Observed at mainnet block 218957 with
+	// canonical/parallel divergence of exactly one tip (1.05e15 wei).
+	workerWroteCoinbase := false
+	for _, w := range result.TxOut {
+		if w.Address == result.Coinbase && w.Path == state.BalancePath {
+			workerWroteCoinbase = true
+			if execBal, ok := w.Val.(uint256.Int); ok {
+				newCoinbaseBalance = execBal
 			}
+			break
 		}
 	}
 	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
@@ -1666,6 +1671,7 @@ func (result *execResult) finalizeTxSimple(
 	var burntAcc *accounts.Account
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
+	workerWroteBurnt := false
 	if hasBurnt {
 		burntAcc, err = vsReader.ReadAccountData(burntAddr)
 		if err != nil {
@@ -1674,15 +1680,15 @@ func (result *execResult) finalizeTxSimple(
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
-		// Check if worker's execution modified the burnt contract
-		if result.CollectorWrites != nil {
-			for _, w := range result.CollectorWrites {
-				if w.Address == burntAddr && w.Path == state.BalancePath {
-					if execBal, ok := w.Val.(uint256.Int); ok {
-						newBurntBalance = execBal
-					}
-					break
+		// Scan TxOut (raw worker output) — not CollectorWrites — for the
+		// same reason described in the coinbase override above.
+		for _, w := range result.TxOut {
+			if w.Address == burntAddr && w.Path == state.BalancePath {
+				workerWroteBurnt = true
+				if execBal, ok := w.Val.(uint256.Int); ok {
+					newBurntBalance = execBal
 				}
+				break
 			}
 		}
 		if txTask.Config.IsLondon(blockNum) {
@@ -1692,32 +1698,37 @@ func (result *execResult) finalizeTxSimple(
 
 	// Update CollectorWrites with fee-adjusted balances.
 	emptyRemoval := chainRules.IsSpuriousDragon
-	oldCoinbaseBalance := uint256.Int{}
 	coinbaseEmptyPre := coinbaseAcc == nil ||
 		(coinbaseAcc.Balance.IsZero() && coinbaseAcc.Nonce == 0 && coinbaseAcc.IsEmptyCodeHash())
+	var oldCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		oldCoinbaseBalance = coinbaseAcc.Balance
 	}
 	// Match the serial executor: even when no fee is being credited
 	// (tipped == 0 means newBalance == oldBalance) the coinbase must be
 	// "touched" so the commitment calculator sees the EIP-161
-	// empty-removal delete. Without this touch the calculator never
-	// learns about the coinbase and the trie root diverges from serial,
-	// which always calls AddBalance(coinbase, 0) → TouchAccount → marks
-	// the empty coinbase dirty so MakeWriteSet emits a SelfDestructPath
-	// delete.
+	// empty-removal delete.
+	//
+	// Also emit when the worker wrote to the coinbase BalancePath: the
+	// worker's incarnation-0 write went to versionMap with the pre-fee
+	// value; the finalize-fee write at incarnation+1 must land regardless
+	// of value equality so it masks the stale worker entry. Covers the
+	// Frontier miner-self-send case where (in IBS terms) net balance
+	// change is zero but versionMap carries a stale intermediate value.
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
+		workerWroteCoinbase ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
 	}
 	if hasBurnt {
-		oldBurntBalance := uint256.Int{}
+		var oldBurntBalance uint256.Int
 		if burntAcc != nil {
 			oldBurntBalance = burntAcc.Balance
 		}
-		if newBurntBalance != oldBurntBalance {
+		// Same staleness-masking reasoning as coinbase above.
+		if newBurntBalance != oldBurntBalance || workerWroteBurnt {
 			result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 				burntAddr, burntAcc, newBurntBalance, tracing.BalanceDecreaseGasBuy, emptyRemoval)
 		}
@@ -1784,11 +1795,12 @@ func (result *execResult) finalizeTxSimple(
 		}
 	}
 	if hasBurnt {
-		oldBurntBalance := uint256.Int{}
+		var oldBurntBalance uint256.Int
 		if burntAcc != nil {
 			oldBurntBalance = burntAcc.Balance
 		}
-		if newBurntBalance != oldBurntBalance {
+		// Same staleness-masking reasoning as coinbase above.
+		if newBurntBalance != oldBurntBalance || workerWroteBurnt {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address:             burntAddr,
 				Path:                state.BalancePath,
