@@ -1072,13 +1072,12 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 			// added childUsed.State back to gas.State).
 			scope.creditStateGasRefund(params.StateGasNewAccount)
 		} else {
-			// EIP-8037: child success — fold child's state-gas usage into our
-			// frame and absorb any unapplied refund credit (SSTORE 0→x→0 inside
-			// the child) into this frame's reservoir/pending.
+			// EIP-8037: child success — fold child's net state-gas usage
+			// (signed: charges − inline refunds the child credited) into
+			// our frame. The child's reservoir leftover (which holds any
+			// refunded gas) has already been merged via restoreChildGas
+			// above.
 			scope.frameStateUsed += childUsed.State
-			if childUsed.PendingStateGasCredit > 0 {
-				scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
-			}
 		}
 	}
 
@@ -1145,9 +1144,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
-		if childUsed.PendingStateGasCredit > 0 {
-			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
-		}
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1196,9 +1192,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
-		if childUsed.PendingStateGasCredit > 0 {
-			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
-		}
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1243,9 +1236,6 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
-		if childUsed.PendingStateGasCredit > 0 {
-			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
-		}
 	}
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1289,9 +1279,6 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam && err == nil {
 		scope.frameStateUsed += childUsed.State
-		if childUsed.PendingStateGasCredit > 0 {
-			scope.creditStateGasRefund(childUsed.PendingStateGasCredit)
-		}
 	}
 	evm.returnData = ret
 	return pc, ret, nil

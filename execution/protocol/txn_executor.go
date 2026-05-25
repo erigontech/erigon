@@ -73,6 +73,17 @@ func (e ErrExecAbortError) Error() string {
 	}
 }
 
+// IsError reports whether the abort carries a genuine, non-dependency
+// execution error. A dependency abort (DependencyTxIndex >= 0, raised by the
+// ErrDependency panic when a versioned read observes an unsettled predecessor)
+// carries no OriginError and is resolved by re-execution. An IsError abort, by
+// contrast, must be validated before it can be attributed to genuinely invalid
+// block data rather than stale speculative input — the two are mutually
+// exclusive, since Execute's recover sets OriginError only when DepTxIndex < 0.
+func (e ErrExecAbortError) IsError() bool {
+	return e.OriginError != nil
+}
+
 type TxnExecutor struct {
 	gp                  *GasPool
 	msg                 Message
@@ -303,14 +314,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 		}
 	}
 
-	regularContribution := st.msg.Gas()
-	var stateContribution uint64
-	if rules.IsAmsterdam {
-		stateContribution = regularContribution
-		if regularContribution > params.MaxTxnGasLimit {
-			regularContribution = params.MaxTxnGasLimit
-		}
-	}
+	regularContribution, stateContribution := InclusionContributions(st.msg.Gas(), intrinsicGasResult, rules.IsAmsterdam)
 	if err := CheckBlockGasInclusion(st.gp, regularContribution, stateContribution); err != nil {
 		return err
 	}
@@ -429,6 +433,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
+		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -527,7 +532,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
-		st.state.SetNonce(msg.From(), nonce+1)
+		st.state.SetNonce(msg.From(), nonce+1, tracing.NonceChangeEoACall)
 	}
 
 	// Check clause 7, subtract intrinsic gas if everything is correct
@@ -607,16 +612,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037 state-gas refund. Frame-local per the spec; the value
-			// is carried out via Call/Create's gasUsed.PendingStateGasCredit:
-			//   - success: any SSTORE-clear credit that no frame absorbed.
-			//   - error: the top frame's execution state-gas + (for CREATE)
-			//     the intrinsic NEW_ACCOUNT state-gas. Set inside the depth==0
-			//     defers in evm.call / evm.create.
-			// State refunds bypass the EIP-3529 quotient cap (regular only).
-			st.blockStateGasUsed = imdGas.State + gasUsed.State - gasUsed.PendingStateGasCredit
-			st.blockRegularGasUsed = max(imdGas.Regular+gasUsed.Regular, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total() - gasUsed.PendingStateGasCredit
+			combined := gasUsed.PlusIntrinsic(imdGas)
+			st.blockStateGasUsed = combined.StateClamped()
+			st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+			st.txnGasUsedB4Refunds = combined.Total()
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		} else if rules.IsPrague {
@@ -632,9 +631,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
-		st.blockStateGasUsed = imdGas.State + gasUsed.State
-		st.blockRegularGasUsed = max(imdGas.Regular+gasUsed.Regular, intrinsicGasResult.FloorGasCost)
-		st.txnGasUsedB4Refunds = imdGas.Plus(gasUsed.MdGas).Total()
+		combined := gasUsed.PlusIntrinsic(imdGas)
+		st.blockStateGasUsed = combined.StateClamped()
+		st.blockRegularGasUsed = max(combined.Regular, intrinsicGasResult.FloorGasCost)
+		st.txnGasUsedB4Refunds = combined.Total()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
 	} else {
 		// No-refund path: gasBailout (trace_call) or !refunds.
@@ -699,6 +699,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
 		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		IntrinsicGas:        intrinsicGasResult,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -806,17 +807,17 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, contractCr
 
 			// 7. set authority code
 			if auth.Address == (common.Address{}) {
-				if err := st.state.SetCode(authority, nil); err != nil {
+				if err := st.state.SetCode(authority, nil, tracing.CodeChangeAuthorizationClear); err != nil {
 					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			} else {
-				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address))); err != nil {
+				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address)), tracing.CodeChangeAuthorization); err != nil {
 					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 				}
 			}
 
 			// 8. increase the nonce of authority
-			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
+			if err := st.state.SetNonce(authority, authorityNonce+1, tracing.NonceChangeAuthorization); err != nil {
 				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 			}
 		}

@@ -32,26 +32,73 @@ concurrency:
 permissions:
   actions: write
   contents: read
+  pull-requests: read
 
 jobs:
+  # Fast path: detect whether any non-docs files changed.
+  # For merge_group and workflow_dispatch always returns code=true/docs_site=true.
+  # Jobs guarded by `needs.changes.outputs.code != 'false'` are skipped
+  # for docs-only PRs, saving 20-30 min of unnecessary Go CI.
+  # Jobs guarded by `needs.changes.outputs.docs_site == 'true'` only run when
+  # docs/site/** is touched.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+      docs_site: ${{ steps.check.outputs.docs_site }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename') \
+            || { echo "Failed to fetch PR files from GitHub API"; exit 1; }
+          # "code" = any file outside: docs/*, root-level llms*.txt, root-level *.md
+          # (nested *.md like execution/README.md still counts as a code change)
+          if echo "$files" | grep -qvE '^(docs/|llms[^/]*\.txt$|[^/]*\.md$)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -qE '^docs/site/'; then
+            echo "docs_site=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_site=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
-    if: github.event_name == 'pull_request'
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/lint.yml
     secrets: inherit
 
   tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-all-erigon.yml
     secrets: inherit
 
   race-tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-all-erigon-race.yml
     secrets: inherit
 
   eest-spec-tests:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-eest-spec.yml
     secrets: inherit
 
   hive:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
 
@@ -61,8 +108,15 @@ jobs:
     secrets: inherit
 
   caplin:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-integration-caplin.yml
     secrets: inherit
+
+  docs-site:
+    if: needs.changes.outputs.docs_site == 'true'
+    needs: [changes]
+    uses: ./.github/workflows/docs-site-build.yml
 
   # Only meaningful for PRs: needs github.event.pull_request.base.sha.
   large-files:
@@ -71,14 +125,20 @@ jobs:
     secrets: inherit
 
   bench:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-bench.yml
     secrets: inherit
 
   kurtosis:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/test-kurtosis-assertoor.yml
     secrets: inherit
 
   repro:
+    if: needs.changes.outputs.code != 'false'
+    needs: [changes]
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
 
@@ -87,15 +147,18 @@ jobs:
     # (GitHub withholds non-GITHUB_TOKEN secrets from Dependabot even for same-repo PRs),
     # so skip the scan for those to avoid a guaranteed failure in ci-gate.
     if: |
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.actor != 'dependabot[bot]') ||
-      github.event_name != 'pull_request'
+      needs.changes.outputs.code != 'false' &&
+      ((github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor != 'dependabot[bot]') ||
+       github.event_name != 'pull_request')
+    needs: [changes]
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
   ci-gate:
     if: always()
     needs:
+      - changes
       - lint
       - tests
       - race-tests
@@ -103,6 +166,7 @@ jobs:
       - hive
       - hive-eest
       - caplin
+      - docs-site
       - large-files
       - bench
       - kurtosis

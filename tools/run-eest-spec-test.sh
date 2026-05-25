@@ -67,10 +67,10 @@ esac
 
 # Resolve workers + failure budget + exec3-parallel flag from the single-source
 # manifest. Both this script and the test-eest-spec.yml load-matrix job read
-# tools/eest-spec-shards.json, so adding a shard / tweaking a budget is a
-# one-file edit.
-manifest=tools/eest-spec-shards.json
-budget_row=$(jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"' "$manifest")
+# tools/eest-spec-shards.yml, so adding a shard / tweaking a budget is a
+# one-file edit. yq converts YAML→JSON so the jq query stays identical.
+manifest=tools/eest-spec-shards.yml
+budget_row=$(yq -o=json '.' "$manifest" | jq -r --arg s "$shard" '.[] | select(.shard == $s) | "\(.workers)\t\(."max-allowed-failures")\t\(."exec3-parallel" // false)"')
 if [[ -z "$budget_row" ]]; then
 	echo "shard $shard not found in $manifest" >&2
 	exit 2

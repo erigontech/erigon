@@ -436,7 +436,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if errors.Is(err, misc.ErrMaxBlobGasUsed) {
-			bad, latestValidHash := s.blockDownloader.IsBadHeader(req.ParentHash)
+			bad, latestValidHash, _ := s.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
@@ -547,7 +547,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
 		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
-		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash())
+		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash(), "invalid block number")
 		parentHash := parent.Hash()
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -556,18 +556,25 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	bad, lastValidHash := s.blockDownloader.IsBadHeader(blockHash)
+	bad, lastValidHash, cachedErr := s.blockDownloader.IsBadHeader(blockHash)
 	if bad {
 		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
-		bad, lastValidHash = s.blockDownloader.IsBadHeader(parentHash)
+		bad, lastValidHash, cachedErr = s.blockDownloader.IsBadHeader(parentHash)
 		if bad {
 			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
+			if cachedErr != "" {
+				cachedErr = fmt.Sprintf("ancestor %s rejected: %s", parentHash, cachedErr)
+			}
 		}
 	}
 	if bad {
-		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString("previously known bad block")}, nil
+		errMsg := cachedErr
+		if errMsg == "" {
+			errMsg = "previously known bad block"
+		}
+		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, errMsg)
+		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(errMsg)}, nil
 	}
 
 	currentHeader := s.chainRW.CurrentHeader(ctx)
@@ -1012,7 +1019,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if status == execmodule.ExecutionStatusBadBlock {
-		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash)
+		e.blockDownloader.ReportBadHeader(block.Hash(), latestValidHash, common.Deref(validationErr))
 	}
 
 	resp := &engine_types.PayloadStatus{
