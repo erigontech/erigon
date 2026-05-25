@@ -84,8 +84,12 @@ func TestExecutionSpecWitness(t *testing.T) {
 
 	// Fixtures come from the lazy-download cache, not the tests submodule, so the
 	// shared Walk's "did you clone the tests submodule?" message is misleading
-	// here. Pre-check the dir and emit an actionable skip instead.
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	// here. Pre-check the dir and emit an actionable skip instead. Mirror Walk's
+	// own guard (missing OR not-a-directory) so we intercept every case it would,
+	// including a stat error other than IsNotExist (which would otherwise hit a
+	// nil-deref inside Walk). The err!=nil short-circuit keeps info from being
+	// dereferenced when nil.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		t.Skipf("missing fixtures at %s; run `make test-fixtures-zkevm`", dir)
 	}
 
