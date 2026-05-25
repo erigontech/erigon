@@ -40,11 +40,10 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
-	// Pin the current generation. Holding dirtyFilesLock means no publish can race
-	// us, so a plain load+increment suffices (no validate-after-pin needed). The
-	// pin protects every dirty file captured below: such a file can only be retired
-	// at a generation >= this one, and oldest-first reclaim won't delete it until we
-	// release the pin in Close — even though these files are not in the visible set.
+	// Pin the current generation (load+increment suffices — we hold dirtyFilesLock,
+	// so no publish can race us). The pin protects every dirty file captured below,
+	// even ones absent from the visible set: such a file can only be retired at a
+	// generation >= this, and oldest-first reclaim won't delete it until Close.
 	ac.visible = a.visible.Load()
 	ac.visible.refcnt.Add(1)
 	for i, d := range a.d {

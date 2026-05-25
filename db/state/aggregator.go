@@ -1767,13 +1767,10 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 // cross-entity consistent: a single atomic load pins one generation for all
 // domains, histories, inverted indexes and the state minimax.
 //
-// Reclamation model (replaces per-file refcount/canDelete on the main path):
-// published bundles form an oldest→newest chain. A reader pins exactly one
-// bundle (refcnt) for its lifetime; refcnt only grows while the bundle is
-// current and only shrinks once superseded. Files removed from dirtyFiles by a
-// merge/prune are attached to the OUTGOING bundle's `retired` set and physically
-// deleted only once that bundle (and every older one) has drained — see the file
-// lifecycle in docs/plans/20260525-lockfree-file-reclamation-spec.md.
+// Bundles also drive file reclamation (replacing per-file refcount/canDelete):
+// they form an oldest→newest chain; a reader pins one via refcnt, and files
+// retired by a merge/prune are attached to the outgoing bundle and deleted only
+// once it drains. See docs/plans/20260525-lockfree-file-reclamation-spec.md.
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
@@ -1781,9 +1778,8 @@ type aggregatorVisible struct {
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
-	gen     uint64             // generation; assigned at publish, increases monotonically
 	refcnt  atomic.Int32       // live readers pinning this bundle
-	retired []*FilesItem       // files this generation is the last to reference; deleted on head-drain
+	retired []*FilesItem       // files this generation is the last to reference; deleted on drain
 	next    *aggregatorVisible // oldest→newest chain link (set under dirtyFilesLock)
 }
 
@@ -1794,10 +1790,8 @@ type aggregatorVisible struct {
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
 //
-// retired carries files just removed from dirtyFiles (merge/prune). They are
-// pinned to the OUTGOING generation and physically deleted only once that
-// generation drains — never inside this call, so a reader still using them is
-// never surprised.
+// retired (files just removed from dirtyFiles) are attached to the outgoing
+// generation and deleted later by the reclaimer — never inside this call.
 func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
@@ -1816,7 +1810,6 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	next.minimaxTxNum = next.stateMinimaxTxNum()
 
 	old := a.visible.Load()
-	next.gen = old.gen + 1
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
