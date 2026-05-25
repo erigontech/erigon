@@ -158,15 +158,43 @@ that runs the complete admin unwind. Sub-ops in order:
    snapshot files is the only state; what's in MDBX is empty (or holds
    only invariants like genesis).
 
-3. **Commitment anchor at toBlock** — write a commitment state entry at
-   toBlock via the existing `WriteCommitmentEntryAtBlock` helper
-   (commit `0244c4e000`). The trie state for this entry is read from
-   the latest commitment entry in snapshots (which sits at the nearest
-   step boundary `<= toBlock` — for aligned-mode chains this is exactly
-   `toBlock` once aligned-mode publishers write per-block commitment
-   entries; for now it may be the most recent step boundary, with
-   re-execution from there to `toBlock` filling the gap on next
-   startup).
+3. **Commitment anchor at toBlock.** Two cases:
+
+   - **toBlock lands on an existing commitment entry** (e.g. step
+     boundary): no work needed; the existing entry stays as the
+     anchor. Validation-only path; landed in commit `cfd41f8377`
+     (`ensureCommitmentAtBlock`).
+
+   - **toBlock is between commitment entries**: recompute the
+     commitment state at toBlock from snapshot+history (no
+     re-execution required — the data is in snapshots/db) and write
+     it as the new latest commitment entry. The user's framing
+     (2026-05-25): *"we should be able to without re-exec as we have
+     the data in the snapshots/db assuming history is available …
+     there is a natural validation — state == block header state."*
+     Algorithm: cursor-iterate state at toBlock's end-txNum via
+     `GetAsOf`, build the patricia trie from scratch via
+     `commitment.HexPatriciaHashed`, validate the resulting root
+     against the block header's `stateRoot`, write the entry via
+     `WriteCommitmentEntryAtBlock`. Landed as commit 2d (separate
+     because the algorithm is genuinely new code touching commitment
+     internals).
+
+   **Shared primitive — used by fork-from CLI too.** The commitment
+   recompute is the same problem fork-from CLI faces when the cut
+   block isn't on an existing commitment boundary (the user's framing
+   2026-05-25: *"for 4 we have the same issue with the fork
+   creation — we need a clean state to verify the start of the block,
+   but it's a bit more complex for the fork if it's not there as we
+   don't want to change the parent state — so we may need an
+   additional record in the forked commitment file (start fork
+   tx-1)"*). Both callers share the recompute primitive; fork-from
+   adds the extra wrinkle that the new entry lands in the *fork's*
+   commitment file with a "start fork tx-1" coordinate, leaving the
+   parent's commitment file untouched. The shared primitive's API is
+   designed to accept either the active commitment domain (SetHead)
+   or a fork-specific commitment file path (fork-from); 2d lands the
+   SetHead caller; fork-from wiring follows.
 
 4. **Atomic commit.** All four steps land in a single MDBX transaction
    (modulo the filesystem operations in step 1 which are not
