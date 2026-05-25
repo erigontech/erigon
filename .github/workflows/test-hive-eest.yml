@@ -29,8 +29,13 @@ jobs:
           # consume-engine shards (reuse is essentially depth-2 consecutive),
           # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
           # and consume-rlp have ~unique pre-state per test (0% hit at any size).
-          # glamsterdam-devnet is the exception — its curve keeps climbing past
+          # amsterdam-devnet is the exception — its curve keeps climbing past
           # 24, so it gets a larger pool.
+          # eest_devnet shards mirror the eest_stable per-fork split and add an
+          # extra amsterdam-devnet shard. The previous-fork tests in eest_devnet
+          # are regenerated against the new Amsterdam-era state. Fairness of
+          # work distribution across the devnet shards has not been measured
+          # yet — the split is a starting point and may be revised.
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
@@ -57,8 +62,28 @@ jobs:
             pool-size: 0
             fixtures-tarball: eest_stable
           - sim: consume-engine
-            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
-            shard: glamsterdam-devnet
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
+            shard: paris+shanghai-devnet
+            pool-size: 0
+            fixtures-tarball: eest_devnet
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Cancun"
+            shard: cancun-devnet
+            pool-size: 4
+            fixtures-tarball: eest_devnet
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Prague"
+            shard: prague-devnet
+            pool-size: 4
+            fixtures-tarball: eest_devnet
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Osaka"
+            shard: osaka-devnet
+            pool-size: 4
+            fixtures-tarball: eest_devnet
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Amsterdam"
+            shard: amsterdam-devnet
             pool-size: 24
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
