@@ -475,7 +475,9 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			copy(dupBuf[:8], invStep)
 			binary.BigEndian.PutUint64(dupBuf[8:], seqID)
 			if hasDup {
-				return keysCursor.PutCurrent(bareKey, dupBuf[:])
+				if err := keysCursor.DeleteCurrent(); err != nil {
+					return err
+				}
 			}
 			return keysCursor.Put(bareKey, dupBuf[:])
 		}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
