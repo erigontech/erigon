@@ -63,18 +63,21 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 	require.Contains(t, err.Error(), "nil provider")
 }
 
-// TestProviderUnwind_ValidationOK_ReturnsNotYetImplemented pins the
-// commit-2b contract: an aligned Provider with a non-nil Tx passes all
-// the precondition guards, then returns the explicit
-// not-yet-implemented error pointing at commit 2c. When commit 2c lands
-// the sub-ops, the assertion here flips to "returns success after
-// snapshot-trim + DB-reset + commitment-recompute all run."
-func TestProviderUnwind_ValidationOK_ReturnsNotYetImplemented(t *testing.T) {
+// TestProviderUnwind_ValidationOK_ReachesSubOps pins that an aligned
+// Provider with a non-nil Tx passes the precondition guards and
+// proceeds into the sub-op chain. The minimum-shape Provider here
+// (no Inventory, no BlockReader) makes snapshot-trim a no-op and
+// fails fast inside unwindDBPastBlock with the BlockReader-nil
+// check — that's the next step in the chain, exactly what we want
+// to pin without standing up a real harness. The full happy path
+// lands with the commit-3 scenario-3 E2E test against a real
+// snapshot fixture.
+func TestProviderUnwind_ValidationOK_ReachesSubOps(t *testing.T) {
 	t.Parallel()
 	p := alignedProvider()
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "not yet implemented")
-	require.Contains(t, err.Error(), "commit 2c",
-		"the error must point readers at where the implementation lands so a future failure is diagnosable from the message")
+	require.Contains(t, err.Error(), "db-reset")
+	require.Contains(t, err.Error(), "BlockReader is nil",
+		"reaching db-reset proves the sub-op chain is wired in; the BlockReader-nil error is the expected next-step failure on this minimum-shape fixture")
 }

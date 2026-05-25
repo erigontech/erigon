@@ -46,30 +46,37 @@ type UnwindOpts struct {
 // AggregatorRoTx.Unwind / unwindExec3 chain and remains bounded by
 // rawtemporaldb.CanUnwindBeforeBlockNum.
 //
-// This commit (2b) lands the architecture only — validation +
-// dispatch surface. The three sub-ops the design calls for are
-// implemented together in commit 2c (they cannot ship independently
-// because snapshot-trim without DB-reset leaves a wedge of orphan
-// DB entries pointing past the new snapshot tip, and DB-reset
-// without snapshot-trim leaves the file set inconsistent with the
-// chain head):
+// Sub-ops, in order — landed together to avoid intermediate-wedge
+// states (snapshot-trim without DB-reset leaves orphan DB entries
+// pointing past the new tip; DB-reset without snapshot-trim leaves
+// the file set inconsistent with the new chain head):
 //
-//  1. Snapshot-trim past toBlock — delete/truncate segments whose
-//     To > toBlock, drop their torrents, republish chain.toml.
-//  2. DB reset past toBlock — truncate TxNums + canonical hashes,
-//     reset Headers / Bodies / BlockHashes / Execution stages, clear
-//     diffsets > toBlock, reset HeadBlockHash / HeadHeaderHash /
-//     ForkchoiceHead.
-//  3. Commitment anchor at toBlock — if commitment is already there
-//     (toBlock on a step boundary), no work; otherwise recompute
-//     from history via GetAsOf.
+//  1. Snapshot-trim past toBlock — see unwindSnapshotsPastBlock.
+//     Removes block files with ToBlock > toBlock and state files
+//     with ToStep > stepBoundary, drops their torrents, republishes
+//     chain.toml.
+//  2. DB-reset past toBlock — see unwindDBPastBlock. Truncates
+//     TxNums + canonical hashes, resets Headers / Bodies /
+//     BlockHashes / Execution stages, clears ChangeSets3 > toBlock,
+//     resets HeadBlockHash / HeadHeaderHash / ForkchoiceHead.
+//  3. Commitment anchor at toBlock — see ensureCommitmentAtBlock.
+//     Validation only in this commit: requires the latest commitment
+//     entry to already sit at toBlock. Arbitrary-block recompute
+//     lands in commit 2d.
+//
+// The post-state is observably identical to a freshly-started node
+// that has just processed frozen blocks up to toBlock (the cold-start
+// equivalence claim in the design doc). External CL forkchoice
+// coordination is test-driven per the design — implemented without
+// any EL/CL signal here; the test rig is responsible for confirming
+// standard Engine API responses are sufficient.
 //
 // Why this method can lift CLAUDE.md's "Unwind beyond data in
 // snapshots not allowed" for aligned chains: that rule was a
-// placeholder for the code that lands across 2b + 2c. The rule
-// stands for non-aligned chains because trimming an arbitrary block
-// out of a 1k-rounded file would corrupt it; aligned mode lifts it
-// because the unit of cutting *is* the block.
+// placeholder for the code that just landed. The rule stands for
+// non-aligned chains because trimming an arbitrary block out of a
+// 1k-rounded file would corrupt it; aligned mode lifts it because
+// the unit of cutting *is* the block.
 //
 // Concurrency: Provider.Unwind does not synchronise. SetHead has
 // already waited for ExecModule quiescence (no SharedDomains in
@@ -85,9 +92,22 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	if opts.Tx == nil {
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")
 	}
-	_ = ctx
-	_ = toBlock
 
-	// Sub-ops 1 + 2 + 3 land together in commit 2c.
-	return fmt.Errorf("storage.Provider.Unwind: mode B sub-ops not yet implemented (snapshot-trim + DB-reset + commitment-recompute land together in commit 2c per docs/plans/20260525-admin-sethead-unwind-design.md to avoid leaving a wedge of orphan DB state past the new snapshot tip)")
+	removed, err := p.unwindSnapshotsPastBlock(ctx, opts.Tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: snapshot-trim: %w", err)
+	}
+	if p.logger != nil && len(removed) > 0 {
+		p.logger.Info("[storage] Provider.Unwind: snapshot files trimmed past toBlock", "toBlock", toBlock, "files", len(removed))
+	}
+
+	if err := p.unwindDBPastBlock(ctx, opts.Tx, toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
+	}
+
+	if err := p.ensureCommitmentAtBlock(opts.Tx, toBlock); err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor: %w", err)
+	}
+
+	return nil
 }
