@@ -172,6 +172,12 @@ type Provider struct {
 	// (IsIndexed()==false), and FrozenBlocks() stays at 0.
 	indexBuilder lifecycle.IndexBuilder
 
+	// blockAlignedBoundaries mirrors Config.Snapshot.BlockAlignedBoundaries
+	// from Deps.Config; exposed via BlockAligned(). Used by SetHead (via
+	// the Unwinder interface) to decide whether mode B (past-diffset
+	// admin unwind) is engagable on this chain.
+	blockAlignedBoundaries bool
+
 	logger log.Logger
 }
 
@@ -283,6 +289,7 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.SegmentsBuildLimiter = deps.SegmentsBuildLimiter
 	p.Inventory = deps.Inventory
 	p.Aggregator = deps.Aggregator
+	p.blockAlignedBoundaries = config.Snapshot.BlockAlignedBoundaries
 
 	// Fork-config datadir guards: refuse pre-merge cut or a datadir
 	// already populated with parent-lineage post-cut files. Runs before
@@ -1421,6 +1428,19 @@ func (a execPoolAdapter) QueueSize() int   { return a.wp.WaitingQueueSize() }
 // three components share one bus and the orchestrator's
 // InitialStateReady can fire on real peer events.
 func (p *Provider) Bus() event.EventBus { return p.eventBus }
+
+// BlockAligned reports whether this chain was configured with
+// --snap.block-aligned-boundaries (i.e.
+// Config.Snapshot.BlockAlignedBoundaries == true at Initialize). The
+// admin SetHead path uses this to decide whether mode B (past-diffset
+// arbitrary-block unwind) is engagable on this chain — see
+// docs/plans/20260525-admin-sethead-unwind-design.md.
+func (p *Provider) BlockAligned() bool {
+	if p == nil {
+		return false
+	}
+	return p.blockAlignedBoundaries
+}
 
 // RestartOpts configures a Provider.Restart cycle. Reason is a
 // short free-form diagnostic string carried in the RestartBegin

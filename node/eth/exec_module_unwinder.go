@@ -44,12 +44,13 @@ func newProviderUnwinderAdapter(p *storagecomp.Provider) execmodule.Unwinder {
 	return providerUnwinderAdapter{p: p}
 }
 
+func (a providerUnwinderAdapter) BlockAligned() bool { return a.p.BlockAligned() }
+
 func (a providerUnwinderAdapter) Unwind(ctx context.Context, toBlock uint64, args execmodule.UnwindArgs) error {
 	return a.p.Unwind(ctx, toBlock, storagecomp.UnwindOpts{
-		BlockAligned: args.BlockAligned,
-		TxNum:        args.TxNum,
-		TrieState:    args.TrieState,
-		Domains:      args.Domains,
-		Tx:           args.Tx,
+		TxNum:     args.TxNum,
+		TrieState: args.TrieState,
+		Domains:   args.Domains,
+		Tx:        args.Tx,
 	})
 }

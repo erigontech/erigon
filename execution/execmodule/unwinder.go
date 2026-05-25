@@ -42,6 +42,18 @@ import (
 // execmoduletester harness, which does not stand up a storage
 // Provider; production wires the real adapter via backend.go.
 type Unwinder interface {
+	// BlockAligned reports whether the chain was configured with
+	// --snap.block-aligned-boundaries. SetHead uses this to decide
+	// whether mode B (past-diffset arbitrary-block admin unwind) is
+	// engagable on this chain. On non-aligned chains mode B never
+	// runs and SetHead keeps the legacy CanUnwindToBlockNum
+	// rejection for deep targets.
+	BlockAligned() bool
+
+	// Unwind runs the storage-layer admin unwind sub-ops at toBlock.
+	// Only invoked by SetHead in mode B (toBlock past the diffset
+	// window AND aligned mode on). See
+	// docs/plans/20260525-admin-sethead-unwind-design.md.
 	Unwind(ctx context.Context, toBlock uint64, args UnwindArgs) error
 }
 
@@ -49,12 +61,6 @@ type Unwinder interface {
 // Mirrors storage.UnwindOpts shape; the adapter at the wiring point
 // translates between the two so neither package leaks into the other.
 type UnwindArgs struct {
-	// BlockAligned is true on chains configured with
-	// --snap.block-aligned-boundaries. The storage-layer admin
-	// unwind is only safe to run in aligned mode; non-aligned
-	// callers fall back to the existing CanUnwindToBlockNum guard.
-	BlockAligned bool
-
 	// TxNum is the last txNum at toBlock — caller computes via
 	// rawdbv3.TxNums.Max(ctx, tx, toBlock).
 	TxNum uint64

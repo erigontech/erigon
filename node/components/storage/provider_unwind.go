@@ -40,12 +40,6 @@ var _ commitmentdb.CommitmentStateWriter = (*dbexecctx.SharedDomains)(nil)
 // CLI) drives the db state machinery and hands the resulting handles
 // plus the encoded trie state in here.
 type UnwindOpts struct {
-	// BlockAligned signals that the caller is operating on a chain
-	// configured with --snap.block-aligned-boundaries (i.e.
-	// snapcfg.Cfg.BlockAlignedBoundaries == true). When false,
-	// Provider.Unwind refuses; see the method docstring for why.
-	BlockAligned bool
-
 	// TxNum is the last txNum at toBlock — typically computed by the
 	// caller via rawdbv3.TxNums.Max(ctx, tx, toBlock).
 	TxNum uint64
@@ -106,8 +100,8 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	if p == nil {
 		return fmt.Errorf("storage.Provider.Unwind: nil provider")
 	}
-	if !opts.BlockAligned {
-		return fmt.Errorf("storage.Provider.Unwind: BlockAligned=false; administrative arbitrary-block unwind requires --snap.block-aligned-boundaries (the existing exec-stage CanUnwindBeforeBlockNum guard governs non-aligned chains)")
+	if !p.BlockAligned() {
+		return fmt.Errorf("storage.Provider.Unwind: chain is not block-aligned (Config.Snapshot.BlockAlignedBoundaries=false); admin arbitrary-block unwind requires --snap.block-aligned-boundaries (the existing exec-stage CanUnwindBeforeBlockNum guard governs non-aligned chains)")
 	}
 	if opts.Domains == nil {
 		return fmt.Errorf("storage.Provider.Unwind: opts.Domains is nil")

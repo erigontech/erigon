@@ -49,29 +49,35 @@ func (f *fakeUnwindDomainPutter) DomainPut(domain kv.Domain, tx kv.TemporalTx, k
 // the tx, it just captures the arg.
 type stubTx struct{ kv.TemporalTx }
 
+// alignedProvider returns a Provider whose BlockAligned() reports true
+// — the minimum state required to clear the mode-B precondition guard
+// inside Provider.Unwind without standing up a real Initialize.
+func alignedProvider() *Provider {
+	return &Provider{blockAlignedBoundaries: true}
+}
+
 func TestProviderUnwind_RejectsNonAlignedChain(t *testing.T) {
 	t.Parallel()
+	// Default Provider has blockAlignedBoundaries == false.
 	p := &Provider{}
 	dom := &fakeUnwindDomainPutter{}
 	tx := &stubTx{}
 
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		BlockAligned: false,
-		Domains:      dom,
-		Tx:           tx,
+		Domains: dom,
+		Tx:      tx,
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "BlockAligned=false")
+	require.Contains(t, err.Error(), "not block-aligned")
 	require.Equal(t, 0, dom.calls, "must short-circuit before sub-op #2 on guard failure")
 }
 
 func TestProviderUnwind_RejectsNilDomains(t *testing.T) {
 	t.Parallel()
-	p := &Provider{}
+	p := alignedProvider()
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		BlockAligned: true,
-		Domains:      nil,
-		Tx:           &stubTx{},
+		Domains: nil,
+		Tx:      &stubTx{},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "opts.Domains is nil")
@@ -79,11 +85,10 @@ func TestProviderUnwind_RejectsNilDomains(t *testing.T) {
 
 func TestProviderUnwind_RejectsNilTx(t *testing.T) {
 	t.Parallel()
-	p := &Provider{}
+	p := alignedProvider()
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		BlockAligned: true,
-		Domains:      &fakeUnwindDomainPutter{},
-		Tx:           nil,
+		Domains: &fakeUnwindDomainPutter{},
+		Tx:      nil,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "opts.Tx is nil")
@@ -93,9 +98,8 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 	t.Parallel()
 	var p *Provider
 	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		BlockAligned: true,
-		Domains:      &fakeUnwindDomainPutter{},
-		Tx:           &stubTx{},
+		Domains: &fakeUnwindDomainPutter{},
+		Tx:      &stubTx{},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil provider")
@@ -103,18 +107,17 @@ func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 
 func TestProviderUnwind_AlignedHappyPath_AnchorsCommitmentAtToBlock(t *testing.T) {
 	t.Parallel()
-	p := &Provider{}
+	p := alignedProvider()
 	dom := &fakeUnwindDomainPutter{}
 	tx := &stubTx{}
 	const toBlock, txNum uint64 = 15_000, 22_500
 	trie := []byte("encoded-trie-at-15000")
 
 	require.NoError(t, p.Unwind(context.Background(), toBlock, UnwindOpts{
-		BlockAligned: true,
-		TxNum:        txNum,
-		TrieState:    trie,
-		Domains:      dom,
-		Tx:           tx,
+		TxNum:     txNum,
+		TrieState: trie,
+		Domains:   dom,
+		Tx:        tx,
 	}))
 
 	require.Equal(t, 1, dom.calls, "sub-op #2 must run exactly once on the happy path")
