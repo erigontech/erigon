@@ -746,7 +746,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		if stateObject != nil && code != nil {
+		if code != nil {
 			stateObject.code = code
 		}
 		return len(code), nil
@@ -780,7 +780,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			// effectively a hashmap probe + slice assignment.
 			code, codeErr := sdb.stateReader.ReadAccountCode(addr)
 			l := len(code)
-			if codeErr == nil && s != nil && code != nil {
+			if codeErr == nil && code != nil {
 				s.code = code
 			}
 			err := codeErr
