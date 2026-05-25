@@ -333,6 +333,7 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	if !existanceSupported {
 		return 0
 	}
+	log.Warn("[dbg] Index.ForceExistenceFilterInRAM", "idx.dataStructureVersion", idx.dataStructureVersion, "idx.fileName", idx.fileName)
 	if idx.dataStructureVersion == 1 {
 		return idx.existenceV1.ForceInMem()
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	mm "github.com/erigontech/erigon/common/mmap"
 )
 
@@ -155,6 +156,7 @@ func validateFilterGeometry(filter *xorfilter.BinaryFuse[uint8], fingerprintsLen
 
 func (r *Reader) ForceInMem() datasize.ByteSize {
 	if r.m == nil || r.inner == nil {
+		log.Warn("[dbg] Reader.ForceInMem.exit1", "r.fileName", r.fileName, "r.m == nil", r.m == nil, "r.inner == nil", r.inner == nil)
 		return 0
 	}
 	cpy := make([]byte, len(r.inner.Fingerprints)) //don't use bytes.Clone - to see ram owner on heap profiler
@@ -302,6 +304,7 @@ func (r *ReaderSharded) ContainsHash(v uint64) bool {
 // clone at the same byte offset. Avoids 256 separate allocations.
 func (r *ReaderSharded) ForceInMem() datasize.ByteSize {
 	if len(r.m) == 0 {
+		log.Warn("[dbg] ReaderSharded.ForceInMem.exit1", "r.fileName", r.fileName)
 		return 0
 	}
 	var res datasize.ByteSize
