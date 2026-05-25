@@ -17,8 +17,10 @@
 package solid
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -31,7 +33,7 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 		{
 			// PoC from security#66: 4 bytes [0x08,0x00,0x00,0x00]
 			// DecodeOffset = 8, length = 8/4 = 2 (implies 2 txs)
-			// But buffer is only 4 bytes — reading offset[1] at buf[4:8] would panic.
+			// But buffer is only 4 bytes; reading offset[1] at buf[4:8] would panic.
 			name:    "security#66 crash payload - offset implies 2 txs in 4-byte buffer",
 			buf:     []byte{0x08, 0x00, 0x00, 0x00},
 			wantErr: ssz.ErrLowBufferSize,
@@ -47,9 +49,9 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 			wantErr: ssz.ErrLowBufferSize,
 		},
 		{
-			name:    "zero transactions",
+			name:    "non-canonical zero-transactions payload",
 			buf:     []byte{0x00, 0x00, 0x00, 0x00},
-			wantErr: nil,
+			wantErr: ssz.ErrBadOffset,
 		},
 		{
 			name:    "valid single tx",
@@ -57,7 +59,12 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 			wantErr: nil,
 		},
 		{
-			// offset = 12 → length = 3, needs 12 bytes for offset array but only 8 given
+			name:    "first offset must be divisible by 4",
+			buf:     []byte{0x05, 0x00, 0x00, 0x00, 0xAA},
+			wantErr: ssz.ErrBadOffset,
+		},
+		{
+			// offset = 12 -> length = 3, needs 12 bytes for offset array but only 8 given
 			name:    "offset array exceeds buffer",
 			buf:     []byte{0x0c, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
 			wantErr: ssz.ErrLowBufferSize,
@@ -71,5 +78,24 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 				t.Errorf("DecodeSSZ() error = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestTransactionsSSZ_DecodeSSZ_MaxTransactionsPerPayload(t *testing.T) {
+	tooMany := clparams.MaxTransactionsPerPayloadDefault + 1
+	firstOffset := uint32(tooMany * 4)
+	buf := make([]byte, firstOffset)
+	ssz.EncodeOffset(buf[:4], firstOffset)
+	for i := uint64(1); i < tooMany; i++ {
+		ssz.EncodeOffset(buf[i*4:], uint32(i*4))
+	}
+
+	txs := &TransactionsSSZ{}
+	err := txs.DecodeSSZ(buf, 0)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ssz.ErrTooBigList) {
+		t.Fatalf("expected ErrTooBigList, got %v", err)
 	}
 }

@@ -18,7 +18,10 @@ package solid
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
@@ -62,24 +65,35 @@ func (*TransactionsSSZ) Static() bool {
 
 func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) == 0 {
+		t.root = common.Hash{}
+		t.underlying = nil
 		return nil
 	}
 	if len(buf) < 4 {
 		return ssz.ErrLowBufferSize
 	}
 	t.root = common.Hash{}
-	length := ssz.DecodeOffset(buf[:4]) / 4
-	if length == 0 {
-		t.underlying = nil
-		return nil
+	firstOffset := ssz.DecodeOffset(buf[:4])
+	if firstOffset%4 != 0 {
+		return ssz.ErrBadOffset
 	}
-	if uint32(len(buf)) < length*4 {
+	length := firstOffset / 4
+	if length == 0 {
+		return ssz.ErrBadOffset
+	}
+	if uint64(length) > clparams.MaxTransactionsPerPayloadDefault {
+		return errors.Join(ssz.ErrTooBigList, fmt.Errorf("TransactionsSSZ: expected at most %d transactions, got %d", clparams.MaxTransactionsPerPayloadDefault, length))
+	}
+	if uint32(len(buf)) < firstOffset {
 		return ssz.ErrLowBufferSize
 	}
 	t.underlying = make([][]byte, length)
 	for i := uint32(0); i < length; i++ {
 		offsetPosition := i * 4
 		startTx := ssz.DecodeOffset(buf[offsetPosition:])
+		if startTx < firstOffset {
+			return ssz.ErrBadOffset
+		}
 		var endTx uint32
 		if i == length-1 {
 			endTx = uint32(len(buf))
@@ -91,6 +105,9 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 		}
 		if len(buf) < int(endTx) {
 			return ssz.ErrLowBufferSize
+		}
+		if uint64(endTx-startTx) > clparams.MaxBytesPerTransactionDefault {
+			return errors.Join(ssz.ErrTooBigList, fmt.Errorf("TransactionsSSZ: transaction[%d] length %d exceeds limit %d", i, endTx-startTx, clparams.MaxBytesPerTransactionDefault))
 		}
 		t.underlying[i] = buf[startTx:endTx]
 	}

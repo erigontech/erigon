@@ -118,6 +118,9 @@ const (
 	MaxChunkSize   uint64        = 15 * 1024 * 1024
 	ReqTimeout     time.Duration = 5 * time.Second
 	RespTimeout    time.Duration = 10 * time.Second
+	// ExecutionPayload transactions bounds from consensus specs.
+	MaxBytesPerTransactionDefault    uint64 = 1 << 30
+	MaxTransactionsPerPayloadDefault uint64 = 1 << 20
 )
 
 const (
@@ -818,13 +821,13 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	HysteresisUpwardMultiplier:       5,
 	MinEpochsForBlobSidecarsRequests: 4096,
 	FieldElementsPerBlob:             4096,
-	MaxBytesPerTransaction:           1073741824, // 1GB
+	MaxBytesPerTransaction:           MaxBytesPerTransactionDefault,
 	MaxExtraDataBytes:                32,
 	MaxRequestBlobSidecars:           768,
 	MaxRequestBlobSidecarsElectra:    1152, // MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK_ELECTRA
 	MaxRequestBlocks:                 1024,
 	MaxRequestBlocksDeneb:            128,
-	MaxTransactionsPerPayload:        1048576,
+	MaxTransactionsPerPayload:        MaxTransactionsPerPayloadDefault,
 	SubnetsPerNode:                   2,
 	VersionedHashVersionKzg:          ConfigByte(1),
 
