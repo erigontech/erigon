@@ -97,12 +97,18 @@ The clean simplification the user proposed (2026-05-25):
 Before any Provider.Unwind work happens, SetHead must observe a
 quiescent DB:
 
-1. **No SharedDomains in flight.** No execution stage is running; no
-   block builder or fork-validator is holding a SharedDomains; no
-   background commit is mid-flush.
-2. **All previous execution flushed to the DB.** Whatever state
-   SharedDomains was about to write has been committed; nothing is
-   buffered.
+1. **No *external* SharedDomains in flight.** No execution stage is
+   running; no block builder or fork-validator is holding a
+   SharedDomains; no background commit is mid-flush. This is
+   specifically about SharedDomains owned by code *outside* mode B
+   — mode B's own sub-ops are free to construct a transient
+   SharedDomains whose lifecycle they own (create → use → close,
+   all within mode B's window), and the commitment-recompute
+   sub-op in fact requires one to drive `DomainPut` against the
+   commitment domain.
+2. **All previous execution flushed to the DB.** Whatever state the
+   external SharedDomains was about to write has been committed;
+   nothing is buffered.
 
 **SetHead waits for these conditions; it does not fail on first
 contact.** Operators invoking `debug_setHead` shouldn't see spurious
