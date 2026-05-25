@@ -107,17 +107,17 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	// Load→modify→Store from losing votes. See also applyPayloadAttestationVote.
 	f.ptcVoteMu.Lock()
 
-	var timelinessVotes [clparams.PtcSize]bool
+	var timelinessVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
-		timelinessVotes = existing.([clparams.PtcSize]bool)
+		timelinessVotes = existing.([clparams.PtcSize]int8)
 	}
-	var dataAvailabilityVotes [clparams.PtcSize]bool
+	var dataAvailabilityVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
-		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
+		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
 	for _, idx := range ptcIndices {
-		timelinessVotes[idx] = data.PayloadPresent
-		dataAvailabilityVotes[idx] = data.BlobDataAvailable
+		timelinessVotes[idx] = boolToVote(data.PayloadPresent)
+		dataAvailabilityVotes[idx] = boolToVote(data.BlobDataAvailable)
 	}
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)

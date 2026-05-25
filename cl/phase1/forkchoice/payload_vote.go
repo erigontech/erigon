@@ -28,6 +28,15 @@ import (
 	log "github.com/erigontech/erigon/common/log/v3"
 )
 
+// boolToVote converts a bool to the three-state vote representation:
+// true → 1, false → -1. Zero means unvoted.
+func boolToVote(b bool) int8 {
+	if b {
+		return 1
+	}
+	return -1
+}
+
 func (f *ForkChoiceStore) calculateCommitteeFraction(s *state.CachingBeaconState, committeePercent uint64) uint64 {
 	committeeWeight := s.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
 	return (committeeWeight * committeePercent) / 100
@@ -103,16 +112,16 @@ func (f *ForkChoiceStore) applyPayloadAttestationVote(
 	// Load→modify→Store from losing votes. See also OnPayloadAttestationMessage.
 	f.ptcVoteMu.Lock()
 
-	var timelinessVotes [clparams.PtcSize]bool
+	var timelinessVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
-		timelinessVotes = existing.([clparams.PtcSize]bool)
+		timelinessVotes = existing.([clparams.PtcSize]int8)
 	}
-	var dataAvailabilityVotes [clparams.PtcSize]bool
+	var dataAvailabilityVotes [clparams.PtcSize]int8
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
-		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
+		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
-	timelinessVotes[ptcIndex] = data.PayloadPresent
-	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
+	timelinessVotes[ptcIndex] = boolToVote(data.PayloadPresent)
+	dataAvailabilityVotes[ptcIndex] = boolToVote(data.BlobDataAvailable)
 	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
 	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
@@ -130,10 +139,11 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 	if !f.forkGraph.HasEnvelope(root) {
 		return false
 	}
-	votes := voteRaw.([clparams.PtcSize]bool)
+	votes := voteRaw.([clparams.PtcSize]int8)
+	target := boolToVote(timely)
 	count := uint64(0)
 	for i := range votes {
-		if votes[i] == timely {
+		if votes[i] == target {
 			count++
 		}
 	}
@@ -151,10 +161,11 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 	if !f.forkGraph.HasEnvelope(root) {
 		return false
 	}
-	votes := voteRaw.([clparams.PtcSize]bool)
+	votes := voteRaw.([clparams.PtcSize]int8)
+	target := boolToVote(available)
 	count := uint64(0)
 	for i := range votes {
-		if votes[i] == available {
+		if votes[i] == target {
 			count++
 		}
 	}

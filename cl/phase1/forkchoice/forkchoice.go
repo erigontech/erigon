@@ -165,8 +165,8 @@ type ForkChoiceStore struct {
 
 	// [New in Gloas:EIP7732]
 	ptcVoteMu                   sync.Mutex // protects read-modify-write on payloadTimelinessVote and payloadDataAvailabilityVote
-	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]bool
-	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]bool
+	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
+	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
 	// Post-GLOAS: stores [block_timely, payload_timely] — two independent booleans.
@@ -396,11 +396,11 @@ func NewForkChoiceStore(
 
 	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
 	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
-	var anchorTimelinessVotes [clparams.PtcSize]bool
-	var anchorDataAvailabilityVotes [clparams.PtcSize]bool
+	var anchorTimelinessVotes [clparams.PtcSize]int8
+	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
 	for i := range anchorTimelinessVotes {
-		anchorTimelinessVotes[i] = true
-		anchorDataAvailabilityVotes[i] = true
+		anchorTimelinessVotes[i] = 1
+		anchorDataAvailabilityVotes[i] = 1
 	}
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
