@@ -450,6 +450,86 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 	}
 }
 
+// TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
+// fix for the parallel-exec lost-coinbase-fee race. finalize credits the
+// coinbase tip as an implicit write the worker never made (it ran with
+// shouldDelayFeeCalc=true). That write must be stamped at the worker's
+// incarnation + 1: a later tx that speculatively read the coinbase BEFORE
+// this finalize ran recorded the worker's incarnation, and the bumped
+// version makes the MapRead version check fail so that tx is invalidated
+// and re-executed against the post-fee balance. Reusing the worker's
+// incarnation makes the stale read indistinguishable from a fresh one and
+// silently drops the fee.
+func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	writes := s.runFinalizeTxSimple(t, nil)
+	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+	require.NotNil(t, coinbaseWrite, "finalize should produce a coinbase BalancePath write")
+
+	// The producer tx executed at incarnation 0; its implicit fee write
+	// must carry incarnation 1 — a distinct version from the worker's.
+	require.Equal(t, 0, coinbaseWrite.Version.TxIndex)
+	require.Equal(t, 1, coinbaseWrite.Version.Incarnation,
+		"finalize coinbase fee write must be stamped at worker incarnation + 1")
+
+	// Reflect the producer tx in a versionMap: the worker's pre-fee
+	// coinbase write at (0,0), then finalize's fee write at (0,1).
+	vm := state.NewVersionMap(nil)
+	vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
+		state.Version{TxIndex: 0, Incarnation: 0}, uint256.Int{}, true)
+	vm.FlushVersionedWrites(state.VersionedWrites{coinbaseWrite}, true, "")
+
+	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
+		if readV != writeV {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+
+	// validateCoinbaseRead validates a dependent tx (txIndex 1) whose only
+	// recorded read is the coinbase balance, read at the given incarnation.
+	validateCoinbaseRead := func(readAtIncarnation int) state.VersionValidity {
+		io := state.NewVersionedIO(2)
+		rs := state.ReadSet{}
+		rs.Set(state.VersionedRead{
+			Address: s.coinbase,
+			Path:    state.BalancePath,
+			Source:  state.MapRead,
+			Version: state.Version{TxIndex: 0, Incarnation: readAtIncarnation},
+		})
+		io.RecordReads(state.Version{TxIndex: 1}, rs)
+		return vm.ValidateVersion(1, io, checkVersion, false, "")
+	}
+
+	// Early-read timing — the dependent read the coinbase before finalize
+	// ran, recording the worker's version (0,0). It must be invalidated.
+	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(0),
+		"a tx that read the coinbase before the fee finalize must fail validation")
+
+	// Late-read timing — the dependent read after finalize, recording the
+	// fee write's version (0,1). It must stay valid.
+	assert.Equal(t, state.VersionValid, validateCoinbaseRead(1),
+		"a tx that read the coinbase after the fee finalize must stay valid")
+}
+
+// TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation verifies the burnt
+// contract's implicit FeeBurnt write gets the same incarnation+1 stamp as
+// the coinbase tip write.
+func TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+
+	writes := s.runFinalizeTxSimple(t, nil)
+	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
+	require.NotNil(t, burntWrite, "finalize should produce a burnt contract BalancePath write")
+
+	assert.Equal(t, 0, burntWrite.Version.TxIndex)
+	assert.Equal(t, 1, burntWrite.Version.Incarnation,
+		"finalize burnt-fee write must be stamped at worker incarnation + 1")
+}
+
 // TestResolveStorageWrites_IBSvsSimple compares the storage write sets
 // produced by the serial IBS path (MakeWriteSet) against the parallel
 // resolveStorageWrites path. They must produce identical storage key sets.
