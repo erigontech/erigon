@@ -72,6 +72,7 @@ import (
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/node/components/storage"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -98,35 +99,41 @@ type StateChangesClient interface {
 // ExecModuleTester aims to construct all parts necessary to test the PoS GRPC API of our EthereumExecModule.
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
-	Ctx             context.Context
-	Log             log.Logger
-	tb              testing.TB
-	cancel          context.CancelFunc
-	DB              kv.TemporalRwDB
-	Dirs            datadir.Dirs
-	Engine          rules.Engine
-	ChainConfig     *chain.Config
-	Sync            *stagedsync.Sync
-	MiningSync      *stagedsync.Sync
-	PendingBlocks   chan *types.Block
-	MinedBlocks     chan *types.BlockWithReceipts
-	sentriesClient  *sentry_multi_client.MultiClient
-	Key             *ecdsa.PrivateKey
-	Genesis         *types.Block
-	SentryClient    direct.SentryClient
-	PeerId          *typesproto.H512
-	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
-	sentMessagesMu  sync.Mutex
-	sentMessages    []*sentryproto.OutboundMessageData
-	StreamWg        sync.WaitGroup
-	ReceiveWg       sync.WaitGroup
-	Address         common.Address
-	ForkValidator   *execmodule.ForkValidator
-	ExecModule      *execmodule.ExecModule
-	StateCache      *execmodule.Cache
-	retirementStart chan bool
-	retirementDone  chan struct{}
-	retirementWg    sync.WaitGroup
+	Ctx            context.Context
+	Log            log.Logger
+	tb             testing.TB
+	cancel         context.CancelFunc
+	DB             kv.TemporalRwDB
+	Dirs           datadir.Dirs
+	Engine         rules.Engine
+	ChainConfig    *chain.Config
+	Sync           *stagedsync.Sync
+	MiningSync     *stagedsync.Sync
+	PendingBlocks  chan *types.Block
+	MinedBlocks    chan *types.BlockWithReceipts
+	sentriesClient *sentry_multi_client.MultiClient
+	Key            *ecdsa.PrivateKey
+	Genesis        *types.Block
+	SentryClient   direct.SentryClient
+	PeerId         *typesproto.H512
+	streams        map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessagesMu sync.Mutex
+	sentMessages   []*sentryproto.OutboundMessageData
+	StreamWg       sync.WaitGroup
+	ReceiveWg      sync.WaitGroup
+	Address        common.Address
+	ForkValidator  *execmodule.ForkValidator
+	ExecModule     *execmodule.ExecModule
+	StateCache     *execmodule.Cache
+
+	// AdminUnwindProvider is the storage.Provider wired as the
+	// admin-unwind Unwinder when WithAdminUnwindWired() is set. nil
+	// otherwise — the default tester has no Provider and SetHead
+	// rejects past-diffset targets with the legacy error.
+	AdminUnwindProvider *storage.Provider
+	retirementStart     chan bool
+	retirementDone      chan struct{}
+	retirementWg        sync.WaitGroup
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient
@@ -347,6 +354,22 @@ func WithFcuBackgroundPrune() Option {
 	}
 }
 
+// WithAdminUnwindWired enables the admin SetHead mode-B path: the
+// tester constructs a minimal storage.Provider whose BlockAligned()
+// returns true and whose Unwind implements the snapshot-trim +
+// writable-shadow wipe + commitment verification chain. The Provider
+// is bridged into the ExecModule's Unwinder slot via an inline
+// adapter (mirroring node/eth's providerUnwinderAdapter).
+//
+// Without this option (default), the tester leaves the Unwinder slot
+// nil — mode B is unreachable and any target past
+// CanUnwindToBlockNum is rejected with the legacy error.
+func WithAdminUnwindWired() Option {
+	return func(opts *options) {
+		opts.adminUnwindWired = true
+	}
+}
+
 type options struct {
 	stepSize            *uint64
 	experimentalBAL     bool
@@ -360,6 +383,7 @@ type options struct {
 	enableDomains       []kv.Domain
 	fcuBackgroundCommit bool
 	fcuBackgroundPrune  bool
+	adminUnwindWired    bool
 }
 
 func applyOptions(opts []Option) options {
@@ -721,6 +745,27 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		Accumulator:    mock.Notifications.Accumulator,
 		RecentReceipts: mock.Notifications.RecentReceipts,
 	}
+
+	// AdminUnwind wiring (default disabled). When WithAdminUnwindWired()
+	// is set, construct a minimal storage.Provider via
+	// NewProviderForUnwindTest and an inline adapter satisfying
+	// execmodule.Unwinder. Mirrors node/eth's providerUnwinderAdapter
+	// — kept inline so the tester doesn't pull in node/eth (heavy + would
+	// be wrong-direction layering).
+	var unwinder execmodule.Unwinder
+	if opt.adminUnwindWired {
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		mock.AdminUnwindProvider = storage.NewProviderForUnwindTest(storage.UnwindTestDeps{
+			ChainDB:     mock.DB,
+			BlockReader: br,
+			Aggregator:  agg,
+			ChainConfig: mock.ChainConfig,
+			SnapDir:     dirs.Snap,
+			Logger:      logger,
+		})
+		unwinder = testProviderUnwinder{p: mock.AdminUnwindProvider}
+	}
+
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -740,7 +785,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		onlySnapDownloadOnStart,
 		readAheader,
 		func() error { return nil },
-		nil, // unwinder — execmoduletester does not stand up a storage Provider
+		unwinder,
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
@@ -937,4 +982,18 @@ func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 		panic(err)
 	}
 	return b
+}
+
+// testProviderUnwinder bridges execmodule.Unwinder to *storage.Provider
+// inside the tester. Mirrors node/eth's providerUnwinderAdapter
+// field-for-field; duplicated here to avoid importing node/eth (which
+// would be heavyweight and wrong-direction layering for a test helper).
+type testProviderUnwinder struct {
+	p *storage.Provider
+}
+
+func (a testProviderUnwinder) BlockAligned() bool { return a.p.BlockAligned() }
+
+func (a testProviderUnwinder) Unwind(ctx context.Context, toBlock uint64, args execmodule.UnwindArgs) error {
+	return a.p.Unwind(ctx, toBlock, storage.UnwindOpts{Tx: args.Tx})
 }
