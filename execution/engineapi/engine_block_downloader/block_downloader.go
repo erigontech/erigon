@@ -201,6 +201,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
+	var lastTip *types.Block
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
 		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
@@ -219,21 +220,33 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 			return err
 		}
 		insertedBlocksWithoutExec += len(blocks)
+		lastTip = blocks[len(blocks)-1]
 		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
-			tip := blocks[len(blocks)-1]
 			e.logger.Info(
 				"[EngineBlockDownloader] executing downloaded batch as it reached sync loop block limit",
-				"to", tip.NumberU64(),
-				"toHash", tip.Hash(),
+				"to", lastTip.NumberU64(),
+				"toHash", lastTip.Hash(),
 			)
-			err = e.execDownloadedBatch(ctx, tip, req.MissingHash)
+			err = e.execDownloadedBatch(ctx, lastTip, req.MissingHash)
 			if err != nil {
 				return err
 			}
 			insertedBlocksWithoutExec = 0
 		}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if req.Trigger == FcuTrigger && insertedBlocksWithoutExec > 0 && lastTip != nil {
+		e.logger.Info(
+			"[EngineBlockDownloader] executing final downloaded batch",
+			"to", lastTip.NumberU64(),
+			"toHash", lastTip.Hash(),
+			"blocks", insertedBlocksWithoutExec,
+		)
+		return e.execDownloadedBatch(ctx, lastTip, req.MissingHash)
+	}
+	return nil
 }
 
 func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
