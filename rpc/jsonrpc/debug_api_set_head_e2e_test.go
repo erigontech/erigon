@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -91,76 +90,54 @@ func newSetHeadE2EAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *Debug
 	return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, 0, false)
 }
 
-// canonicalHeadAndMinUnwindable reads the values both scenarios anchor
-// off of: the current canonical head + the lowest block SetHead's
-// CanUnwindToBlockNum guard will accept as a target.
-func canonicalHeadAndMinUnwindable(t *testing.T, m *execmoduletester.ExecModuleTester) (head, minUnwindable uint64) {
+// canonicalHead reads the current canonical chain head — what every
+// scenario anchors off of.
+func canonicalHead(t *testing.T, m *execmoduletester.ExecModuleTester) uint64 {
 	t.Helper()
-	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	roTx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	head, err = rpchelper.GetLatestBlockNumber(roTx)
+	head, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
-	minUnwindable, err = rawtemporaldb.CanUnwindToBlockNum(roTx)
-	require.NoError(t, err)
-	return head, minUnwindable
+	return head
 }
 
 // TestSetHead_E2E_LimitedRange — Scenario 1.
 //
-// Pins the current limited-range contract end-to-end through the RPC
-// layer with a real ExecModule (not the validation-only mock that
-// TestSetHead uses). Covers the bounds SetHead enforces today:
+// Pins the post-Provider.Unwind contract for SetHead's *future-side*
+// limits: target == head is a no-op success; target == head + 1 is
+// rejected because head + 1 doesn't exist on the canonical chain.
 //
-//   - target == head: no-op success (CurrentHead == target short-circuit).
-//   - target == head + 1: rejection ("future block").
-//   - target < minUnwindable: rejection ("minimum unwindable block"),
-//     when minUnwindable > 0 — otherwise we pin that target = 0
-//     succeeds (still meaningful: no panic on the boundary).
+// Notably absent: the legacy CanUnwindToBlockNum "minimum unwindable
+// block" rejection. That guard exists today as a placeholder for the
+// missing snapshot-mutating unwind code; once SetHead is wired through
+// Provider.Unwind (next commit in this stream), aligned-mode chains can
+// unwind to any in-canonical-chain block regardless of how deep the
+// snapshot tip sits. There is therefore no point pinning the legacy
+// rejection here — that assertion would just have to be removed when
+// the guard is.
 //
-// Within-range successes that actually rewind + execute past the new
-// head are TestSetHead_E2E_WithinDB_ExecutesPastNewHead's job.
+// The actual within-range rewind + execute-past-new-head contract is
+// scenario 2; the snapshot-mutating deep-unwind contract is scenario 3
+// (lands with the Provider.Unwind wiring).
 func TestSetHead_E2E_LimitedRange(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := m.Ctx
 	api := newSetHeadE2EAPI(t, m)
-	head, minUnwindable := canonicalHeadAndMinUnwindable(t, m)
+	head := canonicalHead(t, m)
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
 	t.Run("target equals current head is no-op success", func(t *testing.T) {
 		require.NoError(t, api.SetHead(ctx, hexutil.Uint64(head)))
-		// Chain head must be unchanged — SetHead short-circuits the
-		// targetBlock == currentHead branch before touching anything.
-		stillHead, _ := canonicalHeadAndMinUnwindable(t, m)
-		require.Equal(t, head, stillHead, "head must be unchanged after no-op SetHead")
+		// SetHead short-circuits the targetBlock == currentHead branch
+		// before touching anything; head must stay put.
+		require.Equal(t, head, canonicalHead(t, m), "head must be unchanged after no-op SetHead")
 	})
 
 	t.Run("target one past head is rejected as future", func(t *testing.T) {
 		err := api.SetHead(ctx, hexutil.Uint64(head+1))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "future")
-	})
-
-	t.Run("CanUnwindToBlockNum guard", func(t *testing.T) {
-		if minUnwindable > 0 {
-			err := api.SetHead(ctx, hexutil.Uint64(minUnwindable-1))
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "minimum unwindable block",
-				"SetHead must surface the CanUnwindToBlockNum rejection unchanged")
-		} else {
-			// minUnwindable == 0 on this fixture (no commitment writes
-			// established a higher floor). Pin that the boundary case
-			// — target == 0 — at least reaches the backend without a
-			// guard panic. Whether it succeeds or fails afterwards is
-			// scenario-2 territory; here we just rule out a regression
-			// where the guard check itself starts misbehaving on the
-			// zero boundary.
-			err := api.SetHead(ctx, hexutil.Uint64(0))
-			if err != nil {
-				require.NotContains(t, err.Error(), "minimum unwindable block",
-					"guard must not reject target 0 when minUnwindable is 0")
-			}
-		}
 	})
 }
 
@@ -187,18 +164,14 @@ func TestSetHead_E2E_WithinDB_ExecutesPastNewHead(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := m.Ctx
 	api := newSetHeadE2EAPI(t, m)
-	head, minUnwindable := canonicalHeadAndMinUnwindable(t, m)
+	head := canonicalHead(t, m)
 	require.Greater(t, head, uint64(2), "test chain needs at least 3 blocks for a meaningful rewind")
 
-	// Pick a target strictly below head but at or above minUnwindable.
 	// head-2 is the natural "within db" target on the 13-block fixture
 	// — far enough back to actually trigger TxNums/canonical truncation
-	// without bumping into the unwindable-floor.
+	// while staying in the writable db (the fixture has no snapshot
+	// files at all, so any target above 0 is "within db" here).
 	target := head - 2
-	if target < minUnwindable {
-		target = minUnwindable
-	}
-	require.Less(t, target, head, "target must be strictly below head for this scenario")
 
 	// Snapshot the pre-rewind canonical chain so we know what hashes
 	// should disappear (head-1..head) and what hash should survive
