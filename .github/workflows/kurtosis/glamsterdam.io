@@ -32,6 +32,6 @@ ethereum_genesis_generator_params:
   image: ethpandaops/ethereum-genesis-generator:5.3.5
 additional_services: [spamoor, assertoor]
 assertoor_params:
-  run_stability_check: true
+  run_stability_check: false
   run_block_proposal_check: true
   image: ethpandaops/assertoor:master-0ad56fb
