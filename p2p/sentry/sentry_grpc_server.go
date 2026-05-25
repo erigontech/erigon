@@ -1423,6 +1423,9 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	var pokePeer *PeerInfo // Peer with the earliest dealine, to be "poked" by the request
 	var pokeDeadline time.Time
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if pv := peerInfo.EthProtocol(); pv == 0 || pv != ss.ethVersion {
+			return true
+		}
 		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 		height := peerInfo.Height()
 		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
@@ -1459,6 +1462,9 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 	var maxPermits int
 	now := time.Now()
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if pv := peerInfo.EthProtocol(); pv == 0 || pv != ss.ethVersion {
+			return true
+		}
 		if peerInfo.MinBlock() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
@@ -1980,6 +1986,9 @@ func (ss *GrpcServer) PeerEvents(req *sentryproto.PeerEventsRequest, server sent
 	// replay currently connected peers
 	eg, ctx := errgroup.WithContext(server.Context())
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if pv := peerInfo.EthProtocol(); pv == 0 || pv != ss.ethVersion {
+			return true
+		}
 		eg.Go(func() error {
 			return server.Send(&sentryproto.PeerEvent{
 				PeerId:  gointerfaces.ConvertHashToH512(peerInfo.ID()),

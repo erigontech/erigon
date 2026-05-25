@@ -347,8 +347,6 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
-		// benchmark fixtures at 150M-gas peak ~2.75GB SizeEstimate
-		BatchSize: 4 * datasize.GB,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = 512
 			config.WarmupKzgCtxOnInit = extr.warmupKzgCtxOnInit

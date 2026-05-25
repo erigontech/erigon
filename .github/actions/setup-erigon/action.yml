@@ -249,8 +249,19 @@ runs:
     - name: Install dependencies on Linux
       if: ${{ runner.os == 'Linux' }}
       shell: bash
-      # Can't suppress "Reading database... from apt-get install. Also it's very slow...
-      run: sudo apt-get update -qq && sudo apt-get install -qq -y build-essential 2>/dev/null
+      # erigon only needs build-essential (gcc/make). The hosted runner image
+      # ships extra third-party apt repos (Google Chrome, Microsoft, …) that are
+      # periodically mid-mirror-sync and answer with a Packages.gz size mismatch,
+      # which fails `apt-get update` and so the whole job — the recurring
+      # "dl.google.com/linux/chrome-stable … File has unexpected size" flake.
+      # Drop those repos before updating (we never install from them) and let the
+      # remaining Ubuntu archive retry on transient blips.
+      # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
+      run: |
+        sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                   /etc/apt/sources.list.d/microsoft-prod.list || true
+        sudo apt-get update -qq -o Acquire::Retries=3 \
+          && sudo apt-get install -qq -y build-essential 2>/dev/null
 
     - name: Install make on Windows
       if: ${{ runner.os == 'Windows' }}
