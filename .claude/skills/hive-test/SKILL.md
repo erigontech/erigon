@@ -27,7 +27,7 @@ The user may specify one or more test suites in any combination:
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
 | `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
-| `eest-devnet` | ethereum/eels/consume-engine | EEST devnet (BAL/glamsterdam) fixtures (version auto-discovered) |
+| `eest-devnet` | ethereum/eels/consume-engine | EEST Amsterdam devnet fixtures (version auto-discovered) |
 | `eest-rlp` | ethereum/eels/consume-rlp | EEST RLP block import (BlockchainTest, all forks) |
 
 ### Groups
@@ -41,7 +41,7 @@ The user may specify one or more test suites in any combination:
 - `/hive-test withdrawals api` - Run withdrawals and API suites
 - `/hive-test engine` - Run all engine suites
 - `/hive-test engine rpc-compat` - Run all engine suites plus rpc-compat
-- `/hive-test eest-devnet` - Run devnet EEST tests (BAL/glamsterdam)
+- `/hive-test eest-devnet` - Run Amsterdam devnet EEST tests
 - `/hive-test eest-rlp` - Run EEST RLP block-import tests
 - `/hive-test all` - Run everything
 
@@ -51,7 +51,7 @@ The user may specify one or more test suites in any combination:
   working directory. The branch is cloned from `https://github.com/erigontech/erigon.git`
   into the hive client directory. Example: `/hive-test api branch=fix/my-feature`
 - **eest-version=VERSION** - Pin EEST fixtures version (e.g. `v5.3.0`). Default: auto-discover latest.
-- **bal-version=VERSION** - Pin BAL fixtures version (e.g. `bal@v5.1.0`). Default: auto-discover latest.
+- **bal-version=VERSION** - Pin Amsterdam devnet fixtures version (e.g. `bal@v5.1.0`; the `bal@` prefix is the upstream release-tag convention). Default: auto-discover latest.
 
 ## Expected Failures (CI thresholds)
 
@@ -69,15 +69,22 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-devnet (CI shard: `glamsterdam-devnet`) | 1 (`test_block_regular_gas_limit` — `GAS_USED_OVERFLOW` vs `GAS_ALLOWANCE_EXCEEDED` error classification mismatch) |
+| eest-devnet — `paris+shanghai-devnet` | 0 |
+| eest-devnet — `cancun-devnet` | 0 |
+| eest-devnet — `prague-devnet` | 0 |
+| eest-devnet — `osaka-devnet` | 0 |
+| eest-devnet — `amsterdam-devnet` | 3 (2 EIP-7928 `test_invalid_{pre,post}_fork_block_*_bal_hash_field` wrong-expectation failures + 1 EIP-7928 `test_bal_invalid_extraneous_entries` flake slot, #21364) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `glamsterdam-devnet` shard runs BAL EIPs (`8024|7708|7778|7843|7928|7954|8037`)
-against the URL and hive `branch` pinned under the `eest_devnet`
-entry in `test-fixtures.json` (currently `bal@v5.7.0` / `devnets/bal/4`),
-with `--experimental.bal` enabled on the erigon side. Reproduce locally by
-aligning the invocation with those values — `make eest-devnet` reads them
-from the manifest via `jq` and applies them automatically.
+The CI `eest_devnet` shards mirror the `eest_stable` per-fork split
+(`fork_(Paris|Shanghai)`, `fork_Cancun`, `fork_Prague`, `fork_Osaka`) and add a
+`fork_Amsterdam` shard. The Amsterdam shard passes `--experimental.bal` on the
+erigon side and `--client.checktimelimit=300s` to hive; the pre-Amsterdam
+devnet shards run with default flags. All devnet shards consume the URL and
+hive `branch` pinned under the `eest_devnet` entry in `test-fixtures.json`
+(currently `bal@v7.2.0` / `devnets/bal/7`). Reproduce locally by aligning the
+invocation with those values — `make eest-devnet` reads them from the manifest
+via `jq` and applies them automatically.
 
 ## Procedure
 
@@ -91,7 +98,7 @@ if the user provided explicit version overrides (`eest-version=`, `bal-version=`
 EEST_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
   | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
 
-# Latest BAL fixtures (tag matching bal@v*.*.*)
+# Latest Amsterdam devnet fixtures (upstream tag prefix is `bal@v*.*.*`)
 BAL_TAG=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
   | jq -r '[.[] | select(.tag_name | startswith("bal@"))][0].tag_name')
 BAL_BRANCH="tests-${BAL_TAG}"
