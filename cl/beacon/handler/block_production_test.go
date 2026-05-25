@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -40,6 +41,28 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 )
+
+func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, 123, 456)
+
+	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
+	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
+	require.Equal(t, "456", rr.Header().Get("Eth-Consensus-Block-Value"))
+	require.Equal(t, "false", rr.Header().Get("Eth-Execution-Payload-Blinded"))
+	require.Equal(t, "true", rr.Header().Get("Eth-Execution-Payload-Included"))
+}
+
+func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, 123, 456)
+
+	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
+}
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody
 // against a real Erigon execution layer. A withdrawal request transaction is

@@ -326,7 +326,6 @@ func (a *PayloadAttributes) DecodeSSZ(buf []byte, version int) error {
 	var timestamp uint64
 	var root common.Hash
 	var slot uint64
-	var targetGasLimit uint64
 	switch a.SSZVersion {
 	case clparams.BellatrixVersion:
 		if err := ssz2.UnmarshalSSZ(buf, version, &timestamp, a.PrevRandao[:], a.SuggestedFeeRecipient[:]); err != nil {

@@ -335,13 +335,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	// todo: consensusValue
 	rewardsCollector := blockBuldingMachine.BlockRewardsCollector
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
-	a.setupHeaderReponseForBlockProduction(
-		w,
-		block.Version(),
-		block.IsBlinded(),
-		block.GetExecutionValue().Uint64(),
-		consensusValue,
-	)
 	var resp *beaconhttp.BeaconResponse
 	if block.IsBlinded() {
 		resp = newBeaconResponse(block.ToBlinded())
@@ -357,6 +350,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		With("execution_payload_value", strconv.FormatUint(block.GetExecutionValue().Uint64(), 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10))
 
+	executionPayloadIncluded := false
 	// [New in Gloas:EIP7732] For self-build blocks, compute the unsigned ExecutionPayloadEnvelope
 	// and include it in the response so the validator client can sign it.
 	// The beacon block root can only be computed here (after the state root is set).
@@ -383,16 +377,32 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 						BeaconBlockRoot:       beaconBlockRoot,
 						ParentBeaconBlockRoot: denebBlock.Block.ParentRoot,
 					}
-					resp = resp.With("execution_payload_envelope", envelope)
 					// Cache envelope by slot so the VC can retrieve it via
 					// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}
 					a.selfBuildEnvelopes.Add(targetSlot, envelope)
+					// SSZ encoding only serializes Data, not Extra — only include
+					// the envelope in JSON responses to keep the header truthful.
+					if !beaconhttp.WillEncodeSSZ(r.Header.Get("Accept")) {
+						resp = resp.With("execution_payload_envelope", envelope)
+						executionPayloadIncluded = true
+					}
 					log.Info("BlockProduction: included unsigned execution payload envelope in response",
 						"slot", targetSlot, "beaconBlockRoot", beaconBlockRoot, "blockHash", bid.Message.BlockHash)
 				}
 			}
 		}
 	}
+	if block.Version() >= clparams.GloasVersion {
+		resp = resp.With("execution_payload_included", executionPayloadIncluded)
+	}
+	a.setupHeaderReponseForBlockProduction(
+		w,
+		block.Version(),
+		block.IsBlinded(),
+		executionPayloadIncluded,
+		block.GetExecutionValue().Uint64(),
+		consensusValue,
+	)
 
 	return resp, nil
 }
@@ -715,11 +725,11 @@ func (a *ApiHandler) produceBeaconBody(
 			head = baseState.GetLatestBlockHash()
 		}
 	}
-	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
-		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
+		finalizedHash = head
 	}
-	safeHash := a.forkchoiceStore.GetEth1Hash(baseState.CurrentJustifiedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
 	if safeHash == (common.Hash{}) {
 		safeHash = head
 	}
@@ -1251,12 +1261,16 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 	w http.ResponseWriter,
 	consensusVersion clparams.StateVersion,
 	blinded bool,
+	executionPayloadIncluded bool,
 	executionBlockValue, consensusBlockValue uint64,
 ) {
 	w.Header().Set("Eth-Execution-Payload-Value", strconv.FormatUint(executionBlockValue, 10))
 	w.Header().Set("Eth-Consensus-Block-Value", strconv.FormatUint(consensusBlockValue, 10))
 	w.Header().Set("Eth-Consensus-Version", clparams.ClVersionToString(consensusVersion))
 	w.Header().Set("Eth-Execution-Payload-Blinded", strconv.FormatBool(blinded))
+	if consensusVersion >= clparams.GloasVersion {
+		w.Header().Set("Eth-Execution-Payload-Included", strconv.FormatBool(executionPayloadIncluded))
+	}
 }
 
 func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -1890,8 +1904,8 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
 		return err
 	}
-	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
-	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil, block.Version()); err != nil {
 		return err
 	}
