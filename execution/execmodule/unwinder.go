@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // Unwinder is the seam between SetHead's existing exec-stage unwind
@@ -60,24 +59,14 @@ type Unwinder interface {
 // UnwindArgs carries the inputs SetHead supplies to the Unwinder.
 // Mirrors storage.UnwindOpts shape; the adapter at the wiring point
 // translates between the two so neither package leaks into the other.
+//
+// Mode B as implemented today (snapshot-trim + DB-reset, no
+// commitment write) only needs a writable temporal tx. The
+// commitment-recompute path (next commit) will add the fields it
+// requires back here.
 type UnwindArgs struct {
-	// TxNum is the last txNum at toBlock — caller computes via
-	// rawdbv3.TxNums.Max(ctx, tx, toBlock).
-	TxNum uint64
-
-	// TrieState is the encoded patricia trie state at toBlock,
-	// produced by HexPatriciaHashed.EncodeCurrentState(nil) (or the
-	// concurrent variant's RootTrie().EncodeCurrentState(nil)). The
-	// caller positions the trie at toBlock before encoding.
-	TrieState []byte
-
-	// Domains is the SharedDomains handle whose CommitmentDomain
-	// the commitment-entry write goes through.
-	// *db/state/execctx.SharedDomains satisfies
-	// commitmentdb.CommitmentStateWriter structurally.
-	Domains commitmentdb.CommitmentStateWriter
-
-	// Tx is the temporal transaction the commitment-entry write is
-	// performed inside. SetHead owns its lifecycle.
-	Tx kv.TemporalTx
+	// Tx is the writable temporal transaction the storage-layer
+	// sub-ops run inside. SetHead owns its lifecycle (the Unwinder
+	// does NOT commit; control returns to SetHead which commits).
+	Tx kv.TemporalRwTx
 }

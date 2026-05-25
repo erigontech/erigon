@@ -21,81 +21,60 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
-	dbexecctx "github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
-
-// Compile-time assertion: the production *SharedDomains satisfies the
-// narrow CommitmentStateWriter interface Provider.Unwind expects in
-// UnwindOpts.Domains. Guarantees SetHead-side wiring compiles without
-// surprise the moment that callsite lands.
-var _ commitmentdb.CommitmentStateWriter = (*dbexecctx.SharedDomains)(nil)
 
 // UnwindOpts holds the per-call inputs Provider.Unwind needs that it
 // cannot derive from its own state.
 //
-// All fields are caller-supplied so Provider.Unwind stays free of any
-// SharedDomains construction or aggregator-positioning concerns — the
-// caller (production: execution/execmodule.SetHead; future: fork-from
-// CLI) drives the db state machinery and hands the resulting handles
-// plus the encoded trie state in here.
+// Mode B as implemented today (snapshot-trim + DB-reset, no
+// commitment write) only needs a writable temporal tx. The
+// commitment-recompute path (next commit) will add the fields it
+// requires back here — *SharedDomains will be re-introduced via
+// the commitmentdb.CommitmentStateWriter interface, asserted
+// structurally when that callsite lands.
 type UnwindOpts struct {
-	// TxNum is the last txNum at toBlock — typically computed by the
-	// caller via rawdbv3.TxNums.Max(ctx, tx, toBlock).
-	TxNum uint64
-
-	// TrieState is the encoded patricia trie state at toBlock — the
-	// bytes from commitment.HexPatriciaHashed.EncodeCurrentState(nil)
-	// or ConcurrentPatriciaHashed.RootTrie().EncodeCurrentState(nil).
-	// The caller is responsible for positioning the trie at toBlock
-	// before encoding (production: the existing
-	// pipelineExecutor.RunUnwind pass does this).
-	TrieState []byte
-
-	// Domains is the SharedDomains handle the commitment-entry write
-	// is performed through. *db/state/execctx.SharedDomains satisfies
-	// commitmentdb.CommitmentStateWriter structurally.
-	Domains commitmentdb.CommitmentStateWriter
-
-	// Tx is the temporal transaction the commitment-entry write is
-	// performed inside. Caller owns its lifecycle (Begin / Commit /
-	// Rollback).
-	Tx kv.TemporalTx
+	// Tx is the writable temporal transaction the storage-layer
+	// sub-ops run inside. SetHead owns its lifecycle; Provider.Unwind
+	// does NOT commit.
+	Tx kv.TemporalRwTx
 }
 
 // Unwind is the storage-layer entry point for an *administrative*
-// unwind to an arbitrary block (debug_setHead, fork-from CLI). The
+// past-diffset unwind to an arbitrary block in aligned mode (mode B
+// in docs/plans/20260525-admin-sethead-unwind-design.md). The
 // exec-stage unwind path is unrelated: it stays on the existing
 // AggregatorRoTx.Unwind / unwindExec3 chain and remains bounded by
-// rawtemporaldb.CanUnwindBeforeBlockNum. The two paths share no code
-// below this method.
+// rawtemporaldb.CanUnwindBeforeBlockNum.
 //
-// Sub-op contract:
+// This commit (2b) lands the architecture only — validation +
+// dispatch surface. The three sub-ops the design calls for are
+// implemented together in commit 2c (they cannot ship independently
+// because snapshot-trim without DB-reset leaves a wedge of orphan
+// DB entries pointing past the new snapshot tip, and DB-reset
+// without snapshot-trim leaves the file set inconsistent with the
+// chain head):
 //
-//  1. DB unwind — *caller's responsibility*. Production caller SetHead
-//     does this via its existing pipelineExecutor.RunUnwind pass
-//     BEFORE invoking Provider.Unwind, leaving the temporal db, the
-//     aggregator state, and the patricia trie all positioned at
-//     toBlock.
-//  2. Commitment entry write — WriteCommitmentEntryAtBlock anchors a
-//     commitment state entry at (toBlock, opts.TxNum) using
-//     opts.TrieState so subsequent reads find a valid coordinate.
-//  3. Snapshot file trim past toBlock — deletes / truncates segments
-//     whose To > toBlock, drops their torrents, republishes
-//     chain.toml. Not yet implemented; until it is, callers must
-//     keep toBlock within the unfrozen (db-side) range.
+//  1. Snapshot-trim past toBlock — delete/truncate segments whose
+//     To > toBlock, drop their torrents, republish chain.toml.
+//  2. DB reset past toBlock — truncate TxNums + canonical hashes,
+//     reset Headers / Bodies / BlockHashes / Execution stages, clear
+//     diffsets > toBlock, reset HeadBlockHash / HeadHeaderHash /
+//     ForkchoiceHead.
+//  3. Commitment anchor at toBlock — if commitment is already there
+//     (toBlock on a step boundary), no work; otherwise recompute
+//     from history via GetAsOf.
 //
 // Why this method can lift CLAUDE.md's "Unwind beyond data in
 // snapshots not allowed" for aligned chains: that rule was a
-// placeholder for the code in (2) + (3). It stands for non-aligned
-// rounded-boundary chains because trimming an arbitrary block out of
-// the middle of a 1k-rounded file would corrupt the file. Aligned
-// mode lifts it because the unit of cutting *is* the block — every
-// toBlock is a real file boundary by construction.
+// placeholder for the code that lands across 2b + 2c. The rule
+// stands for non-aligned chains because trimming an arbitrary block
+// out of a 1k-rounded file would corrupt it; aligned mode lifts it
+// because the unit of cutting *is* the block.
 //
-// Concurrency: Provider.Unwind does not synchronise. SetHead already
-// holds the ExecModule semaphore for the duration of the unwind, and
-// the CLI fork-from caller is offline at invocation.
+// Concurrency: Provider.Unwind does not synchronise. SetHead has
+// already waited for ExecModule quiescence (no SharedDomains in
+// flight) before invoking the Unwinder. Caller owns opts.Tx
+// lifecycle and the commit.
 func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) error {
 	if p == nil {
 		return fmt.Errorf("storage.Provider.Unwind: nil provider")
@@ -103,21 +82,12 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	if !p.BlockAligned() {
 		return fmt.Errorf("storage.Provider.Unwind: chain is not block-aligned (Config.Snapshot.BlockAlignedBoundaries=false); admin arbitrary-block unwind requires --snap.block-aligned-boundaries (the existing exec-stage CanUnwindBeforeBlockNum guard governs non-aligned chains)")
 	}
-	if opts.Domains == nil {
-		return fmt.Errorf("storage.Provider.Unwind: opts.Domains is nil")
-	}
 	if opts.Tx == nil {
 		return fmt.Errorf("storage.Provider.Unwind: opts.Tx is nil")
 	}
-
-	if err := commitmentdb.WriteCommitmentEntryAtBlock(opts.Domains, opts.Tx, toBlock, opts.TxNum, opts.TrieState); err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: commitment-entry write at block %d: %w", toBlock, err)
-	}
-
-	// TODO: sub-op #3 (snapshot file trim past toBlock). ctx is
-	// accepted now so the signature is stable when the trim path
-	// (which IS context-aware) is filled in.
 	_ = ctx
+	_ = toBlock
 
-	return nil
+	// Sub-ops 1 + 2 + 3 land together in commit 2c.
+	return fmt.Errorf("storage.Provider.Unwind: mode B sub-ops not yet implemented (snapshot-trim + DB-reset + commitment-recompute land together in commit 2c per docs/plans/20260525-admin-sethead-unwind-design.md to avoid leaving a wedge of orphan DB state past the new snapshot tip)")
 }

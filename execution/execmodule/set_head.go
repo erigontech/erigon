@@ -78,13 +78,21 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return nil // already at the target
 	}
 
-	// Check if we can unwind that far back
+	// Check if we can unwind that far back. minUnwindableBlock is the
+	// boundary of the diffset window. Targets inside it ride the
+	// existing incremental path (mode A); targets past it engage the
+	// admin-unwind path (mode B) if and only if the chain is aligned
+	// AND an Unwinder is wired in. See
+	// docs/plans/20260525-admin-sethead-unwind-design.md.
 	minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 	if err != nil {
 		return fmt.Errorf("failed to check minimum unwindable block: %w", err)
 	}
 	if targetBlock < minUnwindableBlock {
-		return fmt.Errorf("cannot unwind to block %d: minimum unwindable block is %d", targetBlock, minUnwindableBlock)
+		if e.unwinder == nil || !e.unwinder.BlockAligned() {
+			return fmt.Errorf("cannot unwind to block %d: minimum unwindable block is %d", targetBlock, minUnwindableBlock)
+		}
+		return e.setHeadModeB(ctx, tx, targetBlock, currentHead)
 	}
 
 	// Verify the target block exists in the canonical chain

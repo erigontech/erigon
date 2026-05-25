@@ -23,31 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-// fakeUnwindDomainPutter captures DomainPut so we can assert
-// Provider.Unwind reached sub-op #2 (or skipped it on a guard
-// failure) without standing up a real SharedDomains.
-type fakeUnwindDomainPutter struct {
-	calls    int
-	gotKey   []byte
-	gotValue []byte
-	gotTxNum uint64
-}
-
-func (f *fakeUnwindDomainPutter) DomainPut(domain kv.Domain, tx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	f.calls++
-	f.gotKey = k
-	f.gotValue = v
-	f.gotTxNum = txNum
-	return nil
-}
-
-// stubTx satisfies kv.TemporalTx for the purpose of being non-nil; no
-// method on it is exercised — the fakeUnwindDomainPutter doesn't read
-// the tx, it just captures the arg.
-type stubTx struct{ kv.TemporalTx }
+// stubRwTx satisfies kv.TemporalRwTx for the purpose of being non-nil;
+// no method on it is exercised because Provider.Unwind in commit 2b
+// returns the not-yet-implemented error before any tx work happens.
+type stubRwTx struct{ kv.TemporalRwTx }
 
 // alignedProvider returns a Provider whose BlockAligned() reports true
 // — the minimum state required to clear the mode-B precondition guard
@@ -60,36 +41,16 @@ func TestProviderUnwind_RejectsNonAlignedChain(t *testing.T) {
 	t.Parallel()
 	// Default Provider has blockAlignedBoundaries == false.
 	p := &Provider{}
-	dom := &fakeUnwindDomainPutter{}
-	tx := &stubTx{}
 
-	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		Domains: dom,
-		Tx:      tx,
-	})
+	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not block-aligned")
-	require.Equal(t, 0, dom.calls, "must short-circuit before sub-op #2 on guard failure")
-}
-
-func TestProviderUnwind_RejectsNilDomains(t *testing.T) {
-	t.Parallel()
-	p := alignedProvider()
-	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		Domains: nil,
-		Tx:      &stubTx{},
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "opts.Domains is nil")
 }
 
 func TestProviderUnwind_RejectsNilTx(t *testing.T) {
 	t.Parallel()
 	p := alignedProvider()
-	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		Domains: &fakeUnwindDomainPutter{},
-		Tx:      nil,
-	})
+	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: nil})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "opts.Tx is nil")
 }
@@ -97,37 +58,23 @@ func TestProviderUnwind_RejectsNilTx(t *testing.T) {
 func TestProviderUnwind_RejectsNilProvider(t *testing.T) {
 	t.Parallel()
 	var p *Provider
-	err := p.Unwind(context.Background(), 1000, UnwindOpts{
-		Domains: &fakeUnwindDomainPutter{},
-		Tx:      &stubTx{},
-	})
+	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil provider")
 }
 
-func TestProviderUnwind_AlignedHappyPath_AnchorsCommitmentAtToBlock(t *testing.T) {
+// TestProviderUnwind_ValidationOK_ReturnsNotYetImplemented pins the
+// commit-2b contract: an aligned Provider with a non-nil Tx passes all
+// the precondition guards, then returns the explicit
+// not-yet-implemented error pointing at commit 2c. When commit 2c lands
+// the sub-ops, the assertion here flips to "returns success after
+// snapshot-trim + DB-reset + commitment-recompute all run."
+func TestProviderUnwind_ValidationOK_ReturnsNotYetImplemented(t *testing.T) {
 	t.Parallel()
 	p := alignedProvider()
-	dom := &fakeUnwindDomainPutter{}
-	tx := &stubTx{}
-	const toBlock, txNum uint64 = 15_000, 22_500
-	trie := []byte("encoded-trie-at-15000")
-
-	require.NoError(t, p.Unwind(context.Background(), toBlock, UnwindOpts{
-		TxNum:     txNum,
-		TrieState: trie,
-		Domains:   dom,
-		Tx:        tx,
-	}))
-
-	require.Equal(t, 1, dom.calls, "sub-op #2 must run exactly once on the happy path")
-	require.Equal(t, commitmentdb.KeyCommitmentState, dom.gotKey)
-	require.Equal(t, txNum, dom.gotTxNum)
-
-	// The encoded payload must round-trip with the same coordinates
-	// — this is the contract every reader of KeyCommitmentState
-	// depends on (DecodeTxBlockNums, LatestCommitmentState, etc.).
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(dom.gotValue)
-	require.Equal(t, txNum, gotTxNum)
-	require.Equal(t, toBlock, gotBlockNum)
+	err := p.Unwind(context.Background(), 1000, UnwindOpts{Tx: &stubRwTx{}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not yet implemented")
+	require.Contains(t, err.Error(), "commit 2c",
+		"the error must point readers at where the implementation lands so a future failure is diagnosable from the message")
 }
