@@ -18,19 +18,27 @@ package jsonrpc
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
@@ -243,4 +251,132 @@ func TestSetHead_E2E_WithinDB_ExecutesPastNewHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, originalHeadHash, restoredHash,
 		"re-executed head hash must match the original — proves identical block content was replayed")
+}
+
+// TestSetHead_E2E_ModeB_RoutesToProviderUnwind — Scenario 3 (focused).
+//
+// Pins the *dispatch + sub-op-chain wiring* for the admin past-diffset
+// SetHead path:
+//
+//   - SetHead routes to setHeadModeB when targetBlock < CanUnwindToBlockNum
+//     AND an Unwinder is wired with BlockAligned()==true. The legacy
+//     "minimum unwindable block" rejection is bypassed.
+//   - setHeadModeB invokes the Unwinder which delegates to
+//     *storage.Provider.Unwind, exercising the snapshot-trim + DB-reset +
+//     commitment-anchor sub-op chain on a real temporal DB.
+//   - The error surface — when one of the sub-ops can't satisfy its
+//     contract on the small fixture — is a mode-B-prefixed error
+//     containing the offending sub-op name, not a generic panic / wedge
+//     / legacy rejection.
+//
+// What this scenario *does not* assert: full cold-start equivalence
+// after a successful Unwind. That needs a fixture where (a) snapshot
+// files past toBlock physically exist on disk for sub-op #1 to trim
+// (requires BlockRetire to fire, gated on Erigon2MinSegmentSize=1000 +
+// MaxReorgDepth=96 → 1100+ blocks), and (b) the writable shadow has
+// nothing past toBlock's step boundary so sub-op #3's commitment-anchor
+// verify finds LatestBlockNumWithCommitment == toBlock. The current
+// wipe primitive retains writes at step == stepBoundary, so any fixture
+// where execution continued past toBlock leaves an entry that shadows
+// the file's anchor. Both pieces are tracked in the post-compact
+// handoff under "Full E2E scenario 3 deferred".
+//
+// On this fixture the expected outcome is: mode B engages, snapshot-trim
+// is a no-op (no Inventory wired), DB-reset + WipeWritableShadowPast
+// run, ensureCommitmentAtBlock returns a chain-malformed error pointing
+// at the wedged anchor. The test pins all of that as observable wiring
+// evidence.
+func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
+	const stepSize uint64 = 8
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			addr: {Balance: big.NewInt(common.Ether)},
+		},
+		GasLimit: 10_000_000,
+	}
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+		execmoduletester.WithAdminUnwindWired(),
+	)
+	ctx := m.Ctx
+	require.NotNil(t, m.AdminUnwindProvider, "WithAdminUnwindWired must populate AdminUnwindProvider")
+
+	signer := types.LatestSignerForChainID(nil)
+	to := common.Address{0x42}
+	pack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 16, func(i int, b *blockgen.BlockGen) {
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i), to, uint256.NewInt(1_000_000), 21_000, new(uint256.Int), nil),
+			*signer, key,
+		)
+		require.NoError(t, err)
+		b.AddTx(tx)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	head := canonicalHead(t, m)
+	require.Equal(t, uint64(16), head, "test fixture must run all 16 blocks")
+
+	// Find a target block whose lastTxNum lands on a step boundary —
+	// the precondition WipeWritableShadowPast enforces. Per-block txn
+	// counts depend on system txns + 1 user txn per block, so probe
+	// the chain instead of guessing.
+	var targetBlock uint64
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		for b := uint64(1); b < head; b++ {
+			lastTxNum, err := rawdbv3.TxNums.Max(ctx, roTx, b)
+			require.NoError(t, err)
+			if (lastTxNum+1)%stepSize == 0 && targetBlock == 0 {
+				targetBlock = b
+			}
+		}
+		roTx.Rollback()
+		require.NotZero(t, targetBlock, "fixture must produce at least one block whose lastTxNum lands on a step boundary")
+	}
+
+	// Lift CanUnwindToBlockNum past target so dispatch routes to mode B.
+	m.TruncateChangeSetsBelow(t, targetBlock+2)
+	{
+		roTx, err := m.DB.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		minUnwindable, err := rawtemporaldb.CanUnwindToBlockNum(roTx)
+		roTx.Rollback()
+		require.NoError(t, err)
+		require.Greater(t, minUnwindable, targetBlock,
+			"ChangeSets3 truncation must lift CanUnwindToBlockNum past targetBlock so dispatch picks mode B")
+	}
+
+	api := newSetHeadE2EAPI(t, m)
+	setHeadErr := api.SetHead(ctx, hexutil.Uint64(targetBlock))
+
+	// On this fixture mode B must engage and reach Provider.Unwind's
+	// sub-op chain. Acceptable outcomes:
+	//   (a) full success — every sub-op satisfies its contract.
+	//   (b) a chain-malformed err with the mode-B prefix containing
+	//       which sub-op couldn't satisfy its contract.
+	//
+	// What's NOT acceptable: the legacy "minimum unwindable block"
+	// rejection. That would mean dispatch failed to route to mode B.
+	require.Error(t, setHeadErr,
+		"on this small fixture (no snapshot files past toBlock; writable shadow holds entries past stepBoundary "+
+			"from continued execution) sub-op #3 cannot satisfy its anchor invariant — the err is the wiring evidence")
+	require.NotContains(t, setHeadErr.Error(), "minimum unwindable block",
+		"dispatch must route to mode B (Provider.Unwind), not the legacy mode-A rejection")
+	require.Contains(t, setHeadErr.Error(), "SetHead mode B",
+		"mode-B errors must carry the mode-B prefix so operators see which path ran")
+	require.Contains(t, setHeadErr.Error(), "storage.Provider.Unwind",
+		"the mode-B dispatch must delegate into *storage.Provider.Unwind, not some other Unwinder")
+	require.Contains(t, setHeadErr.Error(), "commitment-anchor",
+		"snapshot-trim (no Inventory) is a no-op and DB-reset succeeds on this fixture; the controlled failure point is sub-op #3 ensureCommitmentAtBlock")
 }

@@ -17,6 +17,7 @@
 package execmoduletester
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -982,6 +984,37 @@ func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 		panic(err)
 	}
 	return b
+}
+
+// TruncateChangeSetsBelow deletes ChangeSets3 entries whose block-number
+// prefix is < blockNum. Used by admin SetHead mode-B tests to lift
+// rawtemporaldb.CanUnwindToBlockNum past a chosen target so the dispatch
+// in execmodule.SetHead routes to setHeadModeB instead of the legacy
+// "minimum unwindable block" rejection.
+//
+// CanUnwindToBlockNum derives the floor from the lowest blockNum in
+// ChangeSets3 (via changeset.ReadLowestUnwindableBlock, with minor
+// off-by-one adjustment). Truncating below N makes the floor N-1; a
+// SetHead target < N-1 then routes through mode B.
+//
+// Test helper only. Production diffset retention is managed by the
+// execution-component prune lifecycle.
+func (emt *ExecModuleTester) TruncateChangeSetsBelow(tb testing.TB, blockNum uint64) {
+	tb.Helper()
+	rwTx, err := emt.DB.BeginRw(emt.Ctx)
+	require.NoError(tb, err)
+	defer rwTx.Rollback()
+
+	c, err := rwTx.RwCursor(kv.ChangeSets3)
+	require.NoError(tb, err)
+	defer c.Close()
+
+	upper := dbutils.EncodeBlockNumber(blockNum)
+	for k, _, err := c.First(); k != nil && bytes.Compare(k, upper) < 0; k, _, err = c.Next() {
+		require.NoError(tb, err)
+		require.NoError(tb, c.DeleteCurrent())
+	}
+	require.NoError(tb, rwTx.Commit())
 }
 
 // testProviderUnwinder bridges execmodule.Unwinder to *storage.Provider
