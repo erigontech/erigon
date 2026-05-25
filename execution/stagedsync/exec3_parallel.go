@@ -319,6 +319,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// would hang forever.
 		rootResultsClosed := false
 
+		// deferredRootErr stashes ErrWrongTrieRoot from the calculator so a
+		// later blockResult's post-execution validator (bad gas used, bad
+		// receipts, bad bloom, etc.) can supersede it. Block-validation
+		// errors take precedence over trie-root mismatches: a tx returning
+		// the wrong error category here breaks eest's validation taxonomy
+		// (the test expects the specific block-level error, not the
+		// downstream trie consequence). Surfaced only after applyResults
+		// closes and no block-validation error fired.
+		var deferredRootErr error
+
 		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
 		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
 		// separate entries).  This differs from the old StateUpdates count which
@@ -356,6 +366,28 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			return nil
 		}
 
+		// processCommit runs handleCommitResult and defers ErrWrongTrieRoot
+		// instead of returning it. Other commitment errors stay fast-fail.
+		// The deferred root error is surfaced only after applyResults
+		// closes, so any block-validation error that fires for the same or
+		// a later block first returns from the applyResults branch with
+		// ErrInvalidBlock — matching serial's "validation precedes
+		// commitment" ordering and keeping eest's error categorisation
+		// honest.
+		processCommit := func(cr commitmentResult) error {
+			err := handleCommitResult(cr)
+			if err == nil {
+				return nil
+			}
+			if errors.Is(err, ErrWrongTrieRoot) {
+				if deferredRootErr == nil {
+					deferredRootErr = err
+				}
+				return nil
+			}
+			return err
+		}
+
 		// Apply loop: exits ONLY when applyResults is closed by the exec loop.
 		// Do NOT add ctx.Done or executorContext.Done cases here — the exec
 		// loop owns shutdown sequencing. Adding context checks here causes
@@ -372,7 +404,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// channel hangs forever).
 					if !rootResultsClosed {
 						for cr := range rootResults {
-							if err := handleCommitResult(cr); err != nil {
+							if err := processCommit(cr); err != nil {
 								return err
 							}
 						}
@@ -411,6 +443,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (reachedMaxBlock=%v lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, pe.reachedMaxBlock.Load(), lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
+					}
+					// Surface the deferred trie-root error here: no
+					// block-validation error fired during the drain, so
+					// the wrong-root stands.
+					if deferredRootErr != nil {
+						return deferredRootErr
 					}
 					if pe.reachedMaxBlock.Load() {
 						return nil
@@ -598,7 +636,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					rootResultsClosed = true
 					continue
 				}
-				if err := handleCommitResult(cr); err != nil {
+				if err := processCommit(cr); err != nil {
 					return err
 				}
 			case <-logEvery.C:
@@ -1600,21 +1638,59 @@ func (result *execResult) finalizeTxSimple(
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
-	// Check if the worker's execution modified the coinbase (e.g., a TX
-	// that sends ETH to the block producer). The execution delta =
-	// CollectorWrites balance - versionMap base.
-	if result.CollectorWrites != nil {
+	// Detect the worker's coinbase Balance write so we can start the
+	// finalize from the worker's post-execution value rather than the
+	// pre-tx versionMap value. Scan result.TxOut (the raw worker output,
+	// where every intermediate write lands) — NOT result.CollectorWrites,
+	// which is the IBS's "net change" set and SUPPRESSES the coinbase
+	// entry when sender == coinbase and the per-tx net balance change is
+	// zero in the IBS's view (e.g. Frontier miner-self-send: gas pre-pay
+	// + value-transfer + refund net to zero in the IBS journal, but the
+	// worker's intermediate balance under shouldDelayFeeCalc=true still
+	// debited the gas-used portion which the finalize must re-credit via
+	// the tip).
+	//
+	// Without this, finalize uses the stale pre-tx versionMap value as
+	// base and adds the tip on top — over-crediting the coinbase by one
+	// tip per sender==coinbase tx. Observed at mainnet block 218957 with
+	// canonical/parallel divergence of exactly one tip (1.05e15 wei).
+	// Detect the worker's coinbase write. Two cases produce a coinbase
+	// Balance write from the worker's execution:
+	//   1. sender == coinbase — the worker's gas-pre-pay debit lands on
+	//      the coinbase address. For Frontier-era miner self-sends this
+	//      is the load-bearing case (#21017, block 218957) where the
+	//      CollectorWrites set suppresses the entry due to per-tx net
+	//      balance change == 0.
+	//   2. sender != coinbase but the tx body does a balance transfer to
+	//      the coinbase (CALL with value, SELFDESTRUCT beneficiary, etc.)
+	//      — historically read from CollectorWrites because the IBS's
+	//      net-change view captures the explicit transfer correctly.
+	//
+	// For #1 we MUST scan TxOut (the raw worker output), because that's
+	// where the gas debit lives. For #2 we scan CollectorWrites, because
+	// TxOut can contain artifact entries (e.g. SELFDESTRUCT bookkeeping
+	// that touches the zero address when coinbase == zero address) that
+	// would mislead us. Switch source by the sender-vs-coinbase test.
+	workerWroteCoinbase := false
+	senderIsCoinbase := false
+	if msg, err := txTask.TxMessage(); err == nil && msg != nil {
+		senderIsCoinbase = (msg.From() == result.Coinbase)
+	}
+	if senderIsCoinbase {
+		for _, w := range result.TxOut {
+			if w.Address == result.Coinbase && w.Path == state.BalancePath {
+				workerWroteCoinbase = true
+				if execBal, ok := w.Val.(uint256.Int); ok {
+					newCoinbaseBalance = execBal
+				}
+				break
+			}
+		}
+	} else if result.CollectorWrites != nil {
 		for _, w := range result.CollectorWrites {
 			if w.Address == result.Coinbase && w.Path == state.BalancePath {
+				workerWroteCoinbase = true
 				if execBal, ok := w.Val.(uint256.Int); ok {
-					// The worker's execution balance = staleBase + executionDelta
-					// We want: correctBase + executionDelta + tip
-					// executionDelta = execBal - staleBase
-					// But we don't have staleBase. However, since shouldDelayFeeCalc=true,
-					// the worker's base was whatever it read from the versionMap at
-					// execution time. If the TX was validated (reads matched), the
-					// worker's base IS the correct base. So execBal = correctBase + executionDelta.
-					// We just need to add FeeTipped.
 					newCoinbaseBalance = execBal
 				}
 				break
@@ -1628,6 +1704,7 @@ func (result *execResult) finalizeTxSimple(
 	var burntAcc *accounts.Account
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
+	workerWroteBurnt := false
 	if hasBurnt {
 		burntAcc, err = vsReader.ReadAccountData(burntAddr)
 		if err != nil {
@@ -1636,10 +1713,28 @@ func (result *execResult) finalizeTxSimple(
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
-		// Check if worker's execution modified the burnt contract
-		if result.CollectorWrites != nil {
+		// Mirror the coinbase source-selection rule: scan TxOut only when
+		// the burnt contract is the sender (analogous to the
+		// sender==coinbase miner-self-send case); otherwise scan
+		// CollectorWrites so we don't pick up artifact entries.
+		senderIsBurnt := false
+		if msg, err := txTask.TxMessage(); err == nil && msg != nil {
+			senderIsBurnt = (msg.From() == burntAddr)
+		}
+		if senderIsBurnt {
+			for _, w := range result.TxOut {
+				if w.Address == burntAddr && w.Path == state.BalancePath {
+					workerWroteBurnt = true
+					if execBal, ok := w.Val.(uint256.Int); ok {
+						newBurntBalance = execBal
+					}
+					break
+				}
+			}
+		} else if result.CollectorWrites != nil {
 			for _, w := range result.CollectorWrites {
 				if w.Address == burntAddr && w.Path == state.BalancePath {
+					workerWroteBurnt = true
 					if execBal, ok := w.Val.(uint256.Int); ok {
 						newBurntBalance = execBal
 					}
@@ -1654,32 +1749,37 @@ func (result *execResult) finalizeTxSimple(
 
 	// Update CollectorWrites with fee-adjusted balances.
 	emptyRemoval := chainRules.IsSpuriousDragon
-	oldCoinbaseBalance := uint256.Int{}
 	coinbaseEmptyPre := coinbaseAcc == nil ||
 		(coinbaseAcc.Balance.IsZero() && coinbaseAcc.Nonce == 0 && coinbaseAcc.IsEmptyCodeHash())
+	var oldCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		oldCoinbaseBalance = coinbaseAcc.Balance
 	}
 	// Match the serial executor: even when no fee is being credited
 	// (tipped == 0 means newBalance == oldBalance) the coinbase must be
 	// "touched" so the commitment calculator sees the EIP-161
-	// empty-removal delete. Without this touch the calculator never
-	// learns about the coinbase and the trie root diverges from serial,
-	// which always calls AddBalance(coinbase, 0) → TouchAccount → marks
-	// the empty coinbase dirty so MakeWriteSet emits a SelfDestructPath
-	// delete.
+	// empty-removal delete.
+	//
+	// Also emit when the worker wrote to the coinbase BalancePath: the
+	// worker's incarnation-0 write went to versionMap with the pre-fee
+	// value; the finalize-fee write at incarnation+1 must land regardless
+	// of value equality so it masks the stale worker entry. Covers the
+	// Frontier miner-self-send case where (in IBS terms) net balance
+	// change is zero but versionMap carries a stale intermediate value.
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
+		workerWroteCoinbase ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 	if emitCoinbase {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
 	}
 	if hasBurnt {
-		oldBurntBalance := uint256.Int{}
+		var oldBurntBalance uint256.Int
 		if burntAcc != nil {
 			oldBurntBalance = burntAcc.Balance
 		}
-		if newBurntBalance != oldBurntBalance {
+		// Same staleness-masking reasoning as coinbase above.
+		if newBurntBalance != oldBurntBalance || workerWroteBurnt {
 			result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 				burntAddr, burntAcc, newBurntBalance, tracing.BalanceDecreaseGasBuy, emptyRemoval)
 		}
@@ -1746,11 +1846,12 @@ func (result *execResult) finalizeTxSimple(
 		}
 	}
 	if hasBurnt {
-		oldBurntBalance := uint256.Int{}
+		var oldBurntBalance uint256.Int
 		if burntAcc != nil {
 			oldBurntBalance = burntAcc.Balance
 		}
-		if newBurntBalance != oldBurntBalance {
+		// Same staleness-masking reasoning as coinbase above.
+		if newBurntBalance != oldBurntBalance || workerWroteBurnt {
 			allWrites = append(allWrites, &state.VersionedWrite{
 				Address:             burntAddr,
 				Path:                state.BalancePath,
@@ -2259,7 +2360,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.cntAbort++
 			}
 		} else {
-			return nil, fmt.Errorf("unexpected exec error: %w", res.Err)
+			// Non-ErrExecAbortError from the worker (e.g. raw error from
+			// TxTask.Reset: TxMessage rejection, signer rejection, EIP-7702
+			// empty authorization list). Surface it as a block-validity
+			// failure through blockResult.Err so the apply loop returns
+			// ErrInvalidBlock the same way the other invalidBlockResult
+			// sites do. Returning (nil, err) instead silently exits the
+			// exec loop with no blockResult ever reaching the apply loop;
+			// the apply-channel-closed branch then sees blks=0 and
+			// fabricates ErrLoopExhausted, which the stage loop reports as
+			// "unexpected state step has more work" — engine API
+			// mis-categorises that as a state-machine error rather than the
+			// real block-validation failure (eest fork_Prague
+			// test_empty_authorization_list).
+			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
 		txVersion := res.Version()
