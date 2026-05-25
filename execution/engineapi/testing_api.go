@@ -206,6 +206,7 @@ func (t *testingImpl) BuildBlockV1(
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+		TargetGasLimit:        (*uint64)(payloadAttributes.TargetGasLimit),
 		CustomTxnProvider:     customProvider,
 	}
 	if version >= clparams.CapellaVersion {
