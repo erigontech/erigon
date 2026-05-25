@@ -1654,14 +1654,47 @@ func (result *execResult) finalizeTxSimple(
 	// base and adds the tip on top — over-crediting the coinbase by one
 	// tip per sender==coinbase tx. Observed at mainnet block 218957 with
 	// canonical/parallel divergence of exactly one tip (1.05e15 wei).
+	// Detect the worker's coinbase write. Two cases produce a coinbase
+	// Balance write from the worker's execution:
+	//   1. sender == coinbase — the worker's gas-pre-pay debit lands on
+	//      the coinbase address. For Frontier-era miner self-sends this
+	//      is the load-bearing case (#21017, block 218957) where the
+	//      CollectorWrites set suppresses the entry due to per-tx net
+	//      balance change == 0.
+	//   2. sender != coinbase but the tx body does a balance transfer to
+	//      the coinbase (CALL with value, SELFDESTRUCT beneficiary, etc.)
+	//      — historically read from CollectorWrites because the IBS's
+	//      net-change view captures the explicit transfer correctly.
+	//
+	// For #1 we MUST scan TxOut (the raw worker output), because that's
+	// where the gas debit lives. For #2 we scan CollectorWrites, because
+	// TxOut can contain artifact entries (e.g. SELFDESTRUCT bookkeeping
+	// that touches the zero address when coinbase == zero address) that
+	// would mislead us. Switch source by the sender-vs-coinbase test.
 	workerWroteCoinbase := false
-	for _, w := range result.TxOut {
-		if w.Address == result.Coinbase && w.Path == state.BalancePath {
-			workerWroteCoinbase = true
-			if execBal, ok := w.Val.(uint256.Int); ok {
-				newCoinbaseBalance = execBal
+	senderIsCoinbase := false
+	if msg, err := txTask.TxMessage(); err == nil && msg != nil {
+		senderIsCoinbase = (msg.From() == result.Coinbase)
+	}
+	if senderIsCoinbase {
+		for _, w := range result.TxOut {
+			if w.Address == result.Coinbase && w.Path == state.BalancePath {
+				workerWroteCoinbase = true
+				if execBal, ok := w.Val.(uint256.Int); ok {
+					newCoinbaseBalance = execBal
+				}
+				break
 			}
-			break
+		}
+	} else if result.CollectorWrites != nil {
+		for _, w := range result.CollectorWrites {
+			if w.Address == result.Coinbase && w.Path == state.BalancePath {
+				workerWroteCoinbase = true
+				if execBal, ok := w.Val.(uint256.Int); ok {
+					newCoinbaseBalance = execBal
+				}
+				break
+			}
 		}
 	}
 	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
@@ -1680,15 +1713,33 @@ func (result *execResult) finalizeTxSimple(
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
-		// Scan TxOut (raw worker output) — not CollectorWrites — for the
-		// same reason described in the coinbase override above.
-		for _, w := range result.TxOut {
-			if w.Address == burntAddr && w.Path == state.BalancePath {
-				workerWroteBurnt = true
-				if execBal, ok := w.Val.(uint256.Int); ok {
-					newBurntBalance = execBal
+		// Mirror the coinbase source-selection rule: scan TxOut only when
+		// the burnt contract is the sender (analogous to the
+		// sender==coinbase miner-self-send case); otherwise scan
+		// CollectorWrites so we don't pick up artifact entries.
+		senderIsBurnt := false
+		if msg, err := txTask.TxMessage(); err == nil && msg != nil {
+			senderIsBurnt = (msg.From() == burntAddr)
+		}
+		if senderIsBurnt {
+			for _, w := range result.TxOut {
+				if w.Address == burntAddr && w.Path == state.BalancePath {
+					workerWroteBurnt = true
+					if execBal, ok := w.Val.(uint256.Int); ok {
+						newBurntBalance = execBal
+					}
+					break
 				}
-				break
+			}
+		} else if result.CollectorWrites != nil {
+			for _, w := range result.CollectorWrites {
+				if w.Address == burntAddr && w.Path == state.BalancePath {
+					workerWroteBurnt = true
+					if execBal, ok := w.Val.(uint256.Int); ok {
+						newBurntBalance = execBal
+					}
+					break
+				}
 			}
 		}
 		if txTask.Config.IsLondon(blockNum) {
