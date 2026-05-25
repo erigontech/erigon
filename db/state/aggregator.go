@@ -2011,6 +2011,12 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 	var deleted []string
 
+	// Pin every dirty file so this cleanup is itself a reader of the subsumed files.
+	// deleteMergeFile only marks them canDelete; dirtyRo.Close is then the last reader
+	// that unlinks any file no other reader still holds. Deferred first so it runs last.
+	dirtyRo := a.DebugBeginDirtyFilesRo()
+	defer dirtyRo.Close()
+
 	at := a.BeginFilesRo()
 	defer at.Close()
 

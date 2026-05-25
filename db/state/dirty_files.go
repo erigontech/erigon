@@ -360,8 +360,8 @@ func deleteMergeFile(dirtyFiles *DirtyFiles, outs []*FilesItem, filenameBase str
 		dirtyFiles.Delete(out)
 		out.canDelete.Store(true)
 
-		// Mark `canDelete=true` only. The last reader of this file removes it inside RoTx.Close.
-		// The merge holds a rotx pinning these files, so it is itself such a reader.
+		// Mark `canDelete=true` only. The last reader removes the file inside RoTx.Close;
+		// callers must hold a rotx pinning these files so such a reader is guaranteed to exist.
 		if filenameBase == traceFileLife && out.decompressor != nil {
 			logger.Warn("[agg.dbg] deleteMergeFile: mark as canDelete=true", "f", out.decompressor.FileName())
 		}
