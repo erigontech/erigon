@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"io/fs"
 
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -144,7 +142,7 @@ func TestGenesisBlock() *types.Genesis {
 func DeveloperGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config: &chain.Config{
-			ChainID:               big.NewInt(1337),
+			ChainID:               uint256.NewInt(1337),
 			HomesteadBlock:        common.NewUint64(0),
 			TangerineWhistleBlock: common.NewUint64(0),
 			SpuriousDragonBlock:   common.NewUint64(0),

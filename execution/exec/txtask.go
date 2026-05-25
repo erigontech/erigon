@@ -658,6 +658,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 
 	if len(result.ValidationResults) == 0 {
 		result.Err = fmt.Errorf("found RIP-7560 but no remaining validation results, txIndex %d", txTask.TxIndex)
+		return &result
 	}
 
 	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier

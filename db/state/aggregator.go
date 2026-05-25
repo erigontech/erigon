@@ -1580,6 +1580,9 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 // Set to 0 to remove the cap.
 func (a *Aggregator) SetMaxCollationTxNum(txNum uint64) { a.maxCollationTxNum.Store(txNum) }
 
+// MaxCollationTxNum returns the current collation cap (0 = uncapped).
+func (a *Aggregator) MaxCollationTxNum() uint64 { return a.maxCollationTxNum.Load() }
+
 // SetLastFlushedCommitmentTxNum records the highest txNum at which commitment
 // data has been flushed to MDBX. Call after each commit that includes
 // commitment writes (step boundary or batch-end commitment).

@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
@@ -9,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 )
 
 func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, defaultBlock uint64, override *uint64) (*model.Account, error) {
@@ -171,4 +173,117 @@ func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[st
 	}
 
 	return trans
+}
+
+func addressesFromModel(addrs []string) ([]common.Address, error) {
+	result := make([]common.Address, 0, len(addrs))
+	for _, a := range addrs {
+		if !common.IsHexAddress(a) {
+			return nil, fmt.Errorf("invalid address: %s", a)
+		}
+		result = append(result, common.HexToAddress(a))
+	}
+	return result, nil
+}
+
+func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
+	result := make([][]common.Hash, len(topicSets))
+	for i, set := range topicSets {
+		result[i] = make([]common.Hash, 0, len(set))
+		for _, t := range set {
+			b, err := hexutil.Decode(t)
+			if err != nil {
+				return nil, fmt.Errorf("invalid topic %s: %w", t, err)
+			}
+			result[i] = append(result[i], common.BytesToHash(b))
+		}
+	}
+	return result, nil
+}
+
+func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
+	result := make([]*model.Log, 0, len(logs))
+	for _, l := range logs {
+		ml := &model.Log{
+			Index: uint64(l.Index),
+			Data:  hexutil.Encode(l.Data),
+		}
+		ml.Account = &model.Account{
+			Address:  strings.ToLower(l.Address.Hex()),
+			BlockNum: uint64(l.BlockNumber),
+		}
+		ml.Topics = make([]string, len(l.Topics))
+		for i, t := range l.Topics {
+			ml.Topics[i] = t.Hex()
+		}
+		ml.Transaction = &model.Transaction{
+			Hash: l.TxHash.Hex(),
+			Block: &model.Block{
+				Number: uint64(l.BlockNumber),
+				Hash:   l.BlockHash.Hex(),
+			},
+		}
+		result = append(result, ml)
+	}
+	return result
+}
+
+func decodeOptionalAddress(s *string, fieldName string) (*common.Address, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if !common.IsHexAddress(*s) {
+		return nil, fmt.Errorf("invalid %s address: %s", fieldName, *s)
+	}
+	addr := common.HexToAddress(*s)
+	return &addr, nil
+}
+
+func decodeOptionalBig(s *string, fieldName string) (*hexutil.Big, error) {
+	if s == nil {
+		return nil, nil
+	}
+	b, err := hexutil.DecodeBig(*s)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", fieldName, err)
+	}
+	return (*hexutil.Big)(b), nil
+}
+
+func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
+	var (
+		args ethapi.CallArgs
+		err  error
+	)
+	if args.From, err = decodeOptionalAddress(data.From, "from"); err != nil {
+		return args, err
+	}
+	if args.To, err = decodeOptionalAddress(data.To, "to"); err != nil {
+		return args, err
+	}
+	if data.Gas != nil {
+		gas := hexutil.Uint64(*data.Gas)
+		args.Gas = &gas
+	}
+	if args.GasPrice, err = decodeOptionalBig(data.GasPrice, "gasPrice"); err != nil {
+		return args, err
+	}
+	if args.MaxFeePerGas, err = decodeOptionalBig(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
+		return args, err
+	}
+	if args.MaxPriorityFeePerGas, err = decodeOptionalBig(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
+		return args, err
+	}
+	if args.Value, err = decodeOptionalBig(data.Value, "value"); err != nil {
+		return args, err
+	}
+	if data.Data != nil {
+		b, err := hexutil.Decode(*data.Data)
+		if err != nil {
+			return args, fmt.Errorf("invalid data: %w", err)
+		}
+		input := hexutil.Bytes(b)
+		args.Input = &input
+	}
+	return args, nil
 }

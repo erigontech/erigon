@@ -95,7 +95,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
-| Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
+| Sentry    | 30303        | TCP/UDP  | P2P Peering (Public)     |
 | RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
 | MCP       | 8553         | TCP      | MCP Server (Private)     |
 
