@@ -30,4 +30,12 @@ type StateAggregator interface {
 	BuildMissedAccessors(ctx context.Context, workers int) error
 	LockCollation()
 	UnlockCollation()
+
+	// StepSize is the number of txNums per aggregator step — needed by
+	// the snapshot-trim sub-op in Provider.Unwind to translate a
+	// toBlock target into a step boundary so state files (.kv / .v /
+	// .ef / .efi / .kvi, all step-indexed) can be classified against
+	// the block boundary. Production *state.Aggregator satisfies this
+	// structurally; mocks add a return-constant stub.
+	StepSize() uint64
 }

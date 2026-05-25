@@ -178,6 +178,27 @@ type Provider struct {
 	// admin unwind) is engagable on this chain.
 	blockAlignedBoundaries bool
 
+	// snapDir is the snapshot directory root (config.Dirs.Snap). Stored
+	// so Provider.Unwind's snapshot-trim sub-op can construct absolute
+	// file paths from Inventory entry names (which may include subdirs
+	// like "domain/", "history/", "idx/" — the inventory Name is
+	// relative-from-snapDir).
+	snapDir string
+
+	// downloaderClient is the BitTorrent downloader handle. Stored
+	// from Deps so Provider.Unwind's snapshot-trim sub-op can call
+	// Delete to stop seeding files being removed. May be nil for
+	// tools / tests / nodes started with --no-downloader; trim
+	// still removes inventory + disk in that case.
+	downloaderClient downloader.Client
+
+	// republishChainToml is the publisher's manifest republish hook.
+	// Stored from Deps.RepublishChainToml so Provider.Unwind's
+	// snapshot-trim sub-op can refresh chain.toml after the file set
+	// shrinks. May be nil; trim runs without it for non-publishing
+	// nodes.
+	republishChainToml func() error
+
 	logger log.Logger
 }
 
@@ -290,6 +311,9 @@ func (p *Provider) Initialize(deps Deps) error {
 	p.Inventory = deps.Inventory
 	p.Aggregator = deps.Aggregator
 	p.blockAlignedBoundaries = config.Snapshot.BlockAlignedBoundaries
+	p.snapDir = config.Dirs.Snap
+	p.downloaderClient = deps.DownloaderClient
+	p.republishChainToml = deps.RepublishChainToml
 
 	// Fork-config datadir guards: refuse pre-merge cut or a datadir
 	// already populated with parent-lineage post-cut files. Runs before

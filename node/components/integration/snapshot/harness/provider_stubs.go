@@ -36,6 +36,7 @@ func (mockAggregator) OpenFolder() error                               { return 
 func (mockAggregator) BuildMissedAccessors(context.Context, int) error { return nil }
 func (mockAggregator) LockCollation()                                  {}
 func (mockAggregator) UnlockCollation()                                {}
+func (mockAggregator) StepSize() uint64                                { return 0 }
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has
