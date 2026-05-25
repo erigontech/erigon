@@ -888,7 +888,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	// keeps writing to MDBX above the file boundary, but no new file is
 	// built so the data above never becomes prunable. Result: MDBX grows
 	// unbounded (commitment domain especially) until the next initial-cycle
-	// trip through StageLoopIteration. CollateAndPruneIfNeeded internally
+	// trip through StageLoopIteration. CollateAndPrune internally
 	// opens its own RW tx and calls the pruneFn callback inside it.
 	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
@@ -900,7 +900,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			if pruneTimeout > maxTimeout {
 				pruneTimeout = maxTimeout
 			}
-			if err := agg.CollateAndPruneIfNeeded(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			if err := agg.CollateAndPrune(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger); err != nil {
 				return nil, err

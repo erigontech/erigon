@@ -94,11 +94,6 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	// maxCollationTxNum caps BuildFiles to not extend past available block files.
-	// Set by the caller (exec3.go) based on the block reader's max txNum.
-	// 0 means no cap.
-	maxCollationTxNum atomic.Uint64
-
 	// lastFlushedCommitmentTxNum is the highest txNum at which commitment
 	// data (branch nodes, state key) has been flushed to MDBX. Collation
 	// must not proceed for a step unless the step's commitment boundary has
@@ -837,12 +832,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	a.LockWorkersEditing()
 	defer a.UnlockWorkersEditing()
 
-	lastBlockInStep, lastBlockInDB, lastTxInDB, ok, err := a.readyForCollation(ctx, step)
+	ok, err := a.readyForCollation(ctx, step)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
+		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()))
 		return errStepNotReady
 	}
 	var (
@@ -983,52 +978,59 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	return nil
 }
 
-func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
-	if a.reorgBlockDepth == 0 {
-		return 0, 0, 0, true, nil
+func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bool, err error) {
+	if a.reorgBlockDepth == 0 && a.frozenBlocks == nil {
+		return true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 
+	if a.frozenBlocks != nil {
+		var capTxNum, lstTxNum uint64
+		if err := a.db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
+			if err != nil {
+				return err
+			}
+			lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+			if len(lst) >= 8 {
+				lstTxNum = binary.BigEndian.Uint64(lst)
+			}
+			return nil
+		}); err != nil {
+			return false, fmt.Errorf("read max collatable txNum: %w", err)
+		}
+		if uint64(step+1)*a.StepSize() > capTxNum {
+			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
+				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
+				"lastCollatableStepInDB", lstTxNum/a.StepSize())
+			return false, nil
+		}
+		return true, nil
+	}
+
+	// frozenBlocks == nil && reorgBlockDepth > 0: legacy safety net.
+	var lastBlockInStep, lastBlockInDB uint64
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		var found bool
+		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !found {
 			lastBlockInStep = 0
 		}
-		lastBlockInDB, lastTxInDB, err = rawdbv3.TxNums.Last(tx)
+		lastBlockInDB, _, err = rawdbv3.TxNums.Last(tx)
 		return err
 	})
 	if err != nil {
-		return 0, 0, 0, false, err
+		return false, err
 	}
-	if a.frozenBlocks != nil {
-		var capTxNum uint64
-		if err = a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			return err
-		}); err != nil {
-			return 0, 0, 0, false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			lastStepInDb := kv.Step(lastTxInDB / a.StepSize())
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDb", lastStepInDb-1)
-			return 0, 0, 0, false, nil
-		}
-	}
-	ok = err == nil && lastBlockInDB > lastBlockInStep+a.reorgBlockDepth
-	return
+	return lastBlockInDB > lastBlockInStep+a.reorgBlockDepth, nil
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
-		toTxNum = cap
-	}
 	finished := a.buildFilesInBackground(toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
@@ -1569,20 +1571,6 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 	return steps, nil
 }
 
-// CollateAndPruneIfNeeded runs synchronous collate when stepsInDB exceeds
-// 1.5 steps, looping until it drops to 1 or below. Then runs prune in a
-// separate transaction so MDBX GC can reclaim freed pages.
-// This prevents step accumulation during initial sync when background
-// collate can't keep up with execution throughput.
-// SetMaxCollationTxNum caps all collation (BuildFiles, CollateAndPruneIfNeeded)
-// to not extend past the given txNum. Use this when block snapshot files don't
-// cover all txNums (e.g. --no-downloader or lagging block file builder).
-// Set to 0 to remove the cap.
-func (a *Aggregator) SetMaxCollationTxNum(txNum uint64) { a.maxCollationTxNum.Store(txNum) }
-
-// MaxCollationTxNum returns the current collation cap (0 = uncapped).
-func (a *Aggregator) MaxCollationTxNum() uint64 { return a.maxCollationTxNum.Load() }
-
 // SetLastFlushedCommitmentTxNum records the highest txNum at which commitment
 // data has been flushed to MDBX. Call after each commit that includes
 // commitment writes (step boundary or batch-end commitment).
@@ -1619,83 +1607,19 @@ func (a *Aggregator) UnlockCollation() { a.commitGate.Unlock() }
 // around BeginTemporalRw to drain old readers.
 func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 
-// CollateAndPrune kicks background file building and prunes already-collated
-// steps until stepsInDB drops to the target range. This is the single entry
-// point for collation+prune — called from both ProcessFrozenBlocks and FCU.
-//
-// The pattern: kick BuildFilesInBackground, then loop pruning what's available
-// while waiting for collation to produce more files. Exits when stepsInDB ≤
-// targetSteps or no progress is made.
+// CollateAndPrune runs a single prune pass and kicks background file
+// building. The block-snapshot-boundary gate inside readyForCollation
+// keeps state files from extending past block files, so no external cap
+// is needed.
 func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
-	const targetSteps = 1.5
-
-	// Kick background collation, capped to maxCollationTxNum if set.
-	// This cap (set by the caller from FrozenBlocks/TxNums boundary)
-	// prevents state files from extending past block files.
-	toTxNum := a.EndTxNumMinimax() + a.StepSize()
-	if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
-		toTxNum = cap
-	}
-	a.BuildFilesInBackground(toTxNum)
-
-	prevSteps := float64(0)
-	for {
-		// Prune already-collated steps. RunPrune includes block retirement
-		// which advances FrozenBlocks, so update the collation cap after.
-		err := func() error {
-			a.commitGate.Lock()
-			defer a.commitGate.Unlock()
-			return db.UpdateTemporal(ctx, pruneFn)
-		}()
-		if err != nil {
-			return err
-		}
-
-		stepsInDB, err := a.StepsInDB(ctx, db)
-		if err != nil || stepsInDB <= targetSteps {
-			return nil
-		}
-
-		// No progress — collation can't produce files (e.g., blocks not
-		// yet retired, or cap prevents collation). Exit to let execution
-		// continue and retry next cycle.
-		if stepsInDB >= prevSteps && prevSteps > 0 {
-			return nil
-		}
-		prevSteps = stepsInDB
-
-		// Kick next step build if not already running.
-		// Re-read cap since block retirement may have advanced it.
-		toTxNum = a.EndTxNumMinimax() + a.StepSize()
-		if cap := a.maxCollationTxNum.Load(); cap > 0 && toTxNum > cap {
-			toTxNum = cap
-		}
-		a.BuildFilesInBackground(toTxNum)
-
-		// Brief wait for collation to produce the next file.
-		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-// CollateAndPruneIfNeeded is a backwards-compatible wrapper that only
-// runs collation+prune when stepsInDB exceeds the threshold.
-func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
-	// Always kick background collation — at the tip this keeps file
-	// building progressing even when stepsInDB is below the threshold.
-	toTxNum := a.EndTxNumMinimax() + a.StepSize()
-	a.BuildFilesInBackground(toTxNum)
-
-	stepsInDB, err := a.StepsInDB(ctx, db)
+	a.commitGate.Lock()
+	err := db.UpdateTemporal(ctx, pruneFn)
+	a.commitGate.Unlock()
 	if err != nil {
 		return err
 	}
-	if stepsInDB <= 1.5 {
-		// Still run one prune pass for any already-collated data.
-		a.commitGate.Lock()
-		defer a.commitGate.Unlock()
-		return db.UpdateTemporal(ctx, pruneFn)
-	}
-	return a.CollateAndPrune(ctx, db, pruneFn, logger)
+	a.BuildFilesInBackground(a.EndTxNumMinimax() + a.StepSize())
+	return nil
 }
 func (a *Aggregator) FilesAmount() (res []int) {
 	for _, d := range a.d {
@@ -2227,14 +2151,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
 				return
-			}
-		}
-
-		// Cap to maxCollationTxNum if set (prevents domain files extending past block files).
-		if cap := a.maxCollationTxNum.Load(); cap > 0 {
-			maxStep := kv.Step(cap / a.StepSize())
-			if lastInDB > maxStep {
-				lastInDB = maxStep
 			}
 		}
 
