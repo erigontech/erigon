@@ -1617,6 +1617,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		onlySnapDownloadOnStart,
 		backend.readAheader,
 		backend.stopNode,
+		newProviderUnwinderAdapter(backend.components.Storage),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 

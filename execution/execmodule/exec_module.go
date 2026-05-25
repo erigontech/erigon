@@ -229,6 +229,13 @@ type ExecModule struct {
 	readAheader *exec.BlockReadAheader
 
 	stopNode func() error
+
+	// unwinder is the storage-layer admin unwind seam. Non-nil in
+	// production (wired from node/eth/backend.go to a *storage.Provider
+	// adapter); nil in the execmoduletester harness. See unwinder.go
+	// for the interface contract. SetHead's call site lands in a
+	// follow-up commit alongside snapshot-trim + trie-state extraction.
+	unwinder Unwinder
 }
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
@@ -252,6 +259,7 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
+	unwinder Unwinder,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
@@ -277,6 +285,7 @@ func NewExecModule(
 		stateCache:              domainCache,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
+		unwinder:                unwinder,
 	}
 
 	if stateCache != nil {

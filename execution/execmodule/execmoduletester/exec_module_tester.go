@@ -740,6 +740,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		onlySnapDownloadOnStart,
 		readAheader,
 		func() error { return nil },
+		nil, // unwinder — execmoduletester does not stand up a storage Provider
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
