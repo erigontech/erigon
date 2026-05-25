@@ -29,13 +29,20 @@ jobs:
           # consume-engine shards (reuse is essentially depth-2 consecutive),
           # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
           # and consume-rlp have ~unique pre-state per test (0% hit at any size).
-          # amsterdam-devnet is the exception — its curve keeps climbing past
-          # 24, so it gets a larger pool.
-          # eest_devnet shards mirror the eest_stable per-fork split and add an
-          # extra amsterdam-devnet shard. The previous-fork tests in eest_devnet
-          # are regenerated against the new Amsterdam-era state. Fairness of
-          # work distribution across the devnet shards has not been measured
-          # yet — the split is a starting point and may be revised.
+          # amsterdam-{a-l,m-z}-devnet are the exception — their curve keeps
+          # climbing past 24, so they get a larger pool.
+          # eest_devnet shards mirror the eest_stable per-fork split, with two
+          # adjustments:
+          #   - paris and shanghai are separate shards (not "paris+shanghai")
+          #     because the consume-engine plugin on `devnets/bal/7` doesn't
+          #     honour regex alternation in --sim.limit: the pattern
+          #     ".*/.*fork_(Paris|Shanghai)" leaks 5.8k fork_Cancun tests in.
+          #     Single-fork patterns filter correctly.
+          #   - fork_Amsterdam is split into two shards by first-directory
+          #     letter (tests/[a-l]/* and tests/[m-z]/*) so each finishes in
+          #     ~25 min instead of ~52 min for the combined ~21k tests.
+          # The previous-fork tests in eest_devnet are regenerated against the
+          # new Amsterdam-era state.
           - sim: consume-engine
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
@@ -62,8 +69,13 @@ jobs:
             pool-size: 0
             fixtures-tarball: eest_stable
           - sim: consume-engine
-            sim-limit: ".*/.*fork_(Paris|Shanghai)"
-            shard: paris+shanghai-devnet
+            sim-limit: ".*/.*fork_Paris"
+            shard: paris-devnet
+            pool-size: 0
+            fixtures-tarball: eest_devnet
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Shanghai"
+            shard: shanghai-devnet
             pool-size: 0
             fixtures-tarball: eest_devnet
           - sim: consume-engine
@@ -81,24 +93,27 @@ jobs:
             shard: osaka-devnet
             pool-size: 4
             fixtures-tarball: eest_devnet
+          # fork_Amsterdam tests (~21k total, ~52 min combined) split in half by
+          # first-directory letter under tests/. Measured locally on `bal@v7.2.0`
+          # / `devnets/bal/7`: 11096 tests in [a-l], 10291 in [m-z], both ~25 min.
           - sim: consume-engine
-            sim-limit: ".*/.*fork_Amsterdam"
-            shard: amsterdam-devnet
+            sim-limit: ".*tests/[a-l].*fork_Amsterdam"
+            shard: amsterdam-a-l-devnet
             pool-size: 24
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
-            # Budget breakdown:
-            #   - 2 wrong-test-expectation deterministic failures:
-            #     EIP-7928 test_invalid_{pre,post}_fork_block_*_bal_hash_field
-            #     expect -32602 InvalidParams but the requests are
-            #     well-formed V4/V5 newPayload — the only divergence is a
-            #     blockHash computed over a wrong-fork-schema header. Spec
-            #     convention is InvalidStatus + INVALID_BLOCK_HASH, which
-            #     is what erigon returns. Testing team has been notified.
-            #   - 1 flake slot for the EIP-7928
-            #     test_bal_invalid_extraneous_entries flake (#21364).
-            max-failures: 3
+            # 1 flake slot for the EIP-7928 test_bal_invalid_extraneous_entries
+            # flake (#21364). The failing test lives in tests/amsterdam/... so
+            # it falls in this [a-l] shard.
+            max-failures: 1
+          - sim: consume-engine
+            sim-limit: ".*tests/[m-z].*fork_Amsterdam"
+            shard: amsterdam-m-z-devnet
+            pool-size: 24
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+            erigon-extra-flags: "--experimental.bal"
     steps:
       - name: Clean docker system
         run: |

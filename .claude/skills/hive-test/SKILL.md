@@ -69,22 +69,32 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-engine) | 0 |
 | eest-rlp | 0 |
-| eest-devnet — `paris+shanghai-devnet` | 0 |
+| eest-devnet — `paris-devnet` | 0 |
+| eest-devnet — `shanghai-devnet` | 0 |
 | eest-devnet — `cancun-devnet` | 0 |
 | eest-devnet — `prague-devnet` | 0 |
 | eest-devnet — `osaka-devnet` | 0 |
-| eest-devnet — `amsterdam-devnet` | 3 (2 EIP-7928 `test_invalid_{pre,post}_fork_block_*_bal_hash_field` wrong-expectation failures + 1 EIP-7928 `test_bal_invalid_extraneous_entries` flake slot, #21364) |
+| eest-devnet — `amsterdam-a-l-devnet` | 1 (EIP-7928 `test_bal_invalid_extraneous_entries` flake, #21364 — lives in `tests/amsterdam/...` so it falls in this [a-l] shard) |
+| eest-devnet — `amsterdam-m-z-devnet` | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `eest_devnet` shards mirror the `eest_stable` per-fork split
-(`fork_(Paris|Shanghai)`, `fork_Cancun`, `fork_Prague`, `fork_Osaka`) and add a
-`fork_Amsterdam` shard. The Amsterdam shard passes `--experimental.bal` on the
-erigon side and `--client.checktimelimit=300s` to hive; the pre-Amsterdam
-devnet shards run with default flags. All devnet shards consume the URL and
-hive `branch` pinned under the `eest_devnet` entry in `test-fixtures.json`
-(currently `bal@v7.2.0` / `devnets/bal/7`). Reproduce locally by aligning the
-invocation with those values — `make eest-devnet` reads them from the manifest
-via `jq` and applies them automatically.
+The CI `eest_devnet` shards mirror the `eest_stable` per-fork split with two
+adjustments:
+- `paris` and `shanghai` are separate shards (not combined as in `eest_stable`)
+  because the consume-engine plugin on `devnets/bal/7` doesn't honour regex
+  alternation in `--sim.limit`: `".*/.*fork_(Paris|Shanghai)"` leaks ~5.8k
+  fork_Cancun tests in. Single-fork patterns filter correctly.
+- `fork_Amsterdam` is split into two shards by first-directory letter under
+  `tests/` — `.*tests/[a-l].*fork_Amsterdam` and `.*tests/[m-z].*fork_Amsterdam`
+  — so each finishes in ~25 min instead of ~52 min for the combined ~21k tests.
+
+Both amsterdam shards pass `--experimental.bal` on the erigon side and
+`--client.checktimelimit=300s` to hive; the pre-Amsterdam devnet shards run
+with default flags. All devnet shards consume the URL and hive `branch` pinned
+under the `eest_devnet` entry in `test-fixtures.json` (currently `bal@v7.2.0` /
+`devnets/bal/7`). Reproduce locally by aligning the invocation with those
+values — `make eest-devnet` reads them from the manifest via `jq` and applies
+them automatically.
 
 ## Procedure
 
@@ -174,7 +184,7 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
 
    FROM debian:13-slim
    COPY --from=builder /usr/local/bin/erigon /usr/local/bin/
-   RUN apt-get update && apt-get install -y bash curl jq libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/*
+   RUN apt-get update && apt-get install -y bash curl gcc iproute2 jq libstdc++6 libgcc-s1 && rm -rf /var/lib/apt/lists/*
    RUN erigon --version | sed -e 's/erigon version \(.*\)/\1/' > /version.txt
    COPY genesis.json /genesis.json
    COPY mapper.jq /mapper.jq
