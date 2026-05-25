@@ -34,4 +34,4 @@ additional_services: [spamoor, assertoor]
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
-  image: ethpandaops/assertoor:v0.1.2
+  image: ethpandaops/assertoor:master-0ad56fb
