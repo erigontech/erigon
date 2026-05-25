@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -81,21 +82,27 @@ func TestExecutionSpecWitness(t *testing.T) {
 	//   3. 8 multi-block BLOCKHASH fixtures still have Headers range mismatches
 	bt.Fails(".", "witness State/Codes ordering mismatch (#20442, #20534): state nodes and bytecodes emitted in wrong order")
 
+	// Fixtures come from the lazy-download cache, not the tests submodule, so the
+	// shared Walk's "did you clone the tests submodule?" message is misleading
+	// here. Pre-check the dir and emit an actionable skip instead.
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		t.Skipf("missing fixtures at %s; run `make test-fixtures-zkevm`", dir)
+	}
+
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.WitnessBlockTest) {
 		// Amsterdam fixtures require experimental block access list support.
 		test.ExperimentalBAL = true
 
 		// Run the standard blockchain test: insert blocks, validate post-state.
-		// Block-execution failures are routed through bt.CheckFailure so the
-		// suite-wide bt.Fails(...) absorbs EIP-implementation gaps the same way
-		// it absorbs documented witness-comparison gaps below. The returned
-		// tester's lifetime is bound to t via t.Cleanup; do NOT close it here.
+		// Block execution must succeed. A failure here is a real regression, not a
+		// documented known-issue, so we hard-fail instead of routing it through
+		// bt.CheckFailure — doing the latter would let the suite-wide bt.Fails(".")
+		// silently absorb block-execution regressions and mask them. Only the
+		// witness RPC/comparison gaps below are treated as expected failures. The
+		// returned tester's lifetime is bound to t via t.Cleanup; do NOT close it here.
 		m, err := test.RunWithTester(t)
 		if err != nil {
-			if cferr := bt.CheckFailure(t, fmt.Errorf("block execution failed: %w", err)); cferr != nil {
-				t.Error(cferr)
-			}
-			return
+			t.Fatalf("block execution failed: %v", err)
 		}
 
 		// Set up the debug API using the returned ExecModuleTester.
@@ -264,7 +271,7 @@ func reportSetDiff(t *testing.T, blockNum uint64, field string, expected, actual
 	if onlyInExpected == 0 && onlyInActual == 0 {
 		t.Logf("block %d %s: SET-EQUAL (same %d elements, different order only)", blockNum, field, len(expected))
 	} else {
-		t.Logf("block %d %s: SET-DIFF (expected has %d unique elements not in actual, actual has %d unique elements not in expected)",
+		t.Logf("block %d %s: SET-DIFF (expected has %d elements not in actual, actual has %d elements not in expected)",
 			blockNum, field, onlyInExpected, onlyInActual)
 	}
 }
