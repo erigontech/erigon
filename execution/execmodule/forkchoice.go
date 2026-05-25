@@ -831,35 +831,6 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 	}
 	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 
-	// Track the highest fully-flushed commitment txNum so the aggregator's
-	// collation safety cap (aggregator.go: stepFullyCommitted gate) advances
-	// during normal FCU operation. Without this update, the cap stays at its
-	// initial-cycle value forever and `lastFlushedCommitmentTxNum > 0` guard
-	// at aggregator.go:2140 stops capping correctly — the calculator-port
-	// flushes through commitment domain into MDBX every commit but the
-	// aggregator never learns about it. Mirrors stageloop.go:266.
-	if hasAgg, ok := e.db.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			if verifyTx, verifyErr := e.db.BeginTemporalRo(e.bacgroundCtx); verifyErr == nil { //nolint:gocritic // Rollback below; defer would shadow named-tx scope
-				defer verifyTx.Rollback() //nolint:gocritic // safety net alongside the explicit Rollback below
-				v, _, getErr := verifyTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
-				if getErr != nil {
-					// Log but do not fail FCU — aggregator stays at its prior watermark; the
-					// next commit's GetLatest will retry. Silent failure here is what motivated
-					// this fix in the first place: a stale watermark caused the aggregator to
-					// never learn about flushes and broke collation capping.
-					e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: GetLatest failed; aggregator watermark unchanged", "err", getErr)
-				} else if len(v) >= 16 {
-					committedTxNum, _ := commitmentdb.DecodeTxBlockNums(v)
-					agg.SetLastFlushedCommitmentTxNum(committedTxNum)
-				}
-				verifyTx.Rollback()
-			} else {
-				e.logger.Warn("[fcu] SetLastFlushedCommitmentTxNum: BeginTemporalRo failed; aggregator watermark unchanged", "err", verifyErr)
-			}
-		}
-	}
-
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
 		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {

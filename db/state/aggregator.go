@@ -94,13 +94,6 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	// lastFlushedCommitmentTxNum is the highest txNum at which commitment
-	// data (branch nodes, state key) has been flushed to MDBX. Collation
-	// must not proceed for a step unless the step's commitment boundary has
-	// been flushed — otherwise the collated file captures pre-computation
-	// branch data that differs from the final MDBX state.
-	lastFlushedCommitmentTxNum atomic.Uint64
-
 	// commitGate serializes background db.View() txs against commit+prune.
 	// Background readers (collation, sentry, etc.) hold RLock; commit+prune
 	// path holds Lock (exclusive). This ensures no background RO tx is open
@@ -1571,13 +1564,6 @@ func (a *Aggregator) StepsInDB(ctx context.Context, db kv.RoDB) (float64, error)
 	return steps, nil
 }
 
-// SetLastFlushedCommitmentTxNum records the highest txNum at which commitment
-// data has been flushed to MDBX. Call after each commit that includes
-// commitment writes (step boundary or batch-end commitment).
-func (a *Aggregator) SetLastFlushedCommitmentTxNum(txNum uint64) {
-	a.lastFlushedCommitmentTxNum.Store(txNum)
-}
-
 // MaxPrunableStepsBacklog returns the largest prunable-step count across the
 // state domains (accounts, storage, code, commitment). Used by FCU to size
 // the prune-cycle budget — a larger backlog gets more time. Reads the same
@@ -2151,22 +2137,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 						"Removing only the snapshots is not enough: an earlier build may have already populated chaindata with values read from a corrupt snapshot file.")
 				close(fin)
 				return
-			}
-		}
-
-		// Cap to the last fully-flushed step. Step S is safe to collate only
-		// when all data through its end boundary has been flushed to MDBX.
-		// Without this, collation captures partial step data — when prune
-		// later deletes the MDBX entry, the incomplete file value becomes
-		// authoritative, causing silent state corruption.
-		if flushedTxNum := a.lastFlushedCommitmentTxNum.Load(); flushedTxNum > 0 {
-			stepSize := a.StepSize()
-			// Mirror stepFullyCommitted: step S is fully committed iff
-			// flushedTxNum+1 >= (S+1)*stepSize. The exclusive upper bound on
-			// safe-to-build steps is therefore (flushedTxNum+1)/stepSize.
-			safeStep := kv.Step((flushedTxNum + 1) / stepSize)
-			if lastInDB > safeStep {
-				lastInDB = safeStep
 			}
 		}
 
