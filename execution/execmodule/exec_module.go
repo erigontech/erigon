@@ -491,6 +491,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	var tx kv.TemporalRwTx = doms.BlockOverlay()
 
+	// DO NOT CHANGE THIS WITHOUT WORKING THROUGH THE UNWIND CACHING SCENARIOS.
+	// The earlier `header.ParentHash == ReadHeadBlockHash(tx)` head-extending-
+	// only gate has been intentionally widened back to "chain whenever a
+	// currentContext exists" because fork-payload caching needs the parent
+	// link too — see the two-role breakdown below. The narrower gate was
+	// merged from main during the post-#21017 rebase and is the WRONG choice
+	// for this branch; keep the wider gate.
+	//
 	// Chain the validation SD to the latest in-memory canonical generation:
 	// e.currentContext when present, otherwise the newest in-flight commit
 	// generation (gate item 2 — the prior FCU cleared currentContext and

@@ -14,6 +14,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpcmetadata "google.golang.org/grpc/metadata"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -1147,4 +1148,139 @@ func TestGrpcServer_SetP2PServer_RejectsNil(t *testing.T) {
 	ss := &GrpcServer{statusReady: make(chan struct{})}
 	require.Error(t, ss.SetP2PServer(nil))
 	require.False(t, ss.external, "external must not flip when SetP2PServer rejects the input")
+}
+
+// mockPeerEventsStream is a minimal sentryproto.Sentry_PeerEventsServer
+// implementation that collects sent PeerEvents in-memory.
+type mockPeerEventsStream struct {
+	ctx    context.Context
+	mu     sync.Mutex
+	events []*sentryproto.PeerEvent
+}
+
+func (m *mockPeerEventsStream) Send(e *sentryproto.PeerEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, e)
+	return nil
+}
+func (m *mockPeerEventsStream) Context() context.Context         { return m.ctx }
+func (m *mockPeerEventsStream) SetHeader(grpcmetadata.MD) error  { return nil }
+func (m *mockPeerEventsStream) SendHeader(grpcmetadata.MD) error { return nil }
+func (m *mockPeerEventsStream) SetTrailer(grpcmetadata.MD)       {}
+func (m *mockPeerEventsStream) SendMsg(any) error                { return nil }
+func (m *mockPeerEventsStream) RecvMsg(any) error                { return nil }
+
+// TestGrpcServer_FindBestPeersWithPermit_FiltersVersion verifies that
+// findBestPeersWithPermit only considers peers whose negotiated eth version
+// matches the sentry's own ethVersion when the shared PeerStore is in use.
+func TestGrpcServer_FindBestPeersWithPermit_FiltersVersion(t *testing.T) {
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		ethVersion:  direct.ETH68,
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH68 peer — should be selected.
+	pi68, _ := newTestPeerInfoWithEth(t)
+	var key68 [64]byte
+	key68[0] = 0x11
+	store.peers[key68] = pi68
+
+	// ETH69 peer — must be ignored by this ETH68 sentry.
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	var key69 [64]byte
+	key69[0] = 0x22
+	store.peers[key69] = pi69
+
+	// in-flight (protocol==0) — must also be ignored.
+	pi0, _ := newTestPeerInfoWithEth(t)
+	pi0.protocol = 0
+	var key0 [64]byte
+	key0[0] = 0x33
+	store.peers[key0] = pi0
+
+	got := ss.findBestPeersWithPermit(10)
+	require.Len(t, got, 1, "findBestPeersWithPermit must only return peers matching this sentry's eth version")
+}
+
+// TestGrpcServer_FindPeerByMinBlock_FiltersVersion verifies that
+// findPeerByMinBlock skips peers from other eth protocol versions in the
+// shared PeerStore.
+func TestGrpcServer_FindPeerByMinBlock_FiltersVersion(t *testing.T) {
+	ss := &GrpcServer{
+		statusReady: make(chan struct{}),
+		ethVersion:  direct.ETH68,
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH69 peer with a known min block — if the filter is absent, the
+	// ETH68 sentry would select this peer for GetBlockHeaders and encode
+	// the request with ETH68 codes, causing a protocol error on the
+	// remote side.
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	pi69.minBlock = 0 // minBlock 0 satisfies any findPeerByMinBlock(0) call
+	var key69 [64]byte
+	key69[0] = 0x11
+	store.peers[key69] = pi69
+
+	_, found := ss.findPeerByMinBlock(0)
+	require.False(t, found, "findPeerByMinBlock must not return a peer from a different eth version")
+}
+
+// TestGrpcServer_PeerEvents_ReplayFiltersByVersion verifies that the
+// replay pass inside PeerEvents only emits Connect events for peers
+// whose negotiated eth version matches this sentry's ethVersion.
+func TestGrpcServer_PeerEvents_ReplayFiltersByVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ss := &GrpcServer{
+		ctx:          ctx,
+		statusReady:  make(chan struct{}),
+		ethVersion:   direct.ETH68,
+		peersStreams: NewPeersStreams(),
+	}
+	ss.peers.Store(NewPeerStore())
+	store := ss.peers.Load()
+
+	// ETH68 peer — should appear in the replay.
+	pi68, _ := newTestPeerInfoWithEth(t)
+	var key68 [64]byte
+	key68[0] = 0x10
+	store.peers[key68] = pi68
+
+	// ETH69 peer — must NOT appear (different version).
+	pi69, _ := newTestPeerInfoWithEth(t)
+	pi69.protocol = direct.ETH69
+	var key69 [64]byte
+	key69[0] = 0x20
+	store.peers[key69] = pi69
+
+	// in-flight (protocol==0) — must NOT appear.
+	pi0, _ := newTestPeerInfoWithEth(t)
+	pi0.protocol = 0
+	var key0 [64]byte
+	key0[0] = 0x30
+	store.peers[key0] = pi0
+
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	stream := &mockPeerEventsStream{ctx: streamCtx}
+
+	done := make(chan error, 1)
+	go func() { done <- ss.PeerEvents(nil, stream) }()
+
+	// Give the replay goroutine time to flush, then cancel the stream.
+	time.Sleep(50 * time.Millisecond)
+	streamCancel()
+	require.NoError(t, <-done)
+
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	require.Len(t, stream.events, 1, "PeerEvents replay must only emit Connect for the ETH68 peer")
+	require.Equal(t, sentryproto.PeerEvent_Connect, stream.events[0].EventId)
 }

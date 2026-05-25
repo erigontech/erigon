@@ -205,6 +205,14 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
+	// DO NOT re-introduce a warmup-cache disable here without working through
+	// the unwind caching scenarios. main carried a short-term workaround
+	// (`doms.EnableWarmupCache(!isApplyingBlocks && !parallel)`) that disabled
+	// the trie warmuper's value cache on the parallel path to dodge a
+	// stale-cache wrong-root. THIS PR is the proper fix for that wrong-root:
+	// caching stays enabled, the BranchCache + SD chain handle multi-block
+	// uncommitted batches and fork validation correctly. The re-org tests are
+	// the gate that confirms this.
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
