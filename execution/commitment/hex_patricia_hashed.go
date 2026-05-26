@@ -2971,8 +2971,9 @@ func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 //
 // The BranchCache is intentionally NOT cleared here: with aggregator-scope
 // lifetime the cache must survive between commitment calculations to deliver
-// cross-block hits. Callers that need to invalidate the cache (unwind, fork
-// validation) MUST call ClearBranchCache explicitly.
+// cross-block hits. Unwind correctness is handled by the cache's own
+// txN-tagged eviction in SharedDomains.Unwind — no explicit
+// invalidation is required on the commitment path.
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
 	hph.rootTouched = false

@@ -568,15 +568,17 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// After unwind the canonical commitment-domain values are rolled
-	// back; any cached entries for keys touched in the unwind window
-	// now hold stale bytes vs the post-unwind canonical state. Drop
-	// those specifically — the rest of the cache (including pinned
-	// branches whose keys weren't in the changeset) stays warm.
-	if sd.branchCache != nil && changeset != nil {
-		for _, diff := range changeset[kv.CommitmentDomain] {
-			sd.branchCache.Invalidate([]byte(diff.Key))
-		}
+	// Drop every BranchCache entry whose txN > txNumUnwindTo via a
+	// single watermark pass. Self-sufficient invalidation — no
+	// dependency on changeset[CommitmentDomain] being correctly
+	// populated by upstream writers. The diffset-driven invalidation
+	// this replaced was load-bearing for cache correctness but silently
+	// broken at every write site that lacked an active
+	// SetChangesetAccumulator (frozen-block commits, beyond-reorg
+	// commits, statetest paths). The txN-tagged cache is correct by
+	// construction regardless of where the writes originate.
+	if sd.branchCache != nil {
+		sd.branchCache.UnwindTo(txNumUnwindTo)
 	}
 }
 
