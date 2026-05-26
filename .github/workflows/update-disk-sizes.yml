@@ -1,18 +1,20 @@
 name: Docs - Update disk sizes
 
-# Triggers after a successful sync-from-scratch run (full or minimal node).
-# Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
-# and opens (or updates) a draft PR against the measured run's branch.
+# Manual utility. Given a successful `QA - Sync from scratch` (or minimal
+# node) run ID, downloads its disk-usage artifacts, regenerates
+# docs/site/src/data/disk-sizes.json, and uploads the result as a workflow
+# artifact (`disk-sizes-json`). The docs operator then downloads the
+# artifact and includes the file in the weekly docs update PR.
+#
+# Previously this workflow auto-fired on every successful sync via
+# `workflow_run` and opened its own draft PR, but the new-branch push from
+# a workflow context with the default GITHUB_TOKEN is consistently rejected
+# with "Unable to determine if workflow can be created or updated due to
+# timeout; `workflows` scope may be required." Rather than carry a custom
+# GraphQL Contents API path just for that one workflow, the update is now
+# included in the weekly docs PR by the docs operator — the values need a
+# human sanity check anyway. See erigon-docs-check-routine.md Step 3.
 on:
-  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.4 for workflow_run events
-  workflow_run:
-    workflows:
-      - "QA - Sync from scratch"
-      - "QA - Sync from scratch (minimal node)"
-    types:
-      - completed
-    branches:
-      - release/3.*
   workflow_dispatch:
     inputs:
       run_id:
@@ -32,82 +34,50 @@ on:
           - minimal
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
   actions: read
 
 concurrency:
-  group: update-disk-sizes-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || 'manual' }}
+  group: update-disk-sizes-manual
   cancel-in-progress: false
 
 jobs:
   update-disk-sizes:
-    # For workflow_run: only proceed on success.
-    # For workflow_dispatch: always proceed.
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Determine prune mode and source run ID
+      - name: Validate inputs
         id: determine
         env:
-          EVENT_NAME: ${{ github.event_name }}
           INPUT_PRUNE_MODE: ${{ github.event.inputs.prune_mode }}
           INPUT_RUN_ID: ${{ github.event.inputs.run_id }}
           INPUT_BASE_BRANCH: ${{ github.event.inputs.base_branch }}
-          WORKFLOW_RUN_NAME: ${{ github.event.workflow_run.name }}
-          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            case "$INPUT_PRUNE_MODE" in
-              full|minimal) ;;
-              *)
-                echo "::error::Invalid prune mode: $INPUT_PRUNE_MODE"
-                exit 1
-                ;;
-            esac
-            if ! [[ "$INPUT_RUN_ID" =~ ^[0-9]+$ ]]; then
-              echo "::error::Invalid run_id: must be numeric"
+          case "$INPUT_PRUNE_MODE" in
+            full|minimal) ;;
+            *)
+              echo "::error::Invalid prune mode: $INPUT_PRUNE_MODE"
               exit 1
-            fi
-            if ! [[ "$INPUT_BASE_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-              echo "::error::Invalid base_branch: allowed chars are [A-Za-z0-9._/-]"
-              exit 1
-            fi
-            printf 'prune_mode=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_OUTPUT"
-            printf 'source_run_id=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_OUTPUT"
-          elif [[ "$WORKFLOW_RUN_NAME" == *"minimal"* ]]; then
-            printf 'prune_mode=minimal\n' >> "$GITHUB_OUTPUT"
-            printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
-          else
-            printf 'prune_mode=full\n' >> "$GITHUB_OUTPUT"
-            printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
-            printf 'base_branch=release/3.4\n' >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          if ! [[ "$INPUT_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid run_id: must be numeric"
+            exit 1
           fi
+          if ! [[ "$INPUT_BASE_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid base_branch: allowed chars are [A-Za-z0-9._/-]"
+            exit 1
+          fi
+          printf 'prune_mode=%s\n' "$INPUT_PRUNE_MODE" >> "$GITHUB_OUTPUT"
+          printf 'source_run_id=%s\n' "$INPUT_RUN_ID" >> "$GITHUB_OUTPUT"
+          printf 'base_branch=%s\n' "$INPUT_BASE_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Checkout base branch
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.determine.outputs.base_branch }}
-          persist-credentials: true
-
-      - name: Prepare update branch
-        env:
-          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
-        run: |
-          set -euo pipefail
-          BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
-            git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
-          else
-            git checkout -B "$BRANCH"
-          fi
+          persist-credentials: false
 
       - name: Download disk usage artifacts
         uses: actions/download-artifact@v8
@@ -118,14 +88,12 @@ jobs:
           path: ./artifacts
           merge-multiple: true
 
-      - name: List downloaded artifacts
-        run: ls -lh ./artifacts/ 2>/dev/null || echo "No artifacts found"
-
       - name: Verify artifacts are present
         env:
           SOURCE_RUN_ID: ${{ steps.determine.outputs.source_run_id }}
         run: |
           set -euo pipefail
+          ls -lh ./artifacts/ 2>/dev/null || true
           if [ -z "$(ls -A ./artifacts 2>/dev/null)" ]; then
             echo "::error::No disk-usage artifacts found in run $SOURCE_RUN_ID — aborting"
             exit 1
@@ -147,73 +115,18 @@ jobs:
             docs/site/src/data/disk-sizes.json \
             "$PRUNE_MODE"
 
-      - name: Check for changes
-        id: diff
+      - name: Show diff
         run: |
           set -euo pipefail
           if git diff --quiet docs/site/src/data/disk-sizes.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to disk-sizes.json"
+            echo "::notice::No changes to disk-sizes.json — artifact values match the current file"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff docs/site/src/data/disk-sizes.json
+            git --no-pager diff docs/site/src/data/disk-sizes.json
           fi
 
-      - name: Configure git
-        if: steps.diff.outputs.changed == 'true'
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit and push to update branch
-        if: steps.diff.outputs.changed == 'true'
-        env:
-          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
-        run: |
-          set -euo pipefail
-          BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          git add docs/site/src/data/disk-sizes.json
-          git commit -m "chore(docs): auto-update measured disk sizes [$(date +%Y-%m-%d)]"
-          git push origin "$BRANCH"
-
-      - name: Create or update draft PR
-        if: steps.diff.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
-        run: |
-          set -euo pipefail
-          BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          TODAY=$(date +%Y-%m-%d)
-          EXISTING=$(gh pr list --head "$BRANCH" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null)
-
-          if [ -z "$EXISTING" ]; then
-            gh pr create \
-              --draft \
-              --head "$BRANCH" \
-              --base "$BASE_BRANCH" \
-              --title "docs: auto-update disk size measurements ($TODAY)" \
-              --body "$(cat <<'EOF'
-          ## Automated disk size update
-
-          Opened automatically by the **Docs - Update disk sizes** CI workflow after a successful sync-from-scratch run.
-
-          ### What changed
-          `docs/site/src/data/disk-sizes.json` — `full` and/or `minimal` mode disk usage updated from the latest CI measurement. The hardware requirements page consumes this file directly, so merging this PR is all that's needed.
-
-          ### What this does NOT update
-          - **Archive** mode: requires manual measurement from always-on snapshot machines.
-          - **Recommended disk size** column: intentionally static (should remain a comfortable buffer above current usage).
-
-          ### Before merging
-          - Values should show gradual growth vs. the previous entry — a sudden drop or doubling is suspect.
-          - If both `full` and `minimal` runs completed today, both sets of chains are included (the branch is updated by each run).
-
-          🤖 Auto-generated by [update-disk-sizes.yml](/.github/workflows/update-disk-sizes.yml)
-          EOF
-          )"
-            echo "Created new draft PR for branch $BRANCH"
-          else
-            echo "PR #$EXISTING already open for branch $BRANCH — branch updated"
-          fi
+      - name: Upload updated disk-sizes.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-sizes-json
+          path: docs/site/src/data/disk-sizes.json
+          if-no-files-found: error
