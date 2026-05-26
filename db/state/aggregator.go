@@ -277,8 +277,8 @@ func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 	a.erigondbDomainStepsInFrozenFile = steps
 }
 
-func (a *Aggregator) ForTestReplaceKeysInValues(domain kv.Domain, v bool) {
-	a.d[domain].ReplaceKeysInValues = v
+func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v bool) {
+	a.d[domain].ReferencesInCommitmentBranches = v
 }
 func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
@@ -1828,7 +1828,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	r := &Ranges{}
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
 	if commitmentUseReferencedBranches {
 		lmrAcc := at.d[kv.AccountsDomain].files.LatestMergedRange(stepSize)
 		lmrSto := at.d[kv.StorageDomain].files.LatestMergedRange(stepSize)
@@ -1918,7 +1918,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *FilesForMerge, 
 	t := time.Now()
 
 	at.a.logger.Debug("[snapshots] merge state " + r.String())
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
 
 	accStorageMerged := new(sync.WaitGroup)
 

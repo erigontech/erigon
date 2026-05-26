@@ -49,7 +49,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
+	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
 	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
 		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
 
@@ -294,7 +294,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
+		if !dt.d.ReferencesInCommitmentBranches || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {

@@ -599,7 +599,7 @@ func TestAggregator_CommitmentHistoryOnlyMerge(t *testing.T) {
 	// v2.0-storage.0-0.kv was not found".
 	stepSize := uint64(10)
 	_, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	dirs := agg.Dirs()
 
 	// Accounts/storage/code: all files merged {0,2}, no further merge needed.

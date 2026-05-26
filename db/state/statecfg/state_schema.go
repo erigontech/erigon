@@ -259,7 +259,7 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
 		Accessors:           AccessorHashMap,
-		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		ReferencesInCommitmentBranches: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,

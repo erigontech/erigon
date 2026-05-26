@@ -18,7 +18,7 @@ type DomainCfg struct {
 
 	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
 	// for commitment domain only
-	ReplaceKeysInValues bool
+	ReferencesInCommitmentBranches bool
 
 	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
 

@@ -226,7 +226,7 @@ func TestConcurrentRebuildCommitment(t *testing.T) {
 
 	// --- Create aggregator and DB ---
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, persistentDir)
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 
@@ -502,7 +502,7 @@ func TestConcurrentRebuildCommitmentNoSqueeze(t *testing.T) {
 
 	// --- Phase 1: Data generation ---
 	db, agg, dirs := testDbAndAggregatorForLargeData(t, stepSize, "")
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 
 	ctx := t.Context()
 	rwTx, err := db.BeginTemporalRw(ctx)

@@ -159,12 +159,12 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
   `db/state/squeeze_concurrent_rebuild_test.go`, `db/state/trie_reader_integration_test.go`,
   `db/test/aggregator_ext_test.go`
 
-- [ ] rename the `DomainCfg.ReplaceKeysInValues` struct field to `ReferencesInCommitmentBranches`
-- [ ] rename `ForTestReplaceKeysInValues` → `ForTestReferencesInCommitmentBranches` across **all** callers repo-wide (grep confirms 9 files: aggregator.go def + cmd/integration + 6 test files)
-- [ ] update read/log sites to the new name (`domain_committed.go:52,297`; `squeeze.go:125,345,780,1059`)
-- [ ] rename the field references at the merge-scheduling guards `aggregator.go:1831,1851,1921,1935,1941` — **name only here**; their *behavioral* decoupling is Task 8 (do not change logic in this task)
-- [ ] no new tests (mechanical rename; existing tests are the safety net — note in PR)
-- [ ] `make erigon integration` builds; existing tests pass before next task
+- [x] rename the `DomainCfg.ReplaceKeysInValues` struct field to `ReferencesInCommitmentBranches`
+- [x] rename `ForTestReplaceKeysInValues` → `ForTestReferencesInCommitmentBranches` across **all** callers repo-wide (grep confirms 9 files: aggregator.go def + cmd/integration + 6 test files)
+- [x] update read/log sites to the new name (`domain_committed.go:52,297`; `squeeze.go:125,345,780,1059`)
+- [x] rename the field references at the merge-scheduling guards `aggregator.go:1831,1851,1921,1935,1941` — **name only here**; their *behavioral* decoupling is Task 8 (do not change logic in this task) — only `:281,:1831,:1921` use the field literally; `:1851/:1935/:1941` use the `commitmentUseReferencedBranches` local, unchanged here
+- [x] no new tests (mechanical rename; existing tests are the safety net — note in PR)
+- [x] `make erigon integration` builds; existing tests pass before next task
 
 ### Task 2: Default constant in config3 + retire `AggregatorSqueezeCommitmentValues`
 
