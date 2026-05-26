@@ -1717,9 +1717,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	// Publish is a rare writer op already holding dirtyFilesLock for the whole
 	// build, so deleting the few detached files inline here is fine; the hot
 	// reader-Close path goes through reclaimDrained, which deletes off-lock.
-	for _, f := range a.reclaimDrainedLocked() {
-		f.closeFilesAndRemove()
-	}
+	closeAndRemoveFiles(a.reclaimDrainedLocked())
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2320,9 +2318,7 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 		if a.visible.Load() == v {
 			break
 		}
-		if v.refcnt.Add(-1) == 0 { //last reader cleaning room
-			a.reclaimDrained()
-		}
+		v.refcnt.Add(-1) // next Close/publish reclaims it
 	}
 
 	return v
@@ -2337,7 +2333,13 @@ func (a *Aggregator) reclaimDrained() {
 	a.dirtyFilesLock.Lock()
 	toDelete := a.reclaimDrainedLocked()
 	a.dirtyFilesLock.Unlock()
-	for _, f := range toDelete {
+	closeAndRemoveFiles(toDelete)
+}
+
+// closeAndRemoveFiles closes fds and unlinks each file from disk. Must be called
+// only on files already detached from the visibleFiles chain (no live reader).
+func closeAndRemoveFiles(files []*FilesItem) {
+	for _, f := range files {
 		f.closeFilesAndRemove()
 	}
 }
