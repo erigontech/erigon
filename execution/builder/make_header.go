@@ -53,5 +53,13 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 		header.BlobGasUsed = new(uint64)
 	}
 
+	if chainConfig.IsAmsterdam(header.Time) {
+		var slot uint64
+		if parent.SlotNumber != nil {
+			slot = *parent.SlotNumber + 1
+		}
+		header.SlotNumber = &slot
+	}
+
 	return header
 }
