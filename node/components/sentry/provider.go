@@ -301,6 +301,18 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
 		server := sentry.NewGrpcServer(p.cfg.SentryCtx, nil, readNodeInfo, &cfg, protocol, p.logger, chainBootnodes, chainDNSNetwork)
+		// Take ownership of the discv5 force-bonding goroutine — when
+		// startP2PServer fires the hook, the loop runs under the
+		// component's errgroup rather than as a bare go-routine on
+		// ss.ctx. Shutdown is then component-driven via Close. See
+		// docs/plans/20260507-discv5-handshake-on-connect.md.
+		logger := p.logger
+		server.SetOnP2PServerStarted(func(srv *p2p.Server) {
+			p.eg.Go(func() error {
+				sentry.ForceDiscv5Bonding(p.cfg.SentryCtx, srv, logger)
+				return nil
+			})
+		})
 		p.Servers = append(p.Servers, server)
 
 		var sideProtocols []sentryproto.Protocol

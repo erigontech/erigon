@@ -980,6 +980,26 @@ type GrpcServer struct {
 	// witness request tracking
 	activeWitnessRequests map[common.Hash]*WitnessRequest
 	witnessRequestMutex   sync.RWMutex
+
+	// onP2PServerStarted is invoked once the p2p server has started
+	// (inside startP2PServer, right after srv.Start succeeds). The
+	// sentry component (node/components/sentry/provider.go) installs
+	// a closure that launches ForceDiscv5Bonding under the component's
+	// errgroup, so shutdown of the bonding loop is owned by the
+	// component rather than orphaned to ss.ctx cancellation.
+	//
+	// nil by default. Installed via SetOnP2PServerStarted. Idempotent
+	// at the callsite (a second start would just re-call the hook;
+	// startP2PServer is only called once per GrpcServer in practice).
+	onP2PServerStarted func(*p2p.Server)
+}
+
+// SetOnP2PServerStarted installs a callback invoked once the p2p
+// server starts. The sentry component uses it to launch
+// ForceDiscv5Bonding under its own errgroup. nil disables. Must be set
+// before startP2PServer runs (i.e. before the first SetStatus).
+func (ss *GrpcServer) SetOnP2PServerStarted(fn func(*p2p.Server)) {
+	ss.onP2PServerStarted = fn
 }
 
 // cleanupOldWitnessRequests removes witness requests that have been active for too long
@@ -1437,12 +1457,22 @@ func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 		return nil, fmt.Errorf("could not start server: %w", err)
 	}
 
-	go forceDiscv5Bonding(ss.ctx, srv, ss.logger)
+	// Hand off to the sentry component (or any other registered hook).
+	// The component owns the bonding goroutine under its errgroup so
+	// shutdown is component-driven rather than orphaned to ss.ctx.
+	// Fallback: when no hook is installed (legacy callers, tests),
+	// launch ForceDiscv5Bonding directly on ss.ctx — same behaviour as
+	// before the component refactor.
+	if ss.onP2PServerStarted != nil {
+		ss.onP2PServerStarted(srv)
+	} else {
+		go ForceDiscv5Bonding(ss.ctx, srv, ss.logger)
+	}
 
 	return srv, nil
 }
 
-// forceDiscv5Bonding keeps known endpoints in the discv5 routing table
+// ForceDiscv5Bonding keeps known endpoints in the discv5 routing table
 // with their latest ENR. On each tick it Pings every connected devp2p
 // peer, configured static peer, and bootnode; PING is a single round-trip
 // that returns the peer's current ENR sequence number, so we can detect
@@ -1480,7 +1510,7 @@ func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 //     startup but does not retry on failure; this loop re-bonds them and
 //     bonds static peers independently of devp2p connection state. See
 //     docs/plans/20260507-discv5-handshake-on-connect.md.
-func forceDiscv5Bonding(ctx context.Context, srv *p2p.Server, logger log.Logger) {
+func ForceDiscv5Bonding(ctx context.Context, srv *p2p.Server, logger log.Logger) {
 	var mu sync.Mutex
 	lastSeq := make(map[enode.ID]uint64) // last successfully-injected ENR seq per id
 	inFlight := make(map[enode.ID]bool)  // ids currently being bonded
