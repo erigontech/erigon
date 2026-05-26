@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -43,17 +44,45 @@ func ValuesPlainKeyReferencingThresholdReached(stepSize, from, to uint64) bool {
 	return (to-from)/stepSize >= minStepsForReferencing
 }
 
+// commitmentBranchReferenced reports whether a commitment file written at fileVersion over
+// range from..to carries shortened key references that must be expanded on read. It is a
+// property of the file itself (version + range), independent of the live write flag: files
+// below v2.1 in the referenced regime carry references once the range reaches the threshold;
+// v2.1 files are always plain.
+func commitmentBranchReferenced(fileVersion version.Version, stepSize, from, to uint64) bool {
+	return fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, from, to)
+}
+
+// commitmentFileVersionByRange returns the parsed version of the visible commitment file
+// covering from..to, plus the metric bucket index for that file. A missing file yields the
+// zero version (treated as referenced) to preserve the historical deref behavior.
+func (at *AggregatorRoTx) commitmentFileVersionByRange(from, to uint64) (version.Version, int) {
+	for i, f := range at.d[kv.CommitmentDomain].files {
+		if f.startTxNum == from && f.endTxNum == to {
+			if i > 5 {
+				return f.Version(), 5
+			}
+			return f.Version(), i
+		}
+	}
+	return version.Version{}, 0
+}
+
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files.
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
 	logger := log.Root()
 	aggTx := at
 
-	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReferencesInCommitmentBranches
-	if !commitmentUseReferencedBranches || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
-		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 || !ValuesPlainKeyReferencingThresholdReached(at.StepSize(), fStartTxNum, fEndTxNum) {
+	if len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+		aggTx.TxNumsInFiles(kv.StateDomains...) == 0 {
 
 		return branch, nil // do not transform, return as is
+	}
+
+	fileVersion, metricI := aggTx.commitmentFileVersionByRange(fStartTxNum, fEndTxNum)
+	if !commitmentBranchReferenced(fileVersion, at.StepSize(), fStartTxNum, fEndTxNum) {
+		return branch, nil // input file was written plain (v2.1) or below the referencing threshold
 	}
 
 	sto := aggTx.d[kv.StorageDomain]
@@ -70,16 +99,6 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 	storageGetter := sto.dataReader(storageItem.decompressor)
 	accountGetter := acc.dataReader(accountItem.decompressor)
-	metricI := 0
-	for i, f := range aggTx.d[kv.CommitmentDomain].files {
-		if i > 5 {
-			metricI = 5
-			break
-		}
-		if f.startTxNum == fStartTxNum && f.endTxNum == fEndTxNum {
-			metricI = i
-		}
-	}
 
 	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {

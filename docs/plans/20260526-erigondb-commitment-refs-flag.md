@@ -241,11 +241,11 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `db/state/domain_committed.go` (`replaceShortenedKeysInBranch` `:48-57`)
 - Modify: `db/state/domain_committed_test.go` (create if absent)
 
-- [ ] obtain the source commitment file's version at the deref site via the Task-5 mechanism (extended `getLatestFromFiles` return, or the `:74-82` range-match against `FilesItem.version`)
-- [ ] change the deref gate so it no longer reads the live `ReferencesInCommitmentBranches` flag; instead compute `referenced := fileVersion.Less(version.Version{2,1}) && ValuesPlainKeyReferencingThresholdReached(stepSize, fileFrom, fileTo)` using the **source commitment file's** version and its own range
-- [ ] keep the existing short-circuits (empty branch, `KeyCommitmentState` prefix, no state files)
-- [ ] write tests: reading a v2.0 ≥threshold branch derefs correctly with the flag both on and off; reading a v2.1 branch never derefs; reading a v2.0 <threshold branch is treated as plain
-- [ ] run tests — must pass before next task
+- [x] obtain the source commitment file's version at the deref site via the Task-5 mechanism — `AggregatorRoTx.commitmentFileVersionByRange` reuses the `:74-82` range-match against `FilesItem.version` (via `visibleFile.Version()`) and folds in the metric-bucket index; did NOT extend `getLatestFromFiles`
+- [x] change the deref gate so it no longer reads the live `ReferencesInCommitmentBranches` flag; instead compute `referenced := fileVersion.Less(version.V2_1) && ValuesPlainKeyReferencingThresholdReached(stepSize, fileFrom, fileTo)` via the new `commitmentBranchReferenced` predicate using the **source commitment file's** version and its own range
+- [x] keep the existing short-circuits (empty branch, `KeyCommitmentState` prefix, no state files)
+- [x] write tests: `domain_committed_test.go::TestCommitmentBranchReferenced` covers v2.0/v1.0 ≥threshold → referenced (flag-independent by construction — predicate takes no flag), v2.1 → never referenced, v2.0 <threshold → plain, hypothetical v2.2 → plain; heavyweight read-path tests (`TestAggregator_RebuildCommitmentBasedOnFiles`, `TestAggregator_SqueezeCommitment`) exercise the actual deref end-to-end
+- [x] run tests — must pass before next task
 
 ### Task 8: Decouple merge SCHEDULING from the write flag (the corruption vector)
 
