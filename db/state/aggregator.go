@@ -1714,7 +1714,12 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
-	a.reclaimDrainedLocked()
+	// Publish is a rare writer op already holding dirtyFilesLock for the whole
+	// build, so deleting the few detached files inline here is fine; the hot
+	// reader-Close path goes through reclaimDrained, which deletes off-lock.
+	for _, f := range a.reclaimDrainedLocked() {
+		f.closeFilesAndRemove()
+	}
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2323,24 +2328,33 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 	return v
 }
 
+// reclaimDrained advances the chain and physically removes the detached files
+// with dirtyFilesLock released — closeFilesAndRemove (fd close + unlink) must not
+// run under the lock on the hot reader-Close path. Safe because a detached bundle
+// is off the chain with refcnt 0 and can no longer be pinned, so its files are
+// owned exclusively by us here.
 func (a *Aggregator) reclaimDrained() {
 	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	a.reclaimDrainedLocked()
+	toDelete := a.reclaimDrainedLocked()
+	a.dirtyFilesLock.Unlock()
+	for _, f := range toDelete {
+		f.closeFilesAndRemove()
+	}
 }
 
-// reclaimDrainedLocked deletes the retired files. Traversing visibleFiles linked-list. Reclaiming
-// oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
-// references its retired files. Single caller of closeFilesAndRemove
-func (a *Aggregator) reclaimDrainedLocked() {
+// reclaimDrainedLocked detaches the retired files of every fully-drained bundle
+// from the oldest end of the visibleFiles chain and returns them; the caller does
+// the actual closeFilesAndRemove (ideally after releasing dirtyFilesLock).
+// Reclaiming oldest-first guarantees that when a bundle's refcnt is 0 nothing
+// older still references its retired files. Must hold dirtyFilesLock.
+func (a *Aggregator) reclaimDrainedLocked() (toDelete []*FilesItem) {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
-		for _, f := range h.retired {
-			f.closeFilesAndRemove()
-		}
+		toDelete = append(toDelete, h.retired...)
 		h.retired = nil
 		a.oldestVisible = h.next
 	}
+	return toDelete
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
