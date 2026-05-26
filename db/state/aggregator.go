@@ -2319,6 +2319,7 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 			a.reclaimDrained()
 		}
 	}
+
 	return v
 }
 
