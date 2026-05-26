@@ -199,6 +199,12 @@ type Orchestrator struct {
 	// everyone (default). Set via SetTrust before Start; mid-flight
 	// reconfiguration is not supported.
 	trust TrustFilter
+
+	// proofVerifier re-checks a downloaded file's content against the
+	// manifest's claimed ProofRoot before the orchestrator promotes the
+	// file to TrustVerified. Nil means no re-verification (existing
+	// behaviour); set via SetProofRootVerifier before Start.
+	proofVerifier ProofRootVerifier
 }
 
 // SetTrust attaches a TrustFilter that gates which peers the
@@ -217,6 +223,26 @@ func (o *Orchestrator) SetTrust(t TrustFilter) error {
 		return fmt.Errorf("flow.SetTrust: orchestrator already started")
 	}
 	o.trust = t
+	return nil
+}
+
+// SetProofRootVerifier attaches a re-verifier that runs after each
+// download completes — when the manifest claimed an Anchors block for
+// the file (ProofRoot + AtBlock + AtTxNum). On verification failure
+// the file stays at TrustNone, TrustPromoted is suppressed, and the
+// orchestrator logs the mismatch.
+//
+// Must be called before Start. nil disables re-verification.
+func (o *Orchestrator) SetProofRootVerifier(v ProofRootVerifier) error {
+	if o == nil {
+		return fmt.Errorf("flow.SetProofRootVerifier: nil orchestrator")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.started {
+		return fmt.Errorf("flow.SetProofRootVerifier: orchestrator already started")
+	}
+	o.proofVerifier = v
 	return nil
 }
 
@@ -1075,6 +1101,21 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	localEntry.TorrentHash = e.InfoHash
 	localEntry.Trust = snapshot.TrustVerified
 	localEntry.Local = true
+
+	// Consumer-side proof-root re-verification: when the manifest
+	// claimed a ProofRoot (Anchors non-zero) AND a verifier is wired,
+	// recompute the file's commitment against the claim. On mismatch
+	// the file stays at TrustNone, RecordFile still happens (the bytes
+	// are on disk and the inventory must track them) but TrustPromoted
+	// is suppressed so downstream consumers never see it as verified.
+	if o.proofVerifier != nil && !localEntry.Anchors.IsZero() {
+		if err := o.proofVerifier.VerifyProofRoot(localEntry); err != nil {
+			o.log.Warn("[flow] proof-root re-verification failed; file demoted to TrustNone",
+				"file", e.FileName, "err", err)
+			localEntry.Trust = snapshot.TrustNone
+		}
+	}
+
 	if err := o.storage.RecordFile(localEntry); err != nil {
 		o.log.Warn("[flow] storage.RecordFile failed", "file", e.FileName, "err", err)
 		// Leave pending as-is; a retry or a subsequent DownloadComplete
@@ -1116,11 +1157,15 @@ func (o *Orchestrator) onDownloadComplete(e DownloadComplete) {
 	}
 	o.peerMu.Unlock()
 
-	o.bus.Publish(TrustPromoted{
-		FileName: e.FileName,
-		OldTrust: snapshot.TrustNone,
-		NewTrust: snapshot.TrustVerified,
-	})
+	// Skip TrustPromoted when re-verification demoted us — emitting it
+	// would falsely advertise a file the verifier rejected.
+	if localEntry.Trust == snapshot.TrustVerified {
+		o.bus.Publish(TrustPromoted{
+			FileName: e.FileName,
+			OldTrust: snapshot.TrustNone,
+			NewTrust: snapshot.TrustVerified,
+		})
+	}
 
 	if shouldFireStateReady {
 		o.tryFireInitialStateReady(o.ctx)

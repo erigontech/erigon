@@ -932,6 +932,17 @@ func (p *Provider) Initialize(deps Deps) error {
 		blockReader := p.BlockReader
 		aggregator := deps.Aggregator
 		postIndexedSeed := deps.PostIndexedSeed
+		// Wire the Phase-1 proof-root re-verification stub. The hook
+		// runs on every DownloadComplete whose manifest carried an
+		// Anchors record; on rejection the file stays at TrustNone.
+		// The stub no-ops today — the real qmtree/PMT verifier
+		// replaces it once the segment-proof scheme is selected. See
+		// .claude/plans/20260526-phase1-closing-plan.md § Group B #4.
+		if err := p.Orchestrator.SetProofRootVerifier(flow.HashProofVerifierStub{}); err != nil {
+			p.LifecycleDriver.Stop()
+			return fmt.Errorf("storage: orchestrator.SetProofRootVerifier: %w", err)
+		}
+
 		if err := p.Orchestrator.SetPostIndexed(func(ctx context.Context) error {
 			if blockReader != nil {
 				if err := blockReader.Snapshots().OpenFolder(); err != nil {
