@@ -33,7 +33,13 @@ func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 
 	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
+	toBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
+	if err != nil {
+		return fmt.Errorf("findBlockNum(%d) fails: %w", receiptProgress, err)
+	}
+	if !ok {
+		return fmt.Errorf("findBlockNum(%d) not found", receiptProgress)
+	}
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)

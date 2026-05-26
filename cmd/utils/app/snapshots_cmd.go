@@ -1919,10 +1919,14 @@ func doCheckRCacheRootAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
 			return err
 		}
 		defer tx.Rollback()
-		rcacheTip, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, tx.Debug().DomainProgress(kv.RCacheDomain))
+		rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+		rcacheTip, ok, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, rcacheDomainProgress)
 		tx.Rollback()
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
 		}
 		to = rcacheTip + 1 // exclusive upper bound
 		logger.Info("[check-rcache-root-at-blk-range] auto-detected --to", "to", to)

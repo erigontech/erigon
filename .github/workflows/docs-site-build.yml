@@ -29,7 +29,7 @@ jobs:
           test -d docs/site/scripts || { echo "missing docs/site/scripts/"; exit 1; }
           test -f docs/site/scripts/generate-llms.py || { echo "missing docs/site/scripts/generate-llms.py"; exit 1; }
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         if: steps.guard.outputs.present == 'true'
         with:
           python-version: '3.11'
@@ -40,7 +40,7 @@ jobs:
           python3 docs/site/scripts/generate-llms.py --check
           python3 -m unittest discover docs/site/scripts -v
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.guard.outputs.present == 'true'
         with:
           node-version: '20.x'

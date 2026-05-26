@@ -817,6 +817,8 @@ func (a *ApiHandler) produceBeaconBody(
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			sn := hexutil.Uint64(targetSlot)
 			attrs.SlotNumber = &sn
+			tgl := hexutil.Uint64(a.beaconChainCfg.DefaultBuilderGasLimit)
+			attrs.TargetGasLimit = &tgl
 		}
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
