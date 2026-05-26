@@ -284,11 +284,42 @@ Untouched (already safe): final-batch path (arena not reused before the deferred
 
 ### Task 5: [Final] Docs & wrap-up
 
-- [ ] update CLAUDE.md only if a new pattern warrants it (likely not).
-- [ ] write a short PR note for #21146: "warmuper: copy-free in-flight barrier so arena reset
-      can't race async warmup reads (EncodeKeyV2 panic was the symptom; latent on main via
-      HexToCompact)".
-- [ ] move this plan to `docs/plans/completed/`.
+- [x] update CLAUDE.md only if a new pattern warrants it — not warranted. The change is a one-off
+      concurrency fix (a barrier primitive in `warmuper.go`), not a build/test/convention guideline.
+      CLAUDE.md and `execution/commitment/agents.md` left untouched.
+- [x] write a short PR note for #21146 — see "PR Note (#21146)" section below.
+- [x] move this plan to `docs/plans/completed/`.
+
+## PR Note (#21146)
+
+**warmuper: copy-free in-flight barrier so arena reset can't race async warmup reads**
+
+The commitment `Warmuper` hands async worker goroutines a key slice that aliases the reused
+bump-allocator arena (`Updates.byteArena`). At each 10k-key `HashSort` batch boundary the old code
+dropped only *queued* warmups (`DrainPending`) and immediately reset the arena — but a worker still
+executing `warmupKey` kept reading the old slice while the next batch overwrote those bytes. A
+genuine data race on shared mutable memory.
+
+On `main` the warmup encoder is `HexToCompact`, which tolerates the corrupted bytes silently, so the
+race is invisible (a wasted prefetch at worst). PR #21146 (nibblesv2) switches the warmup encoder to
+`EncodeKeyV2`, which asserts every byte is a nibble (≤0x0F) and **panics** otherwise — turning the
+latent race into a hard crash (`nibble at index N is 0xff`). Reproduced on mainnet at block
+24,832,920 under a 48GB-cap A/B bench.
+
+Fix: a zero-copy barrier, `Warmuper.WaitForInFlightKeysThenRun(fn)`. It drops queued warmups, pushes
+one barrier marker per worker through the existing work channel, parks each worker once it has
+finished its in-flight key, runs the caller's arena reset `fn` at that safe point (no worker still
+references a submitted slice), then releases the workers. Parking — not just counting markers — is
+required so a fast worker can't drain two markers while a slow worker is still mid-`warmupKey`.
+Chosen over per-key / pooled copy because warmup is a hot path (~500k keys per commitment flush).
+
+Wired into both in-loop `HashSort` batch boundaries (ModeDirect, ModeUpdate). The final-batch path,
+the post-`HashSort` `DrainPending`, and the `nil`-warmuper caller are untouched (already safe).
+
+This fix lands on `main`, where the race is latent; #21146 inherits it on merge and the
+`EncodeKeyV2` panic disappears. The `-race` detector is the sole signal on main (no panic there):
+`TestHashSort_WarmupArenaNoRace` fails on pre-fix code and passes after; the deterministic contract
+test `TestWarmuper_WaitForInFlightKeysThenRun` pins the barrier guarantee.
 
 ## Post-Completion
 *Manual / external — no checkboxes*
