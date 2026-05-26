@@ -51,7 +51,7 @@ All scenarios use `--prune.mode=archive`.
    ```bash
    cat <clone-path>/snapshots/erigondb.toml
    ```
-   Expected: `step_size = 1562500`
+   Expected: `step_size = 1562500` and `references_in_commitment_branches = true`
 6. Kill the process and clean up the ephemeral datadir.
 
 ## Scenario B: Fresh sync with downloader
@@ -102,16 +102,24 @@ All scenarios use `--prune.mode=archive`.
    ```bash
    cat <empty-path>/snapshots/erigondb.toml
    ```
-   Expected: `step_size = 1562500` (code defaults, since no downloader to provide network settings)
+   Expected: `step_size = 1562500` and `references_in_commitment_branches = true` (code defaults, since no downloader to provide network settings)
 5. Kill the process and clean up the ephemeral datadir.
 
 ## Success Criteria
 
-| Scenario | Condition | Expected step_size | File timing |
-|----------|-----------|-------------------|-------------|
-| A (legacy) | `Creating erigondb.toml with LEGACY settings` log | 1,562,500 | Written immediately on startup |
-| B (fresh+downloader) | `erigondb.toml not found, using defaults` then `erigondb stepSize changed, propagating` | Code default 1,562,500 then network value (chain-dependent) | After downloader delivers it |
-| C (fresh+no-downloader) | `Initializing erigondb.toml with DEFAULT settings (nodownloader)` log | 1,562,500 | Written immediately on startup |
+| Scenario | Condition | Expected step_size | Expected references_in_commitment_branches | File timing |
+|----------|-----------|-------------------|--------------------------------------------|-------------|
+| A (legacy) | `Creating erigondb.toml with LEGACY settings` log | 1,562,500 | `true` (written explicitly) | Written immediately on startup |
+| B (fresh+downloader) | `erigondb.toml not found, using defaults` then `erigondb stepSize changed, propagating` | Code default 1,562,500 then network value (chain-dependent) | Resolves to `true` in memory until the downloader delivers the file; whatever the network publishes thereafter (a producer-published plain snapshot set ships `false`) | After downloader delivers it |
+| C (fresh+no-downloader) | `Initializing erigondb.toml with DEFAULT settings (nodownloader)` log | 1,562,500 | `true` (written explicitly) | Written immediately on startup |
+
+### references_in_commitment_branches per scenario
+
+The `references_in_commitment_branches` field governs whether new commitment merges write referenced (short-key) `.kv` files. It resolves identically to `step_size` across the three scenarios — absent field normalizes to `true` in memory, and a downloaded `erigondb.toml` is never rewritten (it is synced snapshot metadata, so a producer's published `false` survives). The resolution logic is unit-tested in `db/state/erigondb_settings_test.go` (`TestResolveErigonDBSettings*`); these runtime scenarios confirm the same behavior end-to-end.
+
+- **A (legacy):** the generated file contains `references_in_commitment_branches = true`.
+- **B (fresh+downloader):** no file until the downloader delivers it; the in-memory resolved value is `true`. After delivery the field reflects the network's published value (a plain-snapshot producer ships `false`).
+- **C (fresh+no-downloader):** the immediately-written file contains `references_in_commitment_branches = true`.
 
 ## Cleanup
 

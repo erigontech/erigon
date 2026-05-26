@@ -308,10 +308,10 @@ independent of the write flag.
 - Create/Modify: `db/state/...` integration-style test (mixed-version datadir)
 - Modify: docs for the `erigondb-sync-integration-test-plan` scenarios
 
-- [ ] build a test datadir with both v2.0-referenced and v2.1-plain commitment files; assert reads are correct under flag on and flag off
-- [ ] assert flipping the flag both directions on a populated datadir stays correct (no upfront migration)
-- [ ] extend the 3 erigondb-sync scenarios (legacy / fresh+downloader / fresh+no-downloader) to assert `references_in_commitment_branches` resolves per scenario
-- [ ] run tests — must pass before next task
+- [x] build a test datadir with both v2.0-referenced and v2.1-plain commitment files; assert reads are correct under flag on and flag off — `commitment_mixed_version_test.go::TestMixedVersionDatadirReadsConsistentAcrossFlag`: caps domain merges at a small frozen size (`SetErigondbDomainStepsInFrozenFile`) so a flag-on referenced `v2.0-commitment.0-4.kv` (holding a disjoint `setA` that is never superseded) coexists with later flag-off `v2.1` plain files; the recomputed root is identical with the flag on and off
+- [x] assert flipping the flag both directions on a populated datadir stays correct (no upfront migration) — same test flips on→off→on; root stays equal and the on-disk file set + per-regime counts are unchanged (reads perform no migration, since they never `Commit`)
+- [x] extend the 3 erigondb-sync scenarios (legacy / fresh+downloader / fresh+no-downloader) to assert `references_in_commitment_branches` resolves per scenario — resolution covered by `db/state/erigondb_settings_test.go::TestResolveErigonDBSettings{LegacyWritesTrue,FreshNoDownloaderWritesTrue,FreshWithDownloaderDoesNotWrite}`; documented the new field per scenario in the `erigondb-sync-integration-test-plan` skill (success-criteria table + per-scenario `cat` expectations)
+- [x] run tests — must pass before next task
 
 ### Task 12: Verify acceptance criteria
 
