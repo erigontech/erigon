@@ -490,11 +490,11 @@ func findWrite(writes state.VersionedWrites, addr accounts.Address, path state.A
 // These test the split fee logic: worker debits sender only,
 // finalize credits coinbase/burnt. No StripBalanceWrite or delta computation.
 
-// runFinalizeTx sets up the versionMap with prior TX's finalize writes and
-// runs the apply-loop tip credit (creditTipPreValidate). Returns the
-// tip-credit writes for assertion. finalizeTx itself only adds the receipt
-// and PostApplyMessage logs — no additional writes — so tests that assert
-// on writes need only the creditTipPreValidate output.
+// runFinalizeTx runs the apply-loop tip credit (calcFees) and returns the
+// resulting writes. priorCoinbaseBalance is the pre-block baseline returned
+// by stateReader.ReadAccountData(coinbase). calcFees reads at txIndex
+// (floor txIndex-1) — strictly prior tx — so for the first tx of a block
+// the baseline comes from stateReader, not the versionMap.
 func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance *uint256.Int) state.VersionedWrites {
 	t.Helper()
 	result := s.buildExecResult()
@@ -507,19 +507,20 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 	vm := state.NewVersionMap(nil)
 	reader := s.makeReader()
 
-	// Simulate prior TX's finalize writing coinbase BalancePath to the versionMap.
 	if priorCoinbaseBalance != nil {
-		vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
-			state.Version{TxIndex: 0, Incarnation: 0}, *priorCoinbaseBalance, true)
+		acc, ok := reader.accounts[s.coinbase]
+		if !ok {
+			acc = &accounts.Account{}
+			reader.accounts[s.coinbase] = acc
+		}
+		acc.Balance = *priorCoinbaseBalance
 	}
 
-	// Flush the worker's TxOut to the versionMap (mirrors apply-loop's
-	// FlushVersionedWrites re-flush before validate).
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
 	task := result.Task.(*taskVersion)
 
-	writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
+	writes, err := result.calcFees(task, vm, reader, s.rules)
 	require.NoError(t, err)
 	return writes
 }
@@ -616,7 +617,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 // (Removed: TestFinalizeTxSimple_SenderNotCoinbase_CollectorWritesValueWins
 // was a negative control for the prior code's senderIsCoinbase discriminator
 // — it asserted that flipping sender to non-coinbase made finalize ignore
-// TxOut and use versionMap base + tip. The new apply-loop creditTipPreValidate
+// TxOut and use versionMap base + tip. The new apply-loop calcFees
 // step uses vm.Read(..., txIndex+1) for the base, which reads whatever is
 // most recently in versionMap at or before this tx — including the TxOut
 // entry flushed by the test setup. The discriminator code path no longer
@@ -785,8 +786,8 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
-		require.NoError(t, err, "tx %d: creditTipPreValidate", txIdx)
+		writes, err := result.calcFees(task, vm, reader, s.rules)
+		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
 		vm.FlushVersionedWrites(writes, true, "")
@@ -854,7 +855,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	// Now flush the re-executed TxOut at incarnation 1.
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
+	writes, err := result.calcFees(task, vm, reader, s.rules)
 	require.NoError(t, err)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
@@ -948,7 +949,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
+		writes, err := result.calcFees(task, vm, reader, s.rules)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.

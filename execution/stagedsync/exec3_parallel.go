@@ -1518,10 +1518,6 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		defer fmt.Println(tracePrefix, "done finalize")
 	}
 
-	// Regular-tx tip credit ran in the apply loop's creditTipPreValidate
-	// step before validation, not here. finalize handles only the
-	// PostApplyMessage callback and receipt building.
-
 	txTask, ok := task.Task.(*exec.TxTask)
 
 	if !ok {
@@ -1589,28 +1585,7 @@ func (result *execResult) finalizeSystemTx(
 	return nil, ibs.VersionedReads(), ibs.VersionedWrites(false), nil
 }
 
-// creditTipPreValidate is the apply-loop step that credits the priority
-// tip (FeeTipped) to the coinbase and the burnt amount (FeeBurnt) to the
-// burnt contract before this tx is validated. The worker ran with
-// shouldDelayFeeCalc=true (calcFees=false → ApplyMessageNoFeeBurnOrTip)
-// and skipped both credits; this method authors them.
-//
-// Read semantics mirror IBS AddBalance: vm.Read(..., txIndex+1) does
-// floor(txIndex), returning this tx's worker write if any, otherwise the
-// latest prior-tx settled value. No need for the senderIsCoinbase /
-// CollectorWrites discriminator the prior finalize-time path needed —
-// reading at the worker's own version naturally includes the worker's
-// contribution (e.g. the gas-debit for sender == coinbase miner self-sends).
-//
-// Writes go to versionMap at task.Version() — the SAME version as the
-// worker's writes — overwriting in place. No (Inc+1) masking writes.
-// The (Inc+1) trick existed to invalidate future txs that had read the
-// worker's pre-tip coinbase from versionMap; under same-version overwrite
-// the cell value updates but the cell version doesn't, so version-based
-// validate no longer catches that race. Real BALANCE(coinbase) reads are
-// rare enough in practice that this trade-off is accepted; if the race
-// surfaces, the validator can be made value-aware for MapRead reads.
-func (result *execResult) creditTipPreValidate(
+func (result *execResult) calcFees(
 	task *taskVersion,
 	vm *state.VersionMap,
 	stateReader state.StateReader,
@@ -1619,10 +1594,10 @@ func (result *execResult) creditTipPreValidate(
 	txIndex := task.Version().TxIndex
 	taskVersion := task.Version()
 
-	// vm.Read uses floor(txIdx-1) semantics, so passing txIndex+1 yields
-	// floor(txIndex) — this tx's worker write if present, else the prior
-	// tx's settled value. Same as IBS AddBalance's read step.
-	vsReader := state.NewVersionedStateReader(txIndex+1, nil, vm, stateReader)
+	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
+	// own prior incarnations that would double-apply the tip on re-execution.
+	// Worker writes for the current tx are picked up below via TxOut.
+	vsReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
@@ -1632,12 +1607,9 @@ func (result *execResult) creditTipPreValidate(
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
 	}
-	oldCoinbaseBalance := newCoinbaseBalance
-	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
-
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
-	var newBurntBalance, oldBurntBalance uint256.Int
+	var newBurntBalance uint256.Int
 	var burntAcc *accounts.Account
 	if hasBurnt {
 		burntAcc, err = vsReader.ReadAccountData(burntAddr)
@@ -1647,10 +1619,31 @@ func (result *execResult) creditTipPreValidate(
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
 		}
-		oldBurntBalance = newBurntBalance
-		if chainRules.IsLondon {
-			newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
+	}
+	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
+	// applied to sender under shouldDelayFeeCalc=true).
+	for _, w := range result.TxOut {
+		if w.Path != state.BalancePath {
+			continue
 		}
+		v, ok := w.Val.(uint256.Int)
+		if !ok {
+			continue
+		}
+		switch w.Address {
+		case result.Coinbase:
+			newCoinbaseBalance = v
+		case burntAddr:
+			if hasBurnt {
+				newBurntBalance = v
+			}
+		}
+	}
+	oldCoinbaseBalance := newCoinbaseBalance
+	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	oldBurntBalance := newBurntBalance
+	if hasBurnt && chainRules.IsLondon {
+		newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 	}
 
 	// EIP-161 empty-removal: even when the tip is zero (newBal == oldBal)
@@ -1665,13 +1658,9 @@ func (result *execResult) creditTipPreValidate(
 
 	var addWrites state.VersionedWrites
 	if emitCoinbase {
-		// Update CollectorWrites for the BlockStateCache view.
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
 			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
 			tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
-		// Emit at task.Version() — same incarnation as the worker. The
-		// worker's pre-tip coinbase write (if any) is overwritten in place
-		// by this post-tip value.
 		if emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero() {
 			addWrites = append(addWrites, &state.VersionedWrite{
 				Address: result.Coinbase,
@@ -1705,16 +1694,6 @@ func (result *execResult) creditTipPreValidate(
 	return addWrites, nil
 }
 
-// finalizeTx handles regular TXs after the apply-loop tip credit
-// (creditTipPreValidate) has already authored the post-tip versionMap
-// writes. This function runs the engine's PostApplyMessage callback
-// (e.g. AuRa system calls, EIP-7708 burn-log emission via
-// LogSelfDestructedAccounts) and builds the receipt.
-//
-// Renamed from finalizeTxSimple — the bookkeeping that motivated the
-// "simple" tag (split fee logic, source-discriminator scanning,
-// (Inc+1) masking writes) all moved into creditTipPreValidate; what
-// remains is the receipt-and-PostApplyMessage tail.
 func (result *execResult) finalizeTx(
 	task *taskVersion,
 	txTask *exec.TxTask,
@@ -1731,9 +1710,6 @@ func (result *execResult) finalizeTx(
 		return nil, nil, nil, err
 	}
 
-	// Compute receipt. Tip-credit writes for coinbase/burnt are authored
-	// separately by creditTipPreValidate (called from the apply loop
-	// before validate); finalizeTx returns no addWrites.
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 	if err != nil {
 		return nil, nil, nil, err
@@ -2311,12 +2287,40 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		tx := toValidate[i]
 		txVersion := be.tasks[tx].Task.Version()
+		txTask := be.tasks[tx].Task
+		txResult := be.results[tx]
 
 		var trace bool
 		var tracePrefix string
 
 		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
 			tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+		}
+
+		// Credit tip pre-validate for regular TXs so the validator sees the
+		// post-tip coinbase write. Downstream txs that read coinbase pre-tip
+		// invalidate through the standard version-mismatch path.
+		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
+			taskVer, ok := txResult.Task.(*taskVersion)
+			if !ok {
+				return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
+			}
+			if stateReader == nil {
+				if txTask.IsHistoric() {
+					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
+				} else {
+					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+				}
+			}
+			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, stateReader, txTask.Rules())
+			if err != nil {
+				return nil, err
+			}
+			if len(tipWrites) > 0 {
+				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+				merged := MergeVersionedWrites(existingWrites, tipWrites)
+				be.blockIO.RecordWrites(txVersion, merged)
+			}
 		}
 
 		validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
@@ -2351,7 +2355,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
 
-				txResult := be.results[tx]
 				be.finalizedResults[tx] = txResult
 
 				var prevReceipt *types.Receipt
@@ -2360,8 +2363,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						prevReceipt = prev.Receipt
 					}
 				}
-
-				txTask := be.tasks[tx].Task
 
 				if txn := txTask.Tx(); txn != nil {
 					regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txResult.ExecutionResult.IntrinsicGas, txTask.Rules().IsAmsterdam)
@@ -2387,70 +2388,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if stateReader == nil {
 					if txTask.IsHistoric() {
-						// Chain blockCache → sd.mem → applyTx so historic-mode
-						// finalize reads see every prior-tx write from the
-						// current block. The per-tx finalize path (fee calc,
-						// post-apply hooks) uses this reader for base reads
-						// not satisfied by the versionMap; omitting blockCache
-						// would let a later tx read a pre-block balance that
-						// an earlier tx already updated in-batch.
 						stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 					} else {
-						// Use CachedReaderV3 with readCurrent=true so the
-						// finalize (including system TXs) reads from the
-						// BlockStateCache write buffer. This ensures the
-						// system TX sees all accumulated state from prior
-						// TXs in the block, not stale sd.mem values.
 						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 					}
 				}
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				// Apply-loop tip credit: for regular TXs, author the
-				// coinbase/burnt post-tip writes BEFORE finalize. The
-				// validator now sees the tip-adjusted versionMap (relevant
-				// to the NEXT tx's validate, which reads from versionMap
-				// via floor lookup); this tx's own reads are unaffected
-				// since they use floor(txIndex-1) semantics. See
-				// creditTipPreValidate docstring for the version-stamping
-				// rationale.
-				//
-				// Block-end / system TXs are skipped here — they carry no
-				// tip and go through finalizeSystemTx (full IBS
-				// reconstruction) via the finalize dispatcher. The
-				// dispatcher's branch in finalize() uses the SAME
-				// predicate (txIndex<0 || IsBlockEnd).
-				var tipWrites state.VersionedWrites
-				if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() {
-					taskVer, ok := txResult.Task.(*taskVersion)
-					if !ok {
-						return nil, fmt.Errorf("apply loop: unexpected task type for tx %d: result.Task=%T", tx, txResult.Task)
-					}
-					chainRules := txTask.Rules()
-					var err error
-					tipWrites, err = txResult.creditTipPreValidate(taskVer, be.versionMap, stateReader, chainRules)
-					if err != nil {
-						return nil, err
-					}
-				}
-
-				// finalize returns no addWrites for regular TXs (tip credit
-				// moved out); finalizeSystemTx still returns a write set for
-				// block-end / system TXs via full IBS reconstruction. Keep
-				// both paths' writes for the merge below.
 				_, addReads, finalizeWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 				if err != nil {
 					return nil, err
 				}
 				addWrites := finalizeWrites
-				if len(tipWrites) > 0 {
-					if len(addWrites) == 0 {
-						addWrites = tipWrites
-					} else {
-						addWrites = MergeVersionedWrites(addWrites, tipWrites)
-					}
-				}
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
