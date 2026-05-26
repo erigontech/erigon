@@ -83,6 +83,11 @@ type Provider struct {
 	autoPublishHandler func(flow.TrustPromoted)
 	autoPublishCancel  context.CancelFunc
 	autoPublishDone    chan struct{}
+
+	// activated tracks the Activate → Close edge so a second Activate
+	// call is idempotent and Close can no-op the background-work
+	// shutdown when Activate never ran.
+	activated bool
 }
 
 // peerManifestFetch holds the result of a de-duplicated FetchPeerManifestV2
@@ -171,6 +176,53 @@ func (p *Provider) initDownloader(ctx context.Context) (downloaderproto.Download
 	return dl.DirectGrpcServerClient(bittorrentServer), nil
 }
 
+// Activate starts the downloader's background goroutines. This is the
+// fourth phase of the component lifecycle (Configure → Initialize →
+// Activate → Close), called after Initialize has constructed the
+// underlying Downloader AND callers have wired the per-deployment
+// setters (SetInventory, SetChainIdentity, SetForkCutBlock,
+// SetDelegationSource, SetContentUCANMinter, SetManifestSelfCheck,
+// SetNodeSource, etc.).
+//
+// On a non-NoDownloader build:
+//   - StartTorrentPeerManager runs the DevP2P↔torrent peer sync loop;
+//     requires the caller to have installed a node source (nodeSourceFn).
+//   - If snapshotCfg.P2PManifest is set, EnableP2PManifest opens the
+//     manifestReady channel and StartChainTomlDiscovery launches the
+//     discovery loop.
+//
+// Idempotent: a second call returns nil without re-launching any
+// goroutine. Tests / NoDownloader builds short-circuit on a nil
+// Downloader.
+//
+// ManifestReady() returns the channel callers (e.g. backend.go) plumb
+// into ethconfig.BlocksFreezing.ManifestReady for stage_snapshots's
+// gate. The component's BindBus handler also publishes
+// flow.ManifestDiscoveryComplete the first time that channel closes
+// (see bus.go) so bus subscribers see the signal as a typed event.
+func (p *Provider) Activate(ctx context.Context) error {
+	if p == nil {
+		return fmt.Errorf("downloader.Activate: nil provider")
+	}
+	if p.activated {
+		return nil
+	}
+	if p.Downloader == nil {
+		// External downloader or NoDownloader build — nothing to start.
+		p.activated = true
+		return nil
+	}
+
+	if p.snapshotCfg.P2PManifest {
+		p.Downloader.EnableP2PManifest()
+		p.Downloader.StartChainTomlDiscovery(ctx, p.snapshotCfg.ChainName)
+	}
+	p.Downloader.StartTorrentPeerManager(ctx)
+
+	p.activated = true
+	return nil
+}
+
 // Close shuts down the downloader. Safe to call multiple times.
 func (p *Provider) Close() {
 	_ = p.UnbindBus()
@@ -178,6 +230,7 @@ func (p *Provider) Close() {
 		p.Downloader.Close()
 		p.Downloader = nil
 	}
+	p.activated = false
 }
 
 // IsEnabled returns true if the downloader is configured and active.

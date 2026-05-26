@@ -1121,24 +1121,24 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}()
 
-		if backend.config.Snapshot.P2PManifest {
-			// Enable the manifestReady channel so the snapshot stage
-			// can wait for the first chain.toml discovery before
-			// building download requests. Without this, the stage
-			// would proceed against (potentially-stale) preverified
-			// before the V2 manifest replaces it.
-			//
-			// The downloader exposes the channel via ManifestReady();
-			// we propagate to Snapshot.ManifestReady so stageloop's
-			// StageSnapshotsCfg passes it into the stage's gate at
-			// stage_snapshots.go:190.
-			dl.EnableP2PManifest()
-			backend.config.Snapshot.ManifestReady = dl.ManifestReady()
-			dl.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+		// Activate the downloader's background goroutines (chain.toml
+		// discovery loop if P2PManifest is set, torrent peer manager
+		// unconditionally). The Provider gates internally on its
+		// snapshotCfg + nodeSourceFn — all the per-deployment setters
+		// (SetInventory / SetChainIdentity / SetForkCutBlock /
+		// SetDelegationSource / SetContentUCANMinter /
+		// SetManifestSelfCheck / SetNodeSource etc.) ran above this
+		// block. Surface the ManifestReady channel afterwards so
+		// stage_snapshots's gate at stage_snapshots.go:190 receives
+		// the same channel close that the bus-bridge in
+		// node/components/downloader/bus.go promotes to
+		// flow.ManifestDiscoveryComplete.
+		if err := backend.components.Downloader.Activate(ctx); err != nil {
+			return nil, fmt.Errorf("downloader.Activate: %w", err)
 		}
-
-		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
-		dl.StartTorrentPeerManager(ctx)
+		if backend.config.Snapshot.P2PManifest {
+			backend.config.Snapshot.ManifestReady = dl.ManifestReady()
+		}
 	}
 
 	// setup periodic logging and prometheus updates

@@ -68,3 +68,34 @@ func TestProviderCloseIdempotent(t *testing.T) {
 	p.Close()
 	p.Close()
 }
+
+// TestActivateOnNilProvider pins the nil-safety guard so a misconfigured
+// caller gets a clear error rather than a nil-deref panic.
+func TestActivateOnNilProvider(t *testing.T) {
+	var p *Provider
+	err := p.Activate(t.Context())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nil provider")
+}
+
+// TestActivateNoDownloader pins that the activate phase is a clean no-op
+// (returns nil, marks activated) when the Provider has no underlying
+// Downloader (NoDownloader build, external mode, or no chain config).
+func TestActivateNoDownloader(t *testing.T) {
+	p := &Provider{}
+	p.Configure(
+		nil,
+		ethconfig.BlocksFreezing{NoDownloader: true},
+		datadir.New(t.TempDir()),
+		log.Root(),
+		nil,
+	)
+	require.NoError(t, p.Initialize(t.Context()))
+	require.Nil(t, p.Downloader, "NoDownloader: no underlying downloader constructed")
+
+	require.NoError(t, p.Activate(t.Context()))
+	require.True(t, p.activated, "Activate must record the lifecycle edge even on no-op path")
+
+	// Idempotent: second Activate is a no-op + still returns nil.
+	require.NoError(t, p.Activate(t.Context()))
+}
