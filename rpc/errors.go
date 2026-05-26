@@ -36,8 +36,8 @@ var (
 )
 
 const (
-	ErrCodeNonceTooHigh            = -38011
 	ErrCodeNonceTooLow             = -38010
+	ErrCodeNonceTooHigh            = -38011
 	ErrCodeBaseFeeTooLow           = -38012
 	ErrCodeIntrinsicGas            = -38013
 	ErrCodeInsufficientFunds       = -38014

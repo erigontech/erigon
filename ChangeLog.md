@@ -33,6 +33,20 @@ Note: physical deletion of frozen `.seg` files is gated by [#21306](https://gith
 
 ---
 
+#### `eth_simulateV1`: base fee too low error code corrected to `-38012`
+
+Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).
+
+**What changed:**
+
+| Aspect | Before | After |
+|---|---|---|
+| `ErrFeeCapTooLow` error code | `-32602` (generic "Invalid params") | `-38012` (spec-mandated "baseFeePerGas is too low") |
+
+**Migration:**
+
+- If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
+
 #### Single p2p listener: `--p2p.allowed-ports` removed, all eth versions multiplex on `--port`
 
 Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments — per-protocol Servers each signed an ENR under the same Node ID, and only the highest-`seq` one survived in the DHT, so peers dialed the wrong listener (#21335).
