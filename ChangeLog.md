@@ -83,7 +83,7 @@ Affected RPC methods: `debug_traceTransaction`, `debug_traceBlockByHash`, `debug
 
 ---
 
-## [3.4.2] "Splashing Saga" – TBD
+## [3.4.2] "Splashing Saga" – 2026-05-22
 
 v3.4.2 is a bugfix release recommended for all users.
 
