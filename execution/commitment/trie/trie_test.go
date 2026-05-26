@@ -868,3 +868,36 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	}
 
 }
+
+// TestRLPEncodeSkipsSmallNonRootNodes verifies that RLPEncode omits nodes whose
+// RLP encoding is < 32 bytes (they are inlined in their parent, not referenced by hash).
+// This mirrors Geth's stacktrie behaviour and prevents extra witness entries.
+func TestRLPEncodeSkipsSmallNonRootNodes(t *testing.T) {
+	// Two 32-byte keys that share exactly 8 nibbles (4 bytes) then diverge.
+	// Trie structure:
+	//   root = ShortNode(extension, 8 nibbles) → FullNode(branch at depth 8)
+	//     branch[0] → ShortNode(leaf, 55 nibbles): HP=28B → RLP=31B < 32 (inlined)
+	//     branch[f] → ShortNode(leaf, 55 nibbles): HP=28B → RLP=31B < 32 (inlined)
+	// Without the fix: 4 nodes (extension+branch+2 leaves).
+	// With the fix:    2 nodes (extension+branch only; leaves are inlined in branch).
+	key1 := common.HexToHash("0xef1234560000000000000000000000000000000000000000000000000000dead")
+	key2 := common.HexToHash("0xef123456f000000000000000000000000000000000000000000000000000beef")
+	val := []byte{0x01}
+
+	tr := newEmpty()
+	tr.Update(key1[:], val)
+	tr.Update(key2[:], val)
+
+	encoded, err := tr.RLPEncode()
+	require.NoError(t, err)
+
+	// Only the extension (40B) and branch (79B) nodes must appear; the two 31-byte
+	// leaf nodes are inlined in the branch and must not be separate entries.
+	assert.Equal(t, 2, len(encoded), "extension + branch; the two 31-byte leaves must be inlined, not separate entries")
+
+	// Every emitted node must be >= 32 bytes.
+	for i, node := range encoded {
+		assert.GreaterOrEqual(t, len(node), 32,
+			"node[%d] len=%d < 32 (should be inlined in parent, not a separate witness entry)", i, len(node))
+	}
+}

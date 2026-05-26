@@ -1457,8 +1457,8 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 	h := newHasher(t.valueNodesRLPEncoded)
 	defer returnHasherToPool(h)
 
-	var collect func(node Node) error
-	collect = func(node Node) error {
+	var collect func(node Node, isRoot bool) error
+	collect = func(node Node, isRoot bool) error {
 		if node == nil {
 			return nil
 		}
@@ -1469,41 +1469,47 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			if err != nil {
 				return err
 			}
-			hash := crypto.Keccak256Hash(nodeRLP)
-			if _, ok := seen[hash]; !ok {
-				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+			if isRoot || len(nodeRLP) >= 32 {
+				hash := crypto.Keccak256Hash(nodeRLP)
+				if _, ok := seen[hash]; !ok {
+					seen[hash] = struct{}{}
+					nodes = append(nodes, common.Copy(nodeRLP))
+				}
 			}
-			return collect(n.Val)
+			return collect(n.Val, false)
 
 		case *DuoNode:
 			nodeRLP, err := h.hashChildren(n, 0)
 			if err != nil {
 				return err
 			}
-			hash := crypto.Keccak256Hash(nodeRLP)
-			if _, ok := seen[hash]; !ok {
-				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+			if isRoot || len(nodeRLP) >= 32 {
+				hash := crypto.Keccak256Hash(nodeRLP)
+				if _, ok := seen[hash]; !ok {
+					seen[hash] = struct{}{}
+					nodes = append(nodes, common.Copy(nodeRLP))
+				}
 			}
-			if err := collect(n.child1); err != nil {
+			if err := collect(n.child1, false); err != nil {
 				return err
 			}
-			return collect(n.child2)
+			return collect(n.child2, false)
 
 		case *FullNode:
 			nodeRLP, err := h.hashChildren(n, 0)
 			if err != nil {
 				return err
 			}
-			hash := crypto.Keccak256Hash(nodeRLP)
-			if _, ok := seen[hash]; !ok {
-				seen[hash] = struct{}{}
-				nodes = append(nodes, common.Copy(nodeRLP))
+			if isRoot || len(nodeRLP) >= 32 {
+				hash := crypto.Keccak256Hash(nodeRLP)
+				if _, ok := seen[hash]; !ok {
+					seen[hash] = struct{}{}
+					nodes = append(nodes, common.Copy(nodeRLP))
+				}
 			}
 			for i := 0; i < 17; i++ {
 				if n.Children[i] != nil {
-					if err := collect(n.Children[i]); err != nil {
+					if err := collect(n.Children[i], false); err != nil {
 						return err
 					}
 				}
@@ -1511,18 +1517,15 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 			return nil
 
 		case *AccountNode:
-			// AccountNode may have a storage trie
 			if n.Storage != nil {
-				return collect(n.Storage)
+				return collect(n.Storage, false)
 			}
 			return nil
 
 		case ValueNode:
-			// Leaf value, nothing to collect
 			return nil
 
 		case *HashNode:
-			// HashNode means this subtrie wasn't expanded
 			return nil
 
 		default:
@@ -1530,7 +1533,7 @@ func (t *Trie) RLPEncode() ([][]byte, error) {
 		}
 	}
 
-	if err := collect(t.RootNode); err != nil {
+	if err := collect(t.RootNode, true); err != nil {
 		return nil, err
 	}
 
