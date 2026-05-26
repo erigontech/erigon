@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -307,15 +308,18 @@ func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 		}
 		return res, nil
 	}
-	// Honour the caller's deadline if it has one (test contexts carry
-	// the -timeout flag). Without this, slow CI environments — especially
-	// -race + GOMAXPROCS<=2 on the 4-vCPU GHA runner — hit the cap on
-	// high-mgas blocks (TestInvalidReceiptHashHighMgas) before the engine
-	// returns Valid. Absent any caller deadline, cap at 30 min so a stuck
-	// engine still fails the test rather than hanging.
+	// Cap how long we wait so a stuck engine still fails the test rather
+	// than hanging. The race detector adds ~5-10x overhead on CPU-bound
+	// block processing (e.g. high-mgas blocks in
+	// TestInvalidReceiptHashHighMgas), so use a longer cap to avoid
+	// false timeouts on slow CI runners.
 	if _, ok := ctx.Deadline(); !ok {
+		timeout := 30 * time.Minute
+		if race.Enabled {
+			timeout = 55 * time.Minute
+		}
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Minute)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	var backOff backoff.BackOff
