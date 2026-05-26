@@ -231,6 +231,13 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // SlotNumber required for Glamsterdam (EIP-7843)
 	}
+	// TODO: enable once tests catch up with glamsterdam-devnet-4 spec
+	// if version >= clparams.GloasVersion && payloadAttributes.TargetGasLimit == nil {
+	// 	return &engine_helpers.InvalidPayloadAttributesErr // TargetGasLimit required for V4 attrs
+	// }
+	if version < clparams.GloasVersion && payloadAttributes.TargetGasLimit != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr // pre-V4 attrs MUST NOT carry targetGasLimit
+	}
 	return nil
 }
 
@@ -565,12 +572,23 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}
 	}
 	if bad {
-		errMsg := cachedErr
-		if errMsg == "" {
-			errMsg = "previously known bad block"
+		if cachedErr == "" {
+			// An earlier ReportBadHeader stored this block (or an ancestor)
+			// without a validation message — the original rejection
+			// category was lost. Returning the generic "previously known
+			// bad block" string here strips the category that downstream
+			// callers (eest's ErigonExceptionMapper, Lighthouse, etc.)
+			// rely on to bucket the failure, and rewriting the cache with
+			// that fallback permanently degrades the entry. Drop the
+			// useless entry and fall through to re-validation so the
+			// pipeline re-derives the specific error; the proper string
+			// will be re-cached via ReportBadHeader on the BadBlock path
+			// below (issues #21363 + #21364 Mode A).
+			s.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
+		} else {
+			s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
+			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
-		s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, errMsg)
-		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(errMsg)}, nil
 	}
 
 	currentHeader := s.chainRW.CurrentHeader(ctx)
@@ -802,6 +820,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		PrevRandao:            payloadAttributes.PrevRandao,
 		SuggestedFeeRecipient: payloadAttributes.SuggestedFeeRecipient,
 		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
+		TargetGasLimit:        (*uint64)(payloadAttributes.TargetGasLimit),
 	}
 
 	if version >= clparams.CapellaVersion {

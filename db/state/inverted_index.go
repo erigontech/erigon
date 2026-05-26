@@ -562,7 +562,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		encodedSeq, _ := g.Next(nil)
 
 		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
-		equalOrHigherTxNum, found = iit.reUsableSeq.Seek(txNum)
+		equalOrHigherTxNum, _, found = iit.reUsableSeq.Seek(txNum)
 		if !found {
 			continue
 		}
