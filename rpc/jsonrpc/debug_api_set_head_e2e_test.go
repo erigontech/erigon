@@ -270,22 +270,25 @@ func TestSetHead_E2E_WithinDB_ExecutesPastNewHead(t *testing.T) {
 //     / legacy rejection.
 //
 // What this scenario *does not* assert: full cold-start equivalence
-// after a successful Unwind. That needs a fixture where (a) snapshot
-// files past toBlock physically exist on disk for sub-op #1 to trim
-// (requires BlockRetire to fire, gated on Erigon2MinSegmentSize=1000 +
-// MaxReorgDepth=96 → 1100+ blocks), and (b) the writable shadow has
-// nothing past toBlock's step boundary so sub-op #3's commitment-anchor
-// verify finds LatestBlockNumWithCommitment == toBlock. The current
-// wipe primitive retains writes at step == stepBoundary, so any fixture
-// where execution continued past toBlock leaves an entry that shadows
-// the file's anchor. Both pieces are tracked in the post-compact
-// handoff under "Full E2E scenario 3 deferred".
+// after a successful Unwind. That needs sub-op #1 (snapshot-trim) to
+// actually delete state files past toBlock's step boundary. In this
+// fixture the Provider is built via NewProviderForUnwindTest with
+// Inventory==nil, so snapshot-trim is a no-op even though the test
+// aggregator built state-domain files during execution (one .kv per
+// step). The wipe correctly empties the writable shadow past
+// toBlock, but sub-op #3's LatestBlockNumWithCommitment then falls
+// through to getLatestFromFiles which returns the over-step file's
+// internally-encoded blockNum — a value past toBlock — and the
+// commitment-anchor verify fails with "latest commitment is at
+// block N, expected toBlock". That's the controlled failure surface
+// this test pins.
 //
-// On this fixture the expected outcome is: mode B engages, snapshot-trim
-// is a no-op (no Inventory wired), DB-reset + WipeWritableShadowPast
-// run, ensureCommitmentAtBlock returns a chain-malformed error pointing
-// at the wedged anchor. The test pins all of that as observable wiring
-// evidence.
+// Closing the loop end-to-end requires either (a) populating
+// Inventory in NewProviderForUnwindTest so sub-op #1 removes the
+// over-step files, or (b) the parked recompute-into-file primitive
+// (see post-compact handoff "Full E2E scenario 3 deferred") that
+// rewrites the bordering file's commitment entry to encode toBlock.
+// Both are tracked follow-ups.
 func TestSetHead_E2E_ModeB_RoutesToProviderUnwind(t *testing.T) {
 	const stepSize uint64 = 8
 

@@ -27,21 +27,26 @@ import (
 )
 
 // WipeWritableShadowPast clears every writable-domain MDBX entry whose
-// coordinate falls past lastTxNum.
+// txnum coordinate > lastTxNum. The post-state contract is per-tx, not
+// per-step: the last tx surviving the wipe in any writable-shadow
+// table is exactly lastTxNum (= the last txnum of toBlock), regardless
+// of step alignment.
 //
 // Mode-B admin SetHead (docs/plans/20260525-admin-sethead-unwind-design.md,
 // sub-op #2) calls this after snapshot files past toBlock have been
-// trimmed. The post-state is cold-start-equivalent: the MDBX writable-
-// domain shadow holds nothing newer than lastTxNum, so the next forward
+// trimmed. With the per-tx contract above, the MDBX writable-domain
+// shadow holds nothing newer than lastTxNum, so the next forward
 // execution sees the snapshot files as the authoritative state and
 // LatestCommitmentState resolves to the file's entry at toBlock's step
-// boundary — no DB-shadow override.
+// boundary — no DB-shadow override of a write past toBlock.
 //
 // Per writable domain (accounts, storage, code, commitment):
 //
 //   - ValuesTable: cursor-walk, decode the step coordinate from the
 //     key suffix (LargeValues) or value prefix (DupSort), delete entries
-//     whose step > stepBoundary.
+//     whose step >= stepBoundary. The precondition guarantees lastTxNum
+//     is the last txnum of step (stepBoundary - 1), so every entry at
+//     step >= stepBoundary covers only txnums > lastTxNum.
 //   - History.ValuesTable + InvertedIndex.{Keys,Values}Table: existing
 //     HistoryRoTx.prune machinery (the same call d.unwind issues), with
 //     txFrom = lastTxNum+1, txTo = math.MaxUint64.
@@ -54,9 +59,13 @@ import (
 //
 //   - StepSize() > 0.
 //   - (lastTxNum+1) % StepSize() == 0 — lastTxNum lands on a step
-//     boundary. Mode B's snapshot-trim already enforces this against
-//     toBlock; the check here makes the file-vs-DB layering invariant
-//     explicit for any future caller (fork-from CLI, tooling).
+//     boundary. This is what makes the per-tx contract expressible by
+//     step-granular deletion in ValuesTable: if lastTxNum sits mid-step
+//     the values-table entry for that step would mix txnums on both
+//     sides of lastTxNum and a step-granular wipe couldn't be precise.
+//     Mode B's snapshot-trim already enforces this against toBlock; the
+//     check here makes the file-vs-DB layering invariant explicit for
+//     any future caller (fork-from CLI, tooling).
 //
 // Caller owns tx lifecycle and the commit. WipeWritableShadowPast does
 // not commit and does not flush.
@@ -101,8 +110,15 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 }
 
 // wipeDomainValuesPastStep deletes ValuesTable rows whose step
-// coordinate > stepBoundary. The step coordinate's location depends on
-// the domain's LargeValues setting:
+// coordinate >= stepBoundary. With the caller's invariant
+// `stepBoundary = (lastTxNum+1) / stepSize` and lastTxNum being the
+// last txnum of toBlock (which the precondition guarantees is on a
+// step boundary), step `stepBoundary-1` is exactly the step containing
+// lastTxNum, and steps >= stepBoundary contain only txnums > lastTxNum
+// — i.e. writes past toBlock that must not survive the wipe.
+//
+// The step coordinate's location depends on the domain's LargeValues
+// setting:
 //
 //   - LargeValues=true: rows are key=fullKey+stepBytes, value=raw.
 //     stepBytes is the last 8 bytes of the key, encoded as
@@ -128,7 +144,7 @@ func wipeDomainValuesPastStep(tx kv.RwTx, d *Domain, stepBoundary uint64) error 
 			}
 			encodedStep := binary.BigEndian.Uint64(k[len(k)-8:])
 			step := ^encodedStep
-			if step > stepBoundary {
+			if step >= stepBoundary {
 				if err := c.DeleteCurrent(); err != nil {
 					return err
 				}
@@ -151,7 +167,7 @@ func wipeDomainValuesPastStep(tx kv.RwTx, d *Domain, stepBoundary uint64) error 
 		}
 		encodedStep := binary.BigEndian.Uint64(v[:8])
 		step := ^encodedStep
-		if step > stepBoundary {
+		if step >= stepBoundary {
 			if err := c.DeleteCurrent(); err != nil {
 				return err
 			}

@@ -50,24 +50,24 @@ func TestWipeWritableShadowPast_NotAtStepBoundary(t *testing.T) {
 	require.Contains(t, err.Error(), "step boundary")
 }
 
-// TestWipeWritableShadowPast_ClearsValuesPastBoundary pins the core
-// behavior: domain entries whose step coordinate > stepBoundary get
-// deleted; entries at steps <= stepBoundary survive.
+// TestWipeWritableShadowPast_ClearsValuesPastBoundary pins the per-tx
+// contract: after wipe past lastTxNum, no writable-shadow entry covers
+// any txnum > lastTxNum, regardless of which step that txnum sits in.
 //
-// Setup: writes to three accounts at txNums spanning three steps
-// (stepSize=8 → step 0 is tx 0..7, step 1 is tx 8..15, step 2 is
-// tx 16..23). The flush moves all three writes into the DB shadow.
+// Setup: three accounts written at txnums 0, 8, 16 (stepSize=8 → step
+// 0 is tx 0..7, step 1 is tx 8..15, step 2 is tx 16..23). The flush
+// moves all three writes into the DB shadow.
 //
-// Action: WipeWritableShadowPast with lastTxNum=7 (= end of step 0,
-// step boundary). stepBoundary computes as (7+1)/8 = 1. Entries with
-// step > 1 (= step 2 only) should be deleted.
+// Action: WipeWritableShadowPast with lastTxNum=7 — the last txnum of
+// step 0, on a step boundary. The per-tx contract says any write at
+// txnum > 7 must be gone post-wipe.
 //
-// Hmm — wait: with stepBoundary=1, entries at step 0 (acc1) and
-// step 1 (acc2) should survive; only step 2 (acc3) should go. That
-// matches the wipe semantics (delete past, retain ≤).
-//
-// Assertion: read each account post-wipe via GetLatest; acc1 and
-// acc2 still resolve to their written value, acc3 is gone.
+// Assertion: only acc1 (written at txnum 0) survives. acc2 (txnum 8)
+// AND acc3 (txnum 16) are wiped — both are at txnums > 7 even though
+// only acc3's step is "well past" the boundary. The earlier
+// step-granular semantics retained acc2 and shadowed legitimate file
+// data at sub-op #3's commitment-anchor check; the strict per-tx
+// contract removes that wedge.
 func TestWipeWritableShadowPast_ClearsValuesPastBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -99,9 +99,9 @@ func TestWipeWritableShadowPast_ClearsValuesPastBoundary(t *testing.T) {
 			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, addr[:], buf, txNum, nil))
 		}
 
-		writeAcc(acc1Addr, 0, 1)  // step 0
-		writeAcc(acc2Addr, 8, 2)  // step 1
-		writeAcc(acc3Addr, 16, 3) // step 2
+		writeAcc(acc1Addr, 0, 1)  // step 0 (txnum 0 — kept)
+		writeAcc(acc2Addr, 8, 2)  // step 1 (txnum 8 — past lastTxNum=7, wiped)
+		writeAcc(acc3Addr, 16, 3) // step 2 (txnum 16 — past lastTxNum=7, wiped)
 
 		require.NoError(t, domains.Flush(t.Context(), rwTx))
 		require.NoError(t, rwTx.Commit())
@@ -117,7 +117,7 @@ func TestWipeWritableShadowPast_ClearsValuesPastBoundary(t *testing.T) {
 		require.NotEmpty(t, getLatestAccount(t, roTx, acc3Addr), "acc3 must exist before wipe")
 	}
 
-	// --- Phase 3: wipe past lastTxNum=7 (end of step 0; stepBoundary=1) ---
+	// --- Phase 3: wipe past lastTxNum=7 (last txnum of step 0) ---
 	{
 		rwTx, err := db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
@@ -127,17 +127,98 @@ func TestWipeWritableShadowPast_ClearsValuesPastBoundary(t *testing.T) {
 		require.NoError(t, rwTx.Commit())
 	}
 
-	// --- Phase 4: verify only acc1 (step 0) and acc2 (step 1) survive ---
+	// --- Phase 4: verify only acc1 (txnum 0) survives ---
 	//
-	// stepBoundary = (7+1)/8 = 1. Wipe deletes entries whose step > 1,
-	// i.e. step 2 (acc3). Steps 0 and 1 (acc1, acc2) are retained.
+	// stepBoundary = (7+1)/8 = 1. Wipe deletes entries whose step >=
+	// 1, i.e. steps 1 (acc2) and 2 (acc3). Only step 0 (acc1) is
+	// retained — its single txnum (0) is the only one <= lastTxNum.
 	{
 		roTx, err := db.BeginTemporalRo(t.Context())
 		require.NoError(t, err)
 		defer roTx.Rollback()
-		require.NotEmpty(t, getLatestAccount(t, roTx, acc1Addr), "acc1 (step 0) must survive wipe")
-		require.NotEmpty(t, getLatestAccount(t, roTx, acc2Addr), "acc2 (step 1) must survive wipe")
-		require.Empty(t, getLatestAccount(t, roTx, acc3Addr), "acc3 (step 2) must be wiped")
+		require.NotEmpty(t, getLatestAccount(t, roTx, acc1Addr), "acc1 (txnum 0 ≤ lastTxNum) must survive wipe")
+		require.Empty(t, getLatestAccount(t, roTx, acc2Addr), "acc2 (txnum 8 > lastTxNum) must be wiped")
+		require.Empty(t, getLatestAccount(t, roTx, acc3Addr), "acc3 (txnum 16 > lastTxNum) must be wiped")
+	}
+}
+
+// TestWipeWritableShadowPast_ClearsMultipleStepDupsOfSameKey pins the
+// wipe's behavior for the common pattern of a single key written many
+// times across different steps (KeyCommitmentState is the canonical
+// example — every block's commitment overwrites the same key with a
+// new step-prefixed dup value). The DupSort cursor needs to walk
+// every dup and delete the ones past stepBoundary; an iterator that
+// e.g. moves to next primary key after deletion would leave dups
+// behind.
+//
+// Setup: write `same` at txnums 0, 8, 16, 24 (steps 0, 1, 2, 3). All
+// four writes share the same primary key but land at different steps
+// (encoded as ^step in the value prefix → four dup values).
+//
+// Action: WipeWritableShadowPast with lastTxNum=7 (last txnum of
+// step 0; stepBoundary=1).
+//
+// Assertion: post-wipe, GetLatest(same) resolves to the step-0 value
+// (nonce=1). If the wipe leaves a step-1+ dup behind, GetLatest would
+// see it (higher step = lower encoded prefix = earlier in DupSort
+// order = what SeekExact returns first) and we'd read the wrong
+// nonce.
+func TestWipeWritableShadowPast_ClearsMultipleStepDupsOfSameKey(t *testing.T) {
+	t.Parallel()
+
+	const stepSize uint64 = 8
+	db, agg := newWipeTestDB(t, stepSize)
+
+	sameAddr := [20]byte{0xAB}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		defer domains.Close()
+
+		writeAt := func(txNum, nonce uint64) {
+			acc := accounts.Account{
+				Nonce:    nonce,
+				Balance:  *uint256.NewInt(nonce * 100),
+				CodeHash: accounts.EmptyCodeHash,
+			}
+			buf := accounts.SerialiseV3(&acc)
+			domains.SetTxNum(txNum)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, sameAddr[:], buf, txNum, nil))
+		}
+
+		writeAt(0, 1)  // step 0 nonce=1 (the one that must survive)
+		writeAt(8, 2)  // step 1 nonce=2 (must be wiped)
+		writeAt(16, 3) // step 2 nonce=3 (must be wiped)
+		writeAt(24, 4) // step 3 nonce=4 (must be wiped)
+
+		require.NoError(t, domains.Flush(t.Context(), rwTx))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer rwTx.Rollback()
+
+		require.NoError(t, agg.WipeWritableShadowPast(t.Context(), rwTx, 7))
+		require.NoError(t, rwTx.Commit())
+	}
+
+	{
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+		raw := getLatestAccount(t, roTx, sameAddr)
+		require.NotEmpty(t, raw, "step-0 nonce=1 write must survive")
+		var got accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&got, raw))
+		require.Equal(t, uint64(1), got.Nonce,
+			"GetLatest must resolve to step-0 value (nonce=1); a non-1 nonce means a step>=1 dup wasn't wiped")
 	}
 }
 
