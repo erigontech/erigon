@@ -38,6 +38,7 @@ var (
 const (
 	ErrCodeNonceTooHigh            = -38011
 	ErrCodeNonceTooLow             = -38010
+	ErrCodeBaseFeeTooLow           = -38012
 	ErrCodeIntrinsicGas            = -38013
 	ErrCodeInsufficientFunds       = -38014
 	ErrCodeBlockGasLimitReached    = -38015
