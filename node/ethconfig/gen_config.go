@@ -45,6 +45,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCTxFeeCap                         float64 `toml:",omitempty"`
 		StateStream                         bool
 		ExperimentalBAL                     bool
+		UseGevm                             bool
 		HeimdallURL                         string
 		WithoutHeimdall                     bool
 		Ethstats                            string
@@ -85,6 +86,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
 	enc.ExperimentalBAL = c.ExperimentalBAL
+	enc.UseGevm = c.UseGevm
 	enc.HeimdallURL = c.HeimdallURL
 	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.Ethstats = c.Ethstats
@@ -129,6 +131,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RPCTxFeeCap                         *float64 `toml:",omitempty"`
 		StateStream                         *bool
 		ExperimentalBAL                     *bool
+		UseGevm                             *bool
 		HeimdallURL                         *string
 		WithoutHeimdall                     *bool
 		Ethstats                            *string
@@ -215,6 +218,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.ExperimentalBAL != nil {
 		c.ExperimentalBAL = *dec.ExperimentalBAL
+	}
+	if dec.UseGevm != nil {
+		c.UseGevm = *dec.UseGevm
 	}
 	if dec.HeimdallURL != nil {
 		c.HeimdallURL = *dec.HeimdallURL

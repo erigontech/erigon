@@ -53,6 +53,7 @@ var (
 	txtrace                       bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                         string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                 string
+	useGevm                       bool
 
 	startTxNum uint64
 
@@ -187,6 +188,10 @@ func withMigration(cmd *cobra.Command) {
 
 func withTxTrace(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&txtrace, "txtrace", false, "enable tracing of transactions")
+}
+
+func withUseGevm(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&useGevm, "use-gevm", false, "Use GEVM for staged block execution")
 }
 
 func withChain(cmd *cobra.Command) {

@@ -117,6 +117,9 @@ func ExecV3(ctx context.Context,
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
+	if cfg.vmConfig != nil && cfg.vmConfig.UseGevm {
+		parallel = false
+	}
 	applyTx := rwTx
 	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
@@ -269,6 +272,7 @@ func ExecV3(ctx context.Context,
 				logger:            logger,
 				logPrefix:         execStage.LogPrefix(),
 				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
+				taskExecMetrics:   exec.NewWorkerMetrics(),
 				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
 				hooks:             hooks,
 			}}

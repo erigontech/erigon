@@ -279,6 +279,12 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+func WithUseGevm() Option {
+	return func(opts *options) {
+		opts.useGevm = true
+	}
+}
+
 // WithoutExperimentalBAL disables experimental BAL (and the parallel executor
 // it forces) for tests that exercise patterns the parallel executor doesn't
 // yet handle correctly (e.g. intra-block SELFDESTRUCT + CREATE2 reincarnation).
@@ -351,6 +357,7 @@ func WithFcuBackgroundPrune() Option {
 type options struct {
 	stepSize            *uint64
 	experimentalBAL     bool
+	useGevm             bool
 	genesis             *types.Genesis
 	chainConfig         *chain.Config
 	key                 *ecdsa.PrivateKey
@@ -635,7 +642,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			cfg.BatchSize,
 			mock.ChainConfig,
 			mock.Engine,
-			&vm.Config{},
+			&vm.Config{UseGevm: opt.useGevm},
 			mock.Notifications,
 			cfg.StateStream,
 			false, /*badBlockHalt*/
@@ -648,7 +655,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			readAheader,
 		),
 		nil, /*notifier*/
-		&vm.Config{},
+		&vm.Config{UseGevm: opt.useGevm},
 		dirs.Tmp,
 		mock.TxPool,
 		miningCancel,
@@ -673,7 +680,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
-				&vm.Config{},
+				&vm.Config{UseGevm: opt.useGevm},
 				mock.Notifications,
 				cfg.StateStream,
 				false, /*badBlockHalt*/
