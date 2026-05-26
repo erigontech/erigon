@@ -750,6 +750,7 @@ func NewDefaultStages(ctx context.Context,
 	snapCfg := stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady)
 	snapCfg.SetLifecycleDrivenByStorage(cfg.Snapshot.LifecycleDrivenByStorage)
 	snapCfg.SetInitialStateReady(cfg.Snapshot.InitialStateReady)
+	snapCfg.SetRetirementPublishers(cfg.Snapshot.PublishRetirementStart, cfg.Snapshot.PublishRetirementDone)
 	return stagedsync.DefaultStages(
 		ctx,
 		snapCfg,
@@ -791,6 +792,7 @@ func NewPipelineStages(ctx context.Context,
 	snapCfg := stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady)
 	snapCfg.SetLifecycleDrivenByStorage(cfg.Snapshot.LifecycleDrivenByStorage)
 	snapCfg.SetInitialStateReady(cfg.Snapshot.InitialStateReady)
+	snapCfg.SetRetirementPublishers(cfg.Snapshot.PublishRetirementStart, cfg.Snapshot.PublishRetirementDone)
 	return stagedsync.PipelineStages(ctx,
 		snapCfg,
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),

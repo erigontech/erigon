@@ -167,6 +167,21 @@ type BlocksFreezing struct {
 	// is enabled. Nil otherwise.
 	InitialStateReady <-chan struct{}
 
+	// PublishRetirementStart / PublishRetirementDone bridge block
+	// retirement events onto the storage component's flow event bus.
+	// The legacy shards.Events fan-out
+	// (OnRetirementStart/OnRetirementDone) carries no range info;
+	// these hooks do. Stage_snapshots.SpawnStageSnapshots invokes
+	// them with the [fromBlock, toBlock] range each retire cycle was
+	// driven against, so flow subscribers (and through them, the
+	// storage component's downstream consumers) see the same range
+	// the legacy fan-out elided.
+	//
+	// Set by backend.go to storage.Provider.Bus().Publish wrappers
+	// when LifecycleDrivenByStorage is enabled; nil otherwise.
+	PublishRetirementStart func(fromBlock, toBlock uint64)
+	PublishRetirementDone  func(fromBlock, toBlock uint64)
+
 	// LifecycleDrivenByStorage cuts over file-import orchestration
 	// (BuildMissedIndices, BuildMissedAccessors) from the stage loop
 	// to the storage component's lifecycle driver. Defaults false:

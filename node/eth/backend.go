@@ -1567,6 +1567,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	config.Snapshot.InitialStateReady = backend.components.Storage.InitialStateReady
+	// Bridge block-retirement signals onto the storage component's event
+	// bus. Stage_snapshots calls these inside its retire orchestration
+	// with the [fromBlock, toBlock] range; subscribers on the storage bus
+	// see flow.RetirementStarted / flow.RetirementDone carrying the
+	// range info that the legacy shards.Events fan-out elides. Safe to
+	// invoke unconditionally — the legacy fan-out fires regardless.
+	if bus := backend.components.Storage.Bus(); bus != nil {
+		config.Snapshot.PublishRetirementStart = func(fromBlock, toBlock uint64) {
+			bus.Publish(flow.RetirementStarted{FromBlock: fromBlock, ToBlock: toBlock})
+		}
+		config.Snapshot.PublishRetirementDone = func(fromBlock, toBlock uint64) {
+			bus.Publish(flow.RetirementDone{FromBlock: fromBlock, ToBlock: toBlock})
+		}
+	}
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder

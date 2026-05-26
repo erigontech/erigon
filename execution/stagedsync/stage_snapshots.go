@@ -88,6 +88,16 @@ type SnapshotsCfg struct {
 	// (backend.go) when the storage orchestrator is constructed.
 	// Defaults nil — existing callers see no behaviour change.
 	initialStateReady <-chan struct{}
+
+	// publishRetirementStart / publishRetirementDone bridge block
+	// retirement signals onto the storage component's event bus. The
+	// legacy shards.Events fan-out (OnRetirementStart/Done) carries no
+	// range info; these hooks do. Production wiring (backend.go) sets
+	// them to provider.Bus().Publish(flow.RetirementStarted{...} /
+	// flow.RetirementDone{...}). Tests/tools that don't run the storage
+	// component leave them nil (the publish call site null-checks).
+	publishRetirementStart func(fromBlock, toBlock uint64)
+	publishRetirementDone  func(fromBlock, toBlock uint64)
 }
 
 // SetLifecycleDrivenByStorage opts the stage out of driving
@@ -111,6 +121,18 @@ func (cfg *SnapshotsCfg) SetLifecycleDrivenByStorage(b bool) {
 // component leave it nil.
 func (cfg *SnapshotsCfg) SetInitialStateReady(ch <-chan struct{}) {
 	cfg.initialStateReady = ch
+}
+
+// SetRetirementPublishers installs hooks called when block retirement
+// starts and finishes, with the [fromBlock, toBlock] range RetireBlocks
+// was driven against. Production wiring (backend.go) bridges these
+// onto the storage component's event bus (flow.RetirementStarted /
+// flow.RetirementDone). Tests/tools that don't run the storage
+// component leave them nil — the legacy shards.Events fan-out continues
+// to fire either way (this is purely additive for dual-working).
+func (cfg *SnapshotsCfg) SetRetirementPublishers(onStart, onDone func(fromBlock, toBlock uint64)) {
+	cfg.publishRetirementStart = onStart
+	cfg.publishRetirementDone = onDone
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -611,10 +633,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
+		// Capture the range for the bus-event bridge so the onDone
+		// closure can report the same [fromBlock, toBlock] back to the
+		// storage event bus (flow.RetirementDone). The legacy
+		// shards.Events fan-out below carries no range info.
+		retireFromBlock, retireToBlock := minBlockNumber, s.ForwardProgress
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
-			minBlockNumber,
-			s.ForwardProgress,
+			retireFromBlock,
+			retireToBlock,
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
@@ -628,9 +655,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
+				if cfg.publishRetirementDone != nil {
+					cfg.publishRetirementDone(retireFromBlock, retireToBlock)
+				}
 			})
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
+		}
+		if started && cfg.publishRetirementStart != nil {
+			cfg.publishRetirementStart(retireFromBlock, retireToBlock)
 		}
 	}
 
