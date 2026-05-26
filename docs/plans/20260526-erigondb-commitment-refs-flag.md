@@ -315,11 +315,11 @@ independent of the write flag.
 
 ### Task 12: Verify acceptance criteria
 
-- [ ] verify every Overview requirement is implemented (file-driven flag, default true, version-aware read/merge, threshold stays const, no CLI flag)
-- [ ] verify edge cases: absent field, explicit false/true, mixed-version datadir, flag flip both ways, downloaded-toml-not-rewritten
-- [ ] run full suite: `make test-all` (or `make test-short` for fast loop)
-- [ ] `make lint` until clean (non-deterministic); `make erigon integration`
-- [ ] confirm no remaining references to `ReplaceKeysInValues` / `AggregatorSqueezeCommitmentValues`
+- [x] verify every Overview requirement is implemented (file-driven flag, default true, version-aware read/merge, threshold stays const, no CLI flag) — file-driven flag (`ReferencesInCommitmentBranches` in `erigondb_settings.go`), default true (`config3.DefaultReferencesInCommitmentBranches`), version-aware read (`commitmentBranchReferenced` gates on `fileVersion.Less(version.V2_1)`), threshold const (`minStepsForReferencing = 2`), no CLI flag (no flag in `cmd/utils/flags.go` or elsewhere — pre-existing `experimental.concurrent-commitment`/`prune.include-commitment-history` are unrelated)
+- [x] verify edge cases: absent field, explicit false/true, mixed-version datadir, flag flip both ways, downloaded-toml-not-rewritten — covered by `erigondb_settings_test.go` (`AbsentFieldNormalizesToTrue`+content-equal, `ExplicitFalseHonored`+content-equal, `ExplicitTrueHonored`, `LegacyWritesTrue`, `FreshNoDownloaderWritesTrue`, `FreshWithDownloaderDoesNotWrite`) and `commitment_mixed_version_test.go::TestMixedVersionDatadirReadsConsistentAcrossFlag` (flip on→off→on)
+- [x] run full suite: `make test-all` (or `make test-short` for fast loop) — `make test-short` passed (exit 0, 0 FAIL); affected packages `db/state` (44s), `db/integrity`, `db/state/statecfg` green individually
+- [x] `make lint` until clean (non-deterministic); `make erigon integration` — lint clean (0 issues); build exit 0
+- [x] confirm no remaining references to `ReplaceKeysInValues` / `AggregatorSqueezeCommitmentValues` — repo-wide grep: only the plan doc itself references them; zero in code
 
 ### Task 13: [Final] Documentation
 
