@@ -42,17 +42,10 @@ type sd interface {
 	Trace() bool
 	CommitmentCapture() bool
 
-	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX)
-	// for one key. Used by the BranchCache divergence-detection probe
-	// to localise which state layer holds bytes that diverge from
-	// cache. Read-only.
+	// ProbeReadLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
+	// key — BranchCache divergence-detection probe. Read-only.
 	ProbeReadLayers(domain kv.Domain, tx kv.TemporalTx, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool)
 
-	// Metrics exposes the per-SD DomainMetrics so callers can read
-	// per-domain (cache, db, file) read counters. Used by the
-	// cache-fp log line to break the aggregate `files=N` count down
-	// per domain (Storage value loads vs Commitment branch reads
-	// vs Account loads).
 	Metrics() *changeset.DomainMetrics
 }
 
@@ -190,11 +183,9 @@ func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix strin
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
-// NewSharedDomainsCommitmentContext constructs a per-SharedDomains
-// commitment context. branchCache is the aggregator-scope cache shared
-// across all SDs derived from the same Aggregator; pass nil from test
-// helpers that don't have an aggregator (a fresh per-init cache will be
-// created inside InitializeTrieAndUpdates as a fallback).
+// NewSharedDomainsCommitmentContext: branchCache is the aggregator-scope
+// shared cache; nil from test helpers falls back to a per-init cache inside
+// InitializeTrieAndUpdates.
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant commitment.TrieVariant, tmpDir string, branchCache *commitment.BranchCache) *SharedDomainsCommitmentContext {
 	ctx := &SharedDomainsCommitmentContext{
 		sharedDomains: sd,
@@ -326,7 +317,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
-
 	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
@@ -409,11 +399,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			}
 		}()
 	}
-
-	// Note: a previous EnableWarmupCache(false)+defer(true) guard lived here
-	// to ensure RecordingContext saw every read during trace capture. Now
-	// that the Go-side WarmupCache is gone, every read already goes through
-	// ctx.* (observable to the recorder by construction); no guard needed.
 
 	var warmupConfig commitment.WarmupConfig
 	var drainCollectors func() []*etl.Collector
@@ -590,9 +575,8 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 	return nil, e.err
 }
 
-// KeyCommitmentState is the commitment-domain key under which the latest
-// root hash and tree state are stored. Single definition lives in the
-// commitment package so BranchCache can exclude it by construction.
+// KeyCommitmentState aliases commitment.KeyCommitmentState — single source of
+// truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
 var ErrBehindCommitment = errors.New("behind commitment")
@@ -796,11 +780,7 @@ type TrieContext struct {
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 
-	// probeSd / probeTx feed ProbeStateLayers — diagnostics-only fields
-	// populated when this TrieContext is constructed from a
-	// SharedDomainsCommitmentContext that has both a SharedDomains
-	// and a tx in scope. Both nil for read-only / test contexts where
-	// the probe is not available.
+	// Diagnostics-only — both nil for read-only / test contexts.
 	probeSd sd
 	probeTx kv.TemporalTx
 }
@@ -824,11 +804,9 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return common.Copy(enc), step, nil
 }
 
-// ProbeStateLayers samples the underlying state layers for one key —
-// sd.mem, sd.parent.mem (if any), and tx-direct (MDBX) — for
-// divergence-detection diagnostics. Returns empty / not-ok when
-// constructed without a probe-capable SharedDomains (e.g.
-// NewTrieContextRo). Read-only.
+// ProbeStateLayers samples sd.mem, parent.mem and tx-direct (MDBX) for one
+// key — divergence diagnostics. Returns empty / not-ok when constructed
+// without a probe-capable SharedDomains (e.g. NewTrieContextRo).
 func (sdc *TrieContext) ProbeStateLayers(domain kv.Domain, key []byte) (mem, parentMem, mdbx []byte, memOk, parentOk bool) {
 	if sdc.probeSd == nil {
 		return
@@ -836,10 +814,8 @@ func (sdc *TrieContext) ProbeStateLayers(domain kv.Domain, key []byte) (mem, par
 	return sdc.probeSd.ProbeReadLayers(domain, sdc.probeTx, key)
 }
 
-// SiteIdentity returns a stable string identifying the underlying
-// SharedDomains pointer. Used by cache write sites to tag entries with
-// the SD lineage that produced them, so divergence diagnostics can tell
-// parent-SD writes apart from fork-SD writes when the cache is shared.
+// SiteIdentity tags cache entries with the SD lineage that produced them so
+// divergence diagnostics can tell parent-SD writes from fork-SD writes.
 func (sdc *TrieContext) SiteIdentity() string {
 	return fmt.Sprintf("sd=%p", sdc.probeSd)
 }

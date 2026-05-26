@@ -22,42 +22,23 @@ import (
 	"math/bits"
 )
 
-// BranchMaps captures the three branch-level bitmasks decoded alongside the
-// per-cell payload. Held separately from the cells slice so callers can apply
-// them into trie state without struct-assigning the whole [16]cell array.
+// BranchMaps captures the three branch-level bitmasks decoded alongside
+// the per-cell payload.
 type BranchMaps struct {
-	Bitmap   uint16 // present-children bitmap (the canonical map encoded in the branch)
-	TouchMap uint16 // children that were touched in this branch (set by caller per deleted flag)
+	Bitmap   uint16 // present-children bitmap (canonical encoded map)
+	TouchMap uint16 // children touched in this branch (per the deleted flag)
 	AfterMap uint16 // children present after this commitment step
 }
 
-// DecodeBranchInto parses the on-disk encoded form of a branch (as returned
-// by ctx.Branch / readBranchAndCheckForFlushing with the leading 2-byte
-// touch-map stripped) and populates the supplied cells array.
+// DecodeBranchInto parses the on-disk encoded form of a branch into cells.
+// branchData must already have the leading 2-byte touch-map prefix stripped.
 //
-// branchData must already have the leading touch-map prefix stripped — the
-// raw bytes returned from Branch() include it; callers strip it before
-// invoking this function (matching the unfoldBranchNode call pattern).
+// deleted=true  → touchMap=bitmap, afterMap=0 (touched-but-not-present-after).
+// deleted=false → touchMap=0, afterMap=bitmap (present-after).
 //
-// deleted controls the touchMap/afterMap convention:
-//   - deleted=true  → all decoded cells are touched-but-not-present-after
-//     (touchMap = bitmap, afterMap = 0)
-//   - deleted=false → all decoded cells are present-after (touchMap = 0,
-//     afterMap = bitmap)
-//
-// Returns the three branch-level maps for the caller to apply into their
-// own state machine. The cells array is mutated in place.
-//
-// This is a PURE decode — it does NOT call deriveHashedKeys on the cells.
-// Trie callers (HexPatriciaHashed.unfoldBranchNode) follow this with their
-// own loop calling deriveHashedKeys per cell, since they have the keccak
-// scratch buffer. Cache callers can skip deriveHashedKeys entirely until
-// the cell is consumed by the trie.
-//
-// This function is the canonical decoder for branch data. Both
-// unfoldBranchNode (which feeds the in-memory grid for fold/unfold) and
-// future cache populators consume branches via this same path so the
-// encoded→cells transformation lives in one place.
+// Pure decode — does NOT call deriveHashedKeys on the cells. Trie callers do
+// that themselves (they have the keccak scratch buffer); cache callers can
+// defer it until the cell is consumed by the trie.
 func DecodeBranchInto(
 	branchData []byte,
 	deleted bool,

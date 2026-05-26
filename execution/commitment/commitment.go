@@ -100,11 +100,9 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// SetBranchCache attaches a BranchCache instance for branch read/write
-	// caching across the trie + branchEncoder. ConcurrentPatriciaHashed
-	// implementations propagate the same instance to all mounts so the
-	// concurrency contract documented in branch_cache.go is respected
-	// (single shared cache, partitioned-by-prefix writers).
+	// SetBranchCache attaches the shared cache used by trie + branchEncoder.
+	// ConcurrentPatriciaHashed propagates the same instance to all mounts —
+	// see branch_cache.go for the concurrency contract.
 	SetBranchCache(*BranchCache)
 
 	// Variant returns commitment trie variant
@@ -154,12 +152,9 @@ const (
 	VariantConcurrentHexPatricia TrieVariant = "hex-concurrent-patricia-hashed"
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer for a
-// SharedDomainsCommitmentContext. The branchCache argument is the
-// long-lived (aggregator-scope) cache shared across SDs — pass the cache
-// returned by BranchCacheProvider on the AggregatorRoTx. When nil (test
-// helpers, isolated benchmarks), a fresh per-init cache is created so the
-// trie still has a valid cache to read/write through.
+// InitializeTrieAndUpdates constructs the trie + updates buffer. branchCache
+// should be the aggregator-scope shared cache; nil falls back to a fresh
+// per-init cache (test helpers, isolated benchmarks).
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string, branchCache *BranchCache) (Trie, *Updates) {
 	if branchCache == nil {
 		branchCache = NewBranchCache(DefaultBranchCacheTailCapacity)
@@ -364,10 +359,7 @@ type BranchEncoder struct {
 	deferUpdates    bool
 	deferred        []*DeferredBranchUpdate
 	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	// branchCache, when set, receives mark-dirty-before-encode + Put-after-
-	// canonical-write so the cache stays consistent with ctx.PutBranch.
-	// Set via HexPatriciaHashed.SetBranchCache (which propagates here).
-	branchCache *BranchCache
+	branchCache     *BranchCache                        // set via HexPatriciaHashed.SetBranchCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -583,11 +575,9 @@ func (be *BranchEncoder) CollectUpdate(
 	var prev []byte
 	var err error
 
-	// Mark the BranchCache entry dirty BEFORE doing the encode work. Any
-	// concurrent warmer-style writer that races into PutIfClean for this
-	// prefix between now and our final Put below will see the dirty flag
-	// and skip — preventing a stale read from overwriting our fresh
-	// canonical write. See branch_cache.go's Concurrency Contract.
+	// MarkDirty BEFORE encode so any concurrent PutIfClean for this prefix
+	// skips — preventing a stale read from overwriting our canonical write.
+	// See branch_cache.go's Concurrency Contract.
 	if be.branchCache != nil {
 		be.branchCache.MarkDirty(prefix)
 	}
@@ -617,13 +607,9 @@ func (be *BranchEncoder) CollectUpdate(
 	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	// BranchCache update happens lazily: ctx.PutBranch writes only to sd.mem,
-	// which masks any cached value at this prefix for the rest of the block.
-	// On sd.Flush, sd.mem is moved to MDBX and BranchCache is invalidated +
-	// repopulated for the affected prefixes (see SD.Flush). The MarkDirty
-	// above protects against concurrent warmer-style writers between now and
-	// that flush. Single writer per prefix per fold invariant means no
-	// concurrent Put races on this key.
+	// No cache Put here: ctx.PutBranch writes to sd.mem which masks this
+	// prefix for the rest of the block; BranchCache is invalidated and
+	// repopulated at SD.Flush.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -657,13 +643,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	// Mark BranchCache entry dirty BEFORE the deferred enqueue. Mirrors
-	// the CollectUpdate path so that both immediate and deferred encoder
-	// entries consistently invalidate the cache. Concurrent warmer-style
-	// writers calling PutIfClean for this prefix between now and the
-	// eventual ApplyDeferredBranchUpdates write see the dirty flag and
-	// skip — preventing a stale read from racing the deferred write.
-	// See branch_cache.go's Concurrency Contract.
+	// MarkDirty as in CollectUpdate — the deferred write happens later via
+	// ApplyDeferredBranchUpdates but the cache must skip concurrent
+	// PutIfClean writers in the interim.
 	if be.branchCache != nil {
 		be.branchCache.MarkDirty(prefix)
 	}
@@ -1823,9 +1805,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			// (previously called warmuper.Cache().EvictPlainKey(v) here to drop
-			// stale account/storage entries; the warmer's cache was removed
-			// alongside WarmupCache so there's nothing to evict.)
 			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)

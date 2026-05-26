@@ -10,10 +10,8 @@ package commitment
 
 import "github.com/erigontech/erigon/execution/commitment/nibbles"
 
-// NextSubtree returns the smallest key K' that is greater than every key having
-// `in` as a prefix — i.e. the exclusive upper bound for a prefix-range scan over
-// `in`. Returns nil if `in` is all 0xff (no such K'). Mirrors db/kv.NextSubtree;
-// inlined to keep this package's import set minimal.
+// NextSubtree: exclusive upper bound of a prefix-range scan over `in`. Returns
+// nil if `in` is all 0xff. Mirrors db/kv.NextSubtree (inlined to keep imports minimal).
 func NextSubtree(in []byte) []byte {
 	r := make([]byte, len(in))
 	copy(r, in)
@@ -50,8 +48,7 @@ func ContractTrunkKeyRanges(contractNibbles []byte) (evenFrom, evenTo, oddFrom, 
 	return evenFrom, evenTo, oddFrom, oddTo
 }
 
-// ContractNibbles expands a 32-byte contract hash to its 64-nibble path
-// (one nibble per byte, high nibble first).
+// ContractNibbles expands a 32-byte hash to its 64-nibble path (high nibble first).
 func ContractNibbles(contractHash []byte) []byte {
 	out := make([]byte, len(contractHash)*2)
 	for i, b := range contractHash {

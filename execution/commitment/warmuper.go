@@ -30,21 +30,16 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// Warmer outcome counters — measurement scaffolding to size the
-// hit-rate of warmer branch reads. Hit means branchFromCacheOrDB
-// returned >= 4 bytes (a real branch). Empty means it returned
-// nothing or too short to parse (no branch at this depth in the
-// on-disk trie). Used to bound the value of bypassing the xorfilter
-// for the warmer specifically — high hit ratio implies the filter
-// is mostly overhead in this call path.
+// Warmer branch-read outcome counters. Hit: branchFromCacheOrDB returned
+// >= 4 bytes; Empty: returned nothing or unparseable. Used to size the
+// value of bypassing the xorfilter in this call path.
 var (
 	warmerBranchHitCount   atomic.Uint64
 	warmerBranchEmptyCount atomic.Uint64
 )
 
-// WarmerBranchOutcomeStats returns process-cumulative counts of
-// branch-read outcomes from the warmer's depth walk. To get a
-// per-block delta, snapshot before/after.
+// WarmerBranchOutcomeStats returns process-cumulative counts. Snapshot
+// before/after for per-block deltas.
 func WarmerBranchOutcomeStats() (hit, empty uint64) {
 	return warmerBranchHitCount.Load(), warmerBranchEmptyCount.Load()
 }
@@ -111,11 +106,6 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	}
 }
 
-// branchFromCacheOrDB reads branch data via ctx.Branch. The Go-side
-// warmup cache that previously sat above this has been removed; the
-// aggregator-scope BranchCache (reached through SD.GetLatest) is the
-// only branch cache. The function is kept as a thin wrapper to
-// preserve the warmer-side error handling shape.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	branchData, _, err := trieCtx.Branch(prefix)
 	return branchData, err
@@ -181,16 +171,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		}
 		nextNibble := int(hashedKey[depth])
 
-		// Account/storage prefetch removed: the warmer's scope is branch
-		// warm-up only. If a leaf hash needs underlying account/storage
-		// data during fold, that data is either (a) memoized as the
-		// cell's stateHash, (b) carried in the Updates buffer from the
-		// executor, or (c) faulted on the trie's own slow path —
-		// signalling a memoization gap that wants fixing at the trie
-		// layer, not papered over by a separate prefetcher. Counters
-		// disk_sto / disk_acc on the [commitment][cache-fp] log line
-		// expose any such fall-through.
-
 		branchData = branchData[2:] // skip touch map
 
 		bitmap := binary.BigEndian.Uint16(branchData[0:2])
@@ -220,11 +200,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		// If the child cell is a leaf (holds a plain key), there is no
-		// branch below it — stop walking. Without this check the warmer
-		// pays one extra recsplit + xorfilter lookup per leaf-terminating
-		// path, all of which return empty. Mirrors what unfold does
-		// implicitly by traversing the actual trie structure.
+		// Leaf cell — no branch below. Without this the warmer pays one
+		// extra recsplit + xorfilter lookup per leaf-terminating path.
 		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
 			break
 		}

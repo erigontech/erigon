@@ -568,15 +568,6 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	// Drop every BranchCache entry whose txN > txNumUnwindTo via a
-	// single watermark pass. Self-sufficient invalidation — no
-	// dependency on changeset[CommitmentDomain] being correctly
-	// populated by upstream writers. The diffset-driven invalidation
-	// this replaced was load-bearing for cache correctness but silently
-	// broken at every write site that lacked an active
-	// SetChangesetAccumulator (frozen-block commits, beyond-reorg
-	// commits, statetest paths). The txN-tagged cache is correct by
-	// construction regardless of where the writes originate.
 	if sd.branchCache != nil {
 		sd.branchCache.UnwindTo(txNumUnwindTo)
 	}
@@ -782,10 +773,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				sd.branchCache.Invalidate(k)
 				return
 			}
-			// sd.txNum is the frontier at flush time; all entries in
-			// this batch were written at or before it. Tagging with
-			// sd.txNum lets UnwindTo evict cache entries from any
-			// unwound batch via a single watermark pass.
 			sd.branchCache.Put(k, v, uint64(step), sd.txNum, "sd.Flush")
 		}); err != nil {
 			return err
@@ -918,12 +905,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
-	// MeteredGetterWithTxN is the txN-aware sibling. Used to tag
-	// CommitmentDomain BranchCache puts so UnwindTo can evict by
-	// watermark. AggregatorRoTx implements both; the cache-relevant
-	// read path prefers this one and falls back to MeteredGetter
-	// (passing txN=0, "not tracked") when only the legacy interface
-	// is available — e.g. test stubs.
+	// MeteredGetterWithTxN exposes the txN of the read so the
+	// BranchCache entry can be tagged; falls back to MeteredGetter
+	// when only the legacy interface is implemented (test stubs).
 	type MeteredGetterWithTxN interface {
 		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
 	}
@@ -970,9 +954,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// Capture txN from the read for BranchCache tagging. Prefer the
-	// txN-aware variant; fall back to the legacy method (txN stays 0,
-	// "not tracked" — cache entry survives any UnwindTo watermark).
 	var readTxN uint64
 	switch aggTx := tx.AggTx().(type) {
 	case MeteredGetterWithTxN:
