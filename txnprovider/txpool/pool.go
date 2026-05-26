@@ -1302,6 +1302,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 	}
 
 	goodCount := 0
+	checkedCount := len(txns.Txns)
 	for i, txn := range txns.Txns {
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
@@ -1321,14 +1322,19 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
+		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
+		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
+			checkedCount = i + 1
+			break
+		}
 	}
 
 	goodTxns.Resize(uint(goodCount))
 
 	j := 0
-	for i, txn := range txns.Txns {
+	for i := 0; i < checkedCount; i++ {
 		if reasons[i] == txpoolcfg.NotSet {
-			goodTxns.Txns[j] = txn
+			goodTxns.Txns[j] = txns.Txns[i]
 			goodTxns.IsLocal[j] = txns.IsLocal[i]
 			copy(goodTxns.Senders.At(j), txns.Senders.At(i))
 			j++
