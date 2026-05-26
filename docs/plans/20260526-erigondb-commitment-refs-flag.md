@@ -172,11 +172,11 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `db/config3/config3.go`
 - Modify: `db/state/statecfg/state_schema.go`
 
-- [ ] add `const DefaultReferencesInCommitmentBranches = true` to `db/config3/config3.go` with a one-line doc pointing at `erigondb.toml`
-- [ ] replace `AggregatorSqueezeCommitmentValues` (`state_schema.go:76`) usage; seed the `Schema` literal (`:262`) from `config3.DefaultReferencesInCommitmentBranches`
-- [ ] remove the now-unused `AggregatorSqueezeCommitmentValues` const (or keep as a deprecated alias only if an external caller needs it — grep first; expected: none)
-- [ ] write/adjust a small test asserting the default schema value is `true`
-- [ ] run tests — must pass before next task
+- [x] add `const DefaultReferencesInCommitmentBranches = true` to `db/config3/config3.go` with a one-line doc pointing at `erigondb.toml`
+- [x] replace `AggregatorSqueezeCommitmentValues` (`state_schema.go:76`) usage; seed the `Schema` literal (`:262`) from `config3.DefaultReferencesInCommitmentBranches`
+- [x] remove the now-unused `AggregatorSqueezeCommitmentValues` const (grep confirmed: only used in state_schema.go; no external callers)
+- [x] write/adjust a small test asserting the default schema value is `true` (`state_schema_test.go::TestCommitmentReferencesDefault`)
+- [x] run tests — must pass before next task
 
 ### Task 3: `erigondb.toml` field + resolution semantics
 

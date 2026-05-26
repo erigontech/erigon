@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -73,7 +74,6 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	return nil
 }
 
-const AggregatorSqueezeCommitmentValues = true
 const MaxNonFuriousDirtySpacePerTx = 64 * datasize.MB
 
 var dbgCommBtIndex = dbg.EnvBool("AGG_COMMITMENT_BT", false)
@@ -258,8 +258,8 @@ var Schema = SchemaGen{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
 
-		Accessors:           AccessorHashMap,
-		ReferencesInCommitmentBranches: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: config3.DefaultReferencesInCommitmentBranches, // when true, keys are replaced in values during merge once file range reaches threshold
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
