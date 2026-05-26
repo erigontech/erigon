@@ -141,9 +141,7 @@ func (ac *aggDirtyFilesRoTx) Close() {
 
 	// Release the pinned generation; if it was the last reader, reclaim any files
 	// retired (by a concurrent merge) while we held it.
-	if ac.visible.refcnt.Add(-1) == 0 {
-		agg.reclaimDrained()
-	}
+	agg.releaseVisibleFiles(ac.visible)
 	ac.visible = nil
 }
 

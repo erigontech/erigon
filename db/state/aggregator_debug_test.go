@@ -15,7 +15,7 @@ import (
 // invariant: a debug dirtyFilesRoTx.Close() must NOT physically delete files —
 // even with canDelete=true. Files captured by a DebugBeginDirtyFilesRo are
 // protected by the pinned generation, and physical deletion is owned solely by
-// the aggregator reclaimer (reclaimDrainedLocked). A second deleter here would
+// the aggregator reclaimer (reclaimRetiredLocked). A second deleter here would
 // re-introduce the double-free this design removes. (End-to-end coverage of the
 // deferred deletion: TestAggregatorRetireDeferredWhileDebugPins.)
 func TestDirtyFilesRoTx_CloseIsNotADeleter(t *testing.T) {

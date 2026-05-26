@@ -1717,7 +1717,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	closeAndRemoveFiles(a.reclaimDrainedLocked())
+	closeAndRemoveFiles(a.reclaimRetiredLocked())
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -1944,7 +1944,7 @@ func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
 
 	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
 	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
-	// anything (deferred to reclaimDrained), so it won't re-create a file we delete.
+	// anything (deferred to reclaimRetired), so it won't re-create a file we delete.
 	var deleted []string
 	var retired []*FilesItem
 	for id, d := range at.d {
@@ -2293,38 +2293,21 @@ func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 		if a.visible.Load() == v {
 			break
 		}
-		v.refcnt.Add(-1) // next Close/publish reclaims it
+		a.releaseVisibleFiles(v) // mis-pinned a superseded generation; drop and retry
 	}
-
 	return v
 }
 
-// reclaimDrained advances the chain and physically removes the detached files
-// with dirtyFilesLock released — closeFilesAndRemove (fd close + unlink) must not
-// run under the lock on the hot reader-Close path. Safe because a detached bundle
-// is off the chain with refcnt 0 and can no longer be pinned, so its files are
-// owned exclusively by us here.
-func (a *Aggregator) reclaimDrained() {
-	a.dirtyFilesLock.Lock()
-	toDelete := a.reclaimDrainedLocked()
-	a.dirtyFilesLock.Unlock()
-	closeAndRemoveFiles(toDelete)
-}
-
-// closeAndRemoveFiles closes fds and unlinks each file from disk. Must be called
-// only on files already detached from the visibleFiles chain (no live reader).
-func closeAndRemoveFiles(files []*FilesItem) {
-	for _, f := range files {
-		f.closeFilesAndRemove()
+// releaseVisibleFiles drops a pin taken by acquireVisibleFiles. Last reader: delete files
+func (a *Aggregator) releaseVisibleFiles(v *aggregatorVisible) {
+	if v.refcnt.Add(-1) == 0 {
+		a.reclaimRetired()
 	}
 }
 
-// reclaimDrainedLocked detaches the retired files of every fully-drained bundle
-// from the oldest end of the visibleFiles chain and returns them; the caller does
-// the actual closeFilesAndRemove (ideally after releasing dirtyFilesLock).
-// Reclaiming oldest-first guarantees that when a bundle's refcnt is 0 nothing
-// older still references its retired files. Must hold dirtyFilesLock.
-func (a *Aggregator) reclaimDrainedLocked() (toDelete []*FilesItem) {
+// reclaimRetiredLocked oldest-first traverse linked-list of visibleFiles objects while `refcnt == 0`
+// collecting retired files for physical delete. Physical delete happen out of `dirtyFilesLock`
+func (a *Aggregator) reclaimRetiredLocked() (toDelete []*FilesItem) {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
 		toDelete = append(toDelete, h.retired...)
@@ -2332,6 +2315,19 @@ func (a *Aggregator) reclaimDrainedLocked() (toDelete []*FilesItem) {
 		a.oldestVisible = h.next
 	}
 	return toDelete
+}
+
+func (a *Aggregator) reclaimRetired() {
+	a.dirtyFilesLock.Lock()
+	toDelete := a.reclaimRetiredLocked()
+	a.dirtyFilesLock.Unlock()
+	closeAndRemoveFiles(toDelete)
+}
+
+func closeAndRemoveFiles(files []*FilesItem) {
+	for _, f := range files {
+		f.closeFilesAndRemove()
+	}
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
@@ -2547,9 +2543,7 @@ func (at *AggregatorRoTx) Close() {
 	}
 
 	if at.visible != nil {
-		if at.visible.refcnt.Add(-1) == 0 {
-			a.reclaimDrained()
-		}
+		a.releaseVisibleFiles(at.visible)
 		at.visible = nil
 	}
 }
