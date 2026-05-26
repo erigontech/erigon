@@ -2331,8 +2331,7 @@ func (a *Aggregator) reclaimDrained() {
 
 // reclaimDrainedLocked deletes the retired files. Traversing visibleFiles linked-list. Reclaiming
 // oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
-// references its retired files. Single caller of closeFilesAndRemove on the main
-// path → at-most-once deletion without any per-file flag.
+// references its retired files. Single caller of closeFilesAndRemove
 func (a *Aggregator) reclaimDrainedLocked() {
 	cur := a.visible.Load()
 	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
