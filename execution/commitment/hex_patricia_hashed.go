@@ -1681,6 +1681,18 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 	// dealing with terminal full node
 	if fullNode, ok := nextNode.(*trie.FullNode); ok && row < hph.activeRows {
+		nonEmpty := 0
+		for col := 0; col < 16; col++ {
+			if !hph.grid[hph.activeRows-1][col].IsEmpty() {
+				nonEmpty++
+			}
+		}
+		depthAtRow := int16(-1)
+		if row > 0 {
+			depthAtRow = hph.depths[row-1]
+		}
+		fmt.Printf("[WITNESS_DBG] terminal FullNode key=%x keyLen=%d row=%d activeRows=%d depthAtLastRow=%d depthAtActiveRow=%d nonEmptyChildren=%d\n",
+			hashedKey, len(hashedKey), row, hph.activeRows, depthAtRow, hph.depths[hph.activeRows-1], nonEmpty)
 		for col := 0; col < 16; col++ {
 			currentCell := &hph.grid[hph.activeRows-1][col]
 			if currentCell.IsEmpty() {
