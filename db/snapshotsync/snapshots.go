@@ -1142,7 +1142,10 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To},
+				frozen: false, //disable `frozen` optimization. because it doesn't allow Prune old files on Minimal node. See: https://github.com/erigontech/erigon/pull/21397
+				//frozen: s.snCfg.IsFrozen(f),
+			}
 		}
 
 		if open {

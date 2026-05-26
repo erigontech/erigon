@@ -334,7 +334,8 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		segType: targetFile.Type,
 		version: targetFile.Version,
 		Range:   Range{targetFile.From, targetFile.To},
-		frozen:  m.snCfg.IsFrozen(targetFile),
+		frozen:  false, //disable `frozen` optimization. because it doesn't allow Prune old files on Minimal node. See: https://github.com/erigontech/erigon/pull/21397
+		//frozen: m.snCfg.IsFrozen(targetFile),
 	}
 
 	err = sn.Open(snapDir)
