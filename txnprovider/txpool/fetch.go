@@ -675,7 +675,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			return nil
 		}
 
-		f.pool.AddRemoteTxnsFromPeer(ctx, txns, req.PeerId, sentryClient)
+		f.pool.AddRemoteTxns(ctx, txns, req.PeerId, sentryClient)
 	default:
 		defer f.logger.Trace("[txpool] dropped p2p message", "id", req.Id)
 	}

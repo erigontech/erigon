@@ -188,7 +188,7 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 	slots.Append(&bad, a0[:], false)
 	slots.Append(&good, a1[:], false)
 
-	pool.AddRemoteTxnsFromPeer(ctx, slots, attackerPeerID, sentryClient)
+	pool.AddRemoteTxns(ctx, slots, attackerPeerID, sentryClient)
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	// kickKZGOffenders fires PenalizePeer in a goroutine; wait for it.

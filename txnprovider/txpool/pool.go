@@ -75,8 +75,7 @@ type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
-	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
-	AddRemoteTxnsFromPeer(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
+	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -554,10 +553,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 // Called with p.lock held; the actual PenalizePeer RPC is dispatched off-lock to
 // avoid blocking the pool on sentry I/O.
 func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason) {
-	var (
-		offenders []remoteSource
-		kicked    map[[64]byte]struct{}
-	)
+	var offenders []remoteSource
 	for i, r := range reasons {
 		if r != txpoolcfg.UnmatchedBlobTxExt {
 			continue
@@ -569,15 +565,6 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.Disca
 		if src.peerID == nil || src.sentry == nil {
 			continue
 		}
-		var key [64]byte
-		copy(key[:], gointerfaces.ConvertH512ToBytes(src.peerID))
-		if _, seen := kicked[key]; seen {
-			continue
-		}
-		if kicked == nil {
-			kicked = map[[64]byte]struct{}{}
-		}
-		kicked[key] = struct{}{}
 		offenders = append(offenders, src)
 	}
 	if len(offenders) == 0 {
@@ -943,11 +930,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots) {
-	p.AddRemoteTxnsFromPeer(ctx, newTxns, nil, nil)
-}
-
-func (p *TxPool) AddRemoteTxnsFromPeer(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
+func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
