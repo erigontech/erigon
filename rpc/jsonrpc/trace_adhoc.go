@@ -1146,8 +1146,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if traceConfig != nil {
 		blockOverrides = traceConfig.BlockOverrides
 	}
-	effectiveHeader := blockOverrides.OverrideHeader(header)
-	baseFee := effectiveHeader.BaseFee
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx.GasLimit = math.MaxUint64
+	blockCtx.MaxGasLimit = true
+	if err := blockOverrides.Override(&blockCtx); err != nil {
+		return nil, err
+	}
+
+	baseFee := &blockCtx.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1156,26 +1162,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-
-	blockCtx := transactions.NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
-
 	var precompiles vm.PrecompiledContracts
-	if traceConfig != nil {
-		if traceConfig.BlockOverrides != nil {
-			if err := traceConfig.BlockOverrides.Override(&blockCtx); err != nil {
-				return nil, err
-			}
-		}
-		if traceConfig.StateOverrides != nil {
-			rules := blockCtx.Rules(chainConfig)
-			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return nil, err
-			}
+	if traceConfig != nil && traceConfig.StateOverrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+			return nil, err
 		}
 	}
 
