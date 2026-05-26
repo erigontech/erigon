@@ -1621,21 +1621,39 @@ func (result *execResult) calcFees(
 		}
 	}
 	// Worker writes coinbase/burnt to TxOut when sender matches (gas-debit
-	// applied to sender under shouldDelayFeeCalc=true).
+	// applied to sender under shouldDelayFeeCalc=true). Track Nonce / CodeHash
+	// alongside Balance so the EIP-161 empty-removal check below sees the
+	// worker's post-write coinbase state, not the stale pre-tx snapshot.
+	coinbaseNonce := uint64(0)
+	coinbaseHasCodeHashWrite := false
+	if coinbaseAcc != nil {
+		coinbaseNonce = coinbaseAcc.Nonce
+	}
+	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	for _, w := range result.TxOut {
-		if w.Path != state.BalancePath {
+		if w.Address != result.Coinbase && (!hasBurnt || w.Address != burntAddr) {
 			continue
 		}
-		v, ok := w.Val.(uint256.Int)
-		if !ok {
-			continue
-		}
-		switch w.Address {
-		case result.Coinbase:
-			newCoinbaseBalance = v
-		case burntAddr:
-			if hasBurnt {
+		switch w.Path {
+		case state.BalancePath:
+			v, ok := w.Val.(uint256.Int)
+			if !ok {
+				continue
+			}
+			if w.Address == result.Coinbase {
+				newCoinbaseBalance = v
+			} else {
 				newBurntBalance = v
+			}
+		case state.NoncePath:
+			if w.Address == result.Coinbase {
+				if n, ok := w.Val.(uint64); ok {
+					coinbaseNonce = n
+				}
+			}
+		case state.CodeHashPath:
+			if w.Address == result.Coinbase {
+				coinbaseHasCodeHashWrite = true
 			}
 		}
 	}
@@ -1650,9 +1668,13 @@ func (result *execResult) calcFees(
 	// the coinbase must be "touched" so the commitment calculator sees the
 	// empty-account delete. Matches serial executor's AddBalance(coinbase, 0)
 	// → TouchAccount → MakeWriteSet emits a SelfDestructPath delete.
+	//
+	// Use the worker's post-write Nonce / CodeHash (not pre-tx coinbaseAcc) so
+	// that a sender==coinbase tx whose worker wrote a non-empty Nonce isn't
+	// mistakenly treated as empty here when FeeTipped==0.
 	emptyRemoval := chainRules.IsSpuriousDragon
 	coinbaseEmptyPre := coinbaseAcc == nil ||
-		(coinbaseAcc.Balance.IsZero() && coinbaseAcc.Nonce == 0 && coinbaseAcc.IsEmptyCodeHash())
+		(coinbaseAcc.Balance.IsZero() && coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite)
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance ||
 		(emptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero())
 
@@ -2298,8 +2320,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Credit tip pre-validate for regular TXs so the validator sees the
-		// post-tip coinbase write. Downstream txs that read coinbase pre-tip
-		// invalidate through the standard version-mismatch path.
+		// post-tip coinbase write. Caveat: the tip write is stamped at the
+		// same (TxIndex, Incarnation) as the worker's coinbase write, so a
+		// downstream tx that read coinbase via versionMap between the worker
+		// write and the tip write records the same Version the validator
+		// observes — the version-only validator will NOT catch that case.
+		// In practice this is unusual: only sender==coinbase produces a
+		// worker coinbase write, and downstream BALANCE(coinbase) reads
+		// across this window are rare. Value-aware validation would close
+		// the gap if it surfaces.
 		if txVersion.TxIndex >= 0 && !txTask.IsBlockEnd() && txResult != nil && txResult.Err == nil {
 			taskVer, ok := txResult.Task.(*taskVersion)
 			if !ok {

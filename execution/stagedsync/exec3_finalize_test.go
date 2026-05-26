@@ -526,12 +526,11 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 }
 
 // TestFinalizeTxSimple_BasicFeeCredit verifies that the apply-loop tip
-// credit adds FeeTipped to the coinbase balance from the versionMap.
-// Previously t.Skip'd under #20962: the prior code's vsReader at txIndex
-// (floor(txIdx-1)) didn't see a prior write stamped at TxIndex=0 when
-// the test ran at TxIndex=0. The new apply-loop step reads at
-// vm.Read(..., txIndex+1) = floor(txIndex), which includes the prior
-// write — same as IBS AddBalance.
+// credit adds FeeTipped to the coinbase balance. calcFees reads at
+// vm.Read(..., txIndex) = floor(txIndex-1), i.e. strictly prior tx; for
+// the test's TxIndex=0 case that falls through to stateReader (where
+// runFinalizeTx places the prior balance), and the worker's
+// current-tx execution effects come in via the TxOut scan.
 func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
 	t.Parallel()
 	s := simpleTransferScenario()
