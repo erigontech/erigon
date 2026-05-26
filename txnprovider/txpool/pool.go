@@ -76,6 +76,7 @@ type Pool interface {
 
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots)
+	AddRemoteTxnsFromPeer(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -89,6 +90,13 @@ type Pool interface {
 
 var _ Pool = (*TxPool)(nil) // compile-time interface check
 var _ txnprovider.TxnProvider = (*TxPool)(nil)
+
+// remoteSource carries the peer that delivered a remote txn slot so
+// processRemoteTxns can kick that peer on KZG-verify failure.
+type remoteSource struct {
+	peerID PeerID
+	sentry sentryproto.SentryClient
+}
 
 // TxPool - holds all pool-related data structures and lock-based tiny methods
 // most of logic implemented by pure tests-friendly functions
@@ -111,6 +119,7 @@ type TxPool struct {
 	//   - batch notifications about new txns (reduced P2P spam to other nodes about txns propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
+	unprocessedRemotePeers  []remoteSource                                  // per-slot peer source for KZG-fail kick
 	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
@@ -496,10 +505,11 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	_, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
+	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
 	if err != nil {
 		return err
 	}
+	p.kickKZGOffenders(ctx, validateReasons)
 
 	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
@@ -534,9 +544,42 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 
 	p.unprocessedRemoteTxns.Resize(0)
+	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
 	p.unprocessedRemoteByHash = map[string]int{}
 
 	return nil
+}
+
+// kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
+func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason) {
+	var kicked map[string]struct{}
+	for i, r := range reasons {
+		if r != txpoolcfg.UnmatchedBlobTxExt {
+			continue
+		}
+		if i >= len(p.unprocessedRemotePeers) {
+			continue
+		}
+		src := p.unprocessedRemotePeers[i]
+		if src.peerID == nil || src.sentry == nil {
+			continue
+		}
+		key := string(gointerfaces.ConvertH512ToBytes(src.peerID))
+		if _, seen := kicked[key]; seen {
+			continue
+		}
+		if kicked == nil {
+			kicked = map[string]struct{}{}
+		}
+		kicked[key] = struct{}{}
+		p.logger.Debug("[txpool] penalizing peer for KZG-fail blob txn", "peer", src.peerID)
+		if _, err := src.sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+			PeerId:  src.peerID,
+			Penalty: sentryproto.PenaltyKind_Kick,
+		}); err != nil {
+			p.logger.Debug("[txpool] PenalizePeer failed", "err", err)
+		}
+	}
 }
 
 func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
@@ -886,7 +929,11 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
+func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots) {
+	p.AddRemoteTxnsFromPeer(ctx, newTxns, nil, nil)
+}
+
+func (p *TxPool) AddRemoteTxnsFromPeer(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -897,6 +944,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
+	src := remoteSource{peerID: peerID, sentry: sentry}
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])
 		_, ok := p.unprocessedRemoteByHash[hashS]
@@ -905,6 +953,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		}
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
+		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
 }
 
