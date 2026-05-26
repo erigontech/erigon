@@ -274,6 +274,8 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	if cfg.beaconCfg.GetCurrentStateVersion(epoch).AfterOrEqual(clparams.GloasVersion) {
 		sn := hexutil.Uint64(nextSlot)
 		payloadAttributes.SlotNumber = &sn
+		tgl := hexutil.Uint64(cfg.beaconCfg.DefaultBuilderGasLimit)
+		payloadAttributes.TargetGasLimit = &tgl
 	}
 	e := &beaconevents.PayloadAttributesData{
 		Version: cfg.beaconCfg.GetCurrentStateVersion(epoch).String(),
