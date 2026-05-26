@@ -28,6 +28,8 @@ type AggOpts struct { //nolint:gocritic
 	erigondbDomainStepsInFrozenFile uint64
 	reorgBlockDepth                 uint64
 
+	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
 	disableFsync    bool // for tests speed
@@ -76,6 +78,10 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 
 	a.savedSalt = salt
 
+	if opts.referencesInCommitmentBranches != nil {
+		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
+	}
+
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
 	}
@@ -120,10 +126,13 @@ func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	return opts
 }
 
-// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile).
+// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile,
+// references_in_commitment_branches).
 func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint:gocritic
 	opts.stepSize = s.StepSize
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
+	refs := s.RefsInCommitmentBranches()
+	opts.referencesInCommitmentBranches = &refs
 	return opts
 }
 

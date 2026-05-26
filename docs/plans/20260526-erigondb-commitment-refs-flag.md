@@ -202,11 +202,11 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `execution/state/genesiswrite/genesis_write.go` (`:357`), `node/eth/backend.go` (`:1338`)
 - Modify: `db/state/aggregator_test.go` / `db/test/*` as needed
 
-- [ ] add an apply helper that writes the resolved bool to global `statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches` (covers rebuild paths `squeeze.go:780,1059` + next `Configure`) and, when `a.configured`, live `a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches`
-- [ ] call the helper from `ReloadErigonDBSettings` (primary site; runs each start before execution via `stage_snapshots.go:213`)
-- [ ] audit each standalone entry point above: if it reads commitment, apply the resolved flag (else it silently falls back to default `true`)
-- [ ] write tests: toml `false` → resolve → assert it lands on global `statecfg.Schema.CommitmentDomain` and on a live `a.d[CommitmentDomain]`
-- [ ] run tests — must pass before next task
+- [x] add an apply helper that writes the resolved bool to global `statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches` (covers rebuild paths `squeeze.go:780,1059` + next `Configure`) and, when `a.configured`, live `a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches` — `Aggregator.applyReferencesInCommitmentBranches` (`aggregator.go`)
+- [x] call the helper from `ReloadErigonDBSettings` (primary site; runs each start before execution via `stage_snapshots.go:213`)
+- [x] audit each standalone entry point above: if it reads commitment, apply the resolved flag (else it silently falls back to default `true`) — all aggregator-constructing entry points funnel through `WithErigonDBSettings → Open`, which now captures the resolved flag into `AggOpts.referencesInCommitmentBranches` and applies it before `ConfigureDomains`; `state_history.go` builds only a `History` (no commitment branch read), `step_cmd.go` uses only `StepSize`, and `commitment.go` rebuild explicitly controls the flag itself (Task 9) — no per-site edits needed
+- [x] write tests: toml `false` → resolve → assert it lands on global `statecfg.Schema.CommitmentDomain` and on a live `a.d[CommitmentDomain]` — `aggregator_refs_test.go` (`ReloadErigonDBSettings` path + builder `Open` path, false and true)
+- [x] run tests — must pass before next task
 
 ### Task 5: Carry parsed file version on `FilesItem`
 

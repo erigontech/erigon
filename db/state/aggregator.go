@@ -280,6 +280,16 @@ func (a *Aggregator) SetErigondbDomainStepsInFrozenFile(steps uint64) {
 func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v bool) {
 	a.d[domain].ReferencesInCommitmentBranches = v
 }
+
+// applyReferencesInCommitmentBranches threads the resolved erigondb.toml flag into the global
+// statecfg.Schema (so rebuild paths and the next Configure pick it up) and, once domains are
+// configured, into the live commitment domain.
+func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
+	statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = refs
+	if a.configured && a.d[kv.CommitmentDomain] != nil {
+		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
+	}
+}
 func (a *Aggregator) Cfg(domain kv.Domain) statecfg.DomainCfg { return a.d[domain].DomainCfg }
 
 func (a *Aggregator) reloadSalt() error {
@@ -320,6 +330,7 @@ func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
 	}
 	a.stepSize.Store(settings.StepSize)
 	a.stepsInFrozenFile.Store(settings.StepsInFrozenFile)
+	a.applyReferencesInCommitmentBranches(settings.RefsInCommitmentBranches())
 
 	if a.configured && (settings.StepSize != oldStepSize || settings.StepsInFrozenFile != oldStepsInFrozenFile) {
 		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
