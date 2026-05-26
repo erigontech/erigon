@@ -50,12 +50,9 @@ func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
-// gatedPatriciaContext is a mock PatriciaContext for warmup tests with a
-// controllable in-flight window. When sleep>0 and descend is set, Branch sleeps and
-// returns a blob that makes warmupKey descend on nibble 0, so a worker keeps re-reading
-// its arena-backed hashedKey for many levels — staying in-flight across batch
-// boundaries. When entered/release are set, Branch signals entered then blocks on
-// release for deterministic single-worker ordering.
+// gatedPatriciaContext is a mock PatriciaContext with a controllable in-flight window:
+// sleep+descend keep a worker re-reading its arena-backed key across batch boundaries,
+// while entered/release gate a worker inside Branch for deterministic ordering.
 type gatedPatriciaContext struct {
 	sleep   time.Duration
 	descend bool
@@ -74,9 +71,8 @@ func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		time.Sleep(g.sleep)
 	}
 	if g.descend {
-		// 2-byte touch map + bitmap 0x0001 (child nibble 0 present) + fieldBits 0x00 (no
-		// extension): warmupKey advances depth++ while the next nibble is 0, re-reading
-		// hashedKey at every level.
+		// touch map + bitmap 0x0001 (child nibble 0) + fieldBits 0x00: warmupKey
+		// descends on nibble 0, re-reading hashedKey at every level.
 		return []byte{0, 0, 0, 1, 0, 0}, 0, nil
 	}
 	return []byte{0, 0, 0, 0}, 0, nil
@@ -87,11 +83,8 @@ func (g *gatedPatriciaContext) Account(plainKey []byte) (*Update, error)      { 
 func (g *gatedPatriciaContext) Storage(plainKey []byte) (*Update, error)      { return nil, nil }
 func (g *gatedPatriciaContext) TxNum() uint64                                 { return 0 }
 
-// slowCtxFactory makes the first worker a slow straggler (sleeps per Branch and descends
-// deep, holding one low-offset key across many batch resets) while the rest run fast, so
-// the producer's arena reset + next-batch writes race the straggler's in-flight reads —
-// the documented bug. A uniform delay would not race: every worker would lag equally and
-// no two would touch the same arena offset concurrently.
+// slowCtxFactory makes the first worker a slow straggler that holds one key across many
+// batch resets while the rest run fast, so the producer's arena reset races its in-flight reads.
 func slowCtxFactory(stall time.Duration) TrieContextFactory {
 	var n atomic.Int32
 	return func() (PatriciaContext, func()) {
@@ -110,9 +103,8 @@ func gatedCtxFactory(entered, release chan struct{}) TrieContextFactory {
 	}
 }
 
-// genNibbleKeys produces n unique keys of keyLen bytes where every byte is a valid
-// nibble (0x00-0x0F). The trailing nibbles encode the index so keys are distinct,
-// and the fixed code never corrupts them (the race detector, not a panic, is the signal).
+// genNibbleKeys produces n unique keyLen-byte keys whose every byte is a valid nibble
+// (0x00-0x0F), with the index encoded in the trailing nibbles so keys are distinct.
 func genNibbleKeys(n, keyLen int) [][]byte {
 	keys := make([][]byte, n)
 	for i := 0; i < n; i++ {
@@ -127,11 +119,9 @@ func genNibbleKeys(n, keyLen int) [][]byte {
 	return keys
 }
 
-// TestHashSort_WarmupArenaNoRace reproduces the latent data race on the shared key
-// arena: at a batch boundary HashSort resets t.byteArena while async warmup workers
-// are still reading key slices that alias it. Keys are valid nibbles, so on current
-// code the symptom is the -race report on t.byteArena (and, once EncodeKeyV2 is the
-// warmup encoder, the nibble panic). After the in-flight barrier fix it must be clean.
+// TestHashSort_WarmupArenaNoRace reproduces the arena data race: at a batch boundary
+// HashSort resets t.byteArena while async warmup workers still read key slices that alias
+// it. The -race detector is the signal — red before the barrier fix, clean after.
 func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 	t.Parallel()
 
@@ -153,9 +143,7 @@ func TestHashSort_WarmupArenaNoRace(t *testing.T) {
 			ctx := context.Background()
 			warmuper := NewWarmuper(ctx, WarmupConfig{
 				Enabled: true,
-				// The straggler must keep reading its arena-backed key across the whole
-				// producer run (which the -race detector slows ~10x); a per-level stall
-				// this large keeps one worker in-flight while the arena is reset+rewritten.
+				// Large per-level stall keeps the straggler in-flight across the arena reset.
 				CtxFactory: slowCtxFactory(2 * time.Millisecond),
 				NumWorkers: 4,
 				MaxDepth:   64,
@@ -225,8 +213,9 @@ func TestWarmuper_WaitForInFlightKeysThenRun(t *testing.T) {
 	require.NoError(t, w.Wait())
 }
 
-// TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel pins that a cancelled context can not
-// strand the method: it returns promptly via a ctx.Done arm and still runs fn.
+// TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel pins that a cancelled context returns
+// promptly via a ctx.Done arm without running fn, since resetting the arena while a worker
+// is still in-flight would race.
 func TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel(t *testing.T) {
 	t.Parallel()
 
@@ -259,10 +248,91 @@ func TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("WaitForInFlightKeysThenRun hung after ctx cancel")
 	}
-	require.True(t, fnRan.Load(), "fn must still run on the ctx-cancel path")
+	require.False(t, fnRan.Load(), "fn must not run on ctx-cancel: resetting the arena while a worker is still in-flight would race")
 
 	close(release) // unblock the worker so it observes ctx.Done and exits
 	w.CloseAndWait()
+}
+
+// TestWarmuper_WaitForInFlightKeysThenRun_ParksAllWorkers pins the "park, don't count"
+// property: with one worker held mid-key and another idle, fn must not run until the held
+// worker finishes — a worker that parked on the first marker cannot drain the second.
+func TestWarmuper_WaitForInFlightKeysThenRun_ParksAllWorkers(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	ctx := context.Background()
+	w := NewWarmuper(ctx, WarmupConfig{
+		Enabled:    true,
+		CtxFactory: gatedCtxFactory(entered, release),
+		NumWorkers: 2,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	})
+	w.Start()
+
+	w.WarmKey([]byte{0x01, 0x02, 0x03, 0x04}, 0)
+	<-entered // one worker is inside Branch holding its in-flight key; the other is idle
+
+	var fnRanAfterKey atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		w.WaitForInFlightKeysThenRun(func() {
+			fnRanAfterKey.Store(w.keysProcessed.Load() == 1)
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("WaitForInFlightKeysThenRun returned while a worker was still in-flight (markers counted, not parked)")
+	case <-time.After(50 * time.Millisecond):
+	}
+	require.Zero(t, w.keysProcessed.Load(), "key must still be in flight before release")
+
+	close(release) // the held worker finishes its key, then consumes the second marker
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitForInFlightKeysThenRun did not return after release")
+	}
+	require.True(t, fnRanAfterKey.Load(), "fn must run only after every worker parked")
+	require.EqualValues(t, 1, w.keysProcessed.Load())
+
+	require.NoError(t, w.Wait())
+}
+
+// TestHashSort_NilWarmuper exercises the nil-warmuper batch-boundary path (the else branch
+// that resets the arena directly), crossing the in-loop reset for both modes.
+func TestHashSort_NilWarmuper(t *testing.T) {
+	t.Parallel()
+
+	const numKeys = 20_000
+	const keyLen = 64
+
+	for _, mode := range []Mode{ModeDirect, ModeUpdate} {
+		name := "ModeDirect"
+		if mode == ModeUpdate {
+			name = "ModeUpdate"
+		}
+		t.Run(name, func(t *testing.T) {
+			ut := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+			for _, k := range genNibbleKeys(numKeys, keyLen) {
+				ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
+			}
+			require.EqualValues(t, numKeys, ut.Size())
+
+			visited := 0
+			err := ut.HashSort(context.Background(), nil, func(hk, pk []byte, _ *Update) error {
+				visited++
+				return nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, numKeys, visited)
+		})
+	}
 }
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {

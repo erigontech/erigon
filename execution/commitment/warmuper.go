@@ -334,15 +334,11 @@ func (w *Warmuper) DrainPending() {
 	}
 }
 
-// WaitForInFlightKeysThenRun drops queued warmups, waits until every worker has
-// finished its in-flight key (parking them at a barrier), runs fn at that safe
-// point — when no worker still references a previously submitted key slice — then
-// releases the workers. Used to reset the shared key arena between batches.
-//
-// Contract: call only from the single HashSort producer goroutine (the same one
-// that calls WarmKey). NOT safe to call concurrently with Close()/CloseAndWait(),
-// which close w.work — a send on a closed channel would panic. ctx cancellation
-// is safe (it does not close w.work).
+// WaitForInFlightKeysThenRun parks every worker once it has finished its in-flight key,
+// runs fn at that safe point (no worker still references a submitted key slice), then
+// releases the workers; on context cancellation it releases the workers without running
+// fn, since the arena cannot be reset while a worker may still be reading it.
+// Call only from the single HashSort producer goroutine; not safe to call concurrently with Close.
 func (w *Warmuper) WaitForInFlightKeysThenRun(fn func()) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		fn()
@@ -360,7 +356,6 @@ func (w *Warmuper) WaitForInFlightKeysThenRun(fn func()) {
 			sent++
 		case <-w.ctx.Done():
 			close(b.resume)
-			fn()
 			return
 		}
 	}
@@ -369,7 +364,6 @@ func (w *Warmuper) WaitForInFlightKeysThenRun(fn func()) {
 		case <-b.reached:
 		case <-w.ctx.Done():
 			close(b.resume)
-			fn()
 			return
 		}
 	}

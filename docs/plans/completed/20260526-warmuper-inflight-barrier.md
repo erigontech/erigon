@@ -321,6 +321,18 @@ This fix lands on `main`, where the race is latent; #21146 inherits it on merge 
 `TestHashSort_WarmupArenaNoRace` fails on pre-fix code and passes after; the deterministic contract
 test `TestWarmuper_WaitForInFlightKeysThenRun` pins the barrier guarantee.
 
+## Post-review correction
+
+Code review found that running `fn` on the `ctx.Done()` arms (as originally planned in Task 2 /
+Technical Details) reintroduced the very race the barrier prevents: on cancel the workers are not
+parked, so resetting `byteArena` lets the next `arenaAlloc` (ETL only checks `Quit` every 1024
+iterations) overwrite bytes a straggler is still reading. Fixed by **not** running `fn` on either
+cancel arm — `WaitForInFlightKeysThenRun` now releases the workers and returns without resetting
+the arena (the arena is reset at the next `HashSort` header anyway, and skipping the reset lets
+`arenaAlloc` keep appending past the in-flight region). `TestWarmuper_WaitForInFlightKeysThenRun_CtxCancel`
+now asserts `fn` does **not** run on cancel; added `TestWarmuper_WaitForInFlightKeysThenRun_ParksAllWorkers`
+(deterministic multi-worker park-not-count) and `TestHashSort_NilWarmuper` (nil-warmuper boundary).
+
 ## Post-Completion
 *Manual / external — no checkboxes*
 
