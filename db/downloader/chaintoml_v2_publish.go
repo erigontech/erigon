@@ -26,23 +26,33 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// ComputeENRFields derives the DomainSteps and MergeDepth values the ENR
-// advertises from a V2 manifest. See chaintoml-v2-spec-baseline §4.2:
+// ComputeENRFields derives the DomainSteps, MergeDepth and MinStep
+// values the ENR advertises from a V2 manifest. See
+// chaintoml-v2-spec-baseline §4.2:
 //
 //   - DomainSteps: the largest Coverage[1] across all domains. Zero if
 //     there are no domains.
 //   - MergeDepth: the size in steps of the largest canonical file listed.
 //     Zero if there are no canonical files.
-func ComputeENRFields(manifest *ChainTomlV2) (domainSteps, mergeDepth uint64) {
+//   - MinStep: the prune-window floor — the smallest Coverage[0] across
+//     all domains. Consumers requesting older history can skip publishers
+//     whose floor exceeds the step they want. Zero when the publisher
+//     advertises full history or when no domains are present.
+func ComputeENRFields(manifest *ChainTomlV2) (domainSteps, mergeDepth, minStep uint64) {
 	if manifest == nil {
-		return 0, 0
+		return 0, 0, 0
 	}
+	floorSeen := false
 	for _, dm := range manifest.Domains {
 		if dm == nil {
 			continue
 		}
 		if dm.Coverage[1] > domainSteps {
 			domainSteps = dm.Coverage[1]
+		}
+		if !floorSeen || dm.Coverage[0] < minStep {
+			minStep = dm.Coverage[0]
+			floorSeen = true
 		}
 		for _, f := range dm.Files {
 			size := f.Range[1] - f.Range[0]
@@ -51,7 +61,7 @@ func ComputeENRFields(manifest *ChainTomlV2) (domainSteps, mergeDepth uint64) {
 			}
 		}
 	}
-	return domainSteps, mergeDepth
+	return domainSteps, mergeDepth, minStep
 }
 
 // PublishChainTomlV2 is a one-shot wrapper around RollingV2Publisher

@@ -808,11 +808,13 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 		} else if updater != nil {
 			// Defensive re-assert so the ENR keeps pointing at the last V2
 			// info-hash. Normally a no-op, since PublishChainToml above
-			// runs with a nil updater in V2 mode.
+			// runs with a nil updater in V2 mode. V2InfoHash mirrors
+			// InfoHash for v2-aware consumers.
 			updater(enr.ChainToml{
 				AuthoritativeBlocks: authoritativeBlocksFromCfg(d.cfg.ChainName),
 				KnownBlocks:         authoritativeBlocksFromCfg(d.cfg.ChainName),
 				InfoHash:            lastV2,
+				V2InfoHash:          lastV2,
 			})
 		}
 	}

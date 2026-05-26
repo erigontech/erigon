@@ -65,24 +65,45 @@ func seedInventory(t *testing.T) *snapshotinv.Inventory {
 func TestComputeENRFieldsFromManifest(t *testing.T) {
 	inv := seedInventory(t)
 	manifest := GenerateV2(inv)
-	domainSteps, mergeDepth := ComputeENRFields(manifest)
+	domainSteps, mergeDepth, minStep := ComputeENRFields(manifest)
 
 	// accounts has two canonical files [0,2048) + [2048,4096); Coverage[1] = 4096.
 	require.Equal(t, uint64(4096), domainSteps, "DomainSteps = max Coverage[1] across domains")
 	// Largest file is 2048 steps wide.
 	require.Equal(t, uint64(2048), mergeDepth, "MergeDepth = largest canonical file size")
+	// Floor is the smallest Coverage[0] across domains; full-history publisher has 0.
+	require.Zero(t, minStep, "MinStep = floor of advertised step range; 0 for a full-history publisher")
 }
 
 func TestComputeENRFieldsEmptyManifest(t *testing.T) {
 	empty := &ChainTomlV2{Version: ChainTomlV2Version}
-	domainSteps, mergeDepth := ComputeENRFields(empty)
+	domainSteps, mergeDepth, minStep := ComputeENRFields(empty)
 	require.Zero(t, domainSteps)
 	require.Zero(t, mergeDepth)
+	require.Zero(t, minStep)
 
 	var nilManifest *ChainTomlV2
-	domainSteps, mergeDepth = ComputeENRFields(nilManifest)
+	domainSteps, mergeDepth, minStep = ComputeENRFields(nilManifest)
 	require.Zero(t, domainSteps)
 	require.Zero(t, mergeDepth)
+	require.Zero(t, minStep)
+}
+
+// TestComputeENRFields_MinStepFromFloor confirms MinStep reflects a
+// pruned publisher's retention floor: with the smallest Coverage[0] at
+// step 1000, the ENR advertises MinStep=1000 so consumers wanting
+// older history skip this peer.
+func TestComputeENRFields_MinStepFromFloor(t *testing.T) {
+	pruned := &ChainTomlV2{
+		Version: ChainTomlV2Version,
+		Domains: map[string]*DomainManifest{
+			"accounts": {Coverage: [2]uint64{1000, 4096}},
+			"storage":  {Coverage: [2]uint64{1200, 4096}},
+		},
+	}
+	_, _, minStep := ComputeENRFields(pruned)
+	require.Equal(t, uint64(1000), minStep,
+		"MinStep is the smallest Coverage[0] — the lowest floor a consumer can request from this peer")
 }
 
 func TestPublishChainTomlV2Roundtrip(t *testing.T) {

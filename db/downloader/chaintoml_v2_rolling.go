@@ -714,7 +714,10 @@ func (r *RollingV2Publisher) Publish(
 	}
 
 	if enrUpdater != nil {
-		domainSteps, mergeDepth := ComputeENRFields(manifest)
+		domainSteps, mergeDepth, minStep := ComputeENRFields(manifest)
+		// V2InfoHash mirrors InfoHash so v2-capable consumers can prefer
+		// the typed manifest. InfoHash stays populated for back-compat
+		// with consumers that only know the legacy field.
 		enrUpdater(enr.ChainToml{
 			AuthoritativeBlocks: authoritativeBlocks,
 			KnownBlocks:         authoritativeBlocks,
@@ -722,6 +725,8 @@ func (r *RollingV2Publisher) Publish(
 			DomainSteps:         domainSteps,
 			MergeDepth:          mergeDepth,
 			ContentUCANHash:     contentUCANHash,
+			V2InfoHash:          spec.InfoHash,
+			MinStep:             minStep,
 		})
 	}
 

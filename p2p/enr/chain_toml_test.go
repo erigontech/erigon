@@ -1,10 +1,13 @@
 package enr
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func TestGetSetChainToml(t *testing.T) {
@@ -13,6 +16,8 @@ func TestGetSetChainToml(t *testing.T) {
 		KnownBlocks:         234567890,
 		InfoHash:            [20]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14},
 		ContentUCANHash:     [20]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e},
+		V2InfoHash:          [20]byte{0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34},
+		MinStep:             4096,
 	}
 
 	var r Record
@@ -24,6 +29,8 @@ func TestGetSetChainToml(t *testing.T) {
 	assert.Equal(t, ct.KnownBlocks, ct2.KnownBlocks)
 	assert.Equal(t, ct.InfoHash, ct2.InfoHash)
 	assert.Equal(t, ct.ContentUCANHash, ct2.ContentUCANHash)
+	assert.Equal(t, ct.V2InfoHash, ct2.V2InfoHash)
+	assert.Equal(t, ct.MinStep, ct2.MinStep)
 }
 
 func TestChainTomlENRKey(t *testing.T) {
@@ -49,6 +56,42 @@ func TestChainTomlNotFound(t *testing.T) {
 	err := r.Load(&ct)
 	require.Error(t, err)
 	assert.True(t, IsNotFound(err))
+}
+
+// TestChainTomlDecodeOlderEncoding pins the back-compat decoder: an
+// older publisher that emits only the first 6 fields (no V2InfoHash,
+// no MinStep) must decode cleanly with the new fields defaulting to
+// zero. Trailing-RLP-fields back-compat is the spec invariant that
+// lets us extend the ENR without breaking peers.
+func TestChainTomlDecodeOlderEncoding(t *testing.T) {
+	// Encode using a shadow struct that mirrors the pre-V2InfoHash
+	// shape (6 fields, no trailing V2InfoHash + MinStep).
+	type chainTomlPreV2 struct {
+		AuthoritativeBlocks uint64
+		KnownBlocks         uint64
+		InfoHash            [20]byte
+		DomainSteps         uint64
+		MergeDepth          uint64
+		ContentUCANHash     [20]byte
+	}
+	old := chainTomlPreV2{
+		AuthoritativeBlocks: 100,
+		KnownBlocks:         200,
+		InfoHash:            [20]byte{0xab},
+		DomainSteps:         4096,
+		MergeDepth:          1024,
+		ContentUCANHash:     [20]byte{0xcd},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, rlp.Encode(&buf, &old))
+
+	var decoded ChainToml
+	require.NoError(t, rlp.DecodeBytes(buf.Bytes(), &decoded))
+	assert.Equal(t, uint64(100), decoded.AuthoritativeBlocks)
+	assert.Equal(t, [20]byte{0xab}, decoded.InfoHash)
+	assert.Equal(t, [20]byte{0xcd}, decoded.ContentUCANHash)
+	assert.Equal(t, [20]byte{}, decoded.V2InfoHash, "missing trailing field defaults to zero")
+	assert.Equal(t, uint64(0), decoded.MinStep, "missing trailing field defaults to zero")
 }
 
 func TestChainTomlFitsInENR(t *testing.T) {
