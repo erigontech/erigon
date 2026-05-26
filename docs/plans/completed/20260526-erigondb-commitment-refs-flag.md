@@ -323,11 +323,16 @@ independent of the write flag.
 
 ### Task 13: [Final] Documentation
 
-- [ ] document the `references_in_commitment_branches` `erigondb.toml` field and the producer
+- [x] document the `references_in_commitment_branches` `erigondb.toml` field and the producer
       workflow (set `false` before running to publish plain snapshots) where erigondb settings
-      are described
-- [ ] update `CLAUDE.md` / component `agents.md` only if a new pattern warrants it
-- [ ] move this plan to `docs/plans/completed/`
+      are described — field documented per-scenario + new "Producer workflow" section in the
+      `erigondb-sync-integration-test-plan` skill; field/regime + producer workflow summarized in
+      `db/agents.md` ("Runtime settings (`snapshots/erigondb.toml`)")
+- [x] update `CLAUDE.md` / component `agents.md` only if a new pattern warrants it — added a
+      "Runtime settings (`snapshots/erigondb.toml`)" section to `db/agents.md` documenting the
+      per-datadir settings pattern (resolved by `state.ResolveErigonDBSettings`, never rewrites a
+      downloaded toml) and the three fields; no `CLAUDE.md` change needed (no new agent convention)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
