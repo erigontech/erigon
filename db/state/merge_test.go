@@ -779,7 +779,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	defer dc.Close()
 
 	require.Panics(t, func() {
-		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
 	})
 }
 

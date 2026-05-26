@@ -1234,6 +1234,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
+	fi.dataVer = d.FileVersion.DataKV.Current
 	d.dirtyFiles.Set(fi)
 }
 

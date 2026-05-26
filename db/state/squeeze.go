@@ -238,7 +238,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf)
+			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, true)
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
