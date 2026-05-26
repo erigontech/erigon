@@ -1683,3 +1683,63 @@ func countPath(writes state.VersionedWrites, path state.AccountPath) int {
 	}
 	return n
 }
+
+// TestCalcFees_EmitsAddressPathForCoinbase pins the fix for the mainnet
+// block 25151825 tx 31 +25k gas bug. Background:
+//
+//   - Tx 31 SELFDESTRUCTs and CREATE2s the block coinbase
+//     (0xa8ca1e5afd68d7387ac7daefb7b3aa78fd7b3bc7) and CALLs it with value
+//     mid-tx — an MEV builder settlement pattern.
+//   - Coinbase has no pre-block storage record (fresh EOA-style address).
+//   - In serial-exec, prior txs (0-30) each call AddBalance(coinbase, tip)
+//     which CREATES the stateObject on first credit. By tx 31, the
+//     account exists with balance=accumulated tips, nonce=0, codeEmpty=true.
+//     CALL gas check: Empty(coinbase)=false (balance>0); no
+//     CallNewAccountGas (+25000).
+//   - In parallel-exec, calcFees previously wrote only BalancePath to the
+//     versionMap. Tx 31's getVersionedAccount(coinbase) returned nil
+//     (no AddressPath entry, no stateReader hit). Empty(coinbase)=true.
+//     CALL gas check fires CallNewAccountGas (+25000), inflating
+//     tx 31's gasUsed from 148,667 (serial) to 173,667 (parallel) and
+//     producing a wrong-trie-root.
+//
+// The fix: calcFees must emit an AddressPath sibling write alongside
+// BalancePath when crediting coinbase/burnt, mirroring what serial's
+// AddBalance does implicitly (create-on-first-credit). This makes the
+// account visible to downstream parallel-tx getVersionedAccount calls.
+//
+// This test verifies the contract: calcFees produces both
+// (coinbase, BalancePath) and (coinbase, AddressPath) writes, and the
+// AddressPath account's Balance matches the BalancePath value.
+func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	// No prior coinbase balance — first credit of the block.
+	writes := s.runFinalizeTx(t, nil)
+
+	coinbaseBalance := findWrite(writes, s.coinbase, state.BalancePath)
+	require.NotNil(t, coinbaseBalance,
+		"calcFees should emit coinbase BalancePath write")
+	balVal, ok := coinbaseBalance.Val.(uint256.Int)
+	require.True(t, ok, "BalancePath value must be uint256.Int")
+	require.Equal(t, s.feeTipped, balVal,
+		"BalancePath value must equal feeTipped (no prior balance)")
+
+	coinbaseAddress := findWrite(writes, s.coinbase, state.AddressPath)
+	require.NotNil(t, coinbaseAddress,
+		"calcFees MUST emit coinbase AddressPath sibling write so "+
+			"downstream parallel txs see the account record (mainnet "+
+			"25151825 tx 31 SD+CREATE2-on-coinbase +25k regression pin)")
+
+	addrAcc, ok := coinbaseAddress.Val.(*accounts.Account)
+	require.True(t, ok, "AddressPath value must be *accounts.Account")
+	require.NotNil(t, addrAcc, "AddressPath account must not be nil")
+	require.Equal(t, s.feeTipped, addrAcc.Balance,
+		"AddressPath account.Balance must equal the BalancePath value, "+
+			"otherwise downstream getVersionedAccount returns a stale balance")
+	require.True(t, addrAcc.IsEmptyCodeHash(),
+		"freshly-created coinbase has empty code (no pre-block contract)")
+	require.Equal(t, coinbaseBalance.Version, coinbaseAddress.Version,
+		"AddressPath sibling must share version with the BalancePath write")
+}

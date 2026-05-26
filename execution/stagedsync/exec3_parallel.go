@@ -1698,6 +1698,30 @@ func (result *execResult) calcFees(
 				Version:             taskVersion,
 				BalanceChangeReason: tracing.BalanceIncreaseRewardTransactionFee,
 			})
+			// Emit an AddressPath sibling write so downstream parallel txs
+			// reading this address see an account record. Serial's AddBalance
+			// implicitly creates the account on first credit; parallel calcFees
+			// must mirror that, otherwise getVersionedAccount returns nil for
+			// a freshly-credited coinbase (no pre-block storage entry, no
+			// versionMap AddressPath) and Empty() returns true — charging the
+			// stale CallNewAccountGas (+25000) for a CALL-with-value to the
+			// coinbase mid-tx. Mainnet block 25151825 tx 31's SD+CREATE2-on-
+			// coinbase MEV pattern surfaced this divergence.
+			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
+			if coinbaseAcc != nil {
+				addrAcc.Nonce = coinbaseAcc.Nonce
+				addrAcc.Incarnation = coinbaseAcc.Incarnation
+				addrAcc.CodeHash = coinbaseAcc.CodeHash
+			} else {
+				addrAcc.Nonce = coinbaseNonce
+				addrAcc.CodeHash = accounts.EmptyCodeHash
+			}
+			addWrites = append(addWrites, &state.VersionedWrite{
+				Address: result.Coinbase,
+				Path:    state.AddressPath,
+				Val:     addrAcc,
+				Version: taskVersion,
+			})
 		}
 	}
 	if hasBurnt && newBurntBalance != oldBurntBalance {
@@ -1710,6 +1734,21 @@ func (result *execResult) calcFees(
 			Val:                 newBurntBalance,
 			Version:             taskVersion,
 			BalanceChangeReason: tracing.BalanceDecreaseGasBuy,
+		})
+		// Mirror the AddressPath emission above for the burnt address.
+		burntAddrAcc := &accounts.Account{Balance: newBurntBalance}
+		if burntAcc != nil {
+			burntAddrAcc.Nonce = burntAcc.Nonce
+			burntAddrAcc.Incarnation = burntAcc.Incarnation
+			burntAddrAcc.CodeHash = burntAcc.CodeHash
+		} else {
+			burntAddrAcc.CodeHash = accounts.EmptyCodeHash
+		}
+		addWrites = append(addWrites, &state.VersionedWrite{
+			Address: burntAddr,
+			Path:    state.AddressPath,
+			Val:     burntAddrAcc,
+			Version: taskVersion,
 		})
 	}
 
