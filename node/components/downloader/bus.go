@@ -68,6 +68,17 @@ func (p *Provider) BindBus(ctx context.Context, bus event.EventBus) error {
 		p.busCtx = nil
 		return fmt.Errorf("subscribe flow.DownloadRequested: %w", err)
 	}
+
+	// Bridge the legacy manifestReady channel-close onto the bus. The
+	// legacy stage_snapshots gate still receives on the channel; new
+	// component-layer subscribers see a typed event without owning a
+	// channel-receive site. Idempotent on the Downloader side
+	// (callback fires exactly once per lifetime).
+	if p.Downloader != nil {
+		p.Downloader.SetOnManifestDiscoveryComplete(func() {
+			bus.Publish(flow.ManifestDiscoveryComplete{})
+		})
+	}
 	return nil
 }
 
@@ -81,6 +92,9 @@ func (p *Provider) UnbindBus() error {
 	p.busHandler = nil
 	p.bus = nil
 	p.busCtx = nil
+	if p.Downloader != nil {
+		p.Downloader.SetOnManifestDiscoveryComplete(nil)
+	}
 	return err
 }
 

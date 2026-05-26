@@ -205,6 +205,17 @@ type ManifestPublished struct {
 	Generation uint64
 }
 
+// ManifestDiscoveryComplete fires after the legacy P2P manifest
+// discovery loop (--snap.p2p-manifest) completes its first successful
+// discovery+download+apply cycle. The stage_snapshots gate uses an
+// equivalent channel close (Downloader.ManifestReady()); subscribers
+// on the bus see the same signal as a typed event.
+//
+// Observational only — gates no production work; consumers on the bus
+// can react to "we have at least one peer manifest applied" without
+// owning a channel-receive site.
+type ManifestDiscoveryComplete struct{}
+
 // --- Download / seed events ---
 
 // DownloadRequested is published by the orchestrator when it decides to fetch

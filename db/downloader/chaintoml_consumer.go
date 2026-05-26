@@ -512,11 +512,26 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	// Otherwise --snap.p2p-manifest nodes can hang forever when peers' manifests
 	// don't add anything new.
 	if d.manifestReady != nil {
+		firstClose := false
 		select {
 		case <-d.manifestReady:
 			// already closed
 		default:
 			close(d.manifestReady)
+			firstClose = true
+		}
+		// Fire the bus-bridge hook exactly once per lifetime, matching
+		// the channel-close semantics. Read the hook under the lock to
+		// pair with SetOnManifestDiscoveryComplete; invoke outside the
+		// lock so a slow subscriber on the bus doesn't stall the
+		// chain.toml consumer loop.
+		if firstClose {
+			d.lock.RLock()
+			hook := d.onManifestDiscoveryComplete
+			d.lock.RUnlock()
+			if hook != nil {
+				hook()
+			}
 		}
 	}
 }

@@ -220,6 +220,17 @@ type Downloader struct {
 	// manifest_exchange's ENR check returns empty and silently skips.
 	onPeerWithChainTomlDiscovered func(*ChainTomlPeer)
 
+	// onManifestDiscoveryComplete is called the first time the legacy
+	// P2P manifest discovery loop completes a successful
+	// discovery+download+apply cycle — the same moment
+	// manifestReady is closed. Production wiring (downloader
+	// component's BindBus) plugs in a closure that publishes
+	// flow.ManifestDiscoveryComplete on the storage event bus so
+	// subscribers see the signal as a typed event in addition to the
+	// channel close that stage_snapshots already waits on. Fired at
+	// most once per Downloader lifetime; nil by default.
+	onManifestDiscoveryComplete func()
+
 	// nodeSourceFn lazily resolves the P2P node source for chain.toml discovery.
 	// Returns nil if P2P is not yet available. Called each discovery iteration.
 	nodeSourceFn func() NodeSource
@@ -583,6 +594,19 @@ func (d *Downloader) SetContentUCANMinter(fn ContentUCANMinterFn) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	d.contentMinter = fn
+}
+
+// SetOnManifestDiscoveryComplete installs the callback fired at most
+// once per Downloader lifetime — at the same moment the
+// manifestReady channel is closed (first successful P2P manifest
+// discovery+download+apply cycle). The component-layer BindBus wires
+// this to publish flow.ManifestDiscoveryComplete on the storage event
+// bus so subscribers see the signal as a typed event in addition to
+// the channel close. Pass nil to disable (default).
+func (d *Downloader) SetOnManifestDiscoveryComplete(fn func()) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.onManifestDiscoveryComplete = fn
 }
 
 // SetDelegationSource installs the producer-side Authority UCAN source
