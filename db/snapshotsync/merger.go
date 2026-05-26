@@ -334,7 +334,8 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 		segType: targetFile.Type,
 		version: targetFile.Version,
 		Range:   Range{targetFile.From, targetFile.To},
-		frozen:  m.snCfg.IsFrozen(targetFile),
+		frozen:  false,
+		//frozen:  m.snCfg.IsFrozen(targetFile),
 	}
 
 	err = sn.Open(snapDir)

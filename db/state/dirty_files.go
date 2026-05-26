@@ -139,7 +139,8 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint6
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep >= stepsInFrozenFile
-	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+	_ = frozen
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
 }
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
