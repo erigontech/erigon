@@ -139,8 +139,8 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64, stepsInFrozenFile uint6
 	startStep := startTxNum / stepSize
 	endStep := endTxNum / stepSize
 	frozen := endStep-startStep >= stepsInFrozenFile
-	_ = frozen
-	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
+	frozen = false //disable `frozen` optimization. because it doesn't allow Prune old files on Minimal node. See: https://github.com/erigontech/erigon/pull/21397
+	return &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
 func (i *FilesItem) Segment() *seg.Decompressor { return i.decompressor }
