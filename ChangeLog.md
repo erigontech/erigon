@@ -4,6 +4,25 @@
 
 ### Breaking Changes
 
+#### `--prune.mode=full`: EIP-8252 retention window replaces pre-merge history-expiry
+
+Full mode now retains state and block data for the last `262,144` blocks (~36.4 days), matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW` — the inactivity-leak-bounded non-finality window across which an EL must be able to reconstruct state to handle any reorg without external sync. Previously full mode pruned only pre-merge block data ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444) history-expiry) and kept the last 100,000 blocks of state history.
+
+**What changed:**
+
+| | Before | After |
+|---|---|---|
+| State history retention | last 100,000 blocks | last 262,144 blocks |
+| Block data retention | pre-merge pruned, all post-merge kept (EIP-4444) | last 262,144 blocks |
+
+`--prune.mode=blocks` keeps the same shape (all block data retained) but its `History` retention also bumps from 100,000 to 262,144 blocks. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window, deliberately sub-EIP-8252 for disk-constrained operators. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
+
+**Migration:** existing datadirs upgrade automatically. The prune-config guard now accepts finite distance changes on `History`/`Blocks` in either direction, plus either-direction transitions between a finite Distance and the `KeepPostMergeBlocksPruneMode` chain-history-expiry sentinel on `Blocks` (so the upgrade is silent, and operators can revert with `--prune.distance.blocks=18446744073709551615` even after the auto-upgrade has rewritten the persisted value). Operators who want to keep the old "retain all post-merge block data" behavior can switch to `--prune.mode=blocks` or pass the override flag.
+
+Note: physical deletion of frozen `.seg` files is gated by [#21306](https://github.com/erigontech/erigon/issues/21306); existing on-disk segments persist until that lands. The config-level transition is still recorded so the new cutoff takes effect once the deletion path exists.
+
+---
+
 #### Single p2p listener: `--p2p.allowed-ports` removed, all eth versions multiplex on `--port`
 
 Erigon now opens a single TCP listener on `--port` (default 30303) carrying every configured eth protocol version, instead of one listener per protocol on 30303/30304/30305. This fixes a discovery-DHT race that left inbound peers stuck at a fraction of `--maxpeers` for multi-protocol deployments — per-protocol Servers each signed an ENR under the same Node ID, and only the highest-`seq` one survived in the DHT, so peers dialed the wrong listener (#21335).
