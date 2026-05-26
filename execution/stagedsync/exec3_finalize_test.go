@@ -490,9 +490,12 @@ func findWrite(writes state.VersionedWrites, addr accounts.Address, path state.A
 // These test the split fee logic: worker debits sender only,
 // finalize credits coinbase/burnt. No StripBalanceWrite or delta computation.
 
-// runFinalizeTxSimple sets up the versionMap with prior TX's finalize writes
-// and runs finalizeTxSimple, verifying the fee credit logic.
-func (s *testFinalizeScenario) runFinalizeTxSimple(t *testing.T, priorCoinbaseBalance *uint256.Int) state.VersionedWrites {
+// runFinalizeTx sets up the versionMap with prior TX's finalize writes and
+// runs the apply-loop tip credit (creditTipPreValidate). Returns the
+// tip-credit writes for assertion. finalizeTx itself only adds the receipt
+// and PostApplyMessage logs — no additional writes — so tests that assert
+// on writes need only the creditTipPreValidate output.
+func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance *uint256.Int) state.VersionedWrites {
 	t.Helper()
 	result := s.buildExecResult()
 	result.TxIn = copyReadSet(s.txIn)
@@ -510,33 +513,31 @@ func (s *testFinalizeScenario) runFinalizeTxSimple(t *testing.T, priorCoinbaseBa
 			state.Version{TxIndex: 0, Incarnation: 0}, *priorCoinbaseBalance, true)
 	}
 
-	// Flush the worker's TxOut to the versionMap (simulates line 1928).
+	// Flush the worker's TxOut to the versionMap (mirrors apply-loop's
+	// FlushVersionedWrites re-flush before validate).
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
 	task := result.Task.(*taskVersion)
-	txTask := task.Task.(*exec.TxTask)
 
-	_, _, writes, err := result.finalizeTxSimple(
-		task, txTask, nil, nil, vm, reader,
-		s.rules, false, false, "",
-	)
+	writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
 	require.NoError(t, err)
 	return writes
 }
 
-// TestFinalizeTxSimple_BasicFeeCredit verifies that finalizeTxSimple adds
-// FeeTipped to the coinbase balance from the versionMap.
+// TestFinalizeTxSimple_BasicFeeCredit verifies that the apply-loop tip
+// credit adds FeeTipped to the coinbase balance from the versionMap.
+// Previously t.Skip'd under #20962: the prior code's vsReader at txIndex
+// (floor(txIdx-1)) didn't see a prior write stamped at TxIndex=0 when
+// the test ran at TxIndex=0. The new apply-loop step reads at
+// vm.Read(..., txIndex+1) = floor(txIndex), which includes the prior
+// write — same as IBS AddBalance.
 func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
-	// TODO(#20962): scenario writes priorBalance into versionMap at TxIndex=0
-	// then reads at TxIndex=0; floor semantics changed and the prior write
-	// is no longer visible. Sibling AccumulatedFees test (txIdx 1..N) passes.
-	t.Skip("stale coinbase-handling expectation, see #20962")
 	t.Parallel()
 	s := simpleTransferScenario()
 
 	// Coinbase starts with 1 ETH (from prior TX's finalize).
 	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
-	writes := s.runFinalizeTxSimple(t, priorBalance)
+	writes := s.runFinalizeTx(t, priorBalance)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
@@ -600,7 +601,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 	})
 	// (s.collectorWrites left as the baseline — no coinbase BalancePath entry)
 
-	writes := s.runFinalizeTxSimple(t, nil /* no prior tx in this block */)
+	writes := s.runFinalizeTx(t, nil /* no prior tx in this block */)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize must produce a coinbase BalancePath write")
@@ -612,51 +613,16 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutValueWins(t *testing.T) {
 		postDebitBal, tip, expectedFinal, preBlockBal, tip, preBlockBal+tip)
 }
 
-// TestFinalizeTxSimple_SenderNotCoinbase_CollectorWritesValueWins is the
-// negative control for TxOutValueWins. Same TxOut shape (coinbase
-// BalancePath present), but sender != coinbase, so the senderIsCoinbase
-// discriminator falls into the else branch (scan CollectorWrites instead).
-//
-// CollectorWrites has NO coinbase BalancePath entry, so no override
-// happens — finalizeTxSimple uses the versionMap base + tip. Proves that
-// the senderIsCoinbase branch in TxOutValueWins is the load-bearing
-// reason that test passes (i.e. flipping just the sender flips the
-// outcome), rather than some unrelated code path masking the bug.
-func TestFinalizeTxSimple_SenderNotCoinbase_CollectorWritesValueWins(t *testing.T) {
-	t.Parallel()
-
-	// Use simpleTransferScenario: sender (fAddr("sender")) != coinbase
-	// (fAddr("coinbase")). No s.txs set → txTask.TxMessage() returns nil
-	// → senderIsCoinbase stays false → scans CollectorWrites only.
-	s := simpleTransferScenario()
-
-	// Force the same TxOut-only-coinbase shape as the positive test:
-	// coinbase BalancePath = some-non-zero value in TxOut, NO coinbase
-	// BalancePath in CollectorWrites. Pre-block coinbase balance is 0
-	// (from simpleTransferScenario.accts).
-	const (
-		txOutCoinbaseBal = uint64(979_000) // arbitrary "post-debit" value
-		preBlockCoinbase = uint64(0)       // simpleTransferScenario default
-		tip              = uint64(21_000)  // from scenario.feeTipped
-	)
-	s.txOut = append(s.txOut, &state.VersionedWrite{
-		Address: s.coinbase,
-		Path:    state.BalancePath,
-		Val:     *uint256.NewInt(txOutCoinbaseBal),
-	})
-	// CollectorWrites unchanged — no coinbase BalancePath entry in baseline.
-
-	writes := s.runFinalizeTxSimple(t, nil)
-
-	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
-	require.NotNil(t, coinbaseWrite, "finalize should produce a coinbase BalancePath write")
-
-	got := coinbaseWrite.Val.(uint256.Int)
-	expected := uint256.NewInt(preBlockCoinbase + tip)
-	assert.Equal(t, *expected, got,
-		"sender != coinbase: finalize must use versionMap base (%d) + tip (%d) = %d, NOT TxOut value (%d) + tip = %d",
-		preBlockCoinbase, tip, preBlockCoinbase+tip, txOutCoinbaseBal, txOutCoinbaseBal+tip)
-}
+// (Removed: TestFinalizeTxSimple_SenderNotCoinbase_CollectorWritesValueWins
+// was a negative control for the prior code's senderIsCoinbase discriminator
+// — it asserted that flipping sender to non-coinbase made finalize ignore
+// TxOut and use versionMap base + tip. The new apply-loop creditTipPreValidate
+// step uses vm.Read(..., txIndex+1) for the base, which reads whatever is
+// most recently in versionMap at or before this tx — including the TxOut
+// entry flushed by the test setup. The discriminator code path no longer
+// exists, and the synthetic scenario the test constructed doesn't map to
+// any real execution behavior. The SenderIsCoinbase positive tests still
+// pin the correctness of the new read semantics.)
 
 // TestFinalizeTxSimple_SenderIsCoinbase_TxOutWinsOverCollectorWrites
 // strengthens TxOutValueWins by adding a coinbase BalancePath entry to
@@ -699,7 +665,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_TxOutWinsOverCollectorWrites(t *testi
 		Val:     *uint256.NewInt(collectorBal),
 	})
 
-	writes := s.runFinalizeTxSimple(t, nil)
+	writes := s.runFinalizeTx(t, nil)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize must produce coinbase BalancePath write")
@@ -743,7 +709,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_PostLondon(t *testing.T) {
 	// CollectorWrites: no coinbase, no burnt — finalize reads burnt base
 	// from versionMap (= burntPreBlockBal from scenario.accts) and adds burn.
 
-	writes := s.runFinalizeTxSimple(t, nil)
+	writes := s.runFinalizeTx(t, nil)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "coinbase BalancePath write must exist")
@@ -819,12 +785,8 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		txTask := task.Task.(*exec.TxTask)
-		_, _, writes, err := result.finalizeTxSimple(
-			task, txTask, nil, nil, vm, reader,
-			s.rules, false, false, "",
-		)
-		require.NoError(t, err, "tx %d: finalizeTxSimple", txIdx)
+		writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
+		require.NoError(t, err, "tx %d: creditTipPreValidate", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
 		vm.FlushVersionedWrites(writes, true, "")
@@ -892,11 +854,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	// Now flush the re-executed TxOut at incarnation 1.
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	txTask := task.Task.(*exec.TxTask)
-	_, _, writes, err := result.finalizeTxSimple(
-		task, txTask, nil, nil, vm, reader,
-		s.rules, false, false, "",
-	)
+	writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
 	require.NoError(t, err)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
@@ -914,7 +872,7 @@ func TestFinalizeTxSimple_VersionOnWrites(t *testing.T) {
 	t.Parallel()
 	s := simpleTransferScenario()
 	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
-	writes := s.runFinalizeTxSimple(t, priorBalance)
+	writes := s.runFinalizeTx(t, priorBalance)
 
 	for _, w := range writes {
 		if w.Address == s.coinbase && w.Path == state.BalancePath {
@@ -936,7 +894,7 @@ func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
 	t.Parallel()
 	s := londonTransferScenario()
 	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
-	writes := s.runFinalizeTxSimple(t, priorBalance)
+	writes := s.runFinalizeTx(t, priorBalance)
 
 	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
 	require.NotNil(t, burntWrite, "finalize should produce burnt contract BalancePath write")
@@ -956,7 +914,7 @@ func TestFinalizeTxSimple_NoCoinbaseInVersionMap(t *testing.T) {
 	s := simpleTransferScenario()
 
 	// No prior coinbase balance — reads from stateReader (balance 0).
-	writes := s.runFinalizeTxSimple(t, nil)
+	writes := s.runFinalizeTx(t, nil)
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
@@ -990,11 +948,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		txTask := task.Task.(*exec.TxTask)
-		_, _, writes, err := result.finalizeTxSimple(
-			task, txTask, nil, nil, vm, reader,
-			s.rules, false, false, "",
-		)
+		writes, err := result.creditTipPreValidate(task, vm, reader, s.rules)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
