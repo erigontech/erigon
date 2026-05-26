@@ -41,7 +41,7 @@ func fakeReader(saturated bool) CommitmentReader {
 func TestPinEntry_AndPinnedCount(t *testing.T) {
 	c := NewBranchCache(8)
 	require.Equal(t, 0, c.PinnedCount())
-	c.PinEntry([]byte{0x12, 0x34, 0x56}, []byte{0xab, 0xcd}, 1, "test")
+	c.PinEntry([]byte{0x12, 0x34, 0x56}, []byte{0xab, 0xcd}, 1, 0, "test")
 	require.Equal(t, 1, c.PinnedCount())
 
 	// Pinned entry is hit, not the tail.
@@ -56,7 +56,7 @@ func TestPinEntry_AndPinnedCount(t *testing.T) {
 // deletes a pinned entry, not just LRU/root.
 func TestInvalidate_RemovesFromPinned(t *testing.T) {
 	c := NewBranchCache(8)
-	c.PinEntry([]byte{0x12, 0x34}, []byte{0x99}, 1, "test")
+	c.PinEntry([]byte{0x12, 0x34}, []byte{0x99}, 1, 0, "test")
 	require.Equal(t, 1, c.PinnedCount())
 
 	c.Invalidate([]byte{0x12, 0x34})
@@ -69,7 +69,7 @@ func TestInvalidate_RemovesFromPinned(t *testing.T) {
 // pinned entries (was a correctness gap pre-fix).
 func TestGetWithOrigin_ChecksPinnedTier(t *testing.T) {
 	c := NewBranchCache(8)
-	c.PinEntry([]byte{0x12, 0x34}, []byte{0xab}, 5, "preload")
+	c.PinEntry([]byte{0x12, 0x34}, []byte{0xab}, 5, 0, "preload")
 	data, origin, _, _, ok := c.GetWithOrigin([]byte{0x12, 0x34})
 	require.True(t, ok)
 	require.Equal(t, []byte{0xab}, data)
@@ -80,7 +80,7 @@ func TestGetWithOrigin_ChecksPinnedTier(t *testing.T) {
 // pinned-stats counters (was a correctness gap pre-fix).
 func TestClear_ResetsPinnedTier(t *testing.T) {
 	c := NewBranchCache(8)
-	c.PinEntry([]byte{0x12, 0x34}, []byte{0xab}, 1, "test")
+	c.PinEntry([]byte{0x12, 0x34}, []byte{0xab}, 1, 0, "test")
 	_, _, _ = c.Get([]byte{0x12, 0x34}) // bump pinned hit
 	c.Clear()
 	require.Equal(t, 0, c.PinnedCount())
@@ -99,7 +99,7 @@ func TestMissCallback_FiresOnTripleMiss(t *testing.T) {
 	})
 
 	// Hit (pinned): callback should NOT fire.
-	c.PinEntry([]byte{0x12, 0x34}, []byte{0xff}, 1, "test")
+	c.PinEntry([]byte{0x12, 0x34}, []byte{0xff}, 1, 0, "test")
 	_, _, _ = c.Get([]byte{0x12, 0x34})
 	require.Equal(t, uint64(0), fired.Load(), "pinned hit must not fire callback")
 

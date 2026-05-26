@@ -31,8 +31,8 @@ func TestBranchCache_RootPinning(t *testing.T) {
 
 	rootKey := []byte{0x00} // compact-encoded empty nibble path = root branch
 	deepKey := []byte{0x12, 0x34, 0x56}
-	c.Put(rootKey, []byte("root-data"), 0, "test")
-	c.Put(deepKey, []byte("deep-data"), 0, "test")
+	c.Put(rootKey, []byte("root-data"), 0, 0, "test")
+	c.Put(deepKey, []byte("deep-data"), 0, 0, "test")
 
 	// Root reads should increment rootHits, not tailHits
 	got, _, ok := c.Get(rootKey)
@@ -55,11 +55,11 @@ func TestBranchCache_RootPinning(t *testing.T) {
 func TestBranchCache_RootSurvivesEvictionPressure(t *testing.T) {
 	c := NewBranchCache(10) // very small tail
 	rootKey := []byte{0x00}
-	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, "test")
+	c.Put(rootKey, []byte("ROOT-PERSISTS"), 0, 0, "test")
 
 	// Stuff the tail well past capacity
 	for i := 0; i < 100; i++ {
-		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, "test")
+		c.Put([]byte{byte(i), byte(i)}, []byte{byte(i)}, 0, 0, "test")
 	}
 
 	// Root must still be there
@@ -78,20 +78,20 @@ func TestBranchCache_DirtyFlag(t *testing.T) {
 	c := NewBranchCache(100)
 	key := []byte{0x12, 0x34}
 
-	require.True(t, c.PutIfClean(key, []byte("v1"), 0, "test"))
+	require.True(t, c.PutIfClean(key, []byte("v1"), 0, 0, "test"))
 	c.MarkDirty(key)
 
-	require.False(t, c.PutIfClean(key, []byte("v2"), 0, "test"), "PutIfClean must refuse dirty entry")
+	require.False(t, c.PutIfClean(key, []byte("v2"), 0, 0, "test"), "PutIfClean must refuse dirty entry")
 	got, _, _ := c.Get(key)
 	require.Equal(t, []byte("v1"), got, "dirty entry's data preserved")
 
 	// Unconditional Put replaces
-	c.Put(key, []byte("v3"), 0, "test")
+	c.Put(key, []byte("v3"), 0, 0, "test")
 	got, _, _ = c.Get(key)
 	require.Equal(t, []byte("v3"), got)
 
 	// New entry is clean
-	require.True(t, c.PutIfClean(key, []byte("v4"), 0, "test"))
+	require.True(t, c.PutIfClean(key, []byte("v4"), 0, 0, "test"))
 }
 
 // TestBranchCache_GetDecoded verifies the lazy-decode read path for a
@@ -106,7 +106,7 @@ func TestBranchCache_GetDecoded(t *testing.T) {
 	require.NoError(t, err)
 
 	prefix := []byte{0x12, 0x34}
-	c.Put(prefix, enc, 0, "test")
+	c.Put(prefix, enc, 0, 0, "test")
 
 	// First decoded-read decodes lazily
 	bitmap, cells, ok := c.GetDecoded(prefix)
@@ -130,8 +130,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 	c := NewBranchCache(100)
 	rootKey := []byte{0x00}
 	deepKey := []byte{0x12, 0x34}
-	c.Put(rootKey, []byte("r"), 0, "test")
-	c.Put(deepKey, []byte("d"), 0, "test")
+	c.Put(rootKey, []byte("r"), 0, 0, "test")
+	c.Put(deepKey, []byte("d"), 0, 0, "test")
 
 	c.Invalidate(rootKey)
 	_, _, ok := c.Get(rootKey)
@@ -145,8 +145,8 @@ func TestBranchCache_Invalidate(t *testing.T) {
 // TestBranchCache_Clear empties everything and resets stats.
 func TestBranchCache_Clear(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("r"), 0, "test")
-	c.Put([]byte{0x12}, []byte("d"), 0, "test")
+	c.Put([]byte{0x00}, []byte("r"), 0, 0, "test")
+	c.Put([]byte{0x12}, []byte("d"), 0, 0, "test")
 	_, _, _ = c.Get([]byte{0x00})
 	_, _, _ = c.Get([]byte{0x12})
 
@@ -166,8 +166,8 @@ func TestBranchCache_Clear(t *testing.T) {
 // deterministic and contains the expected per-tier counts.
 func TestBranchCache_Stats(t *testing.T) {
 	c := NewBranchCache(100)
-	c.Put([]byte{0x00}, []byte("rrr"), 0, "test")
-	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, "test")
+	c.Put([]byte{0x00}, []byte("rrr"), 0, 0, "test")
+	c.Put([]byte{0x12, 0x34}, []byte("ddd"), 0, 0, "test")
 	_, _, _ = c.Get([]byte{0x00})
 	_, _, _ = c.Get([]byte{0x12, 0x34})
 	_, _, _ = c.Get([]byte{0xff}) // tail miss
@@ -184,4 +184,108 @@ func TestBranchCache_Stats(t *testing.T) {
 	}
 	// Sanity: format doesn't blow up if we read it
 	require.True(t, strings.HasPrefix(s, "branch-cache "))
+}
+
+// TestBranchCache_UnwindTo_EvictsByTxNWatermark verifies that UnwindTo
+// evicts every entry whose txN > watermark across root + pinned + tail
+// tiers, and that entries with txN <= watermark survive untouched.
+func TestBranchCache_UnwindTo_EvictsByTxNWatermark(t *testing.T) {
+	c := NewBranchCache(100)
+
+	rootKey := []byte{0x00}
+	pinnedKey := []byte{0x12, 0x34, 0x56}
+	tailKeyKeep := []byte{0xa0, 0xb0}
+	tailKeyEvict := []byte{0xa0, 0xb1}
+
+	// txN=50 entries in every tier — these should survive a watermark of 60.
+	c.Put(rootKey, []byte("root-keep"), 0, 50, "test")
+	c.PinEntry(pinnedKey, []byte("pinned-keep"), 0, 50, "test")
+	c.Put(tailKeyKeep, []byte("tail-keep"), 0, 50, "test")
+
+	// txN=100 tail entry — should be evicted at watermark=60.
+	c.Put(tailKeyEvict, []byte("tail-evict"), 0, 100, "test")
+
+	evicted := c.UnwindTo(60)
+	require.Equal(t, 1, evicted, "only the txN=100 tail entry should be evicted")
+
+	_, _, ok := c.Get(rootKey)
+	require.True(t, ok, "root entry with txN=50 must survive watermark=60")
+	_, _, ok = c.Get(pinnedKey)
+	require.True(t, ok, "pinned entry with txN=50 must survive watermark=60")
+	_, _, ok = c.Get(tailKeyKeep)
+	require.True(t, ok, "tail entry with txN=50 must survive watermark=60")
+	_, _, ok = c.Get(tailKeyEvict)
+	require.False(t, ok, "tail entry with txN=100 must be evicted by watermark=60")
+}
+
+// TestBranchCache_UnwindTo_EvictsAcrossAllTiers verifies eviction reaches
+// the root + pinned tiers, not just the LRU tail.
+func TestBranchCache_UnwindTo_EvictsAcrossAllTiers(t *testing.T) {
+	c := NewBranchCache(100)
+
+	rootKey := []byte{0x00}
+	pinnedKey := []byte{0x12, 0x34, 0x56}
+	tailKey := []byte{0xa0, 0xb0}
+
+	c.Put(rootKey, []byte("root"), 0, 100, "test")
+	c.PinEntry(pinnedKey, []byte("pinned"), 0, 100, "test")
+	c.Put(tailKey, []byte("tail"), 0, 100, "test")
+
+	evicted := c.UnwindTo(50)
+	require.Equal(t, 3, evicted, "every entry with txN > watermark must be evicted")
+
+	_, _, ok := c.Get(rootKey)
+	require.False(t, ok, "root entry must be evicted")
+	_, _, ok = c.Get(pinnedKey)
+	require.False(t, ok, "pinned entry must be evicted (pinning protects capacity, not correctness)")
+	_, _, ok = c.Get(tailKey)
+	require.False(t, ok, "tail entry must be evicted")
+}
+
+// TestBranchCache_UnwindTo_TxNZeroIsImmortal verifies that entries
+// tagged with txN=0 ("not tracked") are NEVER evicted by any watermark.
+// Preserves back-compat with callers that haven't been migrated to
+// pass real txN values.
+func TestBranchCache_UnwindTo_TxNZeroIsImmortal(t *testing.T) {
+	c := NewBranchCache(100)
+
+	rootKey := []byte{0x00}
+	pinnedKey := []byte{0x12, 0x34, 0x56}
+	tailKey := []byte{0xa0, 0xb0}
+
+	c.Put(rootKey, []byte("root"), 0, 0, "test")
+	c.PinEntry(pinnedKey, []byte("pinned"), 0, 0, "test")
+	c.Put(tailKey, []byte("tail"), 0, 0, "test")
+
+	evicted := c.UnwindTo(0)
+	require.Equal(t, 0, evicted, "no entry with txN=0 should be evicted")
+	evicted = c.UnwindTo(1_000_000)
+	require.Equal(t, 0, evicted, "no entry with txN=0 should be evicted even at huge watermark")
+
+	_, _, ok := c.Get(rootKey)
+	require.True(t, ok, "txN=0 root entry must survive any watermark")
+	_, _, ok = c.Get(pinnedKey)
+	require.True(t, ok, "txN=0 pinned entry must survive any watermark")
+	_, _, ok = c.Get(tailKey)
+	require.True(t, ok, "txN=0 tail entry must survive any watermark")
+}
+
+// TestBranchCache_UnwindTo_BoundaryEqualsWatermark verifies the
+// inequality at the watermark itself: entries at exactly txN==watermark
+// are NOT evicted (the rule is txN > watermark).
+func TestBranchCache_UnwindTo_BoundaryEqualsWatermark(t *testing.T) {
+	c := NewBranchCache(100)
+
+	atKey := []byte{0xa0, 0xb0}
+	aboveKey := []byte{0xa0, 0xb1}
+	c.Put(atKey, []byte("at"), 0, 100, "test")
+	c.Put(aboveKey, []byte("above"), 0, 101, "test")
+
+	evicted := c.UnwindTo(100)
+	require.Equal(t, 1, evicted, "only the txN=101 entry must be evicted; txN=100 stays")
+
+	_, _, ok := c.Get(atKey)
+	require.True(t, ok, "entry at txN==watermark must survive")
+	_, _, ok = c.Get(aboveKey)
+	require.False(t, ok, "entry at txN>watermark must be evicted")
 }

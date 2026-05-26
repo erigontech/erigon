@@ -780,7 +780,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				sd.branchCache.Invalidate(k)
 				return
 			}
-			sd.branchCache.Put(k, v, uint64(step), "sd.Flush")
+			sd.branchCache.Put(k, v, uint64(step), 0, "sd.Flush")
 		}); err != nil {
 			return err
 		}
@@ -969,7 +969,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.stateCache.Put(domain, k, v)
 	}
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
-		sd.branchCache.Put(k, v, uint64(step), "sd.GetLatest")
+		sd.branchCache.Put(k, v, uint64(step), 0, "sd.GetLatest")
 	}
 
 	return v, step, nil

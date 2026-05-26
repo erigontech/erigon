@@ -270,6 +270,18 @@ type branchCacheEntry struct {
 	// in-memory tests but real callers should always pass the step
 	// returned by aggTx.MeteredGetLatest / tx.GetLatest.
 	step uint64
+
+	// txN is the high-water txNum the cached bytes correspond to. Used by
+	// UnwindTo: an unwind to txNum T evicts every entry whose txN > T.
+	// Tagging conventions per write source:
+	//   - sd.Flush         → sd.txNum (exact, in-memory write)
+	//   - snapshot file    → file.endTxNum (step-boundary, exact under
+	//                        the no-unwind-into-snapshots invariant)
+	//   - DB latest read   → lastTxNumOfStep(step) (conservative
+	//                        high-water within the step)
+	// 0 means "not tracked" — entry survives any watermark (back-compat
+	// with callers that haven't been migrated to pass a real txN yet).
+	txN uint64
 }
 
 // DefaultBranchCacheTailCapacity is the LRU tail size used when no
@@ -372,7 +384,11 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 // eager preload of hot prefixes — e.g. the storage-trunk of big
 // contracts under PIN_CONTRACT_TRUNKS. Data is copied; safe to mutate
 // the input after the call.
-func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin string) {
+//
+// txN tags the entry with its high-water validity; UnwindTo evicts a
+// pinned entry when its txN exceeds the watermark. Pinning protects
+// against capacity-pressure eviction, not correctness eviction.
+func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64, origin string) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -381,6 +397,7 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step uint64, origin s
 	c.pinned.Set(prefix, &branchCacheEntry{
 		data:           dataCopy,
 		step:           step,
+		txN:            txN,
 		writeSeq:       c.writeSeq.Add(1),
 		origin:         origin,
 		writeTimeNanos: time.Now().UnixNano(),
@@ -487,9 +504,11 @@ func (c *BranchCache) GetDecoded(prefix []byte) (bitmap uint16, cells *[16]cell,
 // (clearing its dirty flag in the process — the new entry is fresh).
 // Always copies the input data so the cache owns it independently of
 // caller buffer lifetime. step is the on-disk file step the bytes came
-// from (0 if not tracked); origin is a short label of the write site
-// captured for divergence-detection diagnostics.
-func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string) {
+// from (0 if not tracked); txN is the high-water txNum the entry is
+// valid through (0 if not tracked — entry survives any UnwindTo
+// watermark); origin is a short label of the write site captured for
+// divergence-detection diagnostics.
+func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64, origin string) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -498,6 +517,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string
 	c.store(prefix, &branchCacheEntry{
 		data:           dataCopy,
 		step:           step,
+		txN:            txN,
 		origin:         origin,
 		writeSeq:       c.writeSeq.Add(1),
 		writeTimeNanos: time.Now().UnixNano(),
@@ -511,11 +531,11 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step uint64, origin string
 //
 // Same semantics as WarmupCache.PutBranchIfClean — see that doc for the
 // race-it-protects-against narrative.
-func (c *BranchCache) PutIfClean(prefix []byte, data []byte, step uint64, origin string) bool {
+func (c *BranchCache) PutIfClean(prefix []byte, data []byte, step, txN uint64, origin string) bool {
 	if existing, ok := c.lookup(prefix); ok && existing.dirty.Load() {
 		return false
 	}
-	c.Put(prefix, data, step, origin)
+	c.Put(prefix, data, step, txN, origin)
 	return true
 }
 
@@ -572,6 +592,49 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	}
 	c.pinned.Delete(prefix)
 	c.tail.Delete(prefix)
+}
+
+// UnwindTo evicts every cache entry whose txN > maxValidTxN across all
+// tiers (root, pinned, LRU tail). Returns the number of entries evicted.
+//
+// This is the txN-tagged-cache invalidation primitive: a single watermark
+// pass over the cache, no per-key changeset required. Entries with txN=0
+// ("not tracked") are NEVER evicted by the watermark — they're treated
+// as permanently valid (callers that don't tag pay no watermark cost,
+// preserving back-compat for migration).
+//
+// Pinned entries ARE evicted by watermark — pinning protects against
+// capacity-pressure eviction, not correctness eviction.
+//
+// Concurrency: safe to call alongside concurrent reads. Writes during
+// UnwindTo may produce a slightly larger effective working set than the
+// post-call watermark suggests (a Put racing with the scan may insert an
+// entry the scan already passed), but every such Put carries its own txN
+// and will be caught by the next UnwindTo if the entry violates the
+// invariant.
+func (c *BranchCache) UnwindTo(maxValidTxN uint64) (evicted int) {
+	// Root tier — single slot, atomic check-and-clear.
+	if entry := c.root.Load(); entry != nil && entry.txN > maxValidTxN {
+		c.root.Store(nil)
+		evicted++
+	}
+	// Pinned tier — iterate and delete in place.
+	c.pinned.Range(func(hash uint64, entry *branchCacheEntry) bool {
+		if entry != nil && entry.txN > maxValidTxN {
+			c.pinned.DeleteByHash(hash)
+			evicted++
+		}
+		return true
+	})
+	// LRU tail — iterate and delete in place.
+	c.tail.Range(func(hash uint64, entry *branchCacheEntry) bool {
+		if entry != nil && entry.txN > maxValidTxN {
+			c.tail.DeleteByHash(hash)
+			evicted++
+		}
+		return true
+	})
+	return evicted
 }
 
 // Clear empties the cache and resets stats counters across ALL tiers

@@ -124,7 +124,7 @@ func (p *ContractTrunkPreload) Run(
 			break
 		}
 
-		cache.PinEntry(prefix, v, step, "preload-trunk")
+		cache.PinEntry(prefix, v, step, 0, "preload-trunk")
 		// Copy prefix because nibbles.HexToCompact may return a slice
 		// over a reused buffer; we need a stable handle for later
 		// Invalidate on demotion.

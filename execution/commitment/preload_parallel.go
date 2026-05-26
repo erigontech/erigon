@@ -164,7 +164,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 			budgetHit = true
 			return false
 		}
-		cache.PinEntry(pk.key, v, 0, "preload-trunk-parallel-resumable")
+		cache.PinEntry(pk.key, v, 0, 0, "preload-trunk-parallel-resumable")
 		kc := make([]byte, len(pk.key))
 		copy(kc, pk.key)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, kc)
