@@ -136,7 +136,10 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 	if !ok {
 		return false
 	}
-	if !f.forkGraph.HasEnvelope(root) {
+
+	// If the payload has not been accepted by the execution layer, the payload
+	// is not considered available regardless of the PTC vote.
+	if !f.IsPayloadVerified(root) {
 		return false
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
@@ -158,7 +161,10 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 	if !ok {
 		return false
 	}
-	if !f.forkGraph.HasEnvelope(root) {
+
+	// If the payload has not been accepted by the execution layer, the blob data
+	// is not considered available regardless of the PTC vote.
+	if !f.IsPayloadVerified(root) {
 		return false
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
@@ -266,8 +272,7 @@ func (f *ForkChoiceStore) isSupportingVote(node ForkChoiceNode, message LatestMe
 // Used by prepare_execution_payload to decide FULL vs EMPTY path.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
-	// is_payload_verified: the envelope must exist locally
-	if !f.forkGraph.HasEnvelope(root) {
+	if !f.IsPayloadVerified(root) {
 		return false
 	}
 
@@ -353,13 +358,7 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
 		}
-		// Check disk for envelope existence to determine if FULL status is available.
-		// Spec: is_payload_verified(store, node.root) — in the spec, store.payloads is populated
-		// only after EL returns VALID. During forward sync the EL returns SYNCING for most
-		// payloads, so requiring verifiedExecutionPayload would block the FULL path entirely.
-		// Using HasEnvelope (disk persistence) as a pragmatic proxy; verifiedExecutionPayload
-		// can be added once the EL catches up and validates payloads retroactively.
-		if f.forkGraph.HasEnvelope(node.Root) {
+		if f.IsPayloadVerified(node.Root) {
 			children = append(children, ForkChoiceNode{
 				Root: node.Root, PayloadStatus: cltypes.PayloadStatusFull,
 			})

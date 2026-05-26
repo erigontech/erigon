@@ -3,13 +3,17 @@ package forkchoice
 import (
 	"testing"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/optimistic"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 type ptcVoteForkGraph struct {
@@ -19,6 +23,30 @@ type ptcVoteForkGraph struct {
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
 	return g.envelopes[root]
+}
+
+type payloadVoteForkGraph struct {
+	fork_graph.ForkGraph
+	hasEnvelope       bool
+	dumpedEnvelope    *common.Hash
+	invalidatedHeader *common.Hash
+}
+
+func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
+	return g.hasEnvelope
+}
+
+func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+	if g.dumpedEnvelope != nil {
+		*g.dumpedEnvelope = blockRoot
+	}
+	return nil
+}
+
+func (g payloadVoteForkGraph) MarkHeaderAsInvalid(blockRoot common.Hash) {
+	if g.invalidatedHeader != nil {
+		*g.invalidatedHeader = blockRoot
+	}
 }
 
 func TestGetPTCFromWindow(t *testing.T) {
@@ -211,13 +239,117 @@ func TestPtcShouldBuildOnFullWithUnavailableMajority(t *testing.T) {
 	}))
 }
 
+func TestGloasForkChoiceRequiresVerifiedPayload(t *testing.T) {
+	root := common.HexToHash("0x1234")
+
+	tests := []struct {
+		name          string
+		hasEnvelope   bool
+		verified      bool
+		wantFullChild bool
+	}{
+		{
+			name:          "envelope present but not verified means EMPTY only",
+			hasEnvelope:   true,
+			verified:      false,
+			wantFullChild: false,
+		},
+		{
+			name:          "envelope present and verified produces FULL child",
+			hasEnvelope:   true,
+			verified:      true,
+			wantFullChild: true,
+		},
+		{
+			name:          "no envelope means EMPTY only",
+			hasEnvelope:   false,
+			verified:      false,
+			wantFullChild: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newPayloadVoteTestStore(t, root, tt.hasEnvelope, tt.verified)
+
+			children := f.getNodeChildren(ForkChoiceNode{
+				Root:          root,
+				PayloadStatus: cltypes.PayloadStatusPending,
+			}, nil)
+			require.Equal(t, tt.wantFullChild, hasPayloadStatus(children, cltypes.PayloadStatusFull))
+			require.True(t, hasPayloadStatus(children, cltypes.PayloadStatusEmpty))
+
+			require.Equal(t, tt.wantFullChild, f.ShouldExtendPayload(root))
+			require.Equal(t, tt.wantFullChild, f.payloadTimeliness(root, true))
+			require.Equal(t, tt.wantFullChild, f.payloadDataAvailability(root, true))
+		})
+	}
+}
+
+func TestIsPayloadVerifiedStrictSemantics(t *testing.T) {
+	root := common.HexToHash("0x5678")
+
+	t.Run("envelope on disk but not EL-verified", func(t *testing.T) {
+		f := newPayloadVoteTestStore(t, root, true, false)
+		require.False(t, f.IsPayloadVerified(root))
+	})
+
+	t.Run("EL-verified and envelope present", func(t *testing.T) {
+		f := newPayloadVoteTestStore(t, root, true, true)
+		require.True(t, f.IsPayloadVerified(root))
+	})
+
+	t.Run("mark verified", func(t *testing.T) {
+		f := newPayloadVoteTestStore(t, root, true, false)
+		execHash := common.HexToHash("0xabcd")
+		block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+		f.MarkPayloadVerified(root, execHash, block)
+		require.True(t, f.IsPayloadVerified(root))
+	})
+
+	t.Run("nil cache returns false", func(t *testing.T) {
+		f := &ForkChoiceStore{}
+		require.False(t, f.IsPayloadVerified(root))
+	})
+}
+
 func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
+	verifiedExecutionPayload, _ := lru.New[common.Hash, struct{}](16)
+	verifiedExecutionPayload.Add(root, struct{}{})
 	return &ForkChoiceStore{
-		beaconCfg: &clparams.MainnetBeaconConfig,
+		beaconCfg:                &clparams.MainnetBeaconConfig,
+		verifiedExecutionPayload: verifiedExecutionPayload,
 		forkGraph: ptcVoteForkGraph{
 			envelopes: map[common.Hash]bool{root: true},
 		},
 	}
+}
+
+func newPayloadVoteTestStore(t *testing.T, root common.Hash, hasEnvelope, verified bool) *ForkChoiceStore {
+	t.Helper()
+
+	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](16)
+	require.NoError(t, err)
+	if verified {
+		verifiedExecutionPayload.Add(root, struct{}{})
+	}
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+
+	f := &ForkChoiceStore{
+		beaconCfg:                &clparams.MainnetBeaconConfig,
+		forkGraph:                payloadVoteForkGraph{hasEnvelope: hasEnvelope},
+		verifiedExecutionPayload: verifiedExecutionPayload,
+		executionPayloadStatus:   executionPayloadStatus,
+		optimisticStore:          optimistic.NewOptimisticStore(),
+	}
+	f.proposerBoostRoot.Store(common.Hash{})
+
+	majority := int(f.beaconCfg.PtcSize/2) + 1
+	f.payloadTimelinessVote.Store(root, ptcVotes(majority, 0))
+	f.payloadDataAvailabilityVote.Store(root, ptcVotes(majority, 0))
+
+	return f
 }
 
 func ptcVoteThreshold() int {
@@ -233,4 +365,13 @@ func ptcVotes(trueVotes, falseVotes int) [clparams.PtcSize]int8 {
 		votes[i] = boolToVote(false)
 	}
 	return votes
+}
+
+func hasPayloadStatus(nodes []ForkChoiceNode, status cltypes.PayloadStatus) bool {
+	for _, node := range nodes {
+		if node.PayloadStatus == status {
+			return true
+		}
+	}
+	return false
 }

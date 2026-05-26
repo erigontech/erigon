@@ -761,6 +761,35 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
+// IsPayloadVerified returns whether the execution payload for the beacon block root
+// has been accepted by the execution layer.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.verifiedExecutionPayload == nil {
+		return false
+	}
+	return f.verifiedExecutionPayload.Contains(blockRoot)
+}
+
+// MarkPayloadVerified records that the execution payload has been accepted by the EL
+// and updates all associated state: verified-payload cache, execution-payload-status
+// LRU, optimistic store, and head cache invalidation.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash, block *cltypes.BeaconBlock) {
+	if f.verifiedExecutionPayload == nil {
+		return
+	}
+	f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+	f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusValidated)
+	if err := f.optimisticStore.ValidateBlock(blockRoot, block); err != nil {
+		log.Warn("[MarkPayloadVerified] optimistic store update failed", "blockRoot", blockRoot, "err", err)
+	}
+	f.mu.Lock()
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.mu.Unlock()
+}
+
 // ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -997,8 +1026,14 @@ func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, 
 	})
 }
 
+// RequeuePendingELPayload queues a drained execution payload for another EL validation attempt.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
+	f.addPendingELPayload(p.Block, p.Envelope)
+}
+
 // DrainPendingELPayloads returns and clears all queued EL payloads.
-// The stages layer calls this before Flush() to add them to blockCollector.
+// The stages layer calls this before Flush() to retry them with engine.NewPayload.
 func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
 	f.pendingELPayloadsMu.Lock()
 	defer f.pendingELPayloadsMu.Unlock()

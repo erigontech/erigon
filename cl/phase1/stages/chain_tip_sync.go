@@ -3,14 +3,20 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	network "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -439,6 +445,137 @@ func pollForEnvelope(ctx context.Context, cfg *Cfg, headRoot common.Hash, timeou
 	}
 }
 
+func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
+	if block == nil || block.Block == nil {
+		return nil, nil, errors.New("missing beacon block")
+	}
+	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+		return nil, nil, errors.New("missing execution payload envelope")
+	}
+
+	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if committedBid == nil || committedBid.Message == nil {
+		return nil, nil, errors.New("missing execution payload bid")
+	}
+
+	versionedHashes := make([]common.Hash, 0)
+	blobCommitments := &committedBid.Message.BlobKzgCommitments
+	if blobCommitments.Len() > 0 {
+		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
+		if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
+			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
+			if err != nil {
+				return err
+			}
+			versionedHashes = append(versionedHashes, versionedHash)
+			return nil
+		}); err != nil {
+			return nil, nil, fmt.Errorf("failed to compute versioned hashes: %w", err)
+		}
+	}
+
+	var executionRequestsList []hexutil.Bytes
+	if envelope.Message.ExecutionRequests != nil {
+		executionRequestsList = cltypes.GetExecutionRequestsList(cfg.beaconCfg, envelope.Message.ExecutionRequests)
+	}
+	return versionedHashes, executionRequestsList, nil
+}
+
+func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
+	versionedHashes, executionRequestsList, err := buildGloasNewPayloadArgs(cfg, block, envelope)
+	if err != nil {
+		return execution_client.PayloadStatusNone, err
+	}
+	parentRoot := block.Block.ParentRoot
+	return cfg.executionClient.NewPayload(ctx, envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
+}
+
+func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
+	for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
+		if p.Block == nil || p.Envelope == nil || p.Envelope.Message == nil || p.Envelope.Message.Payload == nil {
+			continue
+		}
+		blockRoot, err := p.Block.Block.HashSSZ()
+		if err != nil {
+			log.Warn("[chainTipSync] failed to hash pending GLOAS block", "slot", p.Block.Block.Slot, "err", err)
+			continue
+		}
+		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
+		if err != nil {
+			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
+		}
+		beaconRoot := common.Hash(blockRoot)
+		execHash := p.Envelope.Message.Payload.BlockHash
+		switch status {
+		case execution_client.PayloadStatusValidated:
+			cfg.forkChoice.MarkPayloadVerified(beaconRoot, execHash, p.Block.Block)
+		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
+			cfg.forkChoice.RequeuePendingELPayload(p)
+		case execution_client.PayloadStatusInvalidated:
+			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
+		}
+	}
+}
+
+func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
+	headRoot := cfg.forkChoice.HighestSeenRoot()
+	if headRoot == (common.Hash{}) {
+		return
+	}
+
+	finalizedSlot := cfg.forkChoice.FinalizedSlot()
+	var blocks []struct {
+		root  common.Hash
+		block *cltypes.SignedBeaconBlock
+	}
+
+	for root := headRoot; root != (common.Hash{}); {
+		block, ok := cfg.forkChoice.GetBlock(root)
+		if !ok || block == nil {
+			break
+		}
+		if block.Block.Slot <= finalizedSlot {
+			break
+		}
+		epoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+		if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+			break
+		}
+		if cfg.forkChoice.HasEnvelope(root) && !cfg.forkChoice.IsPayloadVerified(root) {
+			blocks = append(blocks, struct {
+				root  common.Hash
+				block *cltypes.SignedBeaconBlock
+			}{root: root, block: block})
+		}
+		root = common.Hash(block.Block.ParentRoot)
+	}
+
+	for i := len(blocks) - 1; i >= 0; i-- {
+		item := blocks[i]
+		if cfg.forkChoice.IsPayloadVerified(item.root) {
+			continue
+		}
+		envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(item.root)
+		if err != nil {
+			log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
+			continue
+		}
+		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
+		if err != nil {
+			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+		}
+		execHash := envelope.Message.Payload.BlockHash
+		switch status {
+		case execution_client.PayloadStatusValidated:
+			cfg.forkChoice.MarkPayloadVerified(item.root, execHash, item.block.Block)
+		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
+			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
+		case execution_client.PayloadStatusInvalidated:
+			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
+		}
+	}
+}
+
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
@@ -453,16 +590,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// DrainPendingELPayloads and blockCollector require local insertion support.
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
 		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
-		// but whose EL newPayload failed (EL was behind).  Adding them to the collector
-		// before Flush ensures they are inserted into EL in block-number order, filling
-		// the gap that would otherwise permanently break the EL chain.
-		for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
-			if p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.Payload != nil {
-				if addErr := cfg.blockCollector.AddGloasBlock(p.Block.Block, p.Envelope); addErr != nil {
-					log.Warn("[chainTipSync] failed to add pending EL payload to collector", "err", addErr)
-				}
-			}
-		}
+		// but whose EL newPayload previously returned SYNCING/ACCEPTED.
+		drainPendingGloasPayloads(ctx, cfg)
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
 			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}
@@ -477,6 +606,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			headRoot := cfg.forkChoice.HighestSeenRoot()
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
+			}
+			if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+				verifyUnverifiedGloasPayloads(ctx, cfg)
 			}
 			// NOTE: recoverMissingEnvelopes runs unconditionally above (before
 			// SupportInsertion check), so it covers every cycle.
