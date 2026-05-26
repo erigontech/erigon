@@ -78,10 +78,9 @@ type Aggregator struct {
 	reorgBlockDepth uint64
 
 	dirtyFilesLock sync.Mutex
-	// visible is published via atomic.Store under dirtyFilesLock; readers take no lock.
+	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
-	// oldestVisible is the chain head (oldest still-pinned bundle) used by the
-	// reclaimer. Mutated only under dirtyFilesLock.
+	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
 	oldestVisible     *aggregatorVisible
 	snapshotBuildSema *semaphore.Weighted
 
@@ -150,7 +149,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		produce: true,
 	}
 	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
-	// nil pointer — recalcVisibleFiles will chain new generations off it during
+	// nil pointer — recalcVisibleFiles will linked-list new generations off it during
 	// ConfigureDomains.
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
@@ -1672,15 +1671,13 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 	return m
 }
 
-// aggregatorVisible is the immutable per-entity snapshot read by every
-// AggregatorRoTx. The bundle is what makes BeginFilesRo lock-free and
-// cross-entity consistent: a single atomic load pins one generation for all
-// domains, histories, inverted indexes and the state minimax.
+// aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
+// See also
 //
-// Bundles also drive file reclamation (replacing per-file refcount/canDelete):
-// they form an oldest→newest chain; a reader pins one via refcnt, and files
-// retired by a merge/prune are attached to the outgoing bundle and deleted only
-// once it drains. See docs/plans/20260525-lockfree-file-reclamation-spec.md.
+// new reader: refcnt++
+// new end: refcnt++
+// FilesDelete flow: Merge/Prune can mark old files as "ready for delete". Then last reader traversing linked-list of aggregatorVisible objects and perform real FileDelete
+// See: docs/plans/20260525-lockfree-file-reclamation-spec.md
 type aggregatorVisible struct {
 	d            [kv.DomainLen]*domainVisible
 	dh           [kv.DomainLen]visibleFiles      // per-domain History visible files
@@ -1688,9 +1685,9 @@ type aggregatorVisible struct {
 	iis          [kv.StandaloneIdxLen]*iiVisible // top-level inverted indexes (aligned with a.iis)
 	minimaxTxNum uint64                          // min of domain file EndTxNum across kv.StateDomains
 
-	refcnt  atomic.Int32       // live readers pinning this bundle
-	retired []*FilesItem       // files this generation is the last to reference; deleted on drain
-	next    *aggregatorVisible // oldest→newest chain link (set under dirtyFilesLock)
+	refcnt  atomic.Int32       // live readers
+	retired []*FilesItem       // files marked as "ready for delete"
+	next    *aggregatorVisible // oldest→newest linked-list link (set under dirtyFilesLock)
 }
 
 // recalcVisibleFiles must be called with dirtyFilesLock held (writers are
@@ -1726,8 +1723,7 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	a.reclaimDrainedLocked()
 }
 
-// reclaimDrainedLocked deletes the retired files of every fully-drained bundle
-// from the oldest end of the chain. Must hold dirtyFilesLock. Reclaiming
+// reclaimDrainedLocked deletes the retired files. Traversing visibleFiles linked-list. Reclaiming
 // oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
 // references its retired files. Single caller of closeFilesAndRemove on the main
 // path → at-most-once deletion without any per-file flag.
