@@ -1612,6 +1612,14 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
 				}
 			}
+			nonEmptyFN := 0
+			for col := 0; col < 16; col++ {
+				if fullNode.Children[col] != nil {
+					nonEmptyFN++
+				}
+			}
+			fmt.Printf("[WITNESS_DBG2] LoopFullNode key=%x keyLen=%d row=%d depth=%d nonEmptyChildren=%d nibble=%x\n",
+				hashedKey, len(hashedKey), row, hph.depths[row], nonEmptyFN, currentNibble)
 
 			// this deals with the edge case where the extension key in nextNode diverges from hashedKey
 			// and points to a branch node. In this case we just need to provide the hash of this branch node
