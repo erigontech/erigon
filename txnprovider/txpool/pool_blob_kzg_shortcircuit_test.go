@@ -19,6 +19,7 @@ package txpool
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -163,12 +164,14 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 
 	attackerPeerID := gointerfaces.ConvertHashToH512([64]byte{0x41, 0x42, 0x43})
 
+	kicked := make(chan struct{}, 1)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	sentryServer.EXPECT().
 		PenalizePeer(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 			assert.Equal(t, sentryproto.PenaltyKind_Kick, req.Penalty)
 			assert.Equal(t, attackerPeerID, req.PeerId)
+			kicked <- struct{}{}
 			return &emptypb.Empty{}, nil
 		}).
 		Times(1)
@@ -187,4 +190,11 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 
 	pool.AddRemoteTxnsFromPeer(ctx, slots, attackerPeerID, sentryClient)
 	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	// kickKZGOffenders fires PenalizePeer in a goroutine; wait for it.
+	select {
+	case <-kicked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PenalizePeer was not called within 5s")
+	}
 }

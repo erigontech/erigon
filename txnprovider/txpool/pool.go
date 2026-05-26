@@ -551,8 +551,13 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 }
 
 // kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
+// Called with p.lock held; the actual PenalizePeer RPC is dispatched off-lock to
+// avoid blocking the pool on sentry I/O.
 func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.DiscardReason) {
-	var kicked map[string]struct{}
+	var (
+		offenders []remoteSource
+		kicked    map[[64]byte]struct{}
+	)
 	for i, r := range reasons {
 		if r != txpoolcfg.UnmatchedBlobTxExt {
 			continue
@@ -564,22 +569,31 @@ func (p *TxPool) kickKZGOffenders(ctx context.Context, reasons []txpoolcfg.Disca
 		if src.peerID == nil || src.sentry == nil {
 			continue
 		}
-		key := string(gointerfaces.ConvertH512ToBytes(src.peerID))
+		var key [64]byte
+		copy(key[:], gointerfaces.ConvertH512ToBytes(src.peerID))
 		if _, seen := kicked[key]; seen {
 			continue
 		}
 		if kicked == nil {
-			kicked = map[string]struct{}{}
+			kicked = map[[64]byte]struct{}{}
 		}
 		kicked[key] = struct{}{}
-		p.logger.Debug("[txpool] penalizing peer for KZG-fail blob txn", "peer", src.peerID)
-		if _, err := src.sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
-			PeerId:  src.peerID,
-			Penalty: sentryproto.PenaltyKind_Kick,
-		}); err != nil {
-			p.logger.Debug("[txpool] PenalizePeer failed", "err", err)
-		}
+		offenders = append(offenders, src)
 	}
+	if len(offenders) == 0 {
+		return
+	}
+	go func() {
+		for _, src := range offenders {
+			p.logger.Debug("[txpool] penalizing peer for KZG-fail blob txn", "peer", src.peerID)
+			if _, err := src.sentry.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{
+				PeerId:  src.peerID,
+				Penalty: sentryproto.PenaltyKind_Kick,
+			}); err != nil {
+				p.logger.Debug("[txpool] PenalizePeer failed", "err", err)
+			}
+		}
+	}()
 }
 
 func (p *TxPool) getRlpLocked(tx kv.Tx, hash []byte) (rlpTxn []byte, sender common.Address, isLocal bool, err error) {
