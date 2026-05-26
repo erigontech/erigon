@@ -68,6 +68,16 @@ jobs:
             shard: rlp
             pool-size: 0
             fixtures-tarball: eest_stable
+          # BPO-source fork-transition tests (e.g. BPO1->BPO2, BPO2->BPO3, BPO3->BPO4).
+          # The per-fork shards above catch X->Y transitions whose source X has its
+          # own shard (e.g. fork_OsakaToBPO1 is caught by the osaka shard via
+          # substring match on "fork_Osaka"), but no shard's pattern is a substring
+          # of "fork_BPO[N]To*", so BPO-source transitions need their own shard.
+          - sim: consume-engine
+            sim-limit: ".*fork_BPO"
+            shard: bpo-transitions
+            pool-size: 0
+            fixtures-tarball: eest_stable
           - sim: consume-engine
             sim-limit: ".*/.*fork_Paris"
             shard: paris-devnet
@@ -114,6 +124,25 @@ jobs:
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
             erigon-extra-flags: "--experimental.bal"
+          # Covers BPO1->BPO2 and BPO2->Amsterdam transitions, which the
+          # single-fork shards above miss (see comment on `bpo-transitions`).
+          # Inherits the amsterdam-* shard config since the BPO2->Amsterdam
+          # transition crosses the BAL activation timestamp.
+          - sim: consume-engine
+            sim-limit: ".*fork_BPO"
+            shard: bpo-transitions-devnet
+            pool-size: 0
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+            erigon-extra-flags: "--experimental.bal"
+            # 2 wrong-test-expectation deterministic failures for EIP-7928
+            # test_invalid_{pre,post}_fork_block_*_bal_hash_field: they expect
+            # -32602 InvalidParams but the requests are well-formed V4/V5
+            # newPayload — the only divergence is a blockHash computed over a
+            # wrong-fork-schema header. Spec convention is InvalidStatus +
+            # INVALID_BLOCK_HASH, which is what erigon returns. Testing team
+            # has been notified.
+            max-failures: 2
     steps:
       - name: Clean docker system
         run: |
