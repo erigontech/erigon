@@ -76,9 +76,10 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | eest-devnet — `osaka-devnet` | 0 |
 | eest-devnet — `amsterdam-a-l-devnet` | 1 (EIP-7928 `test_bal_invalid_extraneous_entries` flake, #21364 — lives in `tests/amsterdam/...` so it falls in this [a-l] shard) |
 | eest-devnet — `amsterdam-m-z-devnet` | 0 |
+| eest-devnet — `bpo-transitions-devnet` | 2 (EIP-7928 `test_invalid_{pre,post}_fork_block_*_bal_hash_field` at `fork_BPO2ToAmsterdamAtTime15k` — well-formed V4/V5 newPayload with a wrong-fork-schema header; erigon returns InvalidStatus + INVALID_BLOCK_HASH while the tests expect -32602 InvalidParams. Testing team has been notified.) |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
-The CI `eest_devnet` shards mirror the `eest_stable` per-fork split with two
+The CI `eest_devnet` shards mirror the `eest_stable` per-fork split with three
 adjustments:
 - `paris` and `shanghai` are separate shards (not combined as in `eest_stable`)
   because the consume-engine plugin on `devnets/bal/7` doesn't honour regex
@@ -87,10 +88,19 @@ adjustments:
 - `fork_Amsterdam` is split into two shards by first-directory letter under
   `tests/` — `.*tests/[a-l].*fork_Amsterdam` and `.*tests/[m-z].*fork_Amsterdam`
   — so each finishes in ~25 min instead of ~52 min for the combined ~21k tests.
+- A dedicated `bpo-transitions` shard (sim-limit `.*fork_BPO`) is added to both
+  `eest_stable` and `eest_devnet` matrices. The per-fork shards catch `X->Y`
+  transitions where the source fork `X` has its own shard (via substring match
+  on `fork_X`), but no shard's pattern is a substring of `fork_BPO[N]To*`, so
+  BPO-source transitions need their own. Stable covers `BPO1->BPO2`,
+  `BPO2->BPO3`, `BPO3->BPO4` (17 tests, ~80s). Devnet covers `BPO1->BPO2` and
+  `BPO2->Amsterdam` (94 tests, ~40s) — the latter contains the two known
+  EIP-7928 deterministic failures.
 
-Both amsterdam shards pass `--experimental.bal` on the erigon side and
-`--client.checktimelimit=300s` to hive; the pre-Amsterdam devnet shards run
-with default flags. All devnet shards consume the URL and hive `branch` pinned
+The `amsterdam-{a-l,m-z}-devnet` and `bpo-transitions-devnet` shards pass
+`--experimental.bal` on the erigon side and `--client.checktimelimit=300s` to
+hive (the BPO2->Amsterdam transition crosses BAL activation); the pre-Amsterdam
+per-fork devnet shards run with default flags. All devnet shards consume the URL and hive `branch` pinned
 under the `eest_devnet` entry in `test-fixtures.json` (currently `bal@v7.2.0` /
 `devnets/bal/7`). Reproduce locally by aligning the invocation with those
 values — `make eest-devnet` reads them from the manifest via `jq` and applies
