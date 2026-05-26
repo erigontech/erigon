@@ -387,6 +387,21 @@ var _ SnapNameSchema = (*E3SnapSchema)(nil)
 var stateFileRegex = regexp.MustCompile("^v([0-9]+).([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 // fileName assumes no folderName in it
+//
+// Naming convention dispatch:
+//
+//   - File versions < TxNumNamingPivot use the legacy "step-indexed"
+//     filename, e.g. v1.0-accounts.0-1.kv covers step 0 only (txnums
+//     0..stepSize-1). The numbers parsed from the filename are step
+//     indices; we multiply by stepSize to recover the raw txnum range.
+//
+//   - File versions >= TxNumNamingPivot use the "raw exclusive
+//     txnums" filename, e.g. v4.0-accounts.0-1000.kv covers txnums
+//     0..999 (half-open [from, to)). The numbers parsed are raw
+//     txnums; we use them directly.
+//
+// Both conventions remain readable indefinitely so existing datadirs
+// keep working across the cutover.
 func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 	info := &SnapInfo{Name: baseFileName}
 
@@ -400,22 +415,27 @@ func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 		return nil, false
 	}
 
-	fromStep, err := strconv.ParseUint(subs[4], 10, 64)
+	fromNum, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return nil, false
 	}
 
-	toStep, err := strconv.ParseUint(subs[5], 10, 64)
+	toNum, err := strconv.ParseUint(subs[5], 10, 64)
 	if err != nil {
 		return nil, false
 	}
-
-	info.From = fromStep * s.stepSize
-	info.To = toStep * s.stepSize
 
 	info.Version, err = version.ParseVersion(fmt.Sprintf("v%s.%s", subs[1], subs[2]))
 	if err != nil {
 		return nil, false
+	}
+
+	if info.Version.GreaterOrEqual(version.TxNumNamingPivot) {
+		info.From = fromNum
+		info.To = toNum
+	} else {
+		info.From = fromNum * s.stepSize
+		info.To = toNum * s.stepSize
 	}
 
 	info.Ext = "." + subs[6]
@@ -433,16 +453,25 @@ func (s *E3SnapSchema) Parse(baseFileName string) (f *SnapInfo, ok bool) {
 	return nil, false
 }
 
+// stateFileRangeFormat formats the from-to portion of a state-file
+// name per the writing version's naming convention. See Parse() for
+// the convention description.
+func (s *E3SnapSchema) stateFileRangeFormat(filev statecfg.Version, from, to RootNum) string {
+	if filev.GreaterOrEqual(version.TxNumNamingPivot) {
+		return fmt.Sprintf("%d-%d", from, to)
+	}
+	return fmt.Sprintf("%d-%d", from/RootNum(s.stepSize), to/RootNum(s.stepSize))
+}
+
 func (s *E3SnapSchema) DataFile(filev statecfg.Version, from, to RootNum) (string, error) {
 	if filev.IsZero() {
 		filev = s.currentVersion.DataFileVersion.Current
 	}
 	if !filev.IsSearch() {
-		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%d-%d%s", filev, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), s.dataExtension)), nil
+		return filepath.Join(s.dataFileMetadata.folder, fmt.Sprintf("%s-%s.%s%s", filev, s.dataFileTag, s.stateFileRangeFormat(filev, from, to), s.dataExtension)), nil
 	}
 
-	pattern := s.fileFormat(s.dataFileMetadata.folder, "*", from, to, string(s.dataExtension))
-	return findFilesWithVersionsByPattern(filev, pattern, s.currentVersion.DataFileVersion, s.Parse)
+	return s.findFileByRange(filev, s.dataFileMetadata.folder, from, to, string(s.dataExtension), s.currentVersion.DataFileVersion)
 }
 
 func (s *E3SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum, idxPos uint16) (string, error) {
@@ -456,16 +485,46 @@ func (s *E3SnapSchema) AccessorIdxFile(filev statecfg.Version, from, to RootNum,
 		filev = s.currentVersion.AccessorIdxVersion.Current
 	}
 	if !filev.IsSearch() {
-		return s.fileFormat(s.indexFileMetadata.folder, filev.String(), from, to, string(s.accessorIdxExtension)), nil
+		return s.strictFileName(s.indexFileMetadata.folder, filev, from, to, string(s.accessorIdxExtension)), nil
 	}
 
-	basefile := s.fileFormat(s.indexFileMetadata.folder, "*", from, to, string(s.accessorIdxExtension))
-	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.AccessorIdxVersion, s.Parse)
+	return s.findFileByRange(filev, s.indexFileMetadata.folder, from, to, string(s.accessorIdxExtension), s.currentVersion.AccessorIdxVersion)
 }
 
-func (s *E3SnapSchema) fileFormat(folder string, version string, from, to RootNum, ext string) string {
-	basefile := fmt.Sprintf("%s-%s.%d-%d%s", version, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), ext)
-	return filepath.Join(folder, basefile)
+// strictFileName builds the filename for the strict (non-search)
+// case. Uses the writing version's naming convention.
+func (s *E3SnapSchema) strictFileName(folder string, filev statecfg.Version, from, to RootNum, ext string) string {
+	return filepath.Join(folder, fmt.Sprintf("%s-%s.%s%s", filev, s.dataFileTag, s.stateFileRangeFormat(filev, from, to), ext))
+}
+
+// findFileByRange globs the folder for any state file matching the
+// schema's data tag + extension (any version, any encoded range),
+// then post-filters by the requested raw txnum range. This is
+// convention-agnostic — works across both legacy step-indexed and new
+// raw-txnum filenames in the same directory.
+func (s *E3SnapSchema) findFileByRange(searchVer statecfg.Version, folder string, from, to RootNum, ext string, supported version.Versions) (string, error) {
+	pattern := filepath.Join(folder, fmt.Sprintf("*-%s.*-*%s", s.dataFileTag, ext))
+	return findFilesWithVersionsByPatternAndRange(searchVer, pattern, uint64(from), uint64(to), supported, s.Parse)
+}
+
+// fileFormat is retained for E3 callers that still expect the
+// version-string-as-string signature. It dispatches the range
+// encoding through the explicit Version when possible; for the search
+// "*" version it returns a wildcard pattern that the post-filter
+// matches by range.
+func (s *E3SnapSchema) fileFormat(folder string, versionStr string, from, to RootNum, ext string) string {
+	if versionStr == "*" {
+		// Search pattern: wildcard the range too so the glob matches
+		// both legacy step-indexed and new raw-txnum filenames.
+		return filepath.Join(folder, fmt.Sprintf("*-%s.*-*%s", s.dataFileTag, ext))
+	}
+	// Strict pattern with explicit version string. Try to parse the
+	// version so we can pick the right convention; fall back to
+	// step-indexed encoding (the legacy default) if parsing fails.
+	if v, err := version.ParseVersion(versionStr); err == nil {
+		return filepath.Join(folder, fmt.Sprintf("%s-%s.%s%s", v, s.dataFileTag, s.stateFileRangeFormat(v, from, to), ext))
+	}
+	return filepath.Join(folder, fmt.Sprintf("%s-%s.%d-%d%s", versionStr, s.dataFileTag, from/RootNum(s.stepSize), to/RootNum(s.stepSize), ext))
 }
 
 func (s *E3SnapSchema) BtIdxFile(filev statecfg.Version, from, to RootNum) (string, error) {
@@ -476,10 +535,9 @@ func (s *E3SnapSchema) BtIdxFile(filev statecfg.Version, from, to RootNum) (stri
 		filev = s.currentVersion.BtIdxVersion.Current
 	}
 	if !filev.IsSearch() {
-		return s.fileFormat(s.btIdxFileMetadata.folder, filev.String(), from, to, ".bt"), nil
+		return s.strictFileName(s.btIdxFileMetadata.folder, filev, from, to, ".bt"), nil
 	}
-	basefile := s.fileFormat(s.btIdxFileMetadata.folder, "*", from, to, ".bt")
-	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.BtIdxVersion, s.Parse)
+	return s.findFileByRange(filev, s.btIdxFileMetadata.folder, from, to, ".bt", s.currentVersion.BtIdxVersion)
 }
 
 func (s *E3SnapSchema) ExistenceFile(filev statecfg.Version, from, to RootNum) (string, error) {
@@ -490,10 +548,9 @@ func (s *E3SnapSchema) ExistenceFile(filev statecfg.Version, from, to RootNum) (
 		filev = s.currentVersion.ExistenceVersion.Current
 	}
 	if !filev.IsSearch() {
-		return s.fileFormat(s.existenceFileMetadata.folder, filev.String(), from, to, ".kvei"), nil
+		return s.strictFileName(s.existenceFileMetadata.folder, filev, from, to, ".kvei"), nil
 	}
-	basefile := s.fileFormat(s.existenceFileMetadata.folder, "*", from, to, ".kvei")
-	return findFilesWithVersionsByPattern(filev, basefile, s.currentVersion.ExistenceVersion, s.Parse)
+	return s.findFileByRange(filev, s.existenceFileMetadata.folder, from, to, ".kvei", s.currentVersion.ExistenceVersion)
 }
 
 func (s *E3SnapSchema) DataTag() string {
@@ -631,6 +688,70 @@ func findFilesWithVersionsByPattern(searchVer version.Version, pattern string, s
 	}
 	if maxVersion.IsZero() {
 		return "", fmt.Errorf("couldn't find parseable file for pattern %s", pattern)
+	}
+	return maxMatch, nil
+}
+
+// findFilesWithVersionsByPatternAndRange is the convention-agnostic
+// search used by E3 state-file lookups across the legacy-vs-txnum
+// naming cutover. The caller passes a glob pattern with wildcards in
+// the range portion (`*-tag.*-*ext`) so the glob matches both legacy
+// step-indexed names and new raw-txnum names. We then post-filter by
+// the parsed (from, to) txnum range and pick the highest-version
+// match within `supported`.
+//
+// wantFrom/wantTo are raw txnums (the parser already converts each
+// filename's encoded range back to raw txnums per its convention).
+//
+// Strict-search semantics (searchVer == StrictSearchVersion) demand
+// exactly one file matching the requested range; multiple in-range
+// matches return an ambiguity error. Glob result count alone is no
+// longer meaningful (the wildcard pattern intentionally over-matches
+// for backward compat), so the strict check is on the range-filtered
+// count.
+func findFilesWithVersionsByPatternAndRange(searchVer version.Version, pattern string, wantFrom, wantTo uint64, supported version.Versions, parseOp func(filename string) (*SnapInfo, bool)) (string, error) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		panic(fmt.Sprintf("invalid pattern: %s, err: %v", pattern, err))
+	}
+
+	isStrict := searchVer.Eq(version.StrictSearchVersion)
+
+	var inRange []string
+	var inRangeInfos []*SnapInfo
+	for _, match := range matches {
+		filename := filepath.Base(match)
+		info, ok := parseOp(filename)
+		if !ok {
+			// Glob may return adjacent files (e.g. accessor index for
+			// a different domain that shares the wildcard); skip
+			// unparseable matches rather than fail-fast.
+			continue
+		}
+		if info.From != wantFrom || info.To != wantTo {
+			continue
+		}
+		if !(info.Version.GreaterOrEqual(supported.MinSupported) && info.Version.LessOrEqual(supported.Current)) {
+			continue
+		}
+		inRange = append(inRange, match)
+		inRangeInfos = append(inRangeInfos, info)
+	}
+
+	if len(inRange) == 0 {
+		return "", fmt.Errorf("no match found for pattern %s with range [%d, %d)", pattern, wantFrom, wantTo)
+	}
+	if isStrict && len(inRange) > 1 {
+		return "", fmt.Errorf("more than one match found for pattern: %s with range [%d, %d) (%d candidates)", pattern, wantFrom, wantTo, len(inRange))
+	}
+
+	maxVersion := version.ZeroVersion
+	maxMatch := ""
+	for i, match := range inRange {
+		if maxVersion.Less(inRangeInfos[i].Version) {
+			maxVersion = inRangeInfos[i].Version
+			maxMatch = match
+		}
 	}
 	return maxMatch, nil
 }

@@ -318,3 +318,112 @@ func TestE3SnapSchemaForII(t *testing.T) {
 	require.False(t, p.btIdxFileMetadata.supported)
 	require.False(t, p.existenceFileMetadata.supported)
 }
+
+// TestE3SnapSchema_TxNumNamingConvention pins the v4.0+ raw-txnum
+// state-file naming convention. Versions >= TxNumNamingPivot encode
+// the file's [startTxNum, endTxNum) range directly in the filename
+// (e.g. v4.0-accounts.0-1000.kv covers txnums 0..999). Versions
+// below TxNumNamingPivot use the legacy step-indexed naming
+// (e.g. v1.0-accounts.0-1.kv covers step 0 only). Both conventions
+// remain readable so existing datadirs survive the cutover.
+func TestE3SnapSchema_TxNumNamingConvention(t *testing.T) {
+	t.Parallel()
+	dirs := setup(t)
+	const stepSize uint64 = 1000
+
+	// Use a Versions span that covers BOTH conventions: MinSupported
+	// = V1_0 (legacy), Current = V4_0 (new txnum convention).
+	ver := version.Versions{Current: version.V4_0, MinSupported: version.V1_0}
+	p := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys, ver).
+		BtIndex(ver).
+		Existence(ver).Build()
+
+	// Cover txnums [10000, 11000) — one step with stepSize=1000.
+	from := RootNum(10000)
+	to := RootNum(11000)
+
+	// --- Writer side: emits v4.0 raw-txnum filenames ---
+	dataPath, err := p.DataFile(version.V4_0, from, to)
+	require.NoError(t, err)
+	_, fName := filepath.Split(dataPath)
+	require.Equal(t, "v4.0-accounts.10000-11000.kv", fName,
+		"v4.0 writer must emit raw exclusive txnums in the filename, not step indices")
+
+	btPath, err := p.BtIdxFile(version.V4_0, from, to)
+	require.NoError(t, err)
+	_, fName = filepath.Split(btPath)
+	require.Equal(t, "v4.0-accounts.10000-11000.bt", fName)
+
+	exPath, err := p.ExistenceFile(version.V4_0, from, to)
+	require.NoError(t, err)
+	_, fName = filepath.Split(exPath)
+	require.Equal(t, "v4.0-accounts.10000-11000.kvei", fName)
+
+	// --- Writer side: legacy versions still emit step-indexed names ---
+	legacyDataPath, err := p.DataFile(version.V1_0, from, to)
+	require.NoError(t, err)
+	_, fName = filepath.Split(legacyDataPath)
+	require.Equal(t, "v1.0-accounts.10-11.kv", fName,
+		"legacy v1.0 writer must emit step-indexed filename (10000/1000=10, 11000/1000=11)")
+
+	// --- Parser side: both conventions parse back to the same raw txnum range ---
+	info, ok := p.Parse("v4.0-accounts.10000-11000.kv")
+	require.True(t, ok)
+	require.Equal(t, version.V4_0, info.Version)
+	require.Equal(t, uint64(10000), info.From, "v4.0 parser must read raw txnums directly")
+	require.Equal(t, uint64(11000), info.To)
+	require.Equal(t, "accounts", info.FileType)
+	require.Equal(t, string(DataExtensionKv), info.Ext)
+
+	info, ok = p.Parse("v1.0-accounts.10-11.kv")
+	require.True(t, ok)
+	require.Equal(t, version.V1_0, info.Version)
+	require.Equal(t, uint64(10000), info.From,
+		"legacy v1.0 parser must multiply step indices by stepSize (10*1000)")
+	require.Equal(t, uint64(11000), info.To)
+}
+
+// TestE3SnapSchema_TxNumNamingMultiStepRange pins that v4.0 raw-txnum
+// naming correctly represents files spanning multiple steps. The
+// motivating "variable step sizes" concern: with raw txnums in the
+// filename, the file's coverage is unambiguous without knowing
+// stepSize at parse time.
+func TestE3SnapSchema_TxNumNamingMultiStepRange(t *testing.T) {
+	t.Parallel()
+	dirs := setup(t)
+	const stepSize uint64 = 1000
+	ver := version.Versions{Current: version.V4_0, MinSupported: version.V1_0}
+	p := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "storage", DataExtensionKv, seg.CompressKeys, ver).
+		BtIndex(ver).Build()
+
+	// 5-step range: txnums [0, 5000) under v4.0 → "0-5000".
+	from := RootNum(0)
+	to := RootNum(5 * stepSize)
+
+	dataPath, err := p.DataFile(version.V4_0, from, to)
+	require.NoError(t, err)
+	_, fName := filepath.Split(dataPath)
+	require.Equal(t, "v4.0-storage.0-5000.kv", fName)
+
+	// Adjacent file [5000, 10000) shares the boundary "5000" — the
+	// natural visual representation of half-open [from, to) intervals.
+	from2 := RootNum(5 * stepSize)
+	to2 := RootNum(10 * stepSize)
+	dataPath2, err := p.DataFile(version.V4_0, from2, to2)
+	require.NoError(t, err)
+	_, fName = filepath.Split(dataPath2)
+	require.Equal(t, "v4.0-storage.5000-10000.kv", fName)
+
+	// Parser round-trip.
+	info, ok := p.Parse("v4.0-storage.0-5000.kv")
+	require.True(t, ok)
+	require.Equal(t, uint64(0), info.From)
+	require.Equal(t, uint64(5000), info.To)
+
+	info, ok = p.Parse("v4.0-storage.5000-10000.kv")
+	require.True(t, ok)
+	require.Equal(t, uint64(5000), info.From)
+	require.Equal(t, uint64(10000), info.To)
+}
