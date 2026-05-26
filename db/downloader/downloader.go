@@ -200,6 +200,11 @@ type Downloader struct {
 	forkCutBlock    uint64
 	forkStepToBlock StepToBlock
 
+	// retentionFloor is the prune-window floor in step units passed
+	// through to RollingV2Publisher.SetRetentionFloor. Set by
+	// SetRetentionFloor; zero is the full-history default.
+	retentionFloor uint64
+
 	// v2PublishGate{Enabled,Open} implement the chain.v2 first-publish
 	// gate — see EnableV2PublishGate. Default: both false → ungated.
 	v2PublishGateEnabled atomic.Bool
@@ -647,6 +652,17 @@ func (d *Downloader) SetForkCutBlock(cutBlock uint64, stepToBlock StepToBlock) {
 	d.forkStepToBlock = stepToBlock
 }
 
+// SetRetentionFloor configures the prune-window floor in step units the
+// V2 publisher applies before writing each generation. Minimal-mode
+// callers wire this from the storage component's view of what's
+// actually held (smallest live Coverage[0]); a full-history publisher
+// leaves it zero.
+func (d *Downloader) SetRetentionFloor(floor uint64) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.retentionFloor = floor
+}
+
 // SetSelfIP records this node's externally-advertised IP. Production
 // wiring keeps it fresh from the discv5 ENR. Passing nil clears it.
 // Also forwards to the TorrentPeerManager so the same-host loopback
@@ -917,6 +933,7 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	chainIdentityForks := d.chainIdentityForks
 	forkCutBlock := d.forkCutBlock
 	forkStepToBlock := d.forkStepToBlock
+	retentionFloor := d.retentionFloor
 	d.lock.RUnlock()
 	if selfCheck != nil {
 		pub.SetSelfCheck(selfCheck)
@@ -932,6 +949,9 @@ func (d *Downloader) PublishLocalChainTomlV2(inv *storagesnapshot.Inventory) err
 	}
 	if forkCutBlock > 0 {
 		pub.SetForkCutBlock(forkCutBlock, forkStepToBlock)
+	}
+	if retentionFloor > 0 {
+		pub.SetRetentionFloor(retentionFloor)
 	}
 	// Re-seed the generations a fresh publisher recovered from disk
 	// (see RollingV2Publisher.ResumeSeeding), once.

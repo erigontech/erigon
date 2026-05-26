@@ -284,6 +284,13 @@ type RollingV2Publisher struct {
 	// the classifier reuse.
 	forkCutBlock    uint64
 	forkStepToBlock StepToBlock
+
+	// retentionFloor is the step-unit floor below which state-domain
+	// files are dropped from the advertisement. Set by a minimal-mode
+	// publisher via SetRetentionFloor so the manifest never claims
+	// coverage the publisher cannot serve. Zero disables the filter
+	// (full-history publisher default).
+	retentionFloor uint64
 }
 
 // ManifestSelfCheckFn is the type of the producer-side self-check
@@ -392,6 +399,17 @@ func (r *RollingV2Publisher) SetForkCutBlock(cutBlock uint64, stepToBlock StepTo
 	defer r.mu.Unlock()
 	r.forkCutBlock = cutBlock
 	r.forkStepToBlock = stepToBlock
+}
+
+// SetRetentionFloor records the publisher's prune-window floor in step
+// units. State-domain files whose entire range falls below this value
+// are dropped from the published manifest, and each domain's
+// Coverage[0] is pinned to the floor so the advertisement matches what
+// the publisher can actually serve. Zero is the full-history default.
+func (r *RollingV2Publisher) SetRetentionFloor(floor uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.retentionFloor = floor
 }
 
 // resolveENRFP returns the ENR fingerprint for filename construction:
@@ -550,6 +568,14 @@ func (r *RollingV2Publisher) Publish(
 	populateInventoryTorrentHashes(inv, r.snapDir)
 
 	manifest := GenerateV2(inv)
+
+	// Retention-floor filter: a minimal-mode publisher drops entries
+	// whose range falls entirely below its prune window. Coverage[0]
+	// gets pinned to the floor so the advertisement matches what the
+	// publisher can serve. Zero floor (full-history default) is a no-op.
+	if r.retentionFloor > 0 {
+		FilterManifestByRetentionFloor(manifest, r.retentionFloor)
+	}
 
 	// Fork-publisher filter: on a fork chain, drop pre-cut + straddle
 	// entries before any downstream step sees the manifest. The fork's
