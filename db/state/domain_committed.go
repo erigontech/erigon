@@ -249,6 +249,18 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return 0, false
 }
 
+// fileVersionByRange returns the parsed version of the visible file covering from..to.
+// A missing file yields the zero version, which the referencing predicate treats as
+// referenced — preserving the historical expand-on-merge behavior.
+func (dt *DomainRoTx) fileVersionByRange(from, to uint64) version.Version {
+	for _, f := range dt.files {
+		if f.startTxNum == from && f.endTxNum == to {
+			return f.Version()
+		}
+	}
+	return version.Version{}
+}
+
 // lookupVisibleFileByRange searches only among visible files (those in the RoTx snapshot).
 // Use this during merge operations where constituent files are guaranteed to be visible.
 func (dt *DomainRoTx) lookupVisibleFileByRange(txFrom, txTo uint64) (*FilesItem, error) {
@@ -339,8 +351,20 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	ma := accounts.dataReader(mergedAccount.decompressor)
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
+	// reshorten governs whether merged output keys are re-referenced (offsets into the merged
+	// account/storage files). It is keyed off the live write flag and the OUTPUT range only;
+	// input expansion below is keyed off each input file's own version+range instead.
+	reshorten := dt.d.ReferencesInCommitmentBranches && ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to)
+
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.ReferencesInCommitmentBranches || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
+		if len(valBuf) == 0 {
+			return valBuf, nil
+		}
+		// Expand the input's short keys to plain whenever the input file was written referenced
+		// (its own version+range), independent of the live flag — otherwise a referenced input
+		// merged with the flag off would copy stale offsets into the merged file.
+		inputReferenced := commitmentBranchReferenced(dt.fileVersionByRange(keyFromTxNum, keyEndTxNum), dt.d.stepSize, keyFromTxNum, keyEndTxNum)
+		if !inputReferenced && !reshorten {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {
@@ -373,7 +397,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			var found bool
 			auxBuf := keyBuf[:0]
 			if isStorage {
-				if len(key) == length.Addr+length.Hash {
+				plainKey := len(key) == length.Addr+length.Hash
+				if plainKey {
 					// Non-optimised key originating from a database record
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
@@ -387,6 +412,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 						)
 						return nil, fmt.Errorf("lookup lost storage full key %x", key)
 					}
+				}
+				if !reshorten {
+					if plainKey {
+						return nil, nil // leave the already-plain key in place
+					}
+					return auxBuf, nil // emit the expanded plain key
 				}
 
 				shortenedKeyOffset, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
@@ -405,7 +436,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				return shortened, nil
 			}
 
-			if len(key) == length.Addr {
+			plainKey := len(key) == length.Addr
+			if plainKey {
 				// Non-optimised key originating from a database record
 				auxBuf = append(auxBuf[:0], key...)
 			} else {
@@ -418,6 +450,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					)
 					return nil, fmt.Errorf("lookup account full key: %x", key)
 				}
+			}
+			if !reshorten {
+				if plainKey {
+					return nil, nil // leave the already-plain key in place
+				}
+				return auxBuf, nil // emit the expanded plain key
 			}
 
 			shortenedKeyOffset, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)

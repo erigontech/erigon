@@ -224,7 +224,11 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
-			squeezedTmpPath := originalPath + sqExt + ".tmp"
+			// The squeeze re-references the file, so stamp the output with the flag-derived write
+			// version (v2.0) rather than reusing the input name, which may be a plain v2.1 file
+			// written during a flag-off rebuild window.
+			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
+			squeezedTmpPath := targetPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
 				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
@@ -289,7 +293,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			cf.frozen = false
 			cf.closeFilesAndRemove()
 
-			squeezedPath := originalPath + sqExt
+			squeezedPath := targetPath + sqExt
 			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
 				return err
 			}
