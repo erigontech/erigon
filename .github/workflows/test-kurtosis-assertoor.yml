@@ -20,41 +20,17 @@ on:
         default: false
 
 jobs:
-  assertoor_test:
-    name: assertoor_${{ matrix.suite }}_test
+  # Build the erigon image once for the whole matrix. The matrix below has
+  # grown to suite × {serial, parallel} entries — having every entry run its
+  # own buildx with `cache-to: type=gha,mode=max,scope=kurtosis-erigon-build`
+  # means ~a dozen jobs hammering the same GHA cache key concurrently, which
+  # the cache backend answers with 504s ("failed to parse error response 504"
+  # → `failed to build`). One builder, one cache writer; the matrix consumes
+  # the image as a run-scoped artifact.
+  build-erigon-image:
+    name: build-erigon-image
     if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
-        # step. Observed happy-path durations are roughly:
-        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
-        # The caps below give ~1.5–2x of the happy path so real regressions still
-        # pass but pathological hangs (e.g. a node that silently stops proposing)
-        # fail in reasonable time instead of burning hours.
-        include:
-          - suite: regular
-            package_args: .github/workflows/kurtosis/regular-assertoor.io
-            ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 50
-          - suite: pectra
-            package_args: .github/workflows/kurtosis/pectra.io
-            ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 45
-          - suite: glamsterdam
-            package_args: .github/workflows/kurtosis/glamsterdam.io
-            # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
-            # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
-            # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
-            ethereum_package_branch: "6.1.0"
-            test_timeout_minutes: 20
-          - suite: caplin-minimal
-            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
-            ethereum_package_url: "github.com/erigontech/ethereum-package"
-            ethereum_package_branch: "erigontech/fix-caplin-launcher"
-            test_timeout_minutes: 20
-
     steps:
       - name: Fast checkout git repository
         uses: actions/checkout@v6
@@ -63,8 +39,6 @@ jobs:
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
-        # continue-on-error: transient Docker Hub network timeouts should not
-        # abort the entire workflow — the run proceeds without login (unlogged pull).
         if: |
           github.repository == 'erigontech/erigon' &&
           github.actor != 'dependabot[bot]' &&
@@ -77,6 +51,101 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
+
+      - name: Build erigon Docker image (with BuildKit layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: test/erigon:current-base
+          build-args: |
+            BINARIES=erigon caplin
+          cache-from: type=gha,scope=kurtosis-erigon-build
+          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+
+      - name: Export erigon image as a run-scoped artifact
+        run: docker save test/erigon:current-base -o "${RUNNER_TEMP}/erigon-base-image.tar"
+
+      - name: Upload erigon image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: erigon-base-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/erigon-base-image.tar
+          retention-days: 1
+          if-no-files-found: error
+
+  assertoor_test:
+    name: assertoor_${{ matrix.suite }}_${{ matrix.exec_mode }}_test
+    needs: build-erigon-image
+    # On cache-warming runs build-erigon-image alone warms the kurtosis image
+    # cache; there's nothing for the matrix to do (the test step is skipped).
+    if: ${{ !inputs.cache-warming-only && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
+        # step. Observed happy-path durations are roughly:
+        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
+        # The caps below give ~1.5–2x of the happy path so real regressions still
+        # pass but pathological hangs (e.g. a node that silently stops proposing)
+        # fail in reasonable time instead of burning hours.
+        #
+        # Each suite runs twice — once with serial exec
+        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so divergence
+        # is caught on the PR. Matrix entries spawn separate hosted runners
+        # and run concurrently — wall-clock unchanged, runner-minutes doubled.
+        # All entries share the single erigon image built by build-erigon-image.
+        include:
+          - suite: regular
+            package_args: .github/workflows/kurtosis/regular-assertoor.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 50
+            exec_mode: serial
+          - suite: regular
+            package_args: .github/workflows/kurtosis/regular-assertoor.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 50
+            exec_mode: parallel
+          - suite: pectra
+            package_args: .github/workflows/kurtosis/pectra.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 45
+            exec_mode: serial
+          - suite: pectra
+            package_args: .github/workflows/kurtosis/pectra.io
+            ethereum_package_branch: "5.0.1"
+            test_timeout_minutes: 45
+            exec_mode: parallel
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            # Pinned to 6.1.0 rather than main: commit 835dd9b on main introduced GpuConfig,
+            # a Starlark built-in that requires Kurtosis CLI >=1.18.1, breaking Starlark eval.
+            # Unpin to main once CI is upgraded to Kurtosis 1.18.1.
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: serial
+          - suite: glamsterdam
+            package_args: .github/workflows/kurtosis/glamsterdam.io
+            ethereum_package_branch: "6.1.0"
+            test_timeout_minutes: 20
+            exec_mode: parallel
+          - suite: caplin-minimal
+            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
+            ethereum_package_url: "github.com/erigontech/ethereum-package"
+            ethereum_package_branch: "erigontech/fix-caplin-launcher"
+            test_timeout_minutes: 20
+            exec_mode: serial
+          - suite: caplin-minimal
+            package_args: .github/workflows/kurtosis/caplin-minimal-assertoor.io
+            ethereum_package_url: "github.com/erigontech/ethereum-package"
+            ethereum_package_branch: "erigontech/fix-caplin-launcher"
+            test_timeout_minutes: 20
+            exec_mode: parallel
+
+    steps:
+      - name: Fast checkout git repository
+        uses: actions/checkout@v6
 
       - name: Restore cached third-party containers
         id: cache-cl-images
@@ -103,16 +172,26 @@ jobs:
           docker save ${{ env.TEKU_IMAGE }}        -o /tmp/docker-cache/teku.tar
           docker save ${{ env.ASSERTOOR_IMAGE }}   -o /tmp/docker-cache/assertoor.tar
 
-      - name: Build erigon Docker image (with BuildKit layer cache)
-        uses: docker/build-push-action@v6
+      - name: Download erigon image artifact
+        uses: actions/download-artifact@v8
         with:
-          context: .
-          load: true
-          tags: test/erigon:current
-          build-args: |
-            BINARIES=erigon caplin
-          cache-from: type=gha,scope=kurtosis-erigon-build
-          cache-to: type=gha,mode=max,scope=kurtosis-erigon-build
+          name: erigon-base-image-${{ github.run_id }}
+          path: ${{ runner.temp }}
+
+      - name: Load erigon base image into daemon
+        run: docker load -i "${RUNNER_TEMP}/erigon-base-image.tar"
+
+      - name: Bake exec_mode env into the runtime image
+        # Kurtosis launches `test/erigon:current` as the EL participant.
+        # Add ERIGON_EXEC3_PARALLEL as an ENV layer on top of the shared
+        # base image so the matrix entries differ only in exec mode.
+        env:
+          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+        run: |
+          docker build -t test/erigon:current - <<EOF
+          FROM test/erigon:current-base
+          ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}
+          EOF
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
         # On branch push, tests already passed in the merge queue. This run exists
@@ -126,7 +205,7 @@ jobs:
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"
             ethereum_package_branch: "${{ matrix.ethereum_package_branch }}"
@@ -146,8 +225,8 @@ jobs:
         continue-on-error: true
         run: |
           set -eu
-          enclave_name="kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
-          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}"
+          enclave_name="kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
+          dump_dir="${RUNNER_TEMP}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}"
           kurtosis enclave dump "$enclave_name" "$dump_dir" || true
 
       - name: Upload Kurtosis enclave dump
@@ -155,8 +234,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
-          name: kurtosis-dump-${{ matrix.suite }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}
+          name: kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kurtosis-dump-${{ matrix.suite }}-${{ matrix.exec_mode }}
           retention-days: 7
           if-no-files-found: warn
 
