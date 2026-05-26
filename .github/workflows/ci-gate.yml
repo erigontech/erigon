@@ -124,6 +124,10 @@ jobs:
     uses: ./.github/workflows/check-large-files.yml
     secrets: inherit
 
+  typos:
+    uses: ./.github/workflows/check-typos.yml
+    secrets: inherit
+
   bench:
     if: needs.changes.outputs.code != 'false'
     needs: [changes]
@@ -168,6 +172,7 @@ jobs:
       - caplin
       - docs-site
       - large-files
+      - typos
       - bench
       - kurtosis
       - repro
