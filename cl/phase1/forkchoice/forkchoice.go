@@ -427,9 +427,7 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash com
 	return f.executionPayloadStatus.Get(executionBlockHash)
 }
 
-// GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload
-// by its execution block hash. Used for the is_gas_limit_target_compatible IGNORE check.
-// [New in Gloas:EIP7732]
+// GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
 func (f *ForkChoiceStore) GetExecutionPayloadGasLimit(executionBlockHash common.Hash) (uint64, bool) {
 	return f.executionPayloadGasLimit.Get(executionBlockHash)
 }
@@ -574,8 +572,7 @@ func (f *ForkChoiceStore) GetEth1Hash(eth2Root common.Hash) common.Hash {
 }
 
 // GetFinalizedExecutionHash returns the EL block hash for a finalized/justified checkpoint.
-// [Modified in Gloas:EIP7732] For Gloas+ blocks, returns parent_block_hash from the
-// committed execution payload bid instead of the execution payload header hash.
+// For Gloas+ blocks, uses parent_block_hash from the bid instead of the payload header hash.
 func (f *ForkChoiceStore) GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

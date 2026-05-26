@@ -240,8 +240,7 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			ErrIgnore, bid.ParentBlockHash)
 	}
 
-	// [IGNORE] bid.gas_limit is compatible with target_gas_limit given parent gas limit
-	// (consensus-specs PR #5236: replaces the former REJECT on exact gas_limit match)
+	// [IGNORE] gas_limit compatibility check — skipped (not rejected) when parent is absent from the LRU.
 	if parentGasLimit, ok := s.forkchoiceStore.GetExecutionPayloadGasLimit(bid.ParentBlockHash); ok {
 		if !IsGasLimitTargetCompatible(parentGasLimit, bid.GasLimit, prefs.TargetGasLimit) {
 			return fmt.Errorf("%w: bid gas_limit %d not compatible with target %d (parent %d)",

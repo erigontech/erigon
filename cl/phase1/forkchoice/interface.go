@@ -43,8 +43,7 @@ type ForkChoiceStorageReader interface {
 	FinalizedSlot() uint64
 	LowestAvailableSlot() uint64
 	GetEth1Hash(eth2Root common.Hash) common.Hash
-	// [New in Gloas:EIP7732] GetFinalizedExecutionHash returns the EL block hash for
-	// finalized/justified checkpoints, using parent_block_hash from the bid for Gloas+ blocks.
+	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64

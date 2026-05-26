@@ -16,15 +16,8 @@
 
 package services
 
-// IsGasLimitTargetCompatible checks whether the bid's gas_limit is consistent
-// with the proposer's target_gas_limit given the parent's gas_limit, per EIP-1559
-// gas limit transition rules.
-//
-// Spec reference: consensus-specs PR #5236
-//
-//	def is_gas_limit_target_compatible(parent_gas_limit, gas_limit, target_gas_limit):
-//	    max_gas_limit_difference = max(parent_gas_limit // 1024, 1) - 1
-//	    ...
+// IsGasLimitTargetCompatible checks whether the bid's gas_limit is consistent with the
+// proposer's target given the parent's gas_limit, per EIP-1559 transition rules (consensus-specs PR #5236).
 func IsGasLimitTargetCompatible(parentGasLimit, gasLimit, targetGasLimit uint64) bool {
 	var maxGasLimitDifference uint64
 	if parentGasLimit/1024 > 1 {

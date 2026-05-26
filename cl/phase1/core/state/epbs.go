@@ -186,7 +186,11 @@ func IsPendingValidator(cfg *clparams.BeaconChainConfig, pendingDeposits *solid.
 		if d.PubKey != pubkey {
 			continue
 		}
-		valid, _ := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		valid, err := IsValidDepositSignature(cfg, d.PubKey, d.WithdrawalCredentials, d.Amount, d.Signature)
+		if err != nil {
+			log.Debug("IsValidDepositSignature failed", "pubkey", d.PubKey, "err", err)
+			continue
+		}
 		if valid {
 			return true
 		}

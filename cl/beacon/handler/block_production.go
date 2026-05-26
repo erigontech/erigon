@@ -829,6 +829,7 @@ func (a *ApiHandler) produceBeaconBody(
 			sn := hexutil.Uint64(targetSlot)
 			attrs.SlotNumber = &sn
 			if a.epbsPool != nil {
+				// A proposer submits at most one preference per slot, so first-match is deterministic.
 				for _, pref := range a.epbsPool.GetPreferencesForSlot(targetSlot) {
 					if pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
 						tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
