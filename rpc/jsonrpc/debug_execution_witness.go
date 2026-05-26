@@ -19,7 +19,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -958,6 +957,9 @@ func detectCollapseSiblings(
 	}
 
 	sdCtx.SetCollapseTracer(nil)
+	for i, sp := range siblingPaths {
+		log.Info("[WITNESS_SIBLING] detected", "block", blockNum, "idx", i, "len", len(sp), "path", fmt.Sprintf("%x", sp))
+	}
 	return siblingPaths, nil
 }
 
@@ -988,10 +990,9 @@ func buildWitnessTrie(
 	accessed.touchAll(sdCtx)
 
 	if len(siblingPaths) > 0 {
-		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
-		for _, siblingPath := range siblingPaths {
-			compactSiblingPath := commitment.NibblesToString(siblingPath)
-			log.Debug("[debug_executionWitness] touching sibling hashed key", "path", compactSiblingPath, "len", len(siblingPath))
+		log.Info("[WITNESS_SIBLING] touching sibling paths in buildWitnessTrie", "count", len(siblingPaths))
+		for i, siblingPath := range siblingPaths {
+			log.Info("[WITNESS_SIBLING] touching", "idx", i, "len", len(siblingPath), "path", fmt.Sprintf("%x", siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}
