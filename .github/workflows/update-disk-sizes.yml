@@ -96,19 +96,6 @@ jobs:
           ref: ${{ steps.determine.outputs.base_branch }}
           persist-credentials: true
 
-      - name: Prepare update branch
-        env:
-          BASE_BRANCH: ${{ steps.determine.outputs.base_branch }}
-        run: |
-          set -euo pipefail
-          BRANCH="docs/auto/disk-sizes-${BASE_BRANCH//\//-}"
-          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
-            git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
-          else
-            git checkout -B "$BRANCH"
-          fi
-
       - name: Download disk usage artifacts
         uses: actions/download-artifact@v8
         with:
