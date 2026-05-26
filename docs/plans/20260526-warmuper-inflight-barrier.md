@@ -276,11 +276,11 @@ Untouched (already safe): final-batch path (arena not reused before the deferred
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] verify the Overview repro no longer panics and the race is gone:
-      `go test -race -run 'TestHashSort_WarmupArenaNoRace|TestWarmuper_WaitForInFlightKeysThenRun' ./execution/commitment/ -count=20`
-- [ ] `make lint` (repeat until clean — linter is non-deterministic).
-- [ ] `make erigon integration` (build both binaries).
-- [ ] `go test ./execution/commitment/...` (full package, no `-short`) passes.
+- [x] verify the Overview repro no longer panics and the race is gone:
+      `go test -race -run 'TestHashSort_WarmupArenaNoRace|TestWarmuper_WaitForInFlightKeysThenRun' ./execution/commitment/ -count=20` → green, 9.1s.
+- [x] `make lint` (repeat until clean — linter is non-deterministic). → 0 issues on two consecutive runs.
+- [x] `make erigon integration` (build both binaries). → both built.
+- [x] `go test ./execution/commitment/...` (full package, no `-short`) passes. → all packages ok.
 
 ### Task 5: [Final] Docs & wrap-up
 
