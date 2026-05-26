@@ -184,13 +184,13 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `db/state/erigondb_settings.go`
 - Create: `db/state/erigondb_settings_test.go` (if absent; else modify)
 
-- [ ] add `ReferencesInCommitmentBranches *bool` with `toml:"references_in_commitment_branches"` to `ErigonDBSettings`
-- [ ] existing-file branch: after unmarshal, normalize `nil → &true` **in memory only**; do not rewrite the file
-- [ ] legacy branch (preverified present): write explicit `true`
-- [ ] fresh + `noDownloader`: write explicit `true`; fresh + downloader: leave for the downloader's file (in-memory default `true`)
-- [ ] add a resolved accessor (e.g. `func (s *ErigonDBSettings) RefsInCommitmentBranches() bool { return s.ReferencesInCommitmentBranches == nil || *s.ReferencesInCommitmentBranches }`) for safe consumption
-- [ ] write tests: absent→true; explicit `false` honored; explicit `true` honored; legacy writes `true`; fresh+noDownloader writes `true`; existing-file branch does NOT rewrite the file; `*bool` round-trips through marshal/unmarshal
-- [ ] run tests — must pass before next task
+- [x] add `ReferencesInCommitmentBranches *bool` with `toml:"references_in_commitment_branches"` to `ErigonDBSettings`
+- [x] existing-file branch: after unmarshal, normalize `nil → &true` **in memory only**; do not rewrite the file
+- [x] legacy branch (preverified present): write explicit `true`
+- [x] fresh + `noDownloader`: write explicit `true`; fresh + downloader: leave for the downloader's file (in-memory default `true`)
+- [x] add a resolved accessor (e.g. `func (s *ErigonDBSettings) RefsInCommitmentBranches() bool { return s.ReferencesInCommitmentBranches == nil || *s.ReferencesInCommitmentBranches }`) for safe consumption
+- [x] write tests: absent→true; explicit `false` honored; explicit `true` honored; legacy writes `true`; fresh+noDownloader writes `true`; existing-file branch does NOT rewrite the file; `*bool` round-trips through marshal/unmarshal
+- [x] run tests — must pass before next task
 
 ### Task 4: Thread the resolved flag into schema + aggregator
 
