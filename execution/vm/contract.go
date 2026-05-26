@@ -54,10 +54,11 @@ type Contract struct {
 
 	value uint256.Int
 
-	// selfBalance memoizes the result of SELFBALANCE for the lifetime of this
-	// frame. Invalidated by ops that can change the account's balance via a
-	// nested execution context (CALL, CALLCODE, DELEGATECALL, CREATE, CREATE2).
-	// STATICCALL is exempt: the entire subtree is read-only.
+	// selfBalance memoizes SELFBALANCE for the lifetime of this frame.
+	// Invalidated after opcodes that return control to this frame and may have
+	// changed the account's balance via a nested execution (CALL, CALLCODE,
+	// DELEGATECALL, CREATE, CREATE2). STATICCALL is exempt (whole subtree is
+	// read-only). SELFDESTRUCT is exempt because the frame halts.
 	selfBalance       uint256.Int
 	selfBalanceCached bool
 }
