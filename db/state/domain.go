@@ -551,9 +551,7 @@ func (d *Domain) beginForTests() *DomainRoTx {
 }
 
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
-// aggregatorVisible generation, avoiding a torn cross-entity read. The whole
-// generation is pinned once by AggregatorRoTx (bundle refcnt); no per-file
-// refcount here.
+// aggregatorVisible generation, avoiding a torn cross-entity read
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
 	return &DomainRoTx{
 		name:              d.Name,

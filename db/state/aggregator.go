@@ -1714,9 +1714,9 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
-	// Publish is a rare writer op already holding dirtyFilesLock for the whole
-	// build, so deleting the few detached files inline here is fine; the hot
-	// reader-Close path goes through reclaimDrained, which deletes off-lock.
+
+	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
+	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
 	closeAndRemoveFiles(a.reclaimDrainedLocked())
 }
 
@@ -1936,72 +1936,47 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergeResult) {
-	var deleted []string
-
 	at := a.BeginFilesRo()
 	defer at.Close()
 
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 
-	// Step 1: collect file names and do Blocking-Notification of downstream (like Downloader). Only then delete files (otherwise Downloader may re-create deleted file)
-	// ToDo: call only `.garbage()` and remove `dryRun` parameter from `cleanAfterMerge`. Also remove return parameter from `cleanAfterMerge`
-	dryRun := true
-	for id, d := range at.d {
-		if d.d.Disable {
-			continue
-		}
-		if in == nil {
-			names, _ := d.cleanAfterMerge(nil, nil, nil, dryRun)
-			deleted = append(deleted, names...)
-		} else {
-			names, _ := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
-			deleted = append(deleted, names...)
-		}
-	}
-	for id, ii := range at.standaloneIIs() {
-		if ii.ii.Disable {
-			continue
-		}
-		if in == nil {
-			names, _ := ii.cleanAfterMerge(nil, dryRun)
-			deleted = append(deleted, names...)
-		} else {
-			names, _ := ii.cleanAfterMerge(in.iis[id], dryRun)
-			deleted = append(deleted, names...)
-		}
-	}
-	a.onFilesDelete(deleted)
-
-	// Step 2: remove garbage from dirtyFiles and collect it as `retired`. Physical
-	// deletion is deferred to reclaimDrained once the pinning generation drains.
+	// Collect garbage names and remove it from dirtyFiles in one pass. onFilesDelete
+	// blocks downstream (e.g. Downloader) before recalc/reclaim physically unlinks
+	// anything (deferred to reclaimDrained), so it won't re-create a file we delete.
+	var deleted []string
 	var retired []*FilesItem
-	dryRun = false
 	for id, d := range at.d {
 		if d.d.Disable {
 			continue
 		}
+		var names []string
+		var r []*FilesItem
 		if in == nil {
-			_, r := d.cleanAfterMerge(nil, nil, nil, dryRun)
-			retired = append(retired, r...)
+			names, r = d.cleanAfterMerge(nil, nil, nil)
 		} else {
-			_, r := d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id], dryRun)
-			retired = append(retired, r...)
+			names, r = d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 		}
+		deleted = append(deleted, names...)
+		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
 		if ii.ii.Disable {
 			continue
 		}
+		var names []string
+		var r []*FilesItem
 		if in == nil {
-			_, r := ii.cleanAfterMerge(nil, dryRun)
-			retired = append(retired, r...)
+			names, r = ii.cleanAfterMerge(nil)
 		} else {
-			_, r := ii.cleanAfterMerge(in.iis[id], dryRun)
-			retired = append(retired, r...)
+			names, r = ii.cleanAfterMerge(in.iis[id])
 		}
+		deleted = append(deleted, names...)
+		retired = append(retired, r...)
 	}
 
+	a.onFilesDelete(deleted)
 	a.recalcVisibleFiles(retired)
 }
 
