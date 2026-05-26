@@ -2482,36 +2482,66 @@ func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx,
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
+// MeteredGetLatestWithTxN is the txN-aware variant of MeteredGetLatest.
+// In addition to (value, step), it returns the high-water txNum the
+// returned value corresponds to — used to tag BranchCache entries so
+// UnwindTo can evict by watermark. For non-CommitmentDomain reads,
+// txN=0 ("not tracked"); only CommitmentDomain participates in the
+// txN-tagged BranchCache today.
+//
+// Tagging conventions for CommitmentDomain:
+//   - DB-sourced: txN = lastTxNumOfStep(step) (conservative high-water
+//     within the step — exact write txN isn't recoverable from the
+//     step-keyed DB record).
+//   - File-sourced: txN = fileEndTxNum (exact; can't unwind into
+//     snapshots, so the high-water is safe by invariant).
+func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
+	return at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
+}
+
 func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+	v, step, _, ok, err = at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
+	return v, step, ok, err
+}
+
+// getLatestWithTxN is the txN-aware variant of getLatest. It mirrors
+// the source split (DB vs. files) and returns the high-water txNum the
+// returned value corresponds to. See MeteredGetLatestWithTxN for the
+// tagging convention.
+func (at *AggregatorRoTx) getLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		// Non-Commitment domains don't participate in the txN-tagged
+		// BranchCache; return txN=0 ("not tracked"). The cache layer
+		// treats this as immortal-by-watermark.
+		v, step, ok, err = at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		return v, step, 0, ok, err
 	}
 
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), 0, false, err
 	}
 	if ok && step <= maxStep {
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		return v, step, true, nil
+		// DB-sourced: high-water within the step (the actual write
+		// txN isn't recoverable from the step-keyed record).
+		return v, step, lastTxNumOfStep(step, at.StepSize()), true, nil
 	}
 
 	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
 	if !found {
-		return nil, kv.Step(0), false, err
+		return nil, kv.Step(0), 0, false, err
 	}
 	if metrics != nil && dbg.KVReadLevelledMetrics {
-		// UpdateFileReadsUnique tracks both total reads and distinct
-		// prefixes. The ratio FileReadCount / UniqueFileReadCount is
-		// the read amplification factor — useful when investigating
-		// whether the same prefixes are being re-read from file layer
-		// (cache misses on hot prefixes).
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	// File-sourced: tag with fileEndTxNum (step boundary, exact).
+	// Snapshots are immutable and unwind can't cross into them, so
+	// fileEndTxNum is always <= any legal unwind watermark.
+	return v, kv.Step(fileEndTxNum / at.StepSize()), fileEndTxNum, found, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {

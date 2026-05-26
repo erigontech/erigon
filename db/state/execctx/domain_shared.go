@@ -780,7 +780,11 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 				sd.branchCache.Invalidate(k)
 				return
 			}
-			sd.branchCache.Put(k, v, uint64(step), 0, "sd.Flush")
+			// sd.txNum is the frontier at flush time; all entries in
+			// this batch were written at or before it. Tagging with
+			// sd.txNum lets UnwindTo evict cache entries from any
+			// unwound batch via a single watermark pass.
+			sd.branchCache.Put(k, v, uint64(step), sd.txNum, "sd.Flush")
 		}); err != nil {
 			return err
 		}
@@ -912,6 +916,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
+	// MeteredGetterWithTxN is the txN-aware sibling. Used to tag
+	// CommitmentDomain BranchCache puts so UnwindTo can evict by
+	// watermark. AggregatorRoTx implements both; the cache-relevant
+	// read path prefers this one and falls back to MeteredGetter
+	// (passing txN=0, "not tracked") when only the legacy interface
+	// is available — e.g. test stubs.
+	type MeteredGetterWithTxN interface {
+		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
+	}
 
 	// stateCache holds in-flight values from previous transactions in the same batch
 	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
@@ -955,9 +968,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
+	// Capture txN from the read for BranchCache tagging. Prefer the
+	// txN-aware variant; fall back to the legacy method (txN stays 0,
+	// "not tracked" — cache entry survives any UnwindTo watermark).
+	var readTxN uint64
+	switch aggTx := tx.AggTx().(type) {
+	case MeteredGetterWithTxN:
+		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, &sd.metrics, start)
+	case MeteredGetter:
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, &sd.metrics, start)
-	} else {
+	default:
 		v, step, err = tx.GetLatest(domain, k)
 	}
 	if err != nil {
@@ -969,7 +989,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		sd.stateCache.Put(domain, k, v)
 	}
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
-		sd.branchCache.Put(k, v, uint64(step), 0, "sd.GetLatest")
+		sd.branchCache.Put(k, v, uint64(step), readTxN, "sd.GetLatest")
 	}
 
 	return v, step, nil
