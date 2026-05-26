@@ -543,20 +543,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{}, err
 	}
 
-	// Explicit BranchCache clear between unwind and fork-payload validation.
-	// SD.Unwind's selective per-key invalidation covers only entries listed in
-	// changeset[kv.CommitmentDomain]; commitment-trie internal branches
-	// derived during the canonical flush can sit in the aggregator-scope
-	// BranchCache without ever appearing in a changeset entry. The
-	// HexPatriciaHashed.Reset doctrine (execution/commitment/hex_patricia_hashed.go:2970-2975)
-	// explicitly requires unwind/fork-validation callers to ClearBranchCache,
-	// otherwise stale canonical-lineage branches poison fork-payload reads
-	// and produce wrong trie roots → EngineNewPayload returns INVALID on
-	// fork payloads that should be VALID. Observed as the 6 hive ethereum/engine
-	// re-org failures on this branch's merge-from-main run; the cleared
-	// cache lets the fork-payload trie reads see post-unwind state.
-	doms.ClearBranchCache()
-
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return ValidationResult{}, criticalError
