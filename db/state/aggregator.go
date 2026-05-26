@@ -148,9 +148,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 
 		produce: true,
 	}
-	// Publish an empty bundle so BeginFilesRo / EndTxNumMinimax never observe a
-	// nil pointer — recalcVisibleFiles will linked-list new generations off it during
-	// ConfigureDomains.
 	empty := &aggregatorVisible{}
 	a.visible.Store(empty)
 	a.oldestVisible = empty
@@ -1696,9 +1693,6 @@ type aggregatorVisible struct {
 // helpers, then publishes the completed snapshot with a.visible.Store(next).
 // Per-entity visibility is not mutated; readers atomically observe one
 // cross-entity-consistent generation.
-//
-// retired (files just removed from dirtyFiles) are attached to the outgoing
-// generation and deleted later by the reclaimer — never inside this call.
 func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	toTxNum := a.dirtyFilesEndTxNumMinimax()
 	next := &aggregatorVisible{}
@@ -1720,27 +1714,6 @@ func (a *Aggregator) recalcVisibleFiles(retired []*FilesItem) {
 	old.retired = retired
 	old.next = next
 	a.visible.Store(next)
-	a.reclaimDrainedLocked()
-}
-
-// reclaimDrainedLocked deletes the retired files. Traversing visibleFiles linked-list. Reclaiming
-// oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
-// references its retired files. Single caller of closeFilesAndRemove on the main
-// path → at-most-once deletion without any per-file flag.
-func (a *Aggregator) reclaimDrainedLocked() {
-	cur := a.visible.Load()
-	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
-		for _, f := range h.retired {
-			f.closeFilesAndRemove()
-		}
-		h.retired = nil
-		a.oldestVisible = h.next
-	}
-}
-
-func (a *Aggregator) reclaimDrained() {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
 	a.reclaimDrainedLocked()
 }
 
@@ -2332,21 +2305,46 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
-func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	// validate-after-pin: increment, then re-check the bundle is still current.
-	// Closes the load→pin window — a bundle superseded mid-pin is dropped and we
-	// retry, so we never use (and never keep a ref on) files that may be retired.
-	var v *aggregatorVisible
+func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
+	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
+	// Means: must check that latest view didn't change
+	// Hazard pointer concept: https://github.com/facebook/folly/blob/main/folly/synchronization/Hazptr.h#L27C5-L27C22
 	for {
 		v = a.visible.Load()
 		v.refcnt.Add(1)
 		if a.visible.Load() == v {
 			break
 		}
-		if v.refcnt.Add(-1) == 0 {
+		if v.refcnt.Add(-1) == 0 { //last reader cleaning room
 			a.reclaimDrained()
 		}
 	}
+	return v
+}
+
+func (a *Aggregator) reclaimDrained() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.reclaimDrainedLocked()
+}
+
+// reclaimDrainedLocked deletes the retired files. Traversing visibleFiles linked-list. Reclaiming
+// oldest-first guarantees that when a bundle's refcnt is 0 nothing older still
+// references its retired files. Single caller of closeFilesAndRemove on the main
+// path → at-most-once deletion without any per-file flag.
+func (a *Aggregator) reclaimDrainedLocked() {
+	cur := a.visible.Load()
+	for h := a.oldestVisible; h != cur && h.refcnt.Load() == 0; h = h.next {
+		for _, f := range h.retired {
+			f.closeFilesAndRemove()
+		}
+		h.retired = nil
+		a.oldestVisible = h.next
+	}
+}
+
+func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
+	v := a.acquireVisibleFiles()
 	ac := &AggregatorRoTx{
 		a:        a,
 		visible:  v,
