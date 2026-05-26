@@ -307,15 +307,15 @@ func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 		}
 		return res, nil
 	}
-	// Honour the caller's deadline if it has one (test contexts carry
-	// the -timeout flag). Without this, slow CI environments — especially
-	// -race + GOMAXPROCS<=2 on the 4-vCPU GHA runner — hit the cap on
-	// high-mgas blocks (TestInvalidReceiptHashHighMgas) before the engine
-	// returns Valid. Absent any caller deadline, cap at 30 min so a stuck
-	// engine still fails the test rather than hanging.
+	// Honour the caller's deadline if it has one. Note: t.Context() does
+	// NOT embed the -timeout flag as a Deadline — it only cancels when the
+	// test ends. So this fallback fires for virtually all test invocations.
+	// 55 min gives enough headroom for high-mgas blocks under -race on
+	// resource-constrained CI runners (4-vCPU GHA) while still failing
+	// before the typical 60-min test timeout.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Minute)
+		ctx, cancel = context.WithTimeout(ctx, 55*time.Minute)
 		defer cancel()
 	}
 	var backOff backoff.BackOff
