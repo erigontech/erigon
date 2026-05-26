@@ -31,9 +31,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
+	txpoolcomp "github.com/erigontech/erigon/node/components/txpool"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -184,20 +188,49 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		cfg.TracedSenders[i] = string(sender[:])
 	}
 
-	notifyMiner := func() {}
-	txPool, txpoolGrpcServer, err := txpool.Assemble(
-		ctx,
+	var chainCfg *chain.Config
+	if err := coreDB.View(ctx, func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		chainCfg, err = rawdb.ReadChainConfig(tx, genesisHash)
+		return err
+	}); err != nil {
+		return fmt.Errorf("could not read chain config: %w", err)
+	}
+
+	txPoolProvider := txpoolcomp.NewProvider()
+	if err := txPoolProvider.Configure(
 		cfg,
 		coreDB,
-		kvcache.New(cacheConfig),
-		sentryClients,
-		kvClient,
-		notifyMiner,
-		logger,
+		chainCfg,
 		ethBackendClient,
-	)
-	if err != nil {
+		kvClient,
+		logger,
+	); err != nil {
 		return err
+	}
+	if err := txPoolProvider.SetSentryClients(sentryClients); err != nil {
+		return err
+	}
+	if err := txPoolProvider.SetCache(kvcache.New(cacheConfig)); err != nil {
+		return err
+	}
+	if err := txPoolProvider.SetBuilderNotifyNewTxns(func() {}); err != nil {
+		return err
+	}
+	if err := txPoolProvider.Initialize(ctx); err != nil {
+		return err
+	}
+	if err := txPoolProvider.Activate(); err != nil {
+		return err
+	}
+
+	txPool := txPoolProvider.Pool
+	txpoolGrpcServer := txPoolProvider.Server
+	if txPool == nil {
+		return errors.New("txpool disabled")
 	}
 
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
