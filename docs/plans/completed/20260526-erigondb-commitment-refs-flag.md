@@ -346,10 +346,12 @@ independent of the write flag.
   `version_schema_gen.go` bump are no longer needed once this lands.
 
 **Downgrade caveat (accepted):**
-- The bump is a minor (v2.0 → v2.1). A *downgraded* older binary shares major version 2 and may
-  not hard-reject v2.1 files, so it could silently misread plain files as referenced. Verify
-  behavior on the oldest supported release before advertising downgrade as safe; if unacceptable,
-  revisit the major-bump option.
+- The bump is a minor (v2.0 → v2.1). A *downgraded* older binary whose commitment `DataKV.Current`
+  is still v2.0 hard-rejects v2.1 files: `Versions.MustSupport` panics with an actionable message
+  ("Snapshot file is newer than this Erigon build supports… reset snapshots") rather than silently
+  misreading them. So a downgrade after publishing plain v2.1 snapshots fails loudly and requires
+  re-fetching a v2.0 referenced snapshot set. Verify this on the oldest supported release before
+  advertising downgrade as safe; a release whose `Current` already accepts v2.1 would not reject.
 
 **Fleet rollout:**
 - Confirm mainnet/default nodes (flag absent → true) keep writing byte-compatible v2.0 referenced

@@ -283,10 +283,15 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 
 // applyReferencesInCommitmentBranches threads the resolved erigondb.toml flag into the global
 // statecfg.Schema (so rebuild paths and the next Configure pick it up) and, once domains are
-// configured, into the live commitment domain.
+// configured, into the live commitment domain. Writes are skipped when the value is unchanged:
+// the flag is fixed per-datadir, so the live field the merge goroutines read is mutated only at
+// the first resolution (before any merge is spawned), never concurrently with a running merge.
 func (a *Aggregator) applyReferencesInCommitmentBranches(refs bool) {
-	statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = refs
-	if a.configured && a.d[kv.CommitmentDomain] != nil {
+	if statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches != refs {
+		statecfg.Schema.CommitmentDomain.ReferencesInCommitmentBranches = refs
+	}
+	if a.configured && a.d[kv.CommitmentDomain] != nil &&
+		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches != refs {
 		a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches = refs
 	}
 }
