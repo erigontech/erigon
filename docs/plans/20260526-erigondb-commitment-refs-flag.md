@@ -214,12 +214,12 @@ version+range); re-shorten into the output only if `flag && outputRange ≥ thre
 - Modify: `db/state/dirty_files.go` (`FilesItem` struct `:116`; populate in `openDirtyFiles` `:387`/`:402`)
 - Modify: `db/state/dirty_files_test.go`
 
-- [ ] add a `version version.Version` (singular `Version`, not the `Versions` ceiling pair) field to `FilesItem`
-- [ ] populate it in `Domain.openDirtyFiles` (`:387`) from the `fileVer` already parsed by `version.MatchVersionedFile` right before the `DataKV.MustSupport(fileVer, fName)` call at `:402` — this is the path that actually builds the dirty `FilesItem` set (NOT `aggregator2.go:213`, which is block snapshots)
-- [ ] expose the version on `visibleFile` (accessor) so the deref/merge sites can read it; ensure it survives `recalcVisibleFiles`
-- [ ] decide + implement how the version reaches `replaceShortenedKeysInBranch` (Task 7) and the merge transformer (Task 8): either extend `getLatestFromFiles` (`domain.go:1292`) to also return the matched file version, or reuse the range-match loop at `domain_committed.go:74-82`
-- [ ] write tests: scanning a set of files yields items with the correct parsed versions (mix v1.0/v2.0/v2.1); accessor returns the right version through the visible-files layer
-- [ ] run tests — must pass before next task
+- [x] add a `version version.Version` (singular `Version`, not the `Versions` ceiling pair) field to `FilesItem`
+- [x] populate it in `Domain.openDirtyFiles` (`:387`) from the `fileVer` already parsed by `version.MatchVersionedFile` right before the `DataKV.MustSupport(fileVer, fName)` call at `:402` — this is the path that actually builds the dirty `FilesItem` set (NOT `aggregator2.go:213`, which is block snapshots)
+- [x] expose the version on `visibleFile` (accessor `visibleFile.Version()`) so the deref/merge sites can read it; it survives `recalcVisibleFiles` because the accessor reads through the preserved `src *FilesItem` pointer (recalc rebuilds the `visibleFile` slice but reuses the same `FilesItem`)
+- [x] decide + implement how the version reaches `replaceShortenedKeysInBranch` (Task 7) and the merge transformer (Task 8): **decision** — store on `FilesItem`, reach via the existing range-match loop at `domain_committed.go:74-82` (and `visibleFile.src.version`); do NOT extend `getLatestFromFiles`. The accessor + field make it reachable now; call-site wiring is Task 7/8.
+- [x] write tests: scanning a set of files yields items with the correct parsed versions (mix v1.0/v2.0/v2.1); accessor returns the right version through the visible-files layer — `dirty_files_test.go::TestOpenDirtyFilesPopulatesVersion` + `TestVisibleFileVersion`
+- [x] run tests — must pass before next task
 
 ### Task 6: Accept v2.1 as commitment kv read ceiling; flag-derived write version
 
