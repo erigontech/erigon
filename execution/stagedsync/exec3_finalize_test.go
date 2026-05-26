@@ -1,7 +1,6 @@
 package stagedsync
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -167,39 +166,6 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	return &execResult{TxResult: txResult}
 }
 
-// runFinalizeTx runs the direct finalize path.
-func (s *testFinalizeScenario) runFinalizeTx(t *testing.T) (state.ReadSet, state.VersionedWrites) {
-	t.Helper()
-	result := s.buildExecResult()
-	result.TxIn = copyReadSet(s.txIn)
-	result.TxOut = copyWrites(s.txOut)
-	if s.collectorWrites != nil {
-		result.CollectorWrites = copyWrites(s.collectorWrites)
-	}
-	vm := state.NewVersionMap(nil)
-	reader := s.makeReader()
-
-	// Strip coinbase/burnt.
-	txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
-	result.TxOut = txOut
-	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
-	result.TxOut = txOut
-	result.TxIn.Delete(result.Coinbase, state.AccountKey{Path: state.BalancePath})
-	result.TxIn.Delete(result.ExecutionResult.BurntContractAddress, state.AccountKey{Path: state.BalancePath})
-
-	task := result.Task.(*taskVersion)
-	txTask := task.Task.(*exec.TxTask)
-
-	_, reads, writes, err := result.finalizeTx(
-		task, txTask, nil, nil, vm, reader,
-		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
-		burntDelta, burntDeltaIncrease, hasBurntDelta,
-		s.rules, false, "",
-	)
-	require.NoError(t, err)
-	return reads, writes
-}
-
 func fAddr(name string) accounts.Address {
 	var a [20]byte
 	copy(a[:], name)
@@ -234,7 +200,7 @@ func simpleTransferScenario() *testFinalizeScenario {
 	newRecipientBal := new(uint256.Int).Add(recipientBal, transferAmt)
 
 	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
+	config := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	// TxIn: reads from execution. No coinbase reads (coinbase not touched
 	// during calcFees=false execution).
@@ -247,9 +213,9 @@ func simpleTransferScenario() *testFinalizeScenario {
 
 	// TxOut: writes from execution. No coinbase write (fees deferred).
 	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
+		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, BalanceChangeReason: tracing.BalanceDecreaseGasBuy},
 		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, Reason: tracing.BalanceChangeTransfer},
+		{Address: recipient, Path: state.BalancePath, Val: *newRecipientBal, BalanceChangeReason: tracing.BalanceChangeTransfer},
 	}
 
 	// CollectorWrites: LightCollector output from MakeWriteSet.
@@ -312,246 +278,6 @@ func londonTransferScenario() *testFinalizeScenario {
 	return s
 }
 
-// TestFinalizeTx_SimpleTransfer verifies the direct finalize path produces
-// expected reads and writes for a simple ETH transfer.
-func TestFinalizeTx_SimpleTransfer(t *testing.T) {
-	t.Parallel()
-	s := simpleTransferScenario()
-	reads, writes := s.runFinalizeTx(t)
-
-	assert.NotNil(t, reads, "direct path should produce reads")
-	assert.Greater(t, len(writes), 0, "direct path should produce writes")
-
-	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
-	require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
-	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
-	assert.Equal(t, s.feeTipped, coinbaseBalance, "coinbase should receive the tip")
-}
-
-// TestFinalizeTx_London verifies the direct finalize path with burnt fees.
-func TestFinalizeTx_London(t *testing.T) {
-	t.Parallel()
-	s := londonTransferScenario()
-	reads, writes := s.runFinalizeTx(t)
-
-	assert.NotNil(t, reads)
-	assert.Greater(t, len(writes), 0)
-
-	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
-	require.NotNil(t, burntWrite, "should have burnt contract balance write")
-	burntBalance := burntWrite.Val.(uint256.Int)
-	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
-	assert.Equal(t, *expected, burntBalance, "burnt contract should receive base fee")
-}
-
-// coinbaseIsRecipientScenario: coinbase is the recipient of the transfer.
-// Coinbase balance in TxOut has the transfer amount (from execution) plus
-// it will get the tip from finalize. The StripBalanceWrite must correctly
-// handle the case where coinbase has a real balance change from execution.
-func coinbaseIsRecipientScenario() *testFinalizeScenario {
-	sender := fAddr("sender")
-	coinbase := fAddr("coinbase") // coinbase is also the recipient
-
-	senderBal := uint256.NewInt(100_000_000_000)
-	coinbaseBal := uint256.NewInt(5_000_000_000)
-	transferAmt := uint256.NewInt(1_000_000_000)
-	tip := uint256.NewInt(21_000)
-
-	// During calcFees=false execution:
-	// - sender loses transfer amount (but NOT gas — fees deferred)
-	// - coinbase gains transfer amount (but NOT tip — fees deferred)
-	newSenderBal := new(uint256.Int).Sub(senderBal, transferAmt)
-	newCoinbaseBal := new(uint256.Int).Add(coinbaseBal, transferAmt)
-
-	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
-
-	txIn := state.ReadSet{}
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, Val: *senderBal})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
-	// Coinbase IS touched during execution (as transfer recipient).
-	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.AddressPath, Val: fMakeAccount(coinbaseBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: coinbase, Path: state.BalancePath, Val: *coinbaseBal})
-
-	// TxOut: coinbase has transfer amount but NOT tip (fees deferred).
-	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal, Reason: tracing.BalanceDecreaseGasBuy},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal, Reason: tracing.BalanceChangeTransfer},
-	}
-
-	collectorWrites := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *newSenderBal},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
-		{Address: coinbase, Path: state.BalancePath, Val: *newCoinbaseBal},
-		{Address: coinbase, Path: state.NoncePath, Val: uint64(0)},
-		{Address: coinbase, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: coinbase, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
-	}
-
-	return &testFinalizeScenario{
-		name: "coinbase_is_recipient",
-		accts: map[accounts.Address]*accounts.Account{
-			sender:   fMakeAccount(senderBal.Uint64(), 0),
-			coinbase: fMakeAccount(coinbaseBal.Uint64(), 0),
-		},
-		txIn:            txIn,
-		txOut:           txOut,
-		collectorWrites: collectorWrites,
-		feeTipped:       *tip,
-		coinbase:        coinbase,
-		burntAddr:       accounts.NilAddress,
-		rules:           rules,
-		config:          config,
-		header: &types.Header{
-			Number:   *uint256.NewInt(1),
-			GasLimit: 30_000_000,
-			GasUsed:  21000,
-		},
-	}
-}
-
-// selfTransferScenario: sender sends ETH to themselves. Coinbase is separate.
-// Tests that same-address sender+recipient doesn't confuse the finalize logic.
-func selfTransferScenario() *testFinalizeScenario {
-	sender := fAddr("sender")
-	coinbase := fAddr("coinbase")
-
-	senderBal := uint256.NewInt(100_000_000_000)
-
-	// Self-transfer: balance doesn't change (transfer cancels out).
-	// Gas is NOT deducted during calcFees=false, so balance stays the same.
-	// But nonce increments.
-	rules := &chain.Rules{IsSpuriousDragon: true}
-	config := &chain.Config{ChainID: big.NewInt(1)}
-	tip := uint256.NewInt(21_000)
-
-	txIn := state.ReadSet{}
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.AddressPath, Val: fMakeAccount(senderBal.Uint64(), 0)})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.BalancePath, Val: *senderBal})
-	txIn.Set(state.VersionedRead{Address: sender, Path: state.NoncePath, Val: uint64(0)})
-
-	txOut := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal, Reason: tracing.BalanceChangeTransfer},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-	}
-
-	collectorWrites := state.VersionedWrites{
-		{Address: sender, Path: state.BalancePath, Val: *senderBal},
-		{Address: sender, Path: state.NoncePath, Val: uint64(1)},
-		{Address: sender, Path: state.IncarnationPath, Val: uint64(1)},
-		{Address: sender, Path: state.CodeHashPath, Val: accounts.EmptyCodeHash},
-	}
-
-	return &testFinalizeScenario{
-		name: "self_transfer",
-		accts: map[accounts.Address]*accounts.Account{
-			sender:   fMakeAccount(senderBal.Uint64(), 0),
-			coinbase: fMakeAccount(0, 0),
-		},
-		txIn:            txIn,
-		txOut:           txOut,
-		collectorWrites: collectorWrites,
-		feeTipped:       *tip,
-		coinbase:        coinbase,
-		burntAddr:       accounts.NilAddress,
-		rules:           rules,
-		config:          config,
-		header: &types.Header{
-			Number:   *uint256.NewInt(1),
-			GasLimit: 30_000_000,
-			GasUsed:  21000,
-		},
-	}
-}
-
-// TestFinalizeTx_AllScenarios verifies the direct finalize path produces
-// correct writes and reads across all test scenarios.
-func TestFinalizeTx_AllScenarios(t *testing.T) {
-	t.Parallel()
-	scenarios := []*testFinalizeScenario{
-		simpleTransferScenario(),
-		londonTransferScenario(),
-		coinbaseIsRecipientScenario(),
-		selfTransferScenario(),
-	}
-
-	for _, s := range scenarios {
-		t.Run(s.name, func(t *testing.T) {
-			// TODO(#20962): when coinbase is also the transfer recipient,
-			// finalizeTx no longer adds the tip on top of the existing TxOut
-			// coinbase write. Either StripBalanceWrite or the post-strip
-			// re-credit shifted; re-validate before un-skipping.
-			if s.name == "coinbase_is_recipient" {
-				t.Skip("stale coinbase-is-recipient expectation, see #20962")
-			}
-			reads, writes := s.runFinalizeTx(t)
-
-			assert.NotNil(t, reads, "should produce reads")
-			assert.Greater(t, len(writes), 0, "should produce writes")
-
-			// Coinbase must receive the tip.
-			coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
-			require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
-			coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
-
-			expectedCoinbase := new(uint256.Int).Set(&s.feeTipped)
-			if acc, ok := s.accts[s.coinbase]; ok {
-				expectedCoinbase.Add(expectedCoinbase, &acc.Balance)
-			}
-			// If coinbase was also a transfer recipient, add the delta.
-			if hasCoinbaseDelta(s) {
-				expectedCoinbase = adjustForTransferDelta(s, expectedCoinbase)
-			}
-			assert.Equal(t, *expectedCoinbase, coinbaseBalance,
-				"coinbase balance should be original + tip (+ transfer delta if recipient)")
-
-			// If London: burnt contract must receive base fee.
-			if s.rules.IsLondon && s.burntAddr != accounts.NilAddress {
-				burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
-				require.NotNil(t, burntWrite, "should have burnt contract balance write")
-				burntBalance := burntWrite.Val.(uint256.Int)
-				expectedBurnt := new(uint256.Int).Add(&s.accts[s.burntAddr].Balance, &s.feeBurnt)
-				assert.Equal(t, *expectedBurnt, burntBalance,
-					"burnt contract should receive base fee")
-			}
-
-			// BalancePath reads must include coinbase.
-			balReads := extractBalanceReads(reads)
-			_, hasCoinbaseRead := balReads[s.coinbase]
-			assert.True(t, hasCoinbaseRead, "should read coinbase balance")
-		})
-	}
-}
-
-// hasCoinbaseDelta checks if coinbase was touched during execution (transfer recipient).
-func hasCoinbaseDelta(s *testFinalizeScenario) bool {
-	for _, w := range s.txOut {
-		if w.Address == s.coinbase && w.Path == state.BalancePath {
-			return true
-		}
-	}
-	return false
-}
-
-// adjustForTransferDelta computes the expected coinbase balance when coinbase
-// is also the transfer recipient. The delta is the difference between the
-// execution-written balance and the original balance.
-func adjustForTransferDelta(s *testFinalizeScenario, base *uint256.Int) *uint256.Int {
-	for _, w := range s.txOut {
-		if w.Address == s.coinbase && w.Path == state.BalancePath {
-			execBal := w.Val.(uint256.Int)
-			origBal := s.accts[s.coinbase].Balance
-			delta := new(uint256.Int).Sub(&execBal, &origBal)
-			return new(uint256.Int).Add(base, delta)
-		}
-	}
-	return base
-}
-
 func findWrite(writes state.VersionedWrites, addr accounts.Address, path state.AccountPath) *state.VersionedWrite {
 	for _, w := range writes {
 		if w.Address == addr && w.Path == path {
@@ -559,49 +285,6 @@ func findWrite(writes state.VersionedWrites, addr accounts.Address, path state.A
 		}
 	}
 	return nil
-}
-
-func buildWriteMap(writes state.VersionedWrites) map[string]string {
-	m := make(map[string]string, len(writes))
-	for _, w := range writes {
-		key := w.Address.String() + ":" + w.Path.String() + ":" + w.Key.String()
-		m[key] = fmtWriteVal(w)
-	}
-	return m
-}
-
-func fmtWriteVal(w *state.VersionedWrite) string {
-	switch v := w.Val.(type) {
-	case uint256.Int:
-		return v.Hex()
-	case uint64:
-		return uint256.NewInt(v).Hex()
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	case accounts.CodeHash:
-		return v.String()
-	default:
-		return "<unknown>"
-	}
-}
-
-func extractBalanceReads(reads state.ReadSet) map[accounts.Address]string {
-	m := make(map[accounts.Address]string)
-	if reads == nil {
-		return m
-	}
-	reads.Scan(func(vr *state.VersionedRead) bool {
-		if vr.Path == state.BalancePath {
-			if val, ok := vr.Val.(uint256.Int); ok {
-				m[vr.Address] = val.Hex()
-			}
-		}
-		return true
-	})
-	return m
 }
 
 // --- finalizeTxSimple tests ---
@@ -765,6 +448,86 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		assert.Equal(t, *expectedBal, bal,
 			"TX %d: coinbase should have accumulated %d tips", txIdx, txIdx)
 	}
+}
+
+// TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead exercises the
+// fix for the parallel-exec lost-coinbase-fee race. finalize credits the
+// coinbase tip as an implicit write the worker never made (it ran with
+// shouldDelayFeeCalc=true). That write must be stamped at the worker's
+// incarnation + 1: a later tx that speculatively read the coinbase BEFORE
+// this finalize ran recorded the worker's incarnation, and the bumped
+// version makes the MapRead version check fail so that tx is invalidated
+// and re-executed against the post-fee balance. Reusing the worker's
+// incarnation makes the stale read indistinguishable from a fresh one and
+// silently drops the fee.
+func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	writes := s.runFinalizeTxSimple(t, nil)
+	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+	require.NotNil(t, coinbaseWrite, "finalize should produce a coinbase BalancePath write")
+
+	// The producer tx executed at incarnation 0; its implicit fee write
+	// must carry incarnation 1 — a distinct version from the worker's.
+	require.Equal(t, 0, coinbaseWrite.Version.TxIndex)
+	require.Equal(t, 1, coinbaseWrite.Version.Incarnation,
+		"finalize coinbase fee write must be stamped at worker incarnation + 1")
+
+	// Reflect the producer tx in a versionMap: the worker's pre-fee
+	// coinbase write at (0,0), then finalize's fee write at (0,1).
+	vm := state.NewVersionMap(nil)
+	vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
+		state.Version{TxIndex: 0, Incarnation: 0}, uint256.Int{}, true)
+	vm.FlushVersionedWrites(state.VersionedWrites{coinbaseWrite}, true, "")
+
+	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
+		if readV != writeV {
+			return state.VersionInvalid
+		}
+		return state.VersionValid
+	}
+
+	// validateCoinbaseRead validates a dependent tx (txIndex 1) whose only
+	// recorded read is the coinbase balance, read at the given incarnation.
+	validateCoinbaseRead := func(readAtIncarnation int) state.VersionValidity {
+		io := state.NewVersionedIO(2)
+		rs := state.ReadSet{}
+		rs.Set(state.VersionedRead{
+			Address: s.coinbase,
+			Path:    state.BalancePath,
+			Source:  state.MapRead,
+			Version: state.Version{TxIndex: 0, Incarnation: readAtIncarnation},
+		})
+		io.RecordReads(state.Version{TxIndex: 1}, rs)
+		return vm.ValidateVersion(1, io, checkVersion, false, "")
+	}
+
+	// Early-read timing — the dependent read the coinbase before finalize
+	// ran, recording the worker's version (0,0). It must be invalidated.
+	assert.Equal(t, state.VersionInvalid, validateCoinbaseRead(0),
+		"a tx that read the coinbase before the fee finalize must fail validation")
+
+	// Late-read timing — the dependent read after finalize, recording the
+	// fee write's version (0,1). It must stay valid.
+	assert.Equal(t, state.VersionValid, validateCoinbaseRead(1),
+		"a tx that read the coinbase after the fee finalize must stay valid")
+}
+
+// TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation verifies the burnt
+// contract's implicit FeeBurnt write gets the same incarnation+1 stamp as
+// the coinbase tip write.
+func TestFinalizeTxSimple_BurntFeeWriteBumpsIncarnation(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+
+	writes := s.runFinalizeTxSimple(t, nil)
+	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
+	require.NotNil(t, burntWrite, "finalize should produce a burnt contract BalancePath write")
+
+	assert.Equal(t, 0, burntWrite.Version.TxIndex)
+	assert.Equal(t, 1, burntWrite.Version.Incarnation,
+		"finalize burnt-fee write must be stamped at worker incarnation + 1")
 }
 
 // TestResolveStorageWrites_IBSvsSimple compares the storage write sets
@@ -1051,7 +814,7 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 0, storageCount, "no-op storage write should be filtered")
@@ -1079,7 +842,7 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "changed storage write should be kept")
@@ -1104,7 +867,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "new storage key should be kept")
@@ -1145,7 +908,7 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 			Version: state.Version{TxIndex: 5, Incarnation: 0}}, // stale
 	}
 
-	result := normalizeWriteSet(allWrites, vm, 5, 1, nil)
+	result := normalizeWriteSet(allWrites, vm, 5, 1, nil, nil, true)
 
 	storageCount := countPath(result, state.StoragePath)
 	assert.Equal(t, 1, storageCount, "only incarnation 1's slotA should survive")
@@ -1179,7 +942,7 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	// Should have: SelfDestructPath + DELETE for slotA + DELETE for slotB
 	sdCount := countPath(result, state.SelfDestructPath)
@@ -1220,7 +983,7 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 			Version: state.Version{TxIndex: 1, Incarnation: 0}},
 	}
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, nil, nil, true)
 
 	require.Equal(t, 1, len(result))
 	v := result[0].Val.(uint256.Int)
@@ -1241,7 +1004,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	addrCount := countPath(result, state.AddressPath)
 	balCount := countPath(result, state.BalancePath)
@@ -1277,7 +1040,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true)
 
 	// Should have storage write AND account-level fields for addr.
 	// Serial emits UpdateAccountData for every dirty object.
@@ -1325,7 +1088,7 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 1, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 1, 0, reader, nil, true)
 
 	// Storage write should be filtered (no-op).
 	// But account fields should still be emitted — the IBS would have
@@ -1362,7 +1125,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 	}
 	vm.FlushVersionedWrites(writeSet, true, "")
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, nil)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, nil, nil, true)
 
 	// Should have CreateContractPath + all 4 account fields.
 	// The empty balance should NOT cause deletion because CreateContractPath is present.
@@ -1395,7 +1158,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 	// stateReader returns nil for this address (doesn't exist yet)
 	reader := newMapStateReader() // empty — no accounts
 
-	result := normalizeWriteSet(writeSet, vm, 0, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 0, 0, reader, nil, true)
 
 	balCount := countPath(result, state.BalancePath)
 	nonceCount := countPath(result, state.NoncePath)
@@ -1448,7 +1211,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 		CodeHash: emptyCodeHash,
 	}
 
-	result := normalizeWriteSet(writeSet, vm, 5, 0, reader)
+	result := normalizeWriteSet(writeSet, vm, 5, 0, reader, nil, true)
 
 	// The normalized output should produce a Delete for this account,
 	// NOT a regular write with Balance=0, Nonce=0.

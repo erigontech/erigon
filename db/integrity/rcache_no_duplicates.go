@@ -30,7 +30,13 @@ func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, b
 
 	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	toBlock, ok, err := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	if err != nil {
+		return fmt.Errorf("findBlockNum(%d) fails: %w", rcacheDomainProgress, err)
+	}
+	if !ok {
+		return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
+	}
 
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err

@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -45,7 +45,7 @@ type ExecutionClient interface {
 	UpdateForkChoice(ctx context.Context, tip *types.Header, finalizedHeader *types.Header) (common.Hash, error)
 	CurrentHeader(ctx context.Context) (*types.Header, error)
 	GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error)
-	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error)
+	GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*uint256.Int, error)
 }
 
 func newExecutionClient(logger log.Logger, client execmodule.ExecutionModule) *executionClient {
@@ -139,7 +139,7 @@ func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*type
 	return e.client.GetHeader(ctx, nil, &blockNum)
 }
 
-func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*big.Int, error) {
+func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash common.Hash) (*uint256.Int, error) {
 	return e.client.GetTD(ctx, &blockHash, &blockNum)
 }
 

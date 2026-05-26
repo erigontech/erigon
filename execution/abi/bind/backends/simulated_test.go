@@ -52,7 +52,7 @@ import (
 func TestSimulatedBackend(t *testing.T) {
 	var gasLimit uint64 = 8000029
 	key, _ := crypto.GenerateKey() // nolint: gosec
-	auth, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1337))
 	genAlloc := make(types.GenesisAlloc)
 	genAlloc[auth.From] = types.GenesisAccount{Balance: big.NewInt(9223372036854775807)}
 
@@ -436,7 +436,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	opts, _ := bind.NewKeyedTransactorWithChainID(key, big.NewInt(1337))
+	opts, _ := bind.NewKeyedTransactorWithChainID(key, uint256.NewInt(1337))
 
 	sim := NewSimulatedBackend(t, types.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether)}}, 10000000)
 
@@ -906,7 +906,7 @@ func TestSimulatedBackend_PendingCodeAt(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
@@ -941,7 +941,7 @@ func TestSimulatedBackend_CodeAt(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	auth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	contractAddr, txn, contract, err := bind.DeployContract(auth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v tx: %v contract: %v", err, txn, contract)
@@ -973,7 +973,7 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(abiBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)
@@ -1035,7 +1035,7 @@ func TestSimulatedBackend_PendingAndCallContractOsakaDefaultGas(t *testing.T) {
 	parsed, err := abi.JSON(strings.NewReader(abiJSON))
 	require.NoError(t, err)
 
-	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	require.NoError(t, err)
 	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
 	contractAuth.GasLimit = params.MaxTxnGasLimit
@@ -1083,7 +1083,7 @@ func TestSimulatedBackend_PendingAndCallContractAmsterdamDefaultGas(t *testing.T
 
 	constructor := program.New().ReturnViaCodeCopy(runtime.Bytes()).Bytes()
 
-	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, err := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	require.NoError(t, err)
 	contractAuth.GasPrice = big.NewInt(params.InitialBaseFee)
 	contractAuth.GasLimit = 5_000_000
@@ -1152,7 +1152,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not get code at test addr: %v", err)
 	}
-	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, big.NewInt(1337))
+	contractAuth, _ := bind.NewKeyedTransactorWithChainID(testKey, uint256.NewInt(1337))
 	addr, _, _, err := bind.DeployContract(contractAuth, parsed, common.FromHex(reverterBin), sim)
 	if err != nil {
 		t.Errorf("could not deploy contract: %v", err)

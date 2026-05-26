@@ -21,12 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -136,18 +136,9 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		// Cap collation to the max txNum covered by block files.
-		// Without this, collation creates domain files past the block
-		// file boundary, causing "behind commitment" errors.
-		if maxTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, rwTx, maxBlockNum); err == nil && maxTxNum > 0 {
-			agg.SetMaxCollationTxNum(maxTxNum)
-		}
-		// Background collation removed from exec code — collation is now managed
-		// by CollateAndPruneIfNeeded in the FCU/stage loop (forkchoice.go).
-		// This avoids background collation db.View() txs overlapping with
-		// commit+prune, which prevented MDBX GC page reclamation.
-	}
+	// Background collation removed from exec code — collation is now managed
+	// by CollateAndPrune in the FCU/stage loop (forkchoice.go).
+	// Block-snapshot boundary gating happens inside readyForCollation.
 
 	var (
 		inputTxNum               uint64
@@ -176,7 +167,7 @@ func ExecV3(ctx context.Context,
 			accumulator = shards.NewAccumulator()
 		}
 	}
-	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg, logger))
+	rs := state.NewStateV3Buffered(state.NewStateV3(doms, cfg.syncCfg.PersistReceiptsCacheV2, logger))
 
 	commitThreshold := cfg.batchSize.Bytes()
 
@@ -205,8 +196,12 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(!isApplyingBlocks)
+	// Short-term: keep the trie warmuper's value cache off on the parallel
+	// path. The warmuper reads paraTrieDB (persisted state), so during a
+	// multi-block uncommitted batch (fork validation) it caches values stale
+	// w.r.t. sd.mem and feeds them to the trie, producing wrong roots. The
+	// page-cache warmer above is unaffected; the full fix lands separately.
+	doms.EnableWarmupCache(!isApplyingBlocks && !parallel)
 	doms.SetDeferCommitmentUpdates(false)
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
@@ -310,11 +305,10 @@ func ExecV3(ctx context.Context,
 					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 					se.lastCommittedTxNum.Store(currentTxNum)
 
-					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
 					if initialCycle {
-						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
+						se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					execErr = handleIncorrectRootHashError(
@@ -488,7 +482,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	} else {
 		if te.hooks.OnBlockStart != nil {
 			var b *types.Block
-			var td *big.Int
+			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
@@ -767,21 +761,18 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	// Open a thread-local roTx for domain reads during commitment.
-	// The rwTx (applyTx) is only needed for stage updates above.
-	commitRoTx, err := cfg.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return false, times, fmt.Errorf("commitment: open roTx: %w", err)
-	}
-	defer commitRoTx.Rollback()
-
-	// Get current txNum from the block being committed
+	// Use applyTx, not a fresh BeginTemporalRo: Headers wrote MaxTxNum for
+	// header.Number to applyTx in this batch and a fresh RO snapshot would
+	// miss it, silently falling back to the previous block's max txNum via
+	// c.Last(). Pairing that stale txNum with header.Number in
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
+	// see issue #21171.
 	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
 	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

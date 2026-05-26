@@ -431,6 +431,74 @@ func TestVersionedIO_PostWriteBalanceReadDoesNotPoisonInitialBalance(t *testing.
 	require.True(t, found, "burn target address must appear in BAL")
 }
 
+// fallthroughStateReader returns a fixed account and a fixed storage value, so
+// a test can observe whether a versionedRead fell through to the underlying
+// state (vs. returning a version-map value or aborting).
+type fallthroughStateReader struct {
+	minimalStateReader
+	acct       *accounts.Account
+	storageKey accounts.StorageKey
+	storageVal uint256.Int
+}
+
+func (r *fallthroughStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
+	return r.acct, nil
+}
+
+func (r *fallthroughStateReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if key == r.storageKey {
+		return r.storageVal, true, nil
+	}
+	return uint256.Int{}, false, nil
+}
+
+// TestVersionedIO_RemovedDependencyFallsThroughToStorage is the negative test
+// for the "RM DEP fallthrough" in versionedRead's MVReadResultNone branch
+// (versionedio.go).
+//
+// Scenario: a tx has recorded a MapRead of a storage slot whose version-map
+// cell was written by a prior tx. The prior tx is then re-executed and its
+// cell removed (the cell reads back as MVReadResultNone), leaving a stale
+// prior MapRead in the tx's readSet. A subsequent read of the same slot must
+// NOT abort with ErrDependency — that cascades into re-execution livelocks in
+// dense blocks. It must fall through to a storage read; the validator later
+// rejects the tx if that storage value disagrees with the prior tx's settled
+// value, so deferring to the validator is sound (the validator is the single
+// source of truth since skipCheck was removed — issue #21319).
+//
+// This test pins the fallthrough: removing it (restoring panic(ErrDependency))
+// makes the test panic.
+func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0xfa11"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	storageVal := *uint256.NewInt(0xAA) // the underlying-state value the fallthrough must surface
+
+	acct := accounts.NewAccount()
+	sr := &fallthroughStateReader{acct: &acct, storageKey: key, storageVal: storageVal}
+	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
+	ibs.SetTxContext(2, 0)
+
+	// Seed a stale prior MapRead of the slot — as if a now-removed prior-tx
+	// write had been observed at version (1,0) with a different value.
+	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.Set(VersionedRead{
+		Address: addr, Path: StoragePath, Key: key,
+		Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0},
+		Val: *uint256.NewInt(0xBB),
+	})
+
+	// The version map has no cell for this slot (the prior tx's write was
+	// removed), so versionedRead sees MVReadResultNone with the stale MapRead
+	// recorded — the exact RM-DEP-fallthrough condition.
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Equal(t, storageVal, got,
+		"a read whose version-map dependency was removed must fall through to "+
+			"the underlying storage value, not abort or return the stale MapRead")
+}
+
 // TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths verifies
 // that IntraBlockState.VersionedWrites retains SelfDestructPath, BalancePath
 // (including non-zero residual balances — EIP-7708 case 2), and IncarnationPath
@@ -443,8 +511,8 @@ func TestIBSVersionedWrites_SelfdestructRetainsBalanceDropsOtherPaths(t *testing
 	ibs.SetTxContext(1, 0)
 
 	// Establish nonce and code before selfdestruct — these should be dropped.
-	require.NoError(t, ibs.SetNonce(addr, 5))
-	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}))
+	require.NoError(t, ibs.SetNonce(addr, 5, tracing.NonceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
 	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(0), tracing.BalanceChangeUnspecified))
 
 	// Selfdestruct: records SelfDestructPath=true, IncarnationPath, BalancePath=0.
@@ -784,7 +852,7 @@ func TestApplyVersionedWrites_BalanceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -835,7 +903,7 @@ func TestApplyVersionedWrites_NonceWriteGeneratesBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1)},
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: uint64(1), NonceChangeReason: tracing.NonceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
@@ -863,8 +931,8 @@ func TestApplyVersionedWrites_MultipleAccountsAllGetBalanceReads(t *testing.T) {
 
 	storageKey := accounts.InternKey(common.HexToHash("0x01"))
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), Reason: tracing.BalanceChangeUnspecified},
-		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5)},
+		&VersionedWrite{Address: addrA, Path: BalancePath, Val: *uint256.NewInt(200), BalanceChangeReason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addrB, Path: NoncePath, Val: uint64(5), NonceChangeReason: tracing.NonceChangeUnspecified},
 		&VersionedWrite{Address: addrC, Path: StoragePath, Key: storageKey, Val: *uint256.NewInt(99)},
 	})
 	require.NoError(t, err)
@@ -891,7 +959,7 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 	ibs.SetVersionMap(vm)
 
 	err := ibs.ApplyVersionedWrites(VersionedWrites{
-		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), Reason: tracing.BalanceChangeUnspecified},
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: *uint256.NewInt(100), BalanceChangeReason: tracing.BalanceChangeUnspecified},
 	})
 	require.NoError(t, err)
 
