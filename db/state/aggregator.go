@@ -120,13 +120,6 @@ type Aggregator struct {
 	configured   bool
 	savedSalt    *uint32
 	disableFsync bool
-
-	// nil = no cap. See #20701.
-	frozenBlocks FrozenBlocksProvider
-}
-
-type FrozenBlocksProvider interface {
-	FrozenBlocks() uint64
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -972,39 +965,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bool, err error) {
-	if a.reorgBlockDepth == 0 && a.frozenBlocks == nil {
+	if a.reorgBlockDepth == 0 {
 		return true, nil
 	}
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 
-	if a.frozenBlocks != nil {
-		var capTxNum, lstTxNum uint64
-		if err := a.db.View(ctx, func(tx kv.Tx) error {
-			var err error
-			capTxNum, err = rawdbv3.TxNums.Max(ctx, tx, a.frozenBlocks.FrozenBlocks())
-			if err != nil {
-				return err
-			}
-			lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
-			if len(lst) >= 8 {
-				lstTxNum = binary.BigEndian.Uint64(lst)
-			}
-			return nil
-		}); err != nil {
-			return false, fmt.Errorf("read max collatable txNum: %w", err)
-		}
-		if uint64(step+1)*a.StepSize() > capTxNum {
-			a.logger.Info("[snapshots] holding state collation at block snapshot boundary",
-				"blockSnapshotsStepCompleted", capTxNum/a.StepSize()-1,
-				"lastCollatableStepInDB", lstTxNum/a.StepSize())
-			return false, nil
-		}
-		return true, nil
-	}
-
-	// frozenBlocks == nil && reorgBlockDepth > 0: legacy safety net.
-	var lastBlockInStep, lastBlockInDB uint64
+	var lastBlockInStep, lastBlockInDB, lstTxNum uint64
 	err = a.db.View(ctx, func(tx kv.Tx) error {
 		var found bool
 		lastBlockInStep, found, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
@@ -1015,12 +982,32 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (ok bo
 			lastBlockInStep = 0
 		}
 		lastBlockInDB, _, err = rawdbv3.TxNums.Last(tx)
-		return err
+		if err != nil {
+			return err
+		}
+		lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+		if len(lst) >= 8 {
+			lstTxNum = binary.BigEndian.Uint64(lst)
+		}
+		return nil
 	})
 	if err != nil {
 		return false, err
 	}
-	return lastBlockInDB > lastBlockInStep+a.reorgBlockDepth, nil
+	if lastBlockInDB > lastBlockInStep+a.reorgBlockDepth {
+		return true, nil
+	}
+	var lastCollatableStepInDB kv.Step
+	if lstTxNum+1 >= a.StepSize() {
+		lastCollatableStepInDB = kv.Step((lstTxNum+1)/a.StepSize() - 1)
+	}
+	a.logger.Info("[snapshots] holding state collation at reorg depth",
+		"step", step,
+		"lastBlockInStep", lastBlockInStep,
+		"lastBlockInDB", lastBlockInDB,
+		"reorgBlockDepth", a.reorgBlockDepth,
+		"lastCollatableStepInDB", lastCollatableStepInDB)
+	return false, nil
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
@@ -1999,12 +1986,6 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
 
-// SetFrozenBlocksProvider caps state collation at the block-snapshots boundary.
-// Without it, state files may advance past block files — recovery requires
-// `erigon seg rm-state --latest`. See #20701.
-func (a *Aggregator) SetFrozenBlocksProvider(p FrozenBlocksProvider) {
-	a.frozenBlocks = p
-}
 func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	return a.buildFilesInBackground(txNum, true)
 }
