@@ -389,8 +389,32 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
 
+	type validationOutcome struct {
+		result ValidationResult
+		err    error
+	}
+	outcomeCh := make(chan validationOutcome, 1)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		defer e.semaphore.Release(1)
+		result, err := e.validateChainImpl(e.bacgroundCtx, blockHash, blockNumber)
+		outcomeCh <- validationOutcome{result, err}
+	}()
+
+	select {
+	case o := <-outcomeCh:
+		<-done
+		return o.result, o.err
+	case <-ctx.Done():
+		e.logger.Debug("treating ValidateChain as asynchronous as caller context is done")
+		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
+	}
+}
+
+func (e *ExecModule) validateChainImpl(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
