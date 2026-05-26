@@ -845,6 +845,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 						}
 					}
 				}()
+
+				// CanonicalHeadRewound → demote orphaned entries. The
+				// consumer-side canonical view subordinates to consensus:
+				// when storage emits a rewind, the block-axis predicate
+				// drops every promoted block file whose range includes
+				// any block above ToBlock, and the observation record is
+				// dropped so a stale re-Observe cannot re-promote it.
+				// State-domain files are deferred (their step-axis
+				// ranges need a step→block binding); the predicate is
+				// composable via snapshotsync.Or so a future state-axis
+				// predicate can stack here. See
+				// docs/plans/20260522-canonical-layer-revision.md §5.
+				bus.Subscribe(func(e flow.CanonicalHeadRewound) {
+					dropped := view.Demote(snapshotsync.DemoteByRewindPredicate(e.ToBlock))
+					if dropped > 0 {
+						logger.Info("[canonical-view] demoted on rewind",
+							"toBlock", e.ToBlock, "dropped", dropped)
+					}
+				})
 			}
 
 			mx.SetCanonicalValidator(func(issuer []byte, adv *downloader.ChainTomlV2) *downloader.ChainTomlV2 {
