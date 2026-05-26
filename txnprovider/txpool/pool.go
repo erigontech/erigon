@@ -1341,6 +1341,11 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	return nil
 }
 
+// validateTxns returns per-slot discard reasons and the txns that passed.
+// For a remote (IsLocal=false) batch, validation short-circuits on the first
+// UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
+// goodTxns, so callers reading reasons in isolation must also consult goodTxns
+// to distinguish "accepted" from "not validated".
 func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
