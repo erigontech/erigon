@@ -479,10 +479,17 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.getSeederClient(),
 			func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
-				if filesDeleted && cfg.notifier != nil {
+				if err != nil {
+					return err
+				}
+				commitmentDeleted, err := pruneCommitmentHistorySnapshots(ctx, cfg, logger)
+				if err != nil {
+					return err
+				}
+				if (filesDeleted || commitmentDeleted) && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
-				return err
+				return nil
 			},
 			func() {
 				if cfg.notifier != nil {
@@ -507,6 +514,48 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		return err
 	}
 	return nil
+}
+
+func pruneCommitmentHistorySnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+	if !cfg.syncConfig.KeepExecutionProofs || cfg.syncConfig.KeepExecutionProofsBlocks == 0 {
+		return false, nil
+	}
+	hasAgg, ok := cfg.db.(state.HasAgg)
+	if !ok {
+		return false, nil
+	}
+	agg, ok := hasAgg.Agg().(*state.Aggregator)
+	if !ok || agg == nil {
+		return false, nil
+	}
+	headNumber := cfg.blockReader.FrozenBlocks()
+	if headNumber <= cfg.syncConfig.KeepExecutionProofsBlocks {
+		return false, nil
+	}
+	pruneHeight := headNumber - cfg.syncConfig.KeepExecutionProofsBlocks
+
+	tx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	threshold, err := cfg.blockReader.TxnumReader().Min(ctx, tx, pruneHeight)
+	if err != nil {
+		return false, fmt.Errorf("commitment-history retention: lookup tx-num at block %d: %w", pruneHeight, err)
+	}
+
+	removed := agg.DeleteCommitmentHistoryFilesBelow(threshold)
+	if removed == 0 {
+		return false, nil
+	}
+	logger.Info("[snapshots] pruned commitment history files",
+		"head", headNumber,
+		"keepBlocks", cfg.syncConfig.KeepExecutionProofsBlocks,
+		"pruneBlock", pruneHeight,
+		"thresholdTxNum", threshold,
+		"removed", removed,
+	)
+	return true, nil
 }
 
 func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {

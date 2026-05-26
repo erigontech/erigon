@@ -21,6 +21,7 @@
 package ethconfig
 
 import (
+	"math"
 	"math/big"
 	"os"
 	"os/user"
@@ -299,7 +300,18 @@ type Sync struct {
 	AlwaysGenerateChangesets         bool
 	MaxReorgDepth                    uint64
 	KeepExecutionProofs              bool
+	KeepExecutionProofsBlocks        uint64 // 0 = unbounded archive when KeepExecutionProofs is true; otherwise bounded retention in blocks. See EffectiveCommitmentRetention.
 	ExperimentalConcurrentCommitment bool
 	PersistReceiptsCacheV2           bool
 	SnapshotDownloadToBlock          uint64 // exclusive [0,toBlock)
+}
+
+// EffectiveCommitmentRetention returns the commitment-history retention window
+// in blocks, with 0 (unbounded) mapped to math.MaxUint64 so it sorts as the
+// loosest retention. Useful when comparing retention windows across configs.
+func (s Sync) EffectiveCommitmentRetention() uint64 {
+	if s.KeepExecutionProofsBlocks == 0 {
+		return math.MaxUint64
+	}
+	return s.KeepExecutionProofsBlocks
 }

@@ -553,7 +553,7 @@ func (d *Domain) beginForTests() *DomainRoTx {
 // beginFilesRo lets Aggregator.BeginFilesRo pass a snapshot pinned to a single
 // aggregatorVisible generation, avoiding a torn cross-entity read.
 func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible) *DomainRoTx {
-	dv.files.refcntIncrement()
+	dv.files.refcntIncrement(false)
 
 	return &DomainRoTx{
 		name:              d.Name,
@@ -1429,7 +1429,7 @@ func (dt *DomainRoTx) Close() {
 	dt.closeValsCursor()
 	files := dt.files
 	dt.files = nil
-	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger)
+	files.refcntDecrement(dt.d.FilenameBase, dt.d.logger, false)
 	for _, r := range dt.mapReaders {
 		r.Close()
 	}

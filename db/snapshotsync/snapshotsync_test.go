@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,6 +25,42 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
+
+func TestIsCommitmentHistorySegmentExpired(t *testing.T) {
+	makeItem := func(fromStep, toStep uint64) snapcfg.PreverifiedItem {
+		return snapcfg.PreverifiedItem{
+			Name: "v1.0-commitment." + strconv.FormatUint(fromStep, 10) + "-" + strconv.FormatUint(toStep, 10) + ".v",
+		}
+	}
+	cases := []struct {
+		name              string
+		commitmentMinStep uint64
+		fromStep          uint64
+		toStep            uint64
+		expected          bool
+	}{
+		{"retention inactive (minStep=0)", 0, 0, 64, false},
+		{"segment far below boundary", 2815, 0, 64, true},
+		{"segment ending exactly at boundary", 2815, 2752, 2815, true},
+		{"segment overlapping boundary", 2815, 2752, 2816, false},
+		{"segment exactly at boundary", 2815, 2815, 2879, false},
+		{"segment just above boundary", 2815, 2816, 2880, false},
+		{"segment far above boundary", 2815, 2900, 2964, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isCommitmentHistorySegmentExpired(makeItem(tc.fromStep, tc.toStep), tc.commitmentMinStep)
+			if got != tc.expected {
+				t.Errorf("got %v, want %v", got, tc.expected)
+			}
+		})
+	}
+	t.Run("unparseable filename", func(t *testing.T) {
+		if isCommitmentHistorySegmentExpired(snapcfg.PreverifiedItem{Name: "garbage-filename"}, 2815) {
+			t.Error("unparseable filename should not be marked expired")
+		}
+	})
+}
 
 func TestBlackListForPruning(t *testing.T) {
 	c, ok := snapcfg.KnownCfg(networkname.Mainnet)

@@ -1990,6 +1990,95 @@ func (a *Aggregator) KeepRecentTxnsOfHistoriesWithDisabledSnapshots(recentTxs ui
 	}
 }
 
+// DeleteCommitmentHistoryFilesBelow marks commitment-history files whose
+// endTxNum is at or below threshold for deletion. Removal waits for readers.
+func (a *Aggregator) DeleteCommitmentHistoryFilesBelow(threshold uint64) int {
+	d := a.d[kv.CommitmentDomain]
+	if d.History.SnapshotsDisabled {
+		return 0
+	}
+	h := d.History
+
+	rotx := a.BeginFilesRo()
+	defer rotx.Close()
+
+	deleted, marked := a.markCommitmentHistoryBelowDeletable(h, threshold)
+	if len(deleted) == 0 {
+		return 0
+	}
+	a.onFilesDelete(deleted)
+	// Dirty but invisible files were not pinned by rotx; visible files wait for
+	// rotx.Close or older readers.
+	for _, item := range marked {
+		if item.refcount.Load() == 0 {
+			item.closeFilesAndRemove()
+		}
+	}
+	return len(deleted)
+}
+
+// markCommitmentHistoryBelowDeletable removes the matching FilesItems from
+// dirtyFiles and returns paths for the downloader notification.
+func (a *Aggregator) markCommitmentHistoryBelowDeletable(h *History, threshold uint64) ([]string, []*FilesItem) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	// dirtyFiles is ordered by endTxNum (filesItemLess), so items satisfying
+	// endTxNum <= threshold cluster at the start; break on first miss.
+	collect := func(t *DirtyFiles) []*FilesItem {
+		outs := make([]*FilesItem, 0, t.Len())
+		iter := t.Iter()
+		defer iter.Release()
+		for ok := iter.First(); ok; ok = iter.Next() {
+			item := iter.Item()
+			if item == nil {
+				continue
+			}
+			if item.endTxNum > threshold {
+				break
+			}
+			outs = append(outs, item)
+		}
+		return outs
+	}
+
+	histOuts := collect(h.dirtyFiles)
+	iiOuts := collect(h.InvertedIndex.dirtyFiles)
+	if len(histOuts) == 0 && len(iiOuts) == 0 {
+		return nil, nil
+	}
+
+	deleted := make([]string, 0, (len(histOuts)+len(iiOuts))*2)
+	marked := make([]*FilesItem, 0, len(histOuts)+len(iiOuts))
+	addRel := func(absPath string) {
+		if rel, err := filepath.Rel(a.dirs.Snap, absPath); err == nil {
+			deleted = append(deleted, rel)
+		}
+	}
+	mark := func(t *DirtyFiles, outs []*FilesItem) {
+		for _, item := range outs {
+			if item.decompressor != nil {
+				addRel(item.decompressor.FilePath())
+			}
+			if item.index != nil {
+				addRel(item.index.FilePath())
+			}
+			t.Delete(item)
+			if item.frozen {
+				// Close paths key off canDelete, so publish deleteFrozen first.
+				item.deleteFrozen.Store(true)
+			}
+			item.canDelete.Store(true)
+			marked = append(marked, item)
+		}
+	}
+	mark(h.dirtyFiles, histOuts)
+	mark(h.InvertedIndex.dirtyFiles, iiOuts)
+
+	a.recalcVisibleFiles()
+	return deleted, marked
+}
+
 func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }
@@ -2291,7 +2380,7 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		if iv == nil {
 			continue
 		}
-		ac.iis[id] = a.iis[id].beginFilesRo(iv)
+		ac.iis[id] = a.iis[id].beginFilesRo(iv, false)
 	}
 	for id, dv := range v.d {
 		if dv == nil {

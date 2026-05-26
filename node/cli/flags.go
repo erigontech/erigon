@@ -253,6 +253,10 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.Prune = mode
 
+	if err := validateCommitmentHistoryRetention(cfg); err != nil {
+		utils.Fatalf("%v", err)
+	}
+
 	if batchSize := ctx.String(BatchSizeFlag.Name); batchSize != "" {
 		if err := cfg.BatchSize.UnmarshalText([]byte(batchSize)); err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
@@ -316,6 +320,25 @@ func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.Bool(utils.ChaosMonkeyFlag.Name) {
 		cfg.ChaosMonkey = true
 	}
+}
+
+func validateCommitmentHistoryRetention(cfg *ethconfig.Config) error {
+	if !cfg.KeepExecutionProofs || cfg.KeepExecutionProofsBlocks == 0 {
+		return nil
+	}
+	d, ok := cfg.Prune.History.(prune.Distance)
+	if !ok {
+		return fmt.Errorf("internal: unexpected prune.History type %T", cfg.Prune.History)
+	}
+	effRegular := uint64(d)
+	effCommit := cfg.Sync.EffectiveCommitmentRetention()
+	if effCommit <= effRegular {
+		return nil
+	}
+	return fmt.Errorf(
+		"--prune.commitment-history.distance.blocks=%d cannot exceed --prune.distance=%d. "+
+			"Lower commitment retention to ≤%d, or widen state-history retention via --prune.mode=archive (or larger --prune.distance)",
+		cfg.KeepExecutionProofsBlocks, effRegular, effRegular)
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {

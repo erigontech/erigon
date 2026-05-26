@@ -902,6 +902,7 @@ type HistoryRoTx struct {
 	readers           []*recsplit.IndexReader
 	stepSize          uint64
 	stepsInFrozenFile uint64
+	includeFrozen     bool
 
 	trace bool
 
@@ -926,14 +927,16 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	files.refcntIncrement()
+	includeFrozen := h.HistoryIdx == kv.CommitmentHistoryIdx
+	files.refcntIncrement(includeFrozen)
 
 	return &HistoryRoTx{
 		h:                 h,
-		iit:               h.InvertedIndex.beginFilesRo(iv),
+		iit:               h.InvertedIndex.beginFilesRo(iv, includeFrozen),
 		files:             files,
 		stepSize:          h.stepSize,
 		stepsInFrozenFile: h.stepsInFrozenFile,
+		includeFrozen:     includeFrozen,
 		trace:             false,
 	}
 }
@@ -1128,7 +1131,7 @@ func (ht *HistoryRoTx) Close() {
 	}
 	files := ht.files
 	ht.files = nil
-	files.refcntDecrement(ht.h.FilenameBase, ht.h.logger)
+	files.refcntDecrement(ht.h.FilenameBase, ht.h.logger, ht.includeFrozen)
 	for _, r := range ht.readers {
 		r.Close()
 	}

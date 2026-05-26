@@ -34,6 +34,8 @@ To enable historical proof support, activate commitment history storage at start
 
 This enables faster retrieval of Merkle proofs for any executed block.
 
+To bound commitment-history disk usage, combine with `--prune.commitment-history.distance.blocks=N` to keep only the latest `N` blocks of commitment history. The value must be `≤ --prune.distance` because `eth_getProof` also needs the underlying state history. Retention may be tightened between runs (extra snapshot files are removed on the next prune cycle); widening requires resyncing the chaindata.
+
 ### eth\_getStorageValues
 
 `eth_getStorageValues` is an Erigon extension that retrieves multiple storage slots for a given account in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls.

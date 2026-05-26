@@ -1240,6 +1240,29 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
+func ReadDBCommitmentHistoryBlocks(tx kv.Tx) (uint64, bool, error) {
+	value, err := tx.GetOne(kv.DatabaseInfo, kv.CommitmentLayoutBlocksKey)
+	if err != nil {
+		return 0, false, fmt.Errorf("reading DB commitment history blocks: %w", err)
+	}
+	if len(value) == 0 {
+		return 0, false, nil
+	}
+	if len(value) != 8 {
+		return 0, false, fmt.Errorf("incorrect length of DB commitment history blocks: %d", len(value))
+	}
+	return binary.BigEndian.Uint64(value), true, nil
+}
+
+func WriteDBCommitmentHistoryBlocks(tx kv.RwTx, blocks uint64) error {
+	var value [8]byte
+	binary.BigEndian.PutUint64(value[:], blocks)
+	if err := tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutBlocksKey, value[:]); err != nil {
+		return fmt.Errorf("writing DB commitment history blocks: %w", err)
+	}
+	return nil
+}
+
 type RCacheV2Query struct {
 	BlockNum  uint64
 	BlockHash common.Hash

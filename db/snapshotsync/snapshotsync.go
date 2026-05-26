@@ -255,6 +255,19 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 	return cc.IsPreMerge(s.From)
 }
 
+// isCommitmentHistorySegmentExpired keeps segments that overlap the retained
+// window; they can still contain commitment history inside the boundary.
+func isCommitmentHistorySegmentExpired(p snapcfg.PreverifiedItem, commitmentMinStep uint64) bool {
+	if commitmentMinStep == 0 {
+		return false
+	}
+	s, _, ok := snaptype.ParseFileName("", p.Name)
+	if !ok {
+		return false
+	}
+	return s.To <= commitmentMinStep
+}
+
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
 func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
@@ -393,6 +406,19 @@ func SyncSnapshots(
 			unblackListFilesBySubstring(blackListForPruning, kv.LogAddrIdx.String(), kv.LogTopicIdx.String())
 		}
 
+		// Compute the retention boundary once; the per-segment filter is just
+		// filename parsing after this.
+		var commitmentMinStep uint64
+		commitmentRetentionActive := syncCfg.KeepExecutionProofs && syncCfg.KeepExecutionProofsBlocks > 0
+		if commitmentRetentionActive && frozenBlocks > syncCfg.KeepExecutionProofsBlocks && stepSize > 0 {
+			pruneHeight := frozenBlocks - syncCfg.KeepExecutionProofsBlocks
+			minTxNum, err := txNumsReader.Min(ctx, tx, pruneHeight)
+			if err != nil {
+				return fmt.Errorf("commitment-history retention: lookup tx-num at block %d: %w", pruneHeight, err)
+			}
+			commitmentMinStep = minTxNum / stepSize
+		}
+
 		// build all download requests
 		for _, p := range preverifiedBlockSnapshots.Items {
 			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars") || strings.Contains(p.Name, "caplin")) {
@@ -416,6 +442,10 @@ func SyncSnapshots(
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
+				continue
+			}
+			if commitmentMinStep > 0 && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) &&
+				isCommitmentHistorySegmentExpired(p, commitmentMinStep) {
 				continue
 			}
 

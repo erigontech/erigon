@@ -1330,3 +1330,45 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 	}
 	return nil
 }
+
+func TestDBCommitmentHistoryBlocks_RoundTrip(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	// Absent key returns ok=false, value=0.
+	got, ok, err := rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Equal(t, uint64(0), got)
+
+	// Round-trip a non-zero value.
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryBlocks(tx, 1_000_000))
+	got, ok, err = rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1_000_000), got)
+
+	// Overwrite is honored.
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryBlocks(tx, 500_000))
+	got, ok, err = rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(500_000), got)
+
+	// Zero is a valid persisted value (means "unbounded archive").
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryBlocks(tx, 0))
+	got, ok, err = rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(0), got)
+}
+
+func TestDBCommitmentHistoryBlocks_Malformed(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	// Manually write a value with the wrong length; reader must reject it.
+	require.NoError(t, tx.Put(kv.DatabaseInfo, kv.CommitmentLayoutBlocksKey, []byte{0x01, 0x02, 0x03}))
+	_, _, err := rawdb.ReadDBCommitmentHistoryBlocks(tx)
+	require.Error(t, err)
+}
